@@ -1,5 +1,7 @@
 # Automerge
 
+[![docs](https://docs.rs/automerge/badge.svg)](docs.rs/automerge)
+
 This is a very early, very much work in progress implementation of [automerge](https://github.com/automerge/automerge) in rust. At the moment it barely implements a read only view of operations received, with very little testing that it works. Objectives for it are:
 
 - Full read and write replication

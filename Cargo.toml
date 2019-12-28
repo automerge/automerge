@@ -1,5 +1,5 @@
 [package]
-name = "automerge-rs"
+name = "automerge"
 version = "0.0.2"
 authors = ["Alex Good <alex@memoryandthought.me>"]
 edition = "2018"
