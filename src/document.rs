@@ -152,7 +152,7 @@ mod tests {
                 ],
                 seq: 1,
                 message: Some("actor 2 incrementation".to_string()),
-                dependencies: Clock(actor1_deps.clone()),
+                dependencies: Clock(actor1_deps),
             },
         ];
         let doc = Document::load(changes).unwrap();

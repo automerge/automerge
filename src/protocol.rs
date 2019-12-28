@@ -397,7 +397,7 @@ mod tests {
                     Operation::Set {
                         object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
                         key: Key("sometimestamp".to_string()),
-                        value: PrimitiveValue::Number(123456.0),
+                        value: PrimitiveValue::Number(123_456.0),
                         datatype: Some(DataType::Timestamp)
                     },
                     Operation::Set {

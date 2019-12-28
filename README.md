@@ -2,7 +2,7 @@
 
 This is a very early, very much work in progress implementation of [automerge](https://github.com/automerge/automerge) in rust. At the moment it barely implements a read only view of operations received, with very little testing that it works. Objectives for it are:
 
-- Full read and write replication, with an efficient enough implementation to use for collaborative text editing
+- Full read and write replication
 - `no_std` support to make it easy to use in WASM environments
 - Model based testing to ensure compatibility with the JS library
 
