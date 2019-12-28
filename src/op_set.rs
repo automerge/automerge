@@ -6,6 +6,7 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
+use crate::change_request::Path;
 use crate::error::AutomergeError;
 use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
@@ -205,6 +206,23 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn from_json(json: &serde_json::Value) -> Value {
+        match json {
+            serde_json::Value::Object(kvs) => {
+                let result: HashMap<String, Value> = kvs
+                    .iter()
+                    .map(|(k, v)| (k.clone(), Value::from_json(v)))
+                    .collect();
+                Value::Map(result)
+            }
+            serde_json::Value::Array(vs) => Value::List(vs.iter().map(Value::from_json).collect()),
+            serde_json::Value::String(s) => Value::Str(s.to_string()),
+            serde_json::Value::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
+            serde_json::Value::Bool(b) => Value::Boolean(*b),
+            serde_json::Value::Null => Value::Null,
+        }
+    }
+
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             Value::Map(map) => {
@@ -243,7 +261,7 @@ pub struct OpSet {
     operations_by_object_id: HashMap<ObjectID, ObjectHistory>,
     actor_histories: ActorHistories,
     queue: Vec<Change>,
-    clock: Clock,
+    pub clock: Clock,
 }
 
 impl OpSet {
@@ -506,5 +524,54 @@ impl OpSet {
         let result = result_with_errs.collect::<Result<Vec<Value>, AutomergeError>>()?;
 
         Ok(Value::List(result))
+    }
+
+    pub(crate) fn create_set_operations(
+        &self,
+        _path: &Path,
+        _value: Value,
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        Err(AutomergeError::NotImplemented(
+            "create_set_operation not implemented".to_string(),
+        ))
+    }
+
+    pub(crate) fn create_move_operations(
+        &self,
+        _from: &Path,
+        _to: &Path,
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        Err(AutomergeError::NotImplemented(
+            "create_move_operation not implemented".to_string(),
+        ))
+    }
+
+    pub(crate) fn create_delete_operation(
+        &self,
+        _path: &Path,
+    ) -> Result<Operation, AutomergeError> {
+        Err(AutomergeError::NotImplemented(
+            "create_delete_operation not implemented".to_string(),
+        ))
+    }
+
+    pub(crate) fn create_increment_operation(
+        &self,
+        _path: &Path,
+        _value: f64,
+    ) -> Result<Operation, AutomergeError> {
+        Err(AutomergeError::NotImplemented(
+            "create_increment_operation not implemented".to_string(),
+        ))
+    }
+
+    pub(crate) fn create_insert_operation(
+        &self,
+        _after: &Path,
+        _value: Value,
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        Err(AutomergeError::NotImplemented(
+            "create_insert_operation not implemented".to_string(),
+        ))
     }
 }

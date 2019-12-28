@@ -1,10 +1,12 @@
-use super::op_set::OpSet;
-use super::AutomergeError;
-use crate::protocol::Change;
+use super::op_set::{OpSet, Value};
+use super::{AutomergeError, ChangeRequest};
+use crate::protocol::{ActorID, Change, Operation};
 use serde_json;
+use uuid;
 
 pub struct Document {
     op_set: OpSet,
+    actor_id: ActorID,
 }
 
 impl Document {
@@ -12,6 +14,7 @@ impl Document {
     pub fn init() -> Document {
         Document {
             op_set: OpSet::init(),
+            actor_id: ActorID(uuid::Uuid::new_v4().to_string()),
         }
     }
 
@@ -32,6 +35,45 @@ impl Document {
     /// Add a single change to the document
     pub fn apply_change(&mut self, change: Change) -> Result<(), AutomergeError> {
         self.op_set.apply_change(change)
+    }
+
+    pub fn create_and_apply_change(
+        &mut self,
+        message: Option<String>,
+        _requests: Vec<ChangeRequest>,
+    ) -> Result<Change, AutomergeError> {
+        let ops_with_errors: Vec<Result<Vec<Operation>, AutomergeError>> = _requests
+            .iter()
+            .map(|request| match request {
+                ChangeRequest::Set { path, value } => self
+                    .op_set
+                    .create_set_operations(path, Value::from_json(value)),
+                ChangeRequest::Delete { path } => {
+                    self.op_set.create_delete_operation(path).map(|o| vec![o])
+                }
+                ChangeRequest::Increment { path, value } => self
+                    .op_set
+                    .create_increment_operation(path, value.clone())
+                    .map(|o| vec![o]),
+                ChangeRequest::Move { from, to } => self.op_set.create_move_operations(from, to),
+                ChangeRequest::InsertAfter { path, value } => self
+                    .op_set
+                    .create_insert_operation(path, Value::from_json(value)),
+            })
+            .collect();
+        let nested_ops = ops_with_errors
+            .into_iter()
+            .collect::<Result<Vec<Vec<Operation>>, AutomergeError>>()?;
+        let ops = nested_ops.into_iter().flatten().collect();
+        let dependencies = self.op_set.clock.clone();
+        let seq = self.op_set.clock.seq_for(&self.actor_id) + 1;
+        Ok(Change {
+            actor_id: self.actor_id.clone(),
+            operations: ops,
+            seq,
+            message,
+            dependencies,
+        })
     }
 }
 

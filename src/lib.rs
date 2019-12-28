@@ -15,11 +15,13 @@
 //! let doc = automerge::Document::load(changes).unwrap();
 //! println!("{:?}", doc.state().unwrap());
 //! ```
+mod change_request;
 mod document;
 mod error;
 mod op_set;
 mod protocol;
 
+pub use change_request::{ChangeRequest, Path};
 pub use document::Document;
 pub use error::AutomergeError;
 pub use protocol::Change;
