@@ -1,0 +1,27 @@
+# Automerge
+
+This is a very early, very much work in progress implementation of [automerge](https://github.com/automerge/automerge) in rust. At the moment it barely implements a read only view of operations received, with very little testing that it works. Objectives for it are:
+
+- Full read and write replication, with an efficient enough implementation to use for collaborative text editing
+- `no_std` support to make it easy to use in WASM environments
+- Model based testing to ensure compatibility with the JS library
+
+
+## How to use
+
+You'll need to export changes from automerge as JSON rather than using the encoding that `Automerge.save` uses. So first do this:
+
+```javascript
+const doc = <your automerge document>
+const changes = Automerge.getHistory(doc).map(h => h.change)
+console.log(JSON.stringify(changes, null, 4))
+```
+
+Now you can load these changes into automerge like so:
+
+
+```rust
+let changes: Vec<Change> = serde_json::from_str("<paste the changes JSON here>").unwrap();
+let document = automerge::Document::load(changes)
+let state: serde_json::Value = document.state().unwrap();
+```
