@@ -7,6 +7,7 @@ cache: cargo
 before_script:
 - rustup component add clippy
 script:
+- cargo fmt -- --check
 - cargo clippy --all-targets --all-features -- -D warnings
 - cargo test
 jobs:
@@ -17,5 +18,6 @@ deploy:
   provider: cargo
   on:
     tags: true
+    condition: "$TRAVIS_RUST_VERSION = stable"
   token:
     secure: FWmUT2NJTcy3ccw8B1RYgvlg5SxnkEAeBU2hxXeKLmEBAjzhVPVHjwaQ5RktMRHsyKYJEfDpLD0EHUZknhyDxzCuUKzKYlGgRmtlnsCKS+gDM4j88e/OEnDvxZ2d8ag3Jp8+3GCvv2yjUHFs2JpclqR4ib8LmL6d6x+1+1uxaMOgaDhxQCDLV0eZwX5mTdGAWJl/CpxziFXHYN8/j+e58dJgWN6TUO6BBZeZmkp4xQ6iggEUgIKLLYynG5cM2XtS/j/qbL2ObloamIv9p0SNtj8wTQupJZW3JPBc77gimfeXVQd2+4B/31lJ3GW1310gVBZ9EA7BTbC3M3AkHJFPUIgfEn803zrZhm4WxGg2B+2kENWPpSRUMjhxaPuxAVStHOBl2WSsQTmTRrSUf1nvZUdixTARr6BkKakiNPqts7X/HbxE0cxkk5gtobTyNb4HFbaM/8449U8+KbX7mDXv50FGmRrKxkepOzfRdoEz4h9LnCFWweyle2bpFCQlnro+1SnBRSVmH+c1YUZbIl+He53GUEAwObcHGk+TlhVCGMtmGj/g1THOf4VcWh8C3XoO2yWIu9FoJKvJbd7qm0+dOv+QY8fxgrs4JRSSnt8rXBXhxLKe/ZXl5fHOmLca8T6i/PRfbQ9AzFSCPcz8o4hNO/lVQPSrNrkvxSF39buuYGU=
