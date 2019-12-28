@@ -20,8 +20,13 @@ console.log(JSON.stringify(changes, null, 4))
 Now you can load these changes into automerge like so:
 
 
-```rust
-let changes: Vec<Change> = serde_json::from_str("<paste the changes JSON here>").unwrap();
-let document = automerge::Document::load(changes)
-let state: serde_json::Value = document.state().unwrap();
+```rust,no_run
+extern crate automerge;
+
+fn main() {
+    let changes: Vec<automerge::Change> = serde_json::from_str("<paste the changes JSON here>").unwrap();
+    let document = automerge::Document::load(changes).unwrap();
+    let state: serde_json::Value = document.state().unwrap();
+    println!("{:?}", state);
+}
 ```
