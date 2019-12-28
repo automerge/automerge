@@ -108,7 +108,6 @@ impl Clock {
     }
 }
 
-
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum PrimitiveValue {
@@ -155,13 +154,13 @@ impl FromStr for ElementID {
         match s {
             "_head" => Ok(ElementID::Head),
             id => {
-                let components: Vec<&str> = id.split(":").collect();
+                let components: Vec<&str> = id.split(':').collect();
                 match components.as_slice() {
                     [actor_id, elem_str] => {
                         let elem = u32::from_str(elem_str)
                             .map_err(|_| error::InvalidElementID(id.to_string()))?;
                         Ok(ElementID::SpecificElementID(
-                            ActorID(actor_id.to_string()),
+                            ActorID((*actor_id).to_string()),
                             elem,
                         ))
                     }

@@ -1,9 +1,9 @@
 extern crate automerge;
-use automerge::{Document, Change};
+use automerge::{Change, Document};
 
 #[test]
 fn test_concurrent_ops() {
-    let changes1: Vec<Change>  = serde_json::from_str(
+    let changes1: Vec<Change> = serde_json::from_str(
         r#"
             [
                 {
@@ -115,7 +115,8 @@ fn test_concurrent_ops() {
                 }
             ]
         "#,
-    ).unwrap();
+    )
+    .unwrap();
 
     let changes2: Vec<Change> = serde_json::from_str(
         r#"
@@ -266,8 +267,9 @@ fn test_concurrent_ops() {
                     "message": "concurrently add card (op 2)"
                 }
             ]
-        "#
-    ).unwrap();
+        "#,
+    )
+    .unwrap();
 
     let mut doc = Document::load(changes1).unwrap();
     for change in changes2 {
@@ -285,7 +287,8 @@ fn test_concurrent_ops() {
             ]
         }
     "#,
-    ).unwrap();
+    )
+    .unwrap();
     let actual = doc.state().unwrap();
     assert_eq!(expected, actual);
 }

@@ -38,8 +38,10 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{
+        ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
+    };
     use std::collections::HashMap;
-    use crate::protocol::{ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 
     #[test]
     fn test_loading_from_changes() {
@@ -136,7 +138,7 @@ mod tests {
             Change {
                 actor_id: ActorID("id2".to_string()),
                 operations: vec![
-                        Operation::Increment {
+                    Operation::Increment {
                         object_id: ObjectID::Root,
                         key: Key("numRounds".to_string()),
                         value: 6.0,
