@@ -1,6 +1,9 @@
 # Automerge
 
 [![docs](https://docs.rs/automerge/badge.svg)](docs.rs/automerge)
+[![crates](https://crates.io/crates/automerge)](https://img.shields.io/crates/v/automerge)
+[![Build Status](https://travis-ci.org/alexjg/automerge-rs.svg?branch=master)](https://travis-ci.org/alexjg/automerge-rs)
+
 
 This is a very early, very much work in progress implementation of [automerge](https://github.com/automerge/automerge) in rust. At the moment it barely implements a read only view of operations received, with very little testing that it works. Objectives for it are:
 
@@ -10,6 +13,12 @@ This is a very early, very much work in progress implementation of [automerge](h
 
 
 ## How to use
+
+Add this to your dependencies
+
+```
+automerge = 0.0.2
+```
 
 You'll need to export changes from automerge as JSON rather than using the encoding that `Automerge.save` uses. So first do this:
 
