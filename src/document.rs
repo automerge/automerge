@@ -1,5 +1,6 @@
 use super::op_set::{OpSet, Value};
 use super::{AutomergeError, ChangeRequest};
+use crate::error::InvalidChangeRequest;
 use crate::protocol::{ActorID, Change, Operation};
 use serde_json;
 use uuid;
@@ -41,8 +42,8 @@ impl Document {
         &mut self,
         message: Option<String>,
         _requests: Vec<ChangeRequest>,
-    ) -> Result<Change, AutomergeError> {
-        let ops_with_errors: Vec<Result<Vec<Operation>, AutomergeError>> = _requests
+    ) -> Result<Change, InvalidChangeRequest> {
+        let ops_with_errors: Vec<Result<Vec<Operation>, InvalidChangeRequest>> = _requests
             .iter()
             .map(|request| match request {
                 ChangeRequest::Set { path, value } => self
@@ -63,7 +64,7 @@ impl Document {
             .collect();
         let nested_ops = ops_with_errors
             .into_iter()
-            .collect::<Result<Vec<Vec<Operation>>, AutomergeError>>()?;
+            .collect::<Result<Vec<Vec<Operation>>, InvalidChangeRequest>>()?;
         let ops = nested_ops.into_iter().flatten().collect();
         let dependencies = self.op_set.clock.clone();
         let seq = self.op_set.clock.seq_for(&self.actor_id) + 1;

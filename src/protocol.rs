@@ -123,6 +123,17 @@ pub enum ElementID {
     SpecificElementID(ActorID, u32),
 }
 
+impl ElementID {
+    pub fn as_key(&self) -> Key {
+        match self {
+            ElementID::Head => Key("_head".to_string()),
+            ElementID::SpecificElementID(actor_id, elem) => {
+                Key(format!("{}:{}", actor_id.0, elem))
+            }
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for ElementID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

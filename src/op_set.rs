@@ -7,7 +7,7 @@
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
 use crate::change_request::Path;
-use crate::error::AutomergeError;
+use crate::error::{AutomergeError, InvalidChangeRequest};
 use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
 };
@@ -15,6 +15,7 @@ use serde::Serialize;
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::convert::TryInto;
 
 /// We deserialize individual operations as part of the `Change` structure, but
 /// we need access to the actor ID and sequence when applying each individual
@@ -530,8 +531,8 @@ impl OpSet {
         &self,
         _path: &Path,
         _value: Value,
-    ) -> Result<Vec<Operation>, AutomergeError> {
-        Err(AutomergeError::NotImplemented(
+    ) -> Result<Vec<Operation>, InvalidChangeRequest> {
+        Err(InvalidChangeRequest(
             "create_set_operation not implemented".to_string(),
         ))
     }
@@ -540,8 +541,8 @@ impl OpSet {
         &self,
         _from: &Path,
         _to: &Path,
-    ) -> Result<Vec<Operation>, AutomergeError> {
-        Err(AutomergeError::NotImplemented(
+    ) -> Result<Vec<Operation>, InvalidChangeRequest> {
+        Err(InvalidChangeRequest(
             "create_move_operation not implemented".to_string(),
         ))
     }
@@ -549,8 +550,8 @@ impl OpSet {
     pub(crate) fn create_delete_operation(
         &self,
         _path: &Path,
-    ) -> Result<Operation, AutomergeError> {
-        Err(AutomergeError::NotImplemented(
+    ) -> Result<Operation, InvalidChangeRequest> {
+        Err(InvalidChangeRequest(
             "create_delete_operation not implemented".to_string(),
         ))
     }
@@ -559,8 +560,8 @@ impl OpSet {
         &self,
         _path: &Path,
         _value: f64,
-    ) -> Result<Operation, AutomergeError> {
-        Err(AutomergeError::NotImplemented(
+    ) -> Result<Operation, InvalidChangeRequest> {
+        Err(InvalidChangeRequest(
             "create_increment_operation not implemented".to_string(),
         ))
     }
@@ -569,9 +570,89 @@ impl OpSet {
         &self,
         _after: &Path,
         _value: Value,
-    ) -> Result<Vec<Operation>, AutomergeError> {
-        Err(AutomergeError::NotImplemented(
+    ) -> Result<Vec<Operation>, InvalidChangeRequest> {
+        Err(InvalidChangeRequest(
             "create_insert_operation not implemented".to_string(),
         ))
+    }
+}
+
+fn value_to_ops(actor_id: &ActorID, v: &Value) -> (ObjectID, Vec<Operation>) {
+    match v {
+        Value::List(vs) => {
+            let list_id = ObjectID::ID(uuid::Uuid::new_v4().to_string());
+            let mut ops = vec![Operation::MakeList{object_id: list_id.clone()}];
+            let mut elem_ops: Vec<Operation> = vs.into_iter().enumerate().map(|(index, elem_value)| {
+                let elem: u32 = (index + 1).try_into().unwrap();
+                let previous_elemid = match index {
+                    0 => ElementID::Head,
+                    _ => ElementID::SpecificElementID(
+                        actor_id.clone(),
+                        elem - 1,
+                    )
+                };
+                let insert_op = Operation::Insert{
+                    list_id: list_id.clone(),
+                    elem,
+                    key: previous_elemid,
+                };
+                let elem_id = ElementID::SpecificElementID(actor_id.clone(), elem);
+                let mut elem_value_ops: Vec<Operation> = match elem_value {
+                    Value::Boolean{..} | Value::Str{..} | Value::Number{..} | Value::Null{..} => vec![create_prim(list_id.clone(), elem_id.as_key(), v)],
+                    Value::Map{..} | Value::List{..} => {
+                        let (linked_object_id, mut value_ops) = value_to_ops(actor_id, elem_value);
+                        value_ops.push(Operation::Link{
+                            object_id: list_id.clone(),
+                            key: elem_id.as_key(),
+                            value: linked_object_id
+                        });
+                        value_ops
+                    }
+                };
+                let mut result = Vec::new();
+                result.push(insert_op);
+                result.append(&mut elem_value_ops);
+                result
+            }).flatten().collect();
+            ops.append(&mut elem_ops);
+            (list_id, ops)
+        }
+        Value::Map(kvs) => {
+            let object_id = ObjectID::ID(uuid::Uuid::new_v4().to_string());
+            let mut ops = vec![Operation::MakeMap{object_id: object_id.clone()}];
+            let mut key_ops: Vec<Operation> = kvs.iter().map(|(k,v)| {
+                match v {
+                    Value::Boolean{..} | Value::Str{..} | Value::Number{..} | Value::Null{..} => vec![create_prim(object_id.clone(), Key(k.clone()), v)],
+                    Value::Map{..} | Value::List{..} => {
+                        let (linked_object_id, mut value_ops) = value_to_ops(actor_id, v);
+                        value_ops.push(Operation::Link{
+                            object_id: object_id.clone(),
+                            key: Key(k.clone()),
+                            value: linked_object_id
+                        });
+                        value_ops
+                    }
+                }
+            }).flatten().collect();
+            ops.append(&mut key_ops);
+            (object_id, ops)
+        },
+        _ => panic!("Only a map or list can be the top level object in value_to_ops".to_string())
+    }
+}
+
+fn create_prim(object_id: ObjectID, key: Key, value: &Value) -> Operation {
+    let prim_value = match value {
+        Value::Number(n) => PrimitiveValue::Number(*n),
+        Value::Boolean(b) => PrimitiveValue::Boolean(*b),
+        Value::Str(s) => PrimitiveValue::Str(s.to_string()),
+        Value::Null => PrimitiveValue::Null,
+        _ => panic!("Non primitive value passed to create_prim"),
+    };
+    Operation::Set{
+        object_id,
+        key,
+        value: prim_value,
+        datatype: None,
     }
 }

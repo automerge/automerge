@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum ChangeRequest {
     Set {
         path: Path,
@@ -20,19 +21,20 @@ pub enum ChangeRequest {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ArrayIndex {
     Head,
     Index(u32),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum PathElement {
     Root,
     Key(String),
     Index(ArrayIndex),
 }
 
+#[derive(Debug)]
 pub struct Path(Vec<PathElement>);
 
 impl Path {
