@@ -277,7 +277,7 @@ pub enum Operation {
     },
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "actor")]
     pub(crate) actor_id: ActorID,

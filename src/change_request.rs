@@ -22,16 +22,10 @@ pub enum ChangeRequest {
 }
 
 #[derive(Clone, Debug)]
-pub enum ArrayIndex {
-    Head,
-    Index(u32),
-}
-
-#[derive(Clone, Debug)]
-enum PathElement {
+pub enum PathElement {
     Root,
     Key(String),
-    Index(ArrayIndex),
+    Index(usize),
 }
 
 #[derive(Debug)]
@@ -42,7 +36,7 @@ impl Path {
         Path(vec![PathElement::Root])
     }
 
-    pub fn index(&self, index: ArrayIndex) -> Path {
+    pub fn index(&self, index: usize) -> Path {
         let mut elems = self.0.clone();
         elems.push(PathElement::Index(index));
         Path(elems)
@@ -52,5 +46,19 @@ impl Path {
         let mut elems = self.0.clone();
         elems.push(PathElement::Key(key));
         Path(elems)
+    }
+
+    pub fn parent(&self) -> Path {
+        Path(self.0.clone().into_iter().skip(1).collect())
+    }
+
+}
+
+impl<'a> IntoIterator for &'a Path {
+    type Item = &'a PathElement;
+    type IntoIter = std::slice::Iter<'a, PathElement>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
     }
 }

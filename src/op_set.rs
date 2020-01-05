@@ -6,7 +6,7 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::change_request::Path;
+use crate::change_request::{Path, PathElement};
 use crate::error::{AutomergeError, InvalidChangeRequest};
 use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
@@ -354,7 +354,7 @@ impl OpSet {
                             ref mut operations_by_elemid,
                             ..
                         } => {
-                            let elem_id = ElementID::from_str(&key.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link to an object in a list with invalid element ID {:?}", key.0)))?;
+                            let elem_id = ElementID::from_str(&key.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", key.0)))?;
                             operations_by_elemid
                                 .entry(elem_id.clone())
                                 .or_insert_with(ConcurrentOperations::new)
@@ -466,39 +466,7 @@ impl OpSet {
         _insertions: &HashMap<ElementID, ElementID>,
         following: &HashMap<ElementID, Vec<ElementID>>,
     ) -> Result<Value, AutomergeError> {
-        // First we construct a vector of operations to process in order based
-        // on the insertion orders of the operations we've received
-        let mut ops_in_order: Vec<&ConcurrentOperations> = Vec::new();
-        // start with everything that was inserted after _head
-        let mut to_process: Vec<ElementID> = following
-            .get(&ElementID::Head)
-            .map(|heads| {
-                let mut sorted = heads.to_vec();
-                sorted.sort();
-                sorted
-            })
-            .unwrap_or_else(Vec::new);
-
-        // for each element ID, add the operation to the ops_in_order list,
-        // then find all the following element IDs, sort them and add them to
-        // the list of element IDs still to process.
-        while let Some(next_element_id) = to_process.pop() {
-            let ops = operations_by_elemid.get(&next_element_id).ok_or_else(|| {
-                AutomergeError::InvalidChange(format!(
-                    "Missing element ID {:?} when interpreting list ops",
-                    next_element_id
-                ))
-            })?;
-            ops_in_order.push(ops);
-            if let Some(followers) = following.get(&next_element_id) {
-                let mut sorted = followers.to_vec();
-                sorted.sort();
-                sorted.reverse();
-                for follower in sorted {
-                    to_process.push(follower.clone())
-                }
-            }
-        }
+        let ops_in_order = self.list_ops_in_order(operations_by_elemid, following)?;
 
         // Now that we have a list of `ConcurrentOperations` in the correct
         // order, we need to interpret each one to construct the value that
@@ -506,7 +474,7 @@ impl OpSet {
         let result_with_errs =
             ops_in_order
                 .iter()
-                .filter_map(|ops| -> Option<Result<Value, AutomergeError>> {
+                .filter_map(|(_, ops)| -> Option<Result<Value, AutomergeError>> {
                     ops.active_op().map(|op| match &op.operation {
                         Operation::Set { value, .. } => Ok(match value {
                             PrimitiveValue::Null => Value::Null,
@@ -527,23 +495,82 @@ impl OpSet {
         Ok(Value::List(result))
     }
 
+    fn list_ops_in_order<'a>(
+        &'a self,
+        operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations>,
+        following: &HashMap<ElementID, Vec<ElementID>>,
+    ) -> Result<Vec<(ElementID, &'a ConcurrentOperations)>, AutomergeError> {
+        // First we construct a vector of operations to process in order based
+        // on the insertion orders of the operations we've received
+        let mut ops_in_order: Vec<(ElementID, &ConcurrentOperations)> = Vec::new();
+        // start with everything that was inserted after _head
+        let mut to_process: Vec<ElementID> = following
+            .get(&ElementID::Head)
+            .map(|heads| {
+                let mut sorted = heads.to_vec();
+                sorted.sort();
+                sorted
+            })
+            .unwrap_or_else(Vec::new);
+
+        // for each element ID, add the operation to the ops_in_order list,
+        // then find all the following element IDs, sort them and add them to
+        // the list of element IDs still to process.
+        while let Some(next_element_id) = to_process.pop() {
+            let ops = operations_by_elemid.get(&next_element_id).ok_or_else(|| {
+                AutomergeError::InvalidChange(format!(
+                    "Missing element ID {:?} when interpreting list ops",
+                    next_element_id
+                ))
+            })?;
+            ops_in_order.push((next_element_id.clone(), ops));
+            if let Some(followers) = following.get(&next_element_id) {
+                let mut sorted = followers.to_vec();
+                sorted.sort();
+                sorted.reverse();
+                for follower in sorted {
+                    to_process.push(follower.clone())
+                }
+            }
+        };
+        Ok(ops_in_order)
+    }
+
     pub(crate) fn create_set_operations(
         &self,
-        _path: &Path,
-        _value: Value,
+        actor_id: &ActorID,
+        path: &Path,
+        value: Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
-        Err(InvalidChangeRequest(
-            "create_set_operation not implemented".to_string(),
-        ))
+        self.resolve_path(path).and_then(|r| r.set_target()).map(|path_resolution| {
+            match value {
+                Value::Map{..} | Value::List{..} => {
+                    let (new_object_id, mut create_ops) = value_to_ops(actor_id, &value);
+                    let link_op = Operation::Link {
+                        object_id: path_resolution.containing_object_id.clone(),
+                        key: path_resolution.key.clone(),
+                        value: new_object_id,
+                    };
+                    create_ops.push(link_op);
+                    create_ops
+                },
+                Value::Str{..} | Value::Number{..} | Value::Boolean{..} | Value::Null => {
+                    vec![create_prim(path_resolution.containing_object_id.clone(), path_resolution.key, &value)]        
+                },
+            }
+        }).ok_or(InvalidChangeRequest(format!("Missing path: {:?}", path)))
     }
 
     pub(crate) fn create_move_operations(
         &self,
-        _from: &Path,
-        _to: &Path,
+        from: &Path,
+        to: &Path,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
+        let resolved_from = self.resolve_path(from).ok_or(InvalidChangeRequest(format!("Missing from path: {:?}", from)))?;
+        let resolved_to = self.resolve_path(to).ok_or(InvalidChangeRequest(format!("Missing to path: {:?}", to)))?;
+
         Err(InvalidChangeRequest(
-            "create_move_operation not implemented".to_string(),
+            "create_delete_operation not implemented".to_string(),
         ))
     }
 
@@ -575,6 +602,118 @@ impl OpSet {
             "create_insert_operation not implemented".to_string(),
         ))
     }
+
+    fn resolve_path<'a>(&self, path: &'a Path) -> Option<ResolvedPath<'a>> {
+        let mut resolved_elements: Vec<ResolvedPathElement> = Vec::new();
+        for next_elem in path {
+            match next_elem {
+                PathElement::Root => {
+                    resolved_elements.push(ResolvedPathElement::Map(ObjectID::Root))
+                },
+                PathElement::Key(key) => {
+                    let containing_object_id = match resolved_elements.last() {
+                        None => ObjectID::Root,
+                        Some(ResolvedPathElement::Map(o)) => o.clone(),
+                        Some(_) => return None,
+                    };
+                    let op = self.operations_by_object_id
+                        .get(&containing_object_id)
+                        .and_then(|history| match history {
+                            ObjectHistory::Map{operations_by_key} => Some(operations_by_key),
+                            ObjectHistory::List{..} => None,
+                        })
+                        .and_then(|kvs| kvs.get(key))
+                        .and_then(|cops| cops.active_op()).map(|o| o.operation.clone());
+                    match op {
+                        Some(Operation::Set{value, ..}) => resolved_elements.push(ResolvedPathElement::ValueInObject(Key(key.to_string()), value)),
+                        Some(Operation::Link{value, ..}) => {
+                            match self.operations_by_object_id.get(&value) {
+                                None => return None, Some(ObjectHistory::Map{..}) => resolved_elements.push(ResolvedPathElement::Map(value)),
+                                Some(ObjectHistory::List{..}) => resolved_elements.push(ResolvedPathElement::List(value)),
+                            }
+                        },
+                        None => resolved_elements.push(ResolvedPathElement::MissingKey(Key(key.to_string()))),
+                        _ => return None,
+                    }
+                },
+                PathElement::Index(i) => {
+                    let list_id = match resolved_elements.last() {
+                        Some(ResolvedPathElement::List(o)) => o,
+                        _ => return None,
+                    };
+                    let op = self.operations_by_object_id
+                        .get(&list_id)
+                        .and_then(|history| match history {
+                            ObjectHistory::List{operations_by_elemid, following, ..} => self.list_ops_in_order(operations_by_elemid, following).ok(),
+                            ObjectHistory::Map{..} => None
+                        })
+                        .and_then(|ops| ops.get(*i).map(|o| o.clone()))
+                        .and_then(|(element_id, cops)| cops.active_op().map(|o| (element_id, o.operation.clone()) ));
+                    match op {
+                        Some((elem_id, Operation::Set{value, ..})) => resolved_elements.push(ResolvedPathElement::ValueInList(elem_id, value)),
+                        Some((_, Operation::Link{value, ..})) => {
+                            match self.operations_by_object_id.get(&value) {
+                                None => return None,
+                                Some(ObjectHistory::Map{..}) => resolved_elements.push(ResolvedPathElement::Map(value)),
+                                Some(ObjectHistory::List{..}) => resolved_elements.push(ResolvedPathElement::List(value)),
+                            }
+                        },
+                        _ => return None,
+                    }
+                }
+            }
+        };
+        Some(ResolvedPath::new(path, resolved_elements))
+    }
+}
+
+#[derive(Clone, Debug)]
+enum ResolvedPathElement {
+    Map(ObjectID),
+    List(ObjectID),
+    ValueInObject(Key, PrimitiveValue),
+    ValueInList(ElementID, PrimitiveValue),
+    MissingKey(Key),
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedPath<'a>(Vec<(&'a PathElement, ResolvedPathElement)>);
+
+#[derive(Debug, Clone)]
+struct SetTarget {
+    containing_object_id: ObjectID,
+    key: Key,
+}
+
+impl<'a> ResolvedPath<'a> {
+    fn new<'b>(original: &'b Path, resolved: Vec<ResolvedPathElement>) -> ResolvedPath<'b> {
+        let zipped = original.into_iter().zip(resolved).collect();
+        ResolvedPath(zipped)
+    }
+
+    fn set_target(&self) -> Option<SetTarget> {
+        if self.0.len() < 2 {
+            return None
+        };
+        let last_two: Vec<ResolvedPathElement> = self.0.iter().skip(self.0.len() - 2).map(|i| i.1.clone() ).collect();
+        let last_two_slice: &[ResolvedPathElement] = &last_two;
+        match last_two_slice {
+            [ResolvedPathElement::Map(o), ResolvedPathElement::ValueInObject(k, _)] => Some(SetTarget{
+                containing_object_id: o.clone(),
+                key: k.clone(),
+            }),
+            [ResolvedPathElement::Map(o), ResolvedPathElement::MissingKey(k)] => Some(SetTarget{
+                containing_object_id: o.clone(),
+                key: k.clone(),
+            }),
+            [ResolvedPathElement::List(l), ResolvedPathElement::ValueInList(e, _)] => Some(SetTarget{
+                containing_object_id: l.clone(),
+                key: e.as_key(),
+            }),
+            _ => None
+        }
+    }
+
 }
 
 fn value_to_ops(actor_id: &ActorID, v: &Value) -> (ObjectID, Vec<Operation>) {
@@ -598,7 +737,7 @@ fn value_to_ops(actor_id: &ActorID, v: &Value) -> (ObjectID, Vec<Operation>) {
                 };
                 let elem_id = ElementID::SpecificElementID(actor_id.clone(), elem);
                 let mut elem_value_ops: Vec<Operation> = match elem_value {
-                    Value::Boolean{..} | Value::Str{..} | Value::Number{..} | Value::Null{..} => vec![create_prim(list_id.clone(), elem_id.as_key(), v)],
+                    Value::Boolean{..} | Value::Str{..} | Value::Number{..} | Value::Null{..} => vec![create_prim(list_id.clone(), elem_id.as_key(), elem_value)],
                     Value::Map{..} | Value::List{..} => {
                         let (linked_object_id, mut value_ops) = value_to_ops(actor_id, elem_value);
                         value_ops.push(Operation::Link{

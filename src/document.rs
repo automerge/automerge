@@ -48,11 +48,10 @@ impl Document {
             .map(|request| match request {
                 ChangeRequest::Set { path, value } => self
                     .op_set
-                    .create_set_operations(path, Value::from_json(value)),
+                    .create_set_operations(&self.actor_id, path, Value::from_json(value)),
                 ChangeRequest::Delete { path } => {
                     self.op_set.create_delete_operation(path).map(|o| vec![o])
-                }
-                ChangeRequest::Increment { path, value } => self
+                } ChangeRequest::Increment { path, value } => self
                     .op_set
                     .create_increment_operation(path, value.clone())
                     .map(|o| vec![o]),
@@ -68,13 +67,15 @@ impl Document {
         let ops = nested_ops.into_iter().flatten().collect();
         let dependencies = self.op_set.clock.clone();
         let seq = self.op_set.clock.seq_for(&self.actor_id) + 1;
-        Ok(Change {
+        let change = Change {
             actor_id: self.actor_id.clone(),
             operations: ops,
             seq,
             message,
             dependencies,
-        })
+        };
+        self.apply_change(change.clone()).map_err(|e| InvalidChangeRequest(format!("Error applying change: {:?}", e)))?;
+        Ok(change)
     }
 }
 
@@ -84,6 +85,7 @@ mod tests {
     use crate::protocol::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
+    use crate::change_request::Path;
     use std::collections::HashMap;
 
     #[test]
@@ -212,5 +214,60 @@ mod tests {
         .unwrap();
         let actual_state = doc.state().unwrap();
         assert_eq!(actual_state, expected)
+    }
+
+    #[test]
+    fn test_set_mutation() {
+        let mut doc = Document::init();
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {},
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        ).unwrap();
+        doc.create_and_apply_change(Some("Some change".to_string()), vec![
+            ChangeRequest::Set{
+                path: Path::root().key("the-state".to_string()),
+                value: json_value,
+            }
+        ]).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "the-state": {
+                    "cards_by_id": {},
+                    "size_of_cards": 12.0,
+                    "numRounds": 11.0,
+                    "cards": [1.0, false]
+                }
+            }
+        "#,
+        ).unwrap();
+        assert_eq!(expected, doc.state().unwrap());
+
+        doc.create_and_apply_change(Some("another change".to_string()), vec![
+            ChangeRequest::Set{
+                path: Path::root().key("the-state".to_string()).key("size_of_cards".to_string()),
+                value: serde_json::Value::Number(serde_json::Number::from_f64(10.0).unwrap()),
+            }
+        ]).unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "the-state": {
+                    "cards_by_id": {},
+                    "size_of_cards": 10.0,
+                    "numRounds": 11.0,
+                    "cards": [1.0, false]
+                }
+            }
+        "#,
+        ).unwrap();
+        assert_eq!(expected, doc.state().unwrap());
     }
 }
