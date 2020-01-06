@@ -21,7 +21,7 @@ pub enum ChangeRequest {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PathElement {
     Root,
     Key(String),
@@ -50,6 +50,10 @@ impl Path {
 
     pub fn parent(&self) -> Path {
         Path(self.0.clone().into_iter().skip(1).collect())
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.0.len() == 1 && self.0[0] == PathElement::Root
     }
 
 }

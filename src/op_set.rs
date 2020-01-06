@@ -195,7 +195,7 @@ impl ActorHistories {
 /// Possible values of an element of the state. Using this rather than
 /// serde_json::Value because we'll probably want to make the core logic
 /// independent of serde in order to be `no_std` compatible.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>),
@@ -242,6 +242,7 @@ impl Value {
             Value::Null => serde_json::Value::Null,
         }
     }
+
 }
 
 /// The core logic of the whole libary. Combines operations and allows querying
@@ -542,7 +543,20 @@ impl OpSet {
         path: &Path,
         value: Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
-        self.resolve_path(path).and_then(|r| r.set_target()).map(|path_resolution| {
+        // If we're setting a map as the root object we actually want to set 
+        // each key of the map to the corresponding key in the root object
+        if let Value::Map(kvs) = value.clone() {
+            if path.is_root() {
+                let mut ops = Vec::new();
+                for (key, value) in kvs.into_iter() {
+                    let key_path = path.key(key);
+                    let mut this_key_ops = self.create_set_operations(actor_id, &key_path, value)?;
+                    ops.append(&mut this_key_ops)
+                }
+                return Ok(ops)
+            }
+        };
+        self.resolve_path(path).and_then(|r| r.as_set_target()).map(|path_resolution| {
             match value {
                 Value::Map{..} | Value::List{..} => {
                     let (new_object_id, mut create_ops) = value_to_ops(actor_id, &value);
@@ -569,18 +583,40 @@ impl OpSet {
         let resolved_from = self.resolve_path(from).ok_or(InvalidChangeRequest(format!("Missing from path: {:?}", from)))?;
         let resolved_to = self.resolve_path(to).ok_or(InvalidChangeRequest(format!("Missing to path: {:?}", to)))?;
 
-        Err(InvalidChangeRequest(
-            "create_delete_operation not implemented".to_string(),
-        ))
+        let move_source = resolved_from.as_move_source().ok_or(InvalidChangeRequest(format!("Invalid move source path: {:?}", from)))?;
+        let target = resolved_to.as_set_target().ok_or(InvalidChangeRequest(format!("Invalid to path: {:?}", to)))?;
+
+        let delete_op = move_source.delete_op();
+
+        let insert_op = match (move_source, target) {
+            (MoveSource::Value{value: v, ..}, SetTarget{containing_object_id, key}) => {
+                Operation::Set{
+                    object_id: containing_object_id,
+                    key,
+                    value: v,
+                    datatype: None,
+                }
+            },
+            (MoveSource::Reference{contained_object_id, ..}, SetTarget{containing_object_id: target_container_id, key: target_key}) => {
+                Operation::Link{
+                    object_id: target_container_id,
+                    key: target_key,
+                    value: contained_object_id,
+                }
+            },
+        };
+
+        Ok(vec![delete_op, insert_op])
     }
 
     pub(crate) fn create_delete_operation(
         &self,
-        _path: &Path,
+        path: &Path,
     ) -> Result<Operation, InvalidChangeRequest> {
-        Err(InvalidChangeRequest(
-            "create_delete_operation not implemented".to_string(),
-        ))
+        self.resolve_path(path)
+            .and_then(|r| r.as_move_source())
+            .map(|source| source.delete_op())
+            .ok_or(InvalidChangeRequest(format!("Invalid delete path: {:?}", path)))
     }
 
     pub(crate) fn create_increment_operation(
@@ -603,19 +639,20 @@ impl OpSet {
         ))
     }
 
-    fn resolve_path<'a>(&self, path: &'a Path) -> Option<ResolvedPath<'a>> {
+    fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
         let mut resolved_elements: Vec<ResolvedPathElement> = Vec::new();
+        let mut containing_object_id = ObjectID::Root;
         for next_elem in path {
+            match resolved_elements.last() {
+                Some(ResolvedPathElement::MissingKey(_)) => return None,
+                _ => {}
+            }
             match next_elem {
                 PathElement::Root => {
                     resolved_elements.push(ResolvedPathElement::Map(ObjectID::Root))
                 },
                 PathElement::Key(key) => {
-                    let containing_object_id = match resolved_elements.last() {
-                        None => ObjectID::Root,
-                        Some(ResolvedPathElement::Map(o)) => o.clone(),
-                        Some(_) => return None,
-                    };
+                    resolved_elements.push(ResolvedPathElement::Key(Key(key.to_string())));
                     let op = self.operations_by_object_id
                         .get(&containing_object_id)
                         .and_then(|history| match history {
@@ -625,11 +662,18 @@ impl OpSet {
                         .and_then(|kvs| kvs.get(key))
                         .and_then(|cops| cops.active_op()).map(|o| o.operation.clone());
                     match op {
-                        Some(Operation::Set{value, ..}) => resolved_elements.push(ResolvedPathElement::ValueInObject(Key(key.to_string()), value)),
+                        Some(Operation::Set{value, ..}) => resolved_elements.push(ResolvedPathElement::Value(value)),
                         Some(Operation::Link{value, ..}) => {
                             match self.operations_by_object_id.get(&value) {
-                                None => return None, Some(ObjectHistory::Map{..}) => resolved_elements.push(ResolvedPathElement::Map(value)),
-                                Some(ObjectHistory::List{..}) => resolved_elements.push(ResolvedPathElement::List(value)),
+                                None => return None,
+                                Some(ObjectHistory::Map{..}) => {
+                                    resolved_elements.push(ResolvedPathElement::Map(value.clone()));
+                                    containing_object_id = value.clone()
+                                },
+                                Some(ObjectHistory::List{..}) => {
+                                    resolved_elements.push(ResolvedPathElement::List(value.clone()));
+                                    containing_object_id = value.clone()
+                                }
                             }
                         },
                         None => resolved_elements.push(ResolvedPathElement::MissingKey(Key(key.to_string()))),
@@ -637,12 +681,8 @@ impl OpSet {
                     }
                 },
                 PathElement::Index(i) => {
-                    let list_id = match resolved_elements.last() {
-                        Some(ResolvedPathElement::List(o)) => o,
-                        _ => return None,
-                    };
                     let op = self.operations_by_object_id
-                        .get(&list_id)
+                        .get(&containing_object_id)
                         .and_then(|history| match history {
                             ObjectHistory::List{operations_by_elemid, following, ..} => self.list_ops_in_order(operations_by_elemid, following).ok(),
                             ObjectHistory::Map{..} => None
@@ -650,12 +690,21 @@ impl OpSet {
                         .and_then(|ops| ops.get(*i).map(|o| o.clone()))
                         .and_then(|(element_id, cops)| cops.active_op().map(|o| (element_id, o.operation.clone()) ));
                     match op {
-                        Some((elem_id, Operation::Set{value, ..})) => resolved_elements.push(ResolvedPathElement::ValueInList(elem_id, value)),
+                        Some((elem_id, Operation::Set{value, ..})) => {
+                            resolved_elements.push(ResolvedPathElement::Index(elem_id));
+                            resolved_elements.push(ResolvedPathElement::Value(value));
+                        },
                         Some((_, Operation::Link{value, ..})) => {
                             match self.operations_by_object_id.get(&value) {
                                 None => return None,
-                                Some(ObjectHistory::Map{..}) => resolved_elements.push(ResolvedPathElement::Map(value)),
-                                Some(ObjectHistory::List{..}) => resolved_elements.push(ResolvedPathElement::List(value)),
+                                Some(ObjectHistory::Map{..}) => {
+                                    resolved_elements.push(ResolvedPathElement::Map(value.clone()));
+                                    containing_object_id = value
+                                },
+                                Some(ObjectHistory::List{..}) => {
+                                    resolved_elements.push(ResolvedPathElement::List(value.clone()));
+                                    containing_object_id = value
+                                }
                             }
                         },
                         _ => return None,
@@ -663,7 +712,7 @@ impl OpSet {
                 }
             }
         };
-        Some(ResolvedPath::new(path, resolved_elements))
+        Some(ResolvedPath::new(resolved_elements))
     }
 }
 
@@ -671,13 +720,14 @@ impl OpSet {
 enum ResolvedPathElement {
     Map(ObjectID),
     List(ObjectID),
-    ValueInObject(Key, PrimitiveValue),
-    ValueInList(ElementID, PrimitiveValue),
+    Key(Key),
+    Index(ElementID),
+    Value(PrimitiveValue),
     MissingKey(Key),
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedPath<'a>(Vec<(&'a PathElement, ResolvedPathElement)>);
+struct ResolvedPath(Vec<ResolvedPathElement>);
 
 #[derive(Debug, Clone)]
 struct SetTarget {
@@ -685,32 +735,101 @@ struct SetTarget {
     key: Key,
 }
 
-impl<'a> ResolvedPath<'a> {
-    fn new<'b>(original: &'b Path, resolved: Vec<ResolvedPathElement>) -> ResolvedPath<'b> {
-        let zipped = original.into_iter().zip(resolved).collect();
-        ResolvedPath(zipped)
+enum MoveSource{
+    Reference{
+        containing_object_id: ObjectID, 
+        key: Key, 
+        contained_object_id: ObjectID
+    },
+    Value{
+        containing_object_id: ObjectID, 
+        key: Key, 
+        value: PrimitiveValue
+    },
+}
+
+impl MoveSource {
+
+    fn delete_op(&self) -> Operation {
+        match self {
+            MoveSource::Reference{containing_object_id, key, ..} | MoveSource::Value{containing_object_id, key, ..} => {
+                Operation::Delete{
+                    object_id: containing_object_id.clone(),
+                    key: key.clone()
+                }
+            }
+        }
+    }
+}
+
+impl ResolvedPath {
+    fn new(elements: Vec<ResolvedPathElement>) -> ResolvedPath {
+        ResolvedPath(elements)
     }
 
-    fn set_target(&self) -> Option<SetTarget> {
-        if self.0.len() < 2 {
-            return None
-        };
-        let last_two: Vec<ResolvedPathElement> = self.0.iter().skip(self.0.len() - 2).map(|i| i.1.clone() ).collect();
-        let last_two_slice: &[ResolvedPathElement] = &last_two;
-        match last_two_slice {
-            [ResolvedPathElement::Map(o), ResolvedPathElement::ValueInObject(k, _)] => Some(SetTarget{
-                containing_object_id: o.clone(),
-                key: k.clone(),
-            }),
-            [ResolvedPathElement::Map(o), ResolvedPathElement::MissingKey(k)] => Some(SetTarget{
-                containing_object_id: o.clone(),
-                key: k.clone(),
-            }),
-            [ResolvedPathElement::List(l), ResolvedPathElement::ValueInList(e, _)] => Some(SetTarget{
-                containing_object_id: l.clone(),
-                key: e.as_key(),
-            }),
-            _ => None
+    fn as_set_target(&self) -> Option<SetTarget> {
+        self.last_three().and_then(|last_three| {
+            match &last_three[..] {
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::Value(_)] => Some(SetTarget{
+                    containing_object_id: o.clone(),
+                    key: k.clone(),
+                }),
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::MissingKey(_)] => Some(SetTarget{
+                    containing_object_id: o.clone(),
+                    key: k.clone(),
+                }),
+                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Value(_)] => Some(SetTarget{
+                    containing_object_id: l.clone(),
+                    key: elem_id.as_key(),
+                }),
+                _ => None
+            }
+        })
+    }
+
+    fn as_move_source(&self) -> Option<MoveSource> {
+        self.last_three().and_then(|last_three| {
+            match &last_three[..] {
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::Map(c)] => Some(MoveSource::Reference{
+                    containing_object_id: o.clone(),
+                    key: k.clone(),
+                    contained_object_id: c.clone()
+                }),
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::List(l)] => Some(MoveSource::Reference{
+                    containing_object_id: o.clone(),
+                    key: k.clone(),
+                    contained_object_id: l.clone()
+                }),
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::Value(v)] => Some(MoveSource::Value{
+                    containing_object_id: o.clone(),
+                    value: v.clone(),
+                    key: k.clone(),
+                }),
+                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Map(m)] => Some(MoveSource::Reference{
+                    containing_object_id: l.clone(),
+                    key: elem_id.as_key(),
+                    contained_object_id: m.clone(),
+                }),
+                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::List(l2)] => Some(MoveSource::Reference{
+                    containing_object_id: l.clone(),
+                    key: elem_id.as_key(),
+                    contained_object_id: l2.clone(),
+                }),
+                [ResolvedPathElement::List(l), ResolvedPathElement::Index(i), ResolvedPathElement::Value(v)] => Some(MoveSource::Value{
+                    containing_object_id: l.clone(),
+                    value: v.clone(),
+                    key: i.as_key(),
+                }),
+                _ => None
+            }
+        })
+    }
+
+    fn last_three(&self) -> Option<Box<[ResolvedPathElement]>> {
+        if self.0.len() < 3 {
+            None
+        } else {
+            Some(self.0.iter().skip(self.0.len() - 3).cloned().collect::<Vec<ResolvedPathElement>>().into_boxed_slice())
         }
     }
 

@@ -270,4 +270,95 @@ mod tests {
         ).unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }
+
+    #[test]
+    fn test_move_ops() {
+        let mut doc = Document::init();
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jack": {"value": 11}
+                },
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        ).unwrap();
+        doc.create_and_apply_change(Some("Init".to_string()), vec![
+            ChangeRequest::Set{
+                path: Path::root(),
+                value: json_value,
+            }
+        ]).unwrap();
+        println!("Doc state: {:?}", doc.state().unwrap());
+        doc.create_and_apply_change(Some("Move jack".to_string()), vec![
+            ChangeRequest::Move{
+                from: Path::root().key("cards_by_id".to_string()).key("jack".to_string()),
+                to: Path::root().key("cards_by_id".to_string()).key("jill".to_string()),
+            },
+            ChangeRequest::Move{
+                from: Path::root().key("size_of_cards".to_string()),
+                to: Path::root().key("number_of_cards".to_string()),
+            },
+        ]).unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jill": {"value": 11.0}
+                },
+                "number_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        ).unwrap();
+        assert_eq!(expected, doc.state().unwrap());
+    }
+
+    #[test]
+    fn test_delete_op() {
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jack": {"value": 11}
+                },
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        ).unwrap();
+        let mut doc = Document::init();
+        doc.create_and_apply_change(Some("Init".to_string()), vec![
+            ChangeRequest::Set{
+                path: Path::root(),
+                value: json_value,
+            }
+        ]).unwrap();
+        doc.create_and_apply_change(Some("Delete everything".to_string()), vec![
+            ChangeRequest::Delete{
+                path: Path::root().key("cards_by_id".to_string()).key("jack".to_string()),
+            },
+            ChangeRequest::Delete{
+                path: Path::root().key("cards".to_string()).index(1)
+            },
+        ]).unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {},
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0]
+            }
+        "#,
+        ).unwrap();
+        assert_eq!(expected, doc.state().unwrap());
+    }
 }
