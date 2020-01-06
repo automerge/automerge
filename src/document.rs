@@ -58,7 +58,7 @@ impl Document {
                 ChangeRequest::Move { from, to } => self.op_set.create_move_operations(from, to),
                 ChangeRequest::InsertAfter { path, value } => self
                     .op_set
-                    .create_insert_operation(path, Value::from_json(value)),
+                    .create_insert_operation(&self.actor_id, path, Value::from_json(value)),
             })
             .collect();
         let nested_ops = ops_with_errors
@@ -85,7 +85,7 @@ mod tests {
     use crate::protocol::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
-    use crate::change_request::Path;
+    use crate::change_request::{Path, ListIndex};
     use std::collections::HashMap;
 
     #[test]
@@ -345,7 +345,7 @@ mod tests {
                 path: Path::root().key("cards_by_id".to_string()).key("jack".to_string()),
             },
             ChangeRequest::Delete{
-                path: Path::root().key("cards".to_string()).index(1)
+                path: Path::root().key("cards".to_string()).index(ListIndex::Index(1))
             },
         ]).unwrap();
 
@@ -358,6 +358,60 @@ mod tests {
                 "cards": [1.0]
             }
         "#,
+        ).unwrap();
+        assert_eq!(expected, doc.state().unwrap());
+    }
+
+    #[test]
+    fn test_insert_ops() {
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "values": [1.0, false]
+            }
+        "#,
+        ).unwrap();
+        let mut doc = Document::init();
+        doc.create_and_apply_change(Some("Initial".to_string()), vec![
+            ChangeRequest::Set{
+                path: Path::root(),
+                value: json_value,
+            }
+        ]).unwrap();
+        let person_json: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "name": "fred",
+                "surname": "johnson"
+            }
+            "#
+        ).unwrap();
+        doc.create_and_apply_change(Some("list additions".to_string()), vec![
+            ChangeRequest::InsertAfter{
+                path: Path::root().key("values".to_string()).index(ListIndex::Head),
+                value: person_json,
+            },
+        ]).unwrap();
+        doc.create_and_apply_change(Some("more list additions".to_string()), vec![
+            ChangeRequest::InsertAfter{
+                path: Path::root().key("values".to_string()).index(ListIndex::Index(1)),
+                value: serde_json::Value::String("final".to_string()),
+            },
+        ]).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "values": [
+                    {
+                        "name": "fred",
+                        "surname": "johnson"
+                    },
+                    1.0,
+                    false,
+                    "final"
+                ]
+            }
+            "#
         ).unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }

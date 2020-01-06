@@ -6,7 +6,7 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::change_request::{Path, PathElement};
+use crate::change_request::{Path, PathElement, ListIndex};
 use crate::error::{AutomergeError, InvalidChangeRequest};
 use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
@@ -131,6 +131,7 @@ enum ObjectHistory {
         operations_by_elemid: HashMap<ElementID, ConcurrentOperations>,
         insertions: HashMap<ElementID, ElementID>,
         following: HashMap<ElementID, Vec<ElementID>>,
+        max_elem: u32,
     },
 }
 
@@ -334,6 +335,7 @@ impl OpSet {
                         operations_by_elemid: HashMap::new(),
                         insertions: HashMap::new(),
                         following: HashMap::new(),
+                        max_elem: 0,
                     };
                     self.operations_by_object_id.insert(object_id, object);
                 }
@@ -374,16 +376,17 @@ impl OpSet {
                         .ok_or_else(|| AutomergeError::MissingObjectError(list_id.clone()))?;
                     match list {
                         ObjectHistory::Map{..} => return Err(AutomergeError::InvalidChange(format!("Insert operation received for object key (object ID: {:?}, key: {:?}", list_id, key))),
-                        ObjectHistory::List{insertions, following, operations_by_elemid} => {
-                            if insertions.contains_key(&key) {
-                                return Err(AutomergeError::InvalidChange(format!("Received an insertion for already present key: {:?}", key)));
-                            }
+                        ObjectHistory::List{insertions, following, operations_by_elemid, max_elem} => {
                             let inserted_elemid = ElementID::SpecificElementID(actor_id.clone(), *elem);
-                            insertions.insert(key.clone(), inserted_elemid.clone());
+                            if insertions.contains_key(&inserted_elemid) {
+                                return Err(AutomergeError::InvalidChange(format!("Received an insertion for already present key: {:?}", inserted_elemid)));
+                            }
+                            insertions.insert(inserted_elemid.clone(), inserted_elemid.clone());
                             let following_ops = following.entry(key.clone()).or_insert_with(Vec::new);
                             following_ops.push(inserted_elemid.clone());
 
                             operations_by_elemid.entry(inserted_elemid).or_insert_with(ConcurrentOperations::new);
+                            *max_elem = std::cmp::max(*max_elem, *elem);
                         }
                     }
                 }
@@ -412,6 +415,7 @@ impl OpSet {
                 operations_by_elemid,
                 insertions,
                 following,
+                ..
             } => self.interpret_list_ops(operations_by_elemid, insertions, following),
         }
     }
@@ -631,12 +635,42 @@ impl OpSet {
 
     pub(crate) fn create_insert_operation(
         &self,
-        _after: &Path,
-        _value: Value,
+        actor_id: &ActorID,
+        after: &Path,
+        value: Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
-        Err(InvalidChangeRequest(
-            "create_insert_operation not implemented".to_string(),
-        ))
+        println!("Insert path: {:?}", self.resolve_path(after));
+        println!("Insert path insert after: {:?}", self.resolve_path(after).and_then(|p| p.as_insert_after_target()));
+        let after_target = self
+            .resolve_path(after)
+            .and_then(|p| p.as_insert_after_target())
+            .ok_or(InvalidChangeRequest(format!("Invalid insert after path: {:?}", after)))?;
+        let next_elem_id = ElementID::SpecificElementID(
+            actor_id.clone(),
+            after_target.max_elem + 1 
+        );
+        let insert_op = Operation::Insert{
+            list_id: after_target.list_id.clone(),
+            key: after_target.element_id,
+            elem: after_target.max_elem + 1,
+        };
+        let mut ops = vec![insert_op];
+        match value {
+            Value::Map{..} | Value::List{..} => {
+                let (new_object_id, create_ops) = value_to_ops(actor_id, &value);
+                ops.extend(create_ops);
+                let link_op = Operation::Link {
+                    object_id: after_target.list_id.clone(),
+                    key: next_elem_id.as_key(),
+                    value: new_object_id,
+                };
+                ops.push(link_op);
+            },
+            Value::Str{..} | Value::Number{..} | Value::Boolean{..} | Value::Null => {
+                ops.push(create_prim(after_target.list_id.clone(), next_elem_id.as_key(), &value));
+            }
+        };
+        Ok(ops)
     }
 
     fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
@@ -645,6 +679,7 @@ impl OpSet {
         for next_elem in path {
             match resolved_elements.last() {
                 Some(ResolvedPathElement::MissingKey(_)) => return None,
+                Some(ResolvedPathElement::Index(ElementID::Head)) => return None,
                 _ => {}
             }
             match next_elem {
@@ -670,8 +705,8 @@ impl OpSet {
                                     resolved_elements.push(ResolvedPathElement::Map(value.clone()));
                                     containing_object_id = value.clone()
                                 },
-                                Some(ObjectHistory::List{..}) => {
-                                    resolved_elements.push(ResolvedPathElement::List(value.clone()));
+                                Some(ObjectHistory::List{max_elem, ..}) => {
+                                    resolved_elements.push(ResolvedPathElement::List(value.clone(), *max_elem));
                                     containing_object_id = value.clone()
                                 }
                             }
@@ -680,34 +715,44 @@ impl OpSet {
                         _ => return None,
                     }
                 },
-                PathElement::Index(i) => {
-                    let op = self.operations_by_object_id
-                        .get(&containing_object_id)
-                        .and_then(|history| match history {
-                            ObjectHistory::List{operations_by_elemid, following, ..} => self.list_ops_in_order(operations_by_elemid, following).ok(),
-                            ObjectHistory::Map{..} => None
-                        })
-                        .and_then(|ops| ops.get(*i).map(|o| o.clone()))
-                        .and_then(|(element_id, cops)| cops.active_op().map(|o| (element_id, o.operation.clone()) ));
-                    match op {
-                        Some((elem_id, Operation::Set{value, ..})) => {
-                            resolved_elements.push(ResolvedPathElement::Index(elem_id));
-                            resolved_elements.push(ResolvedPathElement::Value(value));
+                PathElement::Index(index) => {
+                    match index {
+                        ListIndex::Head => {
+                            match self.operations_by_object_id.get(&containing_object_id) {
+                                Some(ObjectHistory::List{..}) => resolved_elements.push(ResolvedPathElement::Index(ElementID::Head)),
+                                _ => return None,
+                            };
                         },
-                        Some((_, Operation::Link{value, ..})) => {
-                            match self.operations_by_object_id.get(&value) {
-                                None => return None,
-                                Some(ObjectHistory::Map{..}) => {
-                                    resolved_elements.push(ResolvedPathElement::Map(value.clone()));
-                                    containing_object_id = value
+                        ListIndex::Index(i) => {
+                            let op = self.operations_by_object_id
+                                .get(&containing_object_id)
+                                .and_then(|history| match history {
+                                    ObjectHistory::List{operations_by_elemid, following, ..} => self.list_ops_in_order(operations_by_elemid, following).ok(),
+                                    ObjectHistory::Map{..} => None
+                                })
+                                .and_then(|ops| ops.get(*i).map(|o| o.clone()))
+                                .and_then(|(element_id, cops)| cops.active_op().map(|o| (element_id, o.operation.clone()) ));
+                            match op {
+                                Some((elem_id, Operation::Set{value, ..})) => {
+                                    resolved_elements.push(ResolvedPathElement::Index(elem_id));
+                                    resolved_elements.push(ResolvedPathElement::Value(value));
                                 },
-                                Some(ObjectHistory::List{..}) => {
-                                    resolved_elements.push(ResolvedPathElement::List(value.clone()));
-                                    containing_object_id = value
-                                }
+                                Some((_, Operation::Link{value, ..})) => {
+                                    match self.operations_by_object_id.get(&value) {
+                                        None => return None,
+                                        Some(ObjectHistory::Map{..}) => {
+                                            resolved_elements.push(ResolvedPathElement::Map(value.clone()));
+                                            containing_object_id = value
+                                        },
+                                        Some(ObjectHistory::List{max_elem, ..}) => {
+                                            resolved_elements.push(ResolvedPathElement::List(value.clone(), *max_elem));
+                                            containing_object_id = value
+                                        }
+                                    }
+                                },
+                                _ => return None,
                             }
-                        },
-                        _ => return None,
+                        }
                     }
                 }
             }
@@ -719,7 +764,7 @@ impl OpSet {
 #[derive(Clone, Debug)]
 enum ResolvedPathElement {
     Map(ObjectID),
-    List(ObjectID),
+    List(ObjectID, u32),
     Key(Key),
     Index(ElementID),
     Value(PrimitiveValue),
@@ -762,13 +807,20 @@ impl MoveSource {
     }
 }
 
+#[derive(Debug)]
+struct InsertAfterTarget {
+    list_id: ObjectID,
+    element_id: ElementID,
+    max_elem: u32,
+}
+
 impl ResolvedPath {
     fn new(elements: Vec<ResolvedPathElement>) -> ResolvedPath {
         ResolvedPath(elements)
     }
 
     fn as_set_target(&self) -> Option<SetTarget> {
-        self.last_three().and_then(|last_three| {
+        self.last_n(3).and_then(|last_three| {
             match &last_three[..] {
                 [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::Value(_)] => Some(SetTarget{
                     containing_object_id: o.clone(),
@@ -778,7 +830,7 @@ impl ResolvedPath {
                     containing_object_id: o.clone(),
                     key: k.clone(),
                 }),
-                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Value(_)] => Some(SetTarget{
+                [ResolvedPathElement::List(l, _), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Value(_)] => Some(SetTarget{
                     containing_object_id: l.clone(),
                     key: elem_id.as_key(),
                 }),
@@ -788,14 +840,14 @@ impl ResolvedPath {
     }
 
     fn as_move_source(&self) -> Option<MoveSource> {
-        self.last_three().and_then(|last_three| {
+        self.last_n(3).and_then(|last_three| {
             match &last_three[..] {
                 [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::Map(c)] => Some(MoveSource::Reference{
                     containing_object_id: o.clone(),
                     key: k.clone(),
                     contained_object_id: c.clone()
                 }),
-                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::List(l)] => Some(MoveSource::Reference{
+                [ResolvedPathElement::Map(o), ResolvedPathElement::Key(k), ResolvedPathElement::List(l, _)] => Some(MoveSource::Reference{
                     containing_object_id: o.clone(),
                     key: k.clone(),
                     contained_object_id: l.clone()
@@ -805,17 +857,17 @@ impl ResolvedPath {
                     value: v.clone(),
                     key: k.clone(),
                 }),
-                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Map(m)] => Some(MoveSource::Reference{
+                [ResolvedPathElement::List(l, _), ResolvedPathElement::Index(elem_id), ResolvedPathElement::Map(m)] => Some(MoveSource::Reference{
                     containing_object_id: l.clone(),
                     key: elem_id.as_key(),
                     contained_object_id: m.clone(),
                 }),
-                [ResolvedPathElement::List(l), ResolvedPathElement::Index(elem_id), ResolvedPathElement::List(l2)] => Some(MoveSource::Reference{
+                [ResolvedPathElement::List(l, _), ResolvedPathElement::Index(elem_id), ResolvedPathElement::List(l2, _)] => Some(MoveSource::Reference{
                     containing_object_id: l.clone(),
                     key: elem_id.as_key(),
                     contained_object_id: l2.clone(),
                 }),
-                [ResolvedPathElement::List(l), ResolvedPathElement::Index(i), ResolvedPathElement::Value(v)] => Some(MoveSource::Value{
+                [ResolvedPathElement::List(l, _), ResolvedPathElement::Index(i), ResolvedPathElement::Value(v)] => Some(MoveSource::Value{
                     containing_object_id: l.clone(),
                     value: v.clone(),
                     key: i.as_key(),
@@ -825,11 +877,29 @@ impl ResolvedPath {
         })
     }
 
-    fn last_three(&self) -> Option<Box<[ResolvedPathElement]>> {
-        if self.0.len() < 3 {
+    fn as_insert_after_target(&self) -> Option<InsertAfterTarget> {
+        self.last_n(3).and_then(|last_three| {
+            match &last_three[..] {
+                [ResolvedPathElement::List(l, m), ResolvedPathElement::Index(e), ResolvedPathElement::Value(_)] => Some(InsertAfterTarget{
+                    list_id: l.clone(),
+                    element_id: e.clone(),
+                    max_elem: *m,
+                }),
+                [_, ResolvedPathElement::List(l, m), ResolvedPathElement::Index(e)] => Some(InsertAfterTarget{
+                    list_id: l.clone(),
+                    element_id: e.clone(),
+                    max_elem: *m,
+                }),
+                _ => None,
+            }
+        })
+    }
+
+    fn last_n(&self, n: usize) -> Option<Box<[ResolvedPathElement]>> {
+        if self.0.len() < n {
             None
         } else {
-            Some(self.0.iter().skip(self.0.len() - 3).cloned().collect::<Vec<ResolvedPathElement>>().into_boxed_slice())
+            Some(self.0.iter().skip(self.0.len() - n).cloned().collect::<Vec<ResolvedPathElement>>().into_boxed_slice())
         }
     }
 

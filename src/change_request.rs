@@ -25,6 +25,12 @@ pub enum ChangeRequest {
 pub enum PathElement {
     Root,
     Key(String),
+    Index(ListIndex),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ListIndex {
+    Head,
     Index(usize),
 }
 
@@ -36,7 +42,7 @@ impl Path {
         Path(vec![PathElement::Root])
     }
 
-    pub fn index(&self, index: usize) -> Path {
+    pub fn index(&self, index: ListIndex) -> Path {
         let mut elems = self.0.clone();
         elems.push(PathElement::Index(index));
         Path(elems)
