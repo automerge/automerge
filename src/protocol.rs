@@ -127,9 +127,7 @@ impl ElementID {
     pub fn as_key(&self) -> Key {
         match self {
             ElementID::Head => Key("_head".to_string()),
-            ElementID::SpecificElementID(actor_id, elem) => {
-                Key(format!("{}:{}", actor_id.0, elem))
-            }
+            ElementID::SpecificElementID(actor_id, elem) => Key(format!("{}:{}", actor_id.0, elem)),
         }
     }
 }

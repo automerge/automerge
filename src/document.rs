@@ -46,20 +46,22 @@ impl Document {
         let ops_with_errors: Vec<Result<Vec<Operation>, InvalidChangeRequest>> = _requests
             .iter()
             .map(|request| match request {
-                ChangeRequest::Set { path, value } => self
-                    .op_set
-                    .create_set_operations(&self.actor_id, path, value),
+                ChangeRequest::Set { path, value } => {
+                    self.op_set
+                        .create_set_operations(&self.actor_id, path, value)
+                }
                 ChangeRequest::Delete { path } => {
                     self.op_set.create_delete_operation(path).map(|o| vec![o])
-                },
+                }
                 ChangeRequest::Increment { path, value } => self
                     .op_set
                     .create_increment_operation(path, value.clone())
                     .map(|o| vec![o]),
                 ChangeRequest::Move { from, to } => self.op_set.create_move_operations(from, to),
-                ChangeRequest::InsertAfter { path, value } => self
-                    .op_set
-                    .create_insert_operation(&self.actor_id, path, value),
+                ChangeRequest::InsertAfter { path, value } => {
+                    self.op_set
+                        .create_insert_operation(&self.actor_id, path, value)
+                }
             })
             .collect();
         let nested_ops = ops_with_errors
@@ -75,7 +77,8 @@ impl Document {
             message,
             dependencies,
         };
-        self.apply_change(change.clone()).map_err(|e| InvalidChangeRequest(format!("Error applying change: {:?}", e)))?;
+        self.apply_change(change.clone())
+            .map_err(|e| InvalidChangeRequest(format!("Error applying change: {:?}", e)))?;
         Ok(change)
     }
 }
@@ -83,11 +86,11 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::Value;
+    use crate::change_request::{ListIndex, Path};
     use crate::protocol::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
-    use crate::change_request::{Path, ListIndex};
+    use crate::value::Value;
     use std::collections::HashMap;
 
     #[test]
@@ -230,13 +233,16 @@ mod tests {
                 "cards": [1.0, false]
             }
         "#,
-        ).unwrap();
-        doc.create_and_apply_change(Some("Some change".to_string()), vec![
-            ChangeRequest::Set{
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Some change".to_string()),
+            vec![ChangeRequest::Set {
                 path: Path::root().key("the-state".to_string()),
                 value: Value::from_json(&json_value),
-            }
-        ]).unwrap();
+            }],
+        )
+        .unwrap();
         let expected: serde_json::Value = serde_json::from_str(
             r#"
             {
@@ -248,15 +254,22 @@ mod tests {
                 }
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(expected, doc.state().unwrap());
 
-        doc.create_and_apply_change(Some("another change".to_string()), vec![
-            ChangeRequest::Set{
-                path: Path::root().key("the-state".to_string()).key("size_of_cards".to_string()),
-                value: Value::from_json(&serde_json::Value::Number(serde_json::Number::from_f64(10.0).unwrap())),
-            }
-        ]).unwrap();
+        doc.create_and_apply_change(
+            Some("another change".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root()
+                    .key("the-state".to_string())
+                    .key("size_of_cards".to_string()),
+                value: Value::from_json(&serde_json::Value::Number(
+                    serde_json::Number::from_f64(10.0).unwrap(),
+                )),
+            }],
+        )
+        .unwrap();
 
         let expected: serde_json::Value = serde_json::from_str(
             r#"
@@ -269,7 +282,8 @@ mod tests {
                 }
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }
 
@@ -287,24 +301,35 @@ mod tests {
                 "cards": [1.0, false]
             }
         "#,
-        ).unwrap();
-        doc.create_and_apply_change(Some("Init".to_string()), vec![
-            ChangeRequest::Set{
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Init".to_string()),
+            vec![ChangeRequest::Set {
                 path: Path::root(),
                 value: Value::from_json(&json_value),
-            }
-        ]).unwrap();
+            }],
+        )
+        .unwrap();
         println!("Doc state: {:?}", doc.state().unwrap());
-        doc.create_and_apply_change(Some("Move jack".to_string()), vec![
-            ChangeRequest::Move{
-                from: Path::root().key("cards_by_id".to_string()).key("jack".to_string()),
-                to: Path::root().key("cards_by_id".to_string()).key("jill".to_string()),
-            },
-            ChangeRequest::Move{
-                from: Path::root().key("size_of_cards".to_string()),
-                to: Path::root().key("number_of_cards".to_string()),
-            },
-        ]).unwrap();
+        doc.create_and_apply_change(
+            Some("Move jack".to_string()),
+            vec![
+                ChangeRequest::Move {
+                    from: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jack".to_string()),
+                    to: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jill".to_string()),
+                },
+                ChangeRequest::Move {
+                    from: Path::root().key("size_of_cards".to_string()),
+                    to: Path::root().key("number_of_cards".to_string()),
+                },
+            ],
+        )
+        .unwrap();
 
         let expected: serde_json::Value = serde_json::from_str(
             r#"
@@ -317,7 +342,8 @@ mod tests {
                 "cards": [1.0, false]
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }
 
@@ -334,22 +360,33 @@ mod tests {
                 "cards": [1.0, false]
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         let mut doc = Document::init();
-        doc.create_and_apply_change(Some("Init".to_string()), vec![
-            ChangeRequest::Set{
+        doc.create_and_apply_change(
+            Some("Init".to_string()),
+            vec![ChangeRequest::Set {
                 path: Path::root(),
                 value: Value::from_json(&json_value),
-            }
-        ]).unwrap();
-        doc.create_and_apply_change(Some("Delete everything".to_string()), vec![
-            ChangeRequest::Delete{
-                path: Path::root().key("cards_by_id".to_string()).key("jack".to_string()),
-            },
-            ChangeRequest::Delete{
-                path: Path::root().key("cards".to_string()).index(ListIndex::Index(1))
-            },
-        ]).unwrap();
+            }],
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Delete everything".to_string()),
+            vec![
+                ChangeRequest::Delete {
+                    path: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jack".to_string()),
+                },
+                ChangeRequest::Delete {
+                    path: Path::root()
+                        .key("cards".to_string())
+                        .index(ListIndex::Index(1)),
+                },
+            ],
+        )
+        .unwrap();
 
         let expected: serde_json::Value = serde_json::from_str(
             r#"
@@ -360,7 +397,8 @@ mod tests {
                 "cards": [1.0]
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }
 
@@ -372,34 +410,46 @@ mod tests {
                 "values": [1.0, false]
             }
         "#,
-        ).unwrap();
+        )
+        .unwrap();
         let mut doc = Document::init();
-        doc.create_and_apply_change(Some("Initial".to_string()), vec![
-            ChangeRequest::Set{
+        doc.create_and_apply_change(
+            Some("Initial".to_string()),
+            vec![ChangeRequest::Set {
                 path: Path::root(),
                 value: Value::from_json(&json_value),
-            }
-        ]).unwrap();
+            }],
+        )
+        .unwrap();
         let person_json: serde_json::Value = serde_json::from_str(
             r#"
             {
                 "name": "fred",
                 "surname": "johnson"
             }
-            "#
-        ).unwrap();
-        doc.create_and_apply_change(Some("list additions".to_string()), vec![
-            ChangeRequest::InsertAfter{
-                path: Path::root().key("values".to_string()).index(ListIndex::Head),
+            "#,
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("list additions".to_string()),
+            vec![ChangeRequest::InsertAfter {
+                path: Path::root()
+                    .key("values".to_string())
+                    .index(ListIndex::Head),
                 value: Value::from_json(&person_json),
-            },
-        ]).unwrap();
-        doc.create_and_apply_change(Some("more list additions".to_string()), vec![
-            ChangeRequest::InsertAfter{
-                path: Path::root().key("values".to_string()).index(ListIndex::Index(1)),
+            }],
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("more list additions".to_string()),
+            vec![ChangeRequest::InsertAfter {
+                path: Path::root()
+                    .key("values".to_string())
+                    .index(ListIndex::Index(1)),
                 value: Value::from_json(&serde_json::Value::String("final".to_string())),
-            },
-        ]).unwrap();
+            }],
+        )
+        .unwrap();
         let expected: serde_json::Value = serde_json::from_str(
             r#"
             {
@@ -413,8 +463,9 @@ mod tests {
                     "final"
                 ]
             }
-            "#
-        ).unwrap();
+            "#,
+        )
+        .unwrap();
         assert_eq!(expected, doc.state().unwrap());
     }
 }

@@ -2,25 +2,11 @@ use crate::value::Value;
 
 #[derive(Debug)]
 pub enum ChangeRequest {
-    Set {
-        path: Path,
-        value: Value,
-    },
-    Move {
-        from: Path,
-        to: Path,
-    },
-    Delete {
-        path: Path,
-    },
-    Increment {
-        path: Path,
-        value: f64,
-    },
-    InsertAfter {
-        path: Path,
-        value: Value,
-    },
+    Set { path: Path, value: Value },
+    Move { from: Path, to: Path },
+    Delete { path: Path },
+    Increment { path: Path, value: f64 },
+    InsertAfter { path: Path, value: Value },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,7 +49,6 @@ impl Path {
     pub fn is_root(&self) -> bool {
         self.0.len() == 1 && self.0[0] == PathElement::Root
     }
-
 }
 
 impl<'a> IntoIterator for &'a Path {
