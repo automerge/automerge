@@ -1,8 +1,10 @@
+use crate::value::Value;
+
 #[derive(Debug)]
 pub enum ChangeRequest {
     Set {
         path: Path,
-        value: serde_json::Value,
+        value: Value,
     },
     Move {
         from: Path,
@@ -17,7 +19,7 @@ pub enum ChangeRequest {
     },
     InsertAfter {
         path: Path,
-        value: serde_json::Value,
+        value: Value,
     },
 }
 

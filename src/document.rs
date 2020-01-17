@@ -1,4 +1,4 @@
-use super::op_set::{OpSet, Value};
+use super::op_set::OpSet;
 use super::{AutomergeError, ChangeRequest};
 use crate::error::InvalidChangeRequest;
 use crate::protocol::{ActorID, Change, Operation};
@@ -48,17 +48,18 @@ impl Document {
             .map(|request| match request {
                 ChangeRequest::Set { path, value } => self
                     .op_set
-                    .create_set_operations(&self.actor_id, path, Value::from_json(value)),
+                    .create_set_operations(&self.actor_id, path, value),
                 ChangeRequest::Delete { path } => {
                     self.op_set.create_delete_operation(path).map(|o| vec![o])
-                } ChangeRequest::Increment { path, value } => self
+                },
+                ChangeRequest::Increment { path, value } => self
                     .op_set
                     .create_increment_operation(path, value.clone())
                     .map(|o| vec![o]),
                 ChangeRequest::Move { from, to } => self.op_set.create_move_operations(from, to),
                 ChangeRequest::InsertAfter { path, value } => self
                     .op_set
-                    .create_insert_operation(&self.actor_id, path, Value::from_json(value)),
+                    .create_insert_operation(&self.actor_id, path, value),
             })
             .collect();
         let nested_ops = ops_with_errors
@@ -82,6 +83,7 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Value;
     use crate::protocol::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
@@ -232,7 +234,7 @@ mod tests {
         doc.create_and_apply_change(Some("Some change".to_string()), vec![
             ChangeRequest::Set{
                 path: Path::root().key("the-state".to_string()),
-                value: json_value,
+                value: Value::from_json(&json_value),
             }
         ]).unwrap();
         let expected: serde_json::Value = serde_json::from_str(
@@ -252,7 +254,7 @@ mod tests {
         doc.create_and_apply_change(Some("another change".to_string()), vec![
             ChangeRequest::Set{
                 path: Path::root().key("the-state".to_string()).key("size_of_cards".to_string()),
-                value: serde_json::Value::Number(serde_json::Number::from_f64(10.0).unwrap()),
+                value: Value::from_json(&serde_json::Value::Number(serde_json::Number::from_f64(10.0).unwrap())),
             }
         ]).unwrap();
 
@@ -289,7 +291,7 @@ mod tests {
         doc.create_and_apply_change(Some("Init".to_string()), vec![
             ChangeRequest::Set{
                 path: Path::root(),
-                value: json_value,
+                value: Value::from_json(&json_value),
             }
         ]).unwrap();
         println!("Doc state: {:?}", doc.state().unwrap());
@@ -337,7 +339,7 @@ mod tests {
         doc.create_and_apply_change(Some("Init".to_string()), vec![
             ChangeRequest::Set{
                 path: Path::root(),
-                value: json_value,
+                value: Value::from_json(&json_value),
             }
         ]).unwrap();
         doc.create_and_apply_change(Some("Delete everything".to_string()), vec![
@@ -375,7 +377,7 @@ mod tests {
         doc.create_and_apply_change(Some("Initial".to_string()), vec![
             ChangeRequest::Set{
                 path: Path::root(),
-                value: json_value,
+                value: Value::from_json(&json_value),
             }
         ]).unwrap();
         let person_json: serde_json::Value = serde_json::from_str(
@@ -389,13 +391,13 @@ mod tests {
         doc.create_and_apply_change(Some("list additions".to_string()), vec![
             ChangeRequest::InsertAfter{
                 path: Path::root().key("values".to_string()).index(ListIndex::Head),
-                value: person_json,
+                value: Value::from_json(&person_json),
             },
         ]).unwrap();
         doc.create_and_apply_change(Some("more list additions".to_string()), vec![
             ChangeRequest::InsertAfter{
                 path: Path::root().key("values".to_string()).index(ListIndex::Index(1)),
-                value: serde_json::Value::String("final".to_string()),
+                value: Value::from_json(&serde_json::Value::String("final".to_string())),
             },
         ]).unwrap();
         let expected: serde_json::Value = serde_json::from_str(

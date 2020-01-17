@@ -11,7 +11,7 @@ use crate::error::{AutomergeError, InvalidChangeRequest};
 use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
 };
-use serde::Serialize;
+use crate::value::Value;
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -191,59 +191,6 @@ impl ActorHistories {
         self.dependency_for(op1, &op2.actor_id) < op2.sequence
             && self.dependency_for(op2, &op1.actor_id) < op1.sequence
     }
-}
-
-/// Possible values of an element of the state. Using this rather than
-/// serde_json::Value because we'll probably want to make the core logic
-/// independent of serde in order to be `no_std` compatible.
-#[derive(Serialize, Clone)]
-#[serde(untagged)]
-pub enum Value {
-    Map(HashMap<String, Value>),
-    List(Vec<Value>),
-    Str(String),
-    Number(f64),
-    Boolean(bool),
-    Null,
-}
-
-impl Value {
-    pub fn from_json(json: &serde_json::Value) -> Value {
-        match json {
-            serde_json::Value::Object(kvs) => {
-                let result: HashMap<String, Value> = kvs
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Value::from_json(v)))
-                    .collect();
-                Value::Map(result)
-            }
-            serde_json::Value::Array(vs) => Value::List(vs.iter().map(Value::from_json).collect()),
-            serde_json::Value::String(s) => Value::Str(s.to_string()),
-            serde_json::Value::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
-            serde_json::Value::Bool(b) => Value::Boolean(*b),
-            serde_json::Value::Null => Value::Null,
-        }
-    }
-
-    pub fn to_json(&self) -> serde_json::Value {
-        match self {
-            Value::Map(map) => {
-                let result: serde_json::map::Map<String, serde_json::Value> =
-                    map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
-                serde_json::Value::Object(result)
-            }
-            Value::List(elements) => {
-                serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
-            }
-            Value::Str(s) => serde_json::Value::String(s.to_string()),
-            Value::Number(n) => serde_json::Value::Number(
-                serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
-            ),
-            Value::Boolean(b) => serde_json::Value::Bool(*b),
-            Value::Null => serde_json::Value::Null,
-        }
-    }
-
 }
 
 /// The core logic of the whole libary. Combines operations and allows querying
@@ -545,7 +492,7 @@ impl OpSet {
         &self,
         actor_id: &ActorID,
         path: &Path,
-        value: Value,
+        value: &Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
         // If we're setting a map as the root object we actually want to set 
         // each key of the map to the corresponding key in the root object
@@ -554,7 +501,7 @@ impl OpSet {
                 let mut ops = Vec::new();
                 for (key, value) in kvs.into_iter() {
                     let key_path = path.key(key);
-                    let mut this_key_ops = self.create_set_operations(actor_id, &key_path, value)?;
+                    let mut this_key_ops = self.create_set_operations(actor_id, &key_path, &value)?;
                     ops.append(&mut this_key_ops)
                 }
                 return Ok(ops)
@@ -637,7 +584,7 @@ impl OpSet {
         &self,
         actor_id: &ActorID,
         after: &Path,
-        value: Value,
+        value: &Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
         println!("Insert path: {:?}", self.resolve_path(after));
         println!("Insert path insert after: {:?}", self.resolve_path(after).and_then(|p| p.as_insert_after_target()));
