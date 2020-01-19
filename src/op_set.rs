@@ -111,6 +111,9 @@ impl ConcurrentOperations {
         // the partial_cmp implementation for `OperationWithMetadata` ensures
         // that the operations are in the deterministic order required by
         // automerge.
+        //
+        // Note we can unwrap because the partial_cmp definition never returns
+        // None
         concurrent.sort_by(|a, b| a.partial_cmp(b).unwrap());
         concurrent.reverse();
         self.operations = concurrent;
@@ -212,6 +215,7 @@ pub struct OpSet {
     actor_histories: ActorHistories,
     queue: Vec<Change>,
     pub clock: Clock,
+    state: Value,
 }
 
 impl OpSet {
@@ -226,12 +230,15 @@ impl OpSet {
             actor_histories: ActorHistories(HashMap::new()),
             queue: Vec::new(),
             clock: Clock::empty(),
+            state: Value::Map(HashMap::new()),
         }
     }
 
     pub fn apply_change(&mut self, change: Change) -> Result<(), AutomergeError> {
         self.queue.push(change);
-        self.apply_causally_ready_changes()
+        self.apply_causally_ready_changes()?;
+        self.state = self.walk(&ObjectID::Root)?;
+        Ok(())
     }
 
     fn apply_causally_ready_changes(&mut self) -> Result<(), AutomergeError> {
@@ -345,8 +352,8 @@ impl OpSet {
         Ok(())
     }
 
-    pub fn root_value(&self) -> Result<Value, AutomergeError> {
-        self.walk(&ObjectID::Root)
+    pub fn root_value(&self) -> &Value {
+        return &self.state
     }
 
     /// This is where we actually interpret the concurrent operations for each
@@ -618,12 +625,6 @@ impl OpSet {
         after: &Path,
         value: &Value,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
-        println!("Insert path: {:?}", self.resolve_path(after));
-        println!(
-            "Insert path insert after: {:?}",
-            self.resolve_path(after)
-                .and_then(|p| p.as_insert_after_target())
-        );
         let after_target = self
             .resolve_path(after)
             .and_then(|p| p.as_insert_after_target())

@@ -2,7 +2,7 @@ use super::op_set::OpSet;
 use super::{AutomergeError, ChangeRequest};
 use crate::error::InvalidChangeRequest;
 use crate::protocol::{ActorID, Change, Operation};
-use serde_json;
+use crate::value::Value;
 use uuid;
 
 pub struct Document {
@@ -29,8 +29,8 @@ impl Document {
     }
 
     /// Get the current state of the document as a serde_json value
-    pub fn state(&self) -> Result<serde_json::Value, AutomergeError> {
-        self.op_set.root_value().map(|v| v.to_json())
+    pub fn state(&self) -> &Value {
+        self.op_set.root_value()
     }
 
     /// Add a single change to the document
@@ -92,6 +92,7 @@ mod tests {
     };
     use crate::value::Value;
     use std::collections::HashMap;
+    use serde_json;
 
     #[test]
     fn test_loading_from_changes() {
@@ -217,7 +218,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        let actual_state = doc.state().unwrap();
+        let actual_state = doc.state().to_json();
         assert_eq!(actual_state, expected)
     }
 
@@ -256,7 +257,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(expected, doc.state().unwrap());
+        assert_eq!(expected, doc.state().to_json());
 
         doc.create_and_apply_change(
             Some("another change".to_string()),
@@ -284,7 +285,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(expected, doc.state().unwrap());
+        assert_eq!(expected, doc.state().to_json());
     }
 
     #[test]
@@ -311,7 +312,7 @@ mod tests {
             }],
         )
         .unwrap();
-        println!("Doc state: {:?}", doc.state().unwrap());
+        println!("Doc state: {:?}", doc.state().to_json());
         doc.create_and_apply_change(
             Some("Move jack".to_string()),
             vec![
@@ -344,7 +345,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(expected, doc.state().unwrap());
+        assert_eq!(expected, doc.state().to_json());
     }
 
     #[test]
@@ -399,7 +400,7 @@ mod tests {
         "#,
         )
         .unwrap();
-        assert_eq!(expected, doc.state().unwrap());
+        assert_eq!(expected, doc.state().to_json());
     }
 
     #[test]
@@ -466,6 +467,6 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(expected, doc.state().unwrap());
+        assert_eq!(expected, doc.state().to_json());
     }
 }

@@ -289,6 +289,6 @@ fn test_concurrent_ops() {
     "#,
     )
     .unwrap();
-    let actual = doc.state().unwrap();
+    let actual = doc.state().to_json();
     assert_eq!(expected, actual);
 }

@@ -13,7 +13,7 @@
 //! let changes_str = "<paste the contents of the output here>";
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! let doc = automerge::Document::load(changes).unwrap();
-//! println!("{:?}", doc.state().unwrap());
+//! println!("{:?}", doc.state().to_json());
 //! ```
 mod change_request;
 mod document;
