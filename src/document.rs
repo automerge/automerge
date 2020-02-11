@@ -3,6 +3,7 @@ use super::{AutomergeError, ChangeRequest};
 use crate::error::InvalidChangeRequest;
 use crate::protocol::{ActorID, Change, Operation};
 use crate::value::Value;
+use crate::change_context::ChangeContext;
 use uuid;
 
 pub struct Document {
@@ -43,24 +44,23 @@ impl Document {
         message: Option<String>,
         _requests: Vec<ChangeRequest>,
     ) -> Result<Change, InvalidChangeRequest> {
+        let change_ctx = ChangeContext::new(&self.op_set);
         let ops_with_errors: Vec<Result<Vec<Operation>, InvalidChangeRequest>> = _requests
             .iter()
             .map(|request| match request {
                 ChangeRequest::Set { path, value } => {
-                    self.op_set
+                    change_ctx
                         .create_set_operations(&self.actor_id, path, value)
                 }
                 ChangeRequest::Delete { path } => {
-                    self.op_set.create_delete_operation(path).map(|o| vec![o])
+                    change_ctx.create_delete_operation(path).map(|o| vec![o])
                 }
-                ChangeRequest::Increment { path, value } => self
-                    .op_set
+                ChangeRequest::Increment { path, value } => change_ctx
                     .create_increment_operation(path, value.clone())
                     .map(|o| vec![o]),
-                ChangeRequest::Move { from, to } => self.op_set.create_move_operations(from, to),
+                ChangeRequest::Move { from, to } => change_ctx.create_move_operations(from, to),
                 ChangeRequest::InsertAfter { path, value } => {
-                    self.op_set
-                        .create_insert_operation(&self.actor_id, path, value)
+                    change_ctx.create_insert_operation(&self.actor_id, path, value)
                 }
             })
             .collect();

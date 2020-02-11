@@ -21,6 +21,7 @@ mod error;
 mod op_set;
 mod protocol;
 mod value;
+mod change_context;
 
 pub use change_request::{ChangeRequest, Path};
 pub use document::Document;
