@@ -7,7 +7,7 @@ use std::cmp::PartialOrd;
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ConcurrentOperations {
     operations: Vec<OperationWithMetadata>,
 }

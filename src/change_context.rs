@@ -1,11 +1,15 @@
-use crate::protocol::{ObjectID, PrimitiveValue, ElementID, Key, Operation, ActorID};
-use crate::concurrent_operations::ConcurrentOperations;
-use crate::object_store::ObjectHistory;
-use crate::op_set::{OpSet, list_ops_in_order};
-use crate::change_request::{Path, PathElement, ListIndex};
-use crate::value::Value;
+/// This module handles creating changes. Most of the machinery here is related
+/// to resolving paths from ChangeRequests, and generating operations to create
+/// and modify data in the op set.
+use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
-use std::collections::HashMap;
+use crate::object_store::ObjectHistory;
+use crate::object_store::ObjectStore;
+use crate::actor_histories::ActorHistories;
+use crate::operation_with_metadata::OperationWithMetadata;
+use crate::op_set::list_ops_in_order;
+use crate::protocol::{ActorID, ElementID, Key, ObjectID, Operation, PrimitiveValue, Change, Clock};
+use crate::value::Value;
 use std::convert::TryInto;
 
 #[derive(Clone, Debug)]
@@ -18,6 +22,7 @@ enum ResolvedPathElement {
     MissingKey(Key),
 }
 
+/// Represents a resolved path 
 #[derive(Debug, Clone)]
 struct ResolvedPath(Vec<ResolvedPathElement>);
 
@@ -118,12 +123,14 @@ impl ResolvedPath {
     }
 }
 
+/// Represents the target of a "set" change request.
 #[derive(Debug, Clone)]
 struct SetTarget {
     containing_object_id: ObjectID,
     key: Key,
 }
 
+/// Represents a path which can be moved.
 enum MoveSource {
     Reference {
         containing_object_id: ObjectID,
@@ -164,22 +171,98 @@ struct InsertAfterTarget {
     max_elem: u32,
 }
 
+/// The ChangeContext is responsible for taking the current state of the opset
+/// (which is an ObjectStore, and a clock), and an actor ID and generating a 
+/// new change for a given set of ChangeRequests. The ObjectStore which the 
+/// ChangeContext manages is a copy of the OpSet's ObjectStore, this is because
+/// in order to process ChangeRequests the ChangeContext needs to update the 
+/// ObjectStore.
+///
+/// For example, if we have several ChangeRequests which are inserting elements
+/// into a list, one after another, then we need to know the element IDs of the
+/// newly inserted elements to generate the correct operations. 
 pub struct ChangeContext<'a> {
-    opset: &'a OpSet,
-    cached_changes: HashMap<ObjectID, ConcurrentOperations>,
+    object_store: ObjectStore,
+    actor_id: ActorID,
+    actor_histories: &'a ActorHistories,
+    clock: Clock,
 }
 
 impl<'a> ChangeContext<'a> {
-
-    pub fn new(opset: &OpSet) -> ChangeContext {
+    pub fn new(object_store: &ObjectStore, actor_id: ActorID, actor_histories: &'a ActorHistories, clock: Clock) -> ChangeContext<'a> {
         ChangeContext {
-            opset,
-            cached_changes: HashMap::new(),
+            object_store: object_store.clone(),
+            actor_histories,
+            actor_id,
+            clock,
         }
     }
 
     fn get_operations_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
-        self.opset.operations_for_object_id(object_id)
+        self.object_store.history_for_object_id(object_id)
+    }
+
+    pub(crate) fn create_change<I>(
+        &mut self,
+        requests: I,
+        message: Option<String>,
+    ) -> Result<Change, InvalidChangeRequest>
+    where
+        I: IntoIterator<Item = ChangeRequest>,
+    {
+        let ops_with_errors: Vec<Result<Vec<Operation>, InvalidChangeRequest>> = requests
+            .into_iter()
+            .map(|request| {
+                let ops = match request {
+                    ChangeRequest::Set {
+                        ref path,
+                        ref value,
+                    } => self.create_set_operations(&self.actor_id, path, value),
+                    ChangeRequest::Delete { ref path } => {
+                        self.create_delete_operation(path).map(|o| vec![o])
+                    }
+                    ChangeRequest::Increment {
+                        ref path,
+                        ref value,
+                    } => self
+                        .create_increment_operation(path, value.clone())
+                        .map(|o| vec![o]),
+                    ChangeRequest::Move { ref from, ref to } => self.create_move_operations(from, to),
+                    ChangeRequest::InsertAfter {
+                        ref path,
+                        ref value,
+                    } => self.create_insert_operation(&self.actor_id, path, value),
+                };
+                // We have to apply each operation to the object store so that
+                // operations which reference earlier operations within this
+                // change set have the correct data to refer to.
+                ops.iter().for_each(|inner_ops| {
+                    inner_ops.iter().for_each(|op| {
+                        let op_with_meta = OperationWithMetadata{
+                            sequence: self.clock.seq_for(&self.actor_id) + 1,
+                            actor_id: self.actor_id.clone(),
+                            operation: op.clone(),
+                        };
+                        self.object_store.apply_operation(self.actor_histories, op_with_meta).unwrap();
+                    });
+                });
+                ops
+            })
+            .collect();
+        let nested_ops = ops_with_errors
+            .into_iter()
+            .collect::<Result<Vec<Vec<Operation>>, InvalidChangeRequest>>()?;
+        let ops = nested_ops.into_iter().flatten().collect::<Vec<Operation>>();
+        let dependencies = self.clock.clone();
+        let seq = self.clock.seq_for(&self.actor_id) + 1;
+        let change = Change {
+            actor_id: self.actor_id.clone(),
+            operations: ops,
+            seq,
+            message,
+            dependencies,
+        };
+        Ok(change)
     }
 
     pub(crate) fn create_set_operations(
@@ -348,7 +431,6 @@ impl<'a> ChangeContext<'a> {
         };
         Ok(ops)
     }
-
 
     fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
         let mut resolved_elements: Vec<ResolvedPathElement> = Vec::new();
@@ -549,4 +631,3 @@ fn create_prim(object_id: ObjectID, key: Key, value: &Value) -> Operation {
         datatype: None,
     }
 }
-

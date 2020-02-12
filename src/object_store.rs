@@ -11,7 +11,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 /// key, they represent the two possible container types in automerge, a map or
 /// a sequence (tables and text are effectively the maps and sequences
 /// respectively).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ObjectHistory {
     Map {
         operations_by_key: HashMap<String, ConcurrentOperations>,
@@ -26,7 +26,7 @@ pub(crate) enum ObjectHistory {
 
 /// The ObjectStore is responsible for storing the concurrent operations seen
 /// for each object ID and for the logic of incorporating a new operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ObjectStore {
     operations_by_object_id: HashMap<ObjectID, ObjectHistory>,
 }

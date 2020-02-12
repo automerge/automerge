@@ -1,7 +1,7 @@
 use super::op_set::OpSet;
 use super::{AutomergeError, ChangeRequest};
 use crate::error::InvalidChangeRequest;
-use crate::protocol::{ActorID, Change, Operation};
+use crate::protocol::{ActorID, Change};
 use crate::value::Value;
 use crate::change_context::ChangeContext;
 use uuid;
@@ -42,41 +42,15 @@ impl Document {
     pub fn create_and_apply_change(
         &mut self,
         message: Option<String>,
-        _requests: Vec<ChangeRequest>,
+        requests: Vec<ChangeRequest>,
     ) -> Result<Change, InvalidChangeRequest> {
-        let change_ctx = ChangeContext::new(&self.op_set);
-        let ops_with_errors: Vec<Result<Vec<Operation>, InvalidChangeRequest>> = _requests
-            .iter()
-            .map(|request| match request {
-                ChangeRequest::Set { path, value } => {
-                    change_ctx
-                        .create_set_operations(&self.actor_id, path, value)
-                }
-                ChangeRequest::Delete { path } => {
-                    change_ctx.create_delete_operation(path).map(|o| vec![o])
-                }
-                ChangeRequest::Increment { path, value } => change_ctx
-                    .create_increment_operation(path, value.clone())
-                    .map(|o| vec![o]),
-                ChangeRequest::Move { from, to } => change_ctx.create_move_operations(from, to),
-                ChangeRequest::InsertAfter { path, value } => {
-                    change_ctx.create_insert_operation(&self.actor_id, path, value)
-                }
-            })
-            .collect();
-        let nested_ops = ops_with_errors
-            .into_iter()
-            .collect::<Result<Vec<Vec<Operation>>, InvalidChangeRequest>>()?;
-        let ops = nested_ops.into_iter().flatten().collect();
-        let dependencies = self.op_set.clock.clone();
-        let seq = self.op_set.clock.seq_for(&self.actor_id) + 1;
-        let change = Change {
-            actor_id: self.actor_id.clone(),
-            operations: ops,
-            seq,
-            message,
-            dependencies,
-        };
+        let mut change_ctx = ChangeContext::new(
+            &self.op_set.object_store,
+            self.actor_id.clone(),
+            &self.op_set.actor_histories,
+            self.op_set.clock.clone(),
+        );
+        let change = change_ctx.create_change(requests, message)?;
         self.apply_change(change.clone())
             .map_err(|e| InvalidChangeRequest(format!("Error applying change: {:?}", e)))?;
         Ok(change)

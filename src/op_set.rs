@@ -32,8 +32,8 @@ use std::collections::HashMap;
 /// that node.
 #[derive(Debug)]
 pub struct OpSet {
-    object_store: ObjectStore,
-    actor_histories: ActorHistories,
+    pub object_store: ObjectStore,
+    pub actor_histories: ActorHistories,
     queue: Vec<Change>,
     pub clock: Clock,
     state: Value,
@@ -205,10 +205,6 @@ impl OpSet {
         let result = result_with_errs.collect::<Result<Vec<Value>, AutomergeError>>()?;
 
         Ok(Value::List(result))
-    }
-
-    pub(crate) fn operations_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
-        self.object_store.history_for_object_id(object_id)
     }
 
 }
