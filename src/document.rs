@@ -433,22 +433,20 @@ mod tests {
         .unwrap();
         doc.create_and_apply_change(
             Some("list additions".to_string()),
-            vec![ChangeRequest::InsertAfter {
-                path: Path::root()
-                    .key("values".to_string())
-                    .index(ListIndex::Head),
-                value: Value::from_json(&person_json),
-            }],
-        )
-        .unwrap();
-        doc.create_and_apply_change(
-            Some("more list additions".to_string()),
-            vec![ChangeRequest::InsertAfter {
-                path: Path::root()
-                    .key("values".to_string())
-                    .index(ListIndex::Index(1)),
-                value: Value::from_json(&serde_json::Value::String("final".to_string())),
-            }],
+            vec![
+                ChangeRequest::InsertAfter {
+                    path: Path::root()
+                        .key("values".to_string())
+                        .index(ListIndex::Head),
+                    value: Value::from_json(&person_json),
+                },
+                ChangeRequest::InsertAfter {
+                    path: Path::root()
+                        .key("values".to_string())
+                        .index(ListIndex::Index(1)),
+                    value: Value::from_json(&serde_json::Value::String("final".to_string())),
+                },
+            ],
         )
         .unwrap();
         let expected: serde_json::Value = serde_json::from_str(

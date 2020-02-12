@@ -1,5 +1,7 @@
 use crate::protocol::{ObjectID, PrimitiveValue, ElementID, Key, Operation, ActorID};
-use crate::op_set::{OpSet, ConcurrentOperations, ObjectHistory, list_ops_in_order};
+use crate::concurrent_operations::ConcurrentOperations;
+use crate::object_store::ObjectHistory;
+use crate::op_set::{OpSet, list_ops_in_order};
 use crate::change_request::{Path, PathElement, ListIndex};
 use crate::value::Value;
 use crate::error::InvalidChangeRequest;

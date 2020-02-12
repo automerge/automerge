@@ -22,6 +22,10 @@ mod op_set;
 mod protocol;
 mod value;
 mod change_context;
+mod actor_histories;
+mod concurrent_operations;
+mod operation_with_metadata;
+mod object_store;
 
 pub use change_request::{ChangeRequest, Path};
 pub use document::Document;
