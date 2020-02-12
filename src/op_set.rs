@@ -6,14 +6,12 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::error::AutomergeError;
-use crate::protocol::{
-    Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue,
-};
 use crate::actor_histories::ActorHistories;
 use crate::concurrent_operations::ConcurrentOperations;
-use crate::operation_with_metadata::OperationWithMetadata;
+use crate::error::AutomergeError;
 use crate::object_store::{ObjectHistory, ObjectStore};
+use crate::operation_with_metadata::OperationWithMetadata;
+use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
 use std::collections::HashMap;
 
@@ -21,7 +19,7 @@ use std::collections::HashMap;
 /// to ensure that operations are delivered to the object store in causal order
 ///
 /// Whenever a new change is received we iterate through any causally ready
-/// changes in the queue and apply them to the object store, then repeat until 
+/// changes in the queue and apply them to the object store, then repeat until
 /// there are no causally ready changes left. The end result of this is that
 /// the object store will contain sets of concurrent operations for each object
 /// ID or element ID.
@@ -94,10 +92,8 @@ impl OpSet {
                 actor_id: actor_id.clone(),
                 operation: operation.clone(),
             };
-            self.object_store.apply_operation(
-                &self.actor_histories,
-                op_with_metadata,
-            )?;
+            self.object_store
+                .apply_operation(&self.actor_histories, op_with_metadata)?;
         }
         self.clock = self
             .clock
@@ -106,7 +102,7 @@ impl OpSet {
     }
 
     pub fn root_value(&self) -> &Value {
-        return &self.state
+        return &self.state;
     }
 
     /// This is where we actually interpret the concurrent operations for each
@@ -206,7 +202,6 @@ impl OpSet {
 
         Ok(Value::List(result))
     }
-
 }
 
 pub(crate) fn list_ops_in_order<'a>(

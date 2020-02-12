@@ -1,9 +1,8 @@
-use crate::protocol::{Operation, DataType, PrimitiveValue};
-use crate::operation_with_metadata::OperationWithMetadata;
 use crate::actor_histories::ActorHistories;
 use crate::error::AutomergeError;
+use crate::operation_with_metadata::OperationWithMetadata;
+use crate::protocol::{DataType, Operation, PrimitiveValue};
 use std::cmp::PartialOrd;
-
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
@@ -85,4 +84,3 @@ impl ConcurrentOperations {
         Ok(())
     }
 }
-

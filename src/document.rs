@@ -1,9 +1,9 @@
 use super::op_set::OpSet;
 use super::{AutomergeError, ChangeRequest};
+use crate::change_context::ChangeContext;
 use crate::error::InvalidChangeRequest;
 use crate::protocol::{ActorID, Change};
 use crate::value::Value;
-use crate::change_context::ChangeContext;
 use uuid;
 
 pub struct Document {
@@ -65,8 +65,8 @@ mod tests {
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
     use crate::value::Value;
-    use std::collections::HashMap;
     use serde_json;
+    use std::collections::HashMap;
 
     #[test]
     fn test_loading_from_changes() {

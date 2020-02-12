@@ -15,17 +15,17 @@
 //! let doc = automerge::Document::load(changes).unwrap();
 //! println!("{:?}", doc.state().to_json());
 //! ```
+mod actor_histories;
+mod change_context;
 mod change_request;
+mod concurrent_operations;
 mod document;
 mod error;
+mod object_store;
 mod op_set;
+mod operation_with_metadata;
 mod protocol;
 mod value;
-mod change_context;
-mod actor_histories;
-mod concurrent_operations;
-mod operation_with_metadata;
-mod object_store;
 
 pub use change_request::{ChangeRequest, Path};
 pub use document::Document;

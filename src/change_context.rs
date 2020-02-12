@@ -1,3 +1,4 @@
+use crate::actor_histories::ActorHistories;
 /// This module handles creating changes. Most of the machinery here is related
 /// to resolving paths from ChangeRequests, and generating operations to create
 /// and modify data in the op set.
@@ -5,10 +6,11 @@ use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
 use crate::object_store::ObjectHistory;
 use crate::object_store::ObjectStore;
-use crate::actor_histories::ActorHistories;
-use crate::operation_with_metadata::OperationWithMetadata;
 use crate::op_set::list_ops_in_order;
-use crate::protocol::{ActorID, ElementID, Key, ObjectID, Operation, PrimitiveValue, Change, Clock};
+use crate::operation_with_metadata::OperationWithMetadata;
+use crate::protocol::{
+    ActorID, Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue,
+};
 use crate::value::Value;
 use std::convert::TryInto;
 
@@ -22,7 +24,7 @@ enum ResolvedPathElement {
     MissingKey(Key),
 }
 
-/// Represents a resolved path 
+/// Represents a resolved path
 #[derive(Debug, Clone)]
 struct ResolvedPath(Vec<ResolvedPathElement>);
 
@@ -172,15 +174,15 @@ struct InsertAfterTarget {
 }
 
 /// The ChangeContext is responsible for taking the current state of the opset
-/// (which is an ObjectStore, and a clock), and an actor ID and generating a 
-/// new change for a given set of ChangeRequests. The ObjectStore which the 
+/// (which is an ObjectStore, and a clock), and an actor ID and generating a
+/// new change for a given set of ChangeRequests. The ObjectStore which the
 /// ChangeContext manages is a copy of the OpSet's ObjectStore, this is because
-/// in order to process ChangeRequests the ChangeContext needs to update the 
+/// in order to process ChangeRequests the ChangeContext needs to update the
 /// ObjectStore.
 ///
 /// For example, if we have several ChangeRequests which are inserting elements
 /// into a list, one after another, then we need to know the element IDs of the
-/// newly inserted elements to generate the correct operations. 
+/// newly inserted elements to generate the correct operations.
 pub struct ChangeContext<'a> {
     object_store: ObjectStore,
     actor_id: ActorID,
@@ -189,7 +191,12 @@ pub struct ChangeContext<'a> {
 }
 
 impl<'a> ChangeContext<'a> {
-    pub fn new(object_store: &ObjectStore, actor_id: ActorID, actor_histories: &'a ActorHistories, clock: Clock) -> ChangeContext<'a> {
+    pub fn new(
+        object_store: &ObjectStore,
+        actor_id: ActorID,
+        actor_histories: &'a ActorHistories,
+        clock: Clock,
+    ) -> ChangeContext<'a> {
         ChangeContext {
             object_store: object_store.clone(),
             actor_histories,
@@ -227,7 +234,9 @@ impl<'a> ChangeContext<'a> {
                     } => self
                         .create_increment_operation(path, value.clone())
                         .map(|o| vec![o]),
-                    ChangeRequest::Move { ref from, ref to } => self.create_move_operations(from, to),
+                    ChangeRequest::Move { ref from, ref to } => {
+                        self.create_move_operations(from, to)
+                    }
                     ChangeRequest::InsertAfter {
                         ref path,
                         ref value,
@@ -238,12 +247,14 @@ impl<'a> ChangeContext<'a> {
                 // change set have the correct data to refer to.
                 ops.iter().for_each(|inner_ops| {
                     inner_ops.iter().for_each(|op| {
-                        let op_with_meta = OperationWithMetadata{
+                        let op_with_meta = OperationWithMetadata {
                             sequence: self.clock.seq_for(&self.actor_id) + 1,
                             actor_id: self.actor_id.clone(),
                             operation: op.clone(),
                         };
-                        self.object_store.apply_operation(self.actor_histories, op_with_meta).unwrap();
+                        self.object_store
+                            .apply_operation(self.actor_histories, op_with_meta)
+                            .unwrap();
                     });
                 });
                 ops

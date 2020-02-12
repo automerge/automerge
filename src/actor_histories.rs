@@ -1,5 +1,5 @@
-use crate::protocol::{ActorID, Clock, Change};
 use crate::operation_with_metadata::OperationWithMetadata;
+use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
 
 /// ActorHistories is a cache for the transitive dependencies of each change
@@ -10,11 +10,10 @@ use std::collections::HashMap;
 pub struct ActorHistories(HashMap<ActorID, HashMap<u32, Clock>>);
 
 impl ActorHistories {
-
     pub(crate) fn new() -> ActorHistories {
         ActorHistories(HashMap::new())
     }
-    
+
     /// Return the latest sequence required by `op` for actor `actor`
     fn dependency_for(&self, op: &OperationWithMetadata, actor: &ActorID) -> u32 {
         self.0
@@ -56,7 +55,11 @@ impl ActorHistories {
     }
 
     /// Whether the two operations in question are concurrent
-    pub(crate) fn are_concurrent(&self, op1: &OperationWithMetadata, op2: &OperationWithMetadata) -> bool {
+    pub(crate) fn are_concurrent(
+        &self,
+        op1: &OperationWithMetadata,
+        op2: &OperationWithMetadata,
+    ) -> bool {
         if op1.sequence == op2.sequence && op1.actor_id == op2.actor_id {
             return false;
         }
@@ -64,4 +67,3 @@ impl ActorHistories {
             && self.dependency_for(op2, &op1.actor_id) < op1.sequence
     }
 }
-
