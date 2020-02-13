@@ -1,12 +1,7 @@
 # Automerge
 
-<<<<<<< HEAD
-[![docs](https://docs.rs/automerge/badge.svg)](docs.rs/automerge)
-[![crates](https://img.shields.io/crates/v/automerge)](https://crates.io/crates/automerge)
-=======
 [![docs](https://docs.rs/automerge/badge.svg)](https://docs.rs/automerge)
 [![crates](https://crates.io/crates/automerge)](https://crates.io/crates/automerge)
->>>>>>> mutation
 [![Build Status](https://travis-ci.org/alexjg/automerge-rs.svg?branch=master)](https://travis-ci.org/alexjg/automerge-rs)
 
 
