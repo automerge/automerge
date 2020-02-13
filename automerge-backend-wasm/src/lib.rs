@@ -1,11 +1,7 @@
 extern crate automerge_backend;
 extern crate serde_json;
-//extern crate js_sys;
 use wasm_bindgen::prelude::*;
-//use js_sys::*;
-//use web_sys::console;
-use automerge_backend::Backend;
-use automerge_backend::Change;
+use automerge_backend::{Backend, ActorID, Change, Clock};
 
 // When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
 // allocator.
@@ -33,13 +29,65 @@ pub fn applyChanges(state: &mut State, changes: JsValue) -> JsValue {
   let patch = state.backend.apply_changes(c);
   JsValue::from_serde(&patch).ok().into()
 /*
-  // attempt to get the [state,patch] working
-  // ... -> Array
+  // attempt to get the [state,patch] tuple working
+  // return ... -> Array
   let ret = Array::new();
   ret.push(&state.clone().into());
   ret.push(&JsValue::from_serde(&patch).ok().into());
   ret
 */
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn applyLocalChange(state: &mut State, change: JsValue) -> JsValue {
+  let c: Change = change.into_serde().unwrap();
+  let patch = state.backend.apply_local_change(c);
+  JsValue::from_serde(&patch).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getPatch(state: &mut State) -> JsValue {
+  let patch = state.backend.get_patch();
+  JsValue::from_serde(&patch).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getChanges(state: &mut State) -> JsValue {
+  let changes = state.backend.get_changes();
+  JsValue::from_serde(&changes).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getChangesForActorId(state: &mut State, actorId: JsValue) -> JsValue {
+  let a: ActorID = actorId.into_serde().unwrap();
+  let changes = state.backend.get_changes_for_actor_id(a);
+  JsValue::from_serde(&changes).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getMissingChanges(state: &mut State, clock: JsValue) -> JsValue {
+  let c: Clock = clock.into_serde().unwrap();
+  let changes = state.backend.get_missing_changes(c);
+  JsValue::from_serde(&changes).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getMissingDeps(state: &mut State) -> JsValue {
+  let clock = state.backend.get_missing_deps();
+  JsValue::from_serde(&clock).ok().into()
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn merge(state: &mut State, remote: State) -> JsValue {
+  let patch = state.backend.merge(&remote.backend);
+  JsValue::from_serde(&patch).ok().into()
 }
 
 #[wasm_bindgen]
