@@ -1,10 +1,14 @@
 use super::op_set::OpSet;
-use super::AutomergeError;
-use crate::protocol::Change;
-use serde_json;
+use super::{AutomergeError, ChangeRequest};
+use crate::change_context::ChangeContext;
+use crate::error::InvalidChangeRequest;
+use crate::protocol::{ActorID, Change};
+use crate::value::Value;
+use uuid;
 
 pub struct Document {
     op_set: OpSet,
+    actor_id: ActorID,
 }
 
 impl Document {
@@ -12,6 +16,7 @@ impl Document {
     pub fn init() -> Document {
         Document {
             op_set: OpSet::init(),
+            actor_id: ActorID(uuid::Uuid::new_v4().to_string()),
         }
     }
 
@@ -25,22 +30,42 @@ impl Document {
     }
 
     /// Get the current state of the document as a serde_json value
-    pub fn state(&self) -> Result<serde_json::Value, AutomergeError> {
-        self.op_set.root_value().map(|v| v.to_json())
+    pub fn state(&self) -> &Value {
+        self.op_set.root_value()
     }
 
     /// Add a single change to the document
     pub fn apply_change(&mut self, change: Change) -> Result<(), AutomergeError> {
         self.op_set.apply_change(change)
     }
+
+    pub fn create_and_apply_change(
+        &mut self,
+        message: Option<String>,
+        requests: Vec<ChangeRequest>,
+    ) -> Result<Change, InvalidChangeRequest> {
+        let mut change_ctx = ChangeContext::new(
+            &self.op_set.object_store,
+            self.actor_id.clone(),
+            &self.op_set.actor_histories,
+            self.op_set.clock.clone(),
+        );
+        let change = change_ctx.create_change(requests, message)?;
+        self.apply_change(change.clone())
+            .map_err(|e| InvalidChangeRequest(format!("Error applying change: {:?}", e)))?;
+        Ok(change)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::change_request::{ListIndex, Path};
     use crate::protocol::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
+    use crate::value::Value;
+    use serde_json;
     use std::collections::HashMap;
 
     #[test]
@@ -167,7 +192,253 @@ mod tests {
         "#,
         )
         .unwrap();
-        let actual_state = doc.state().unwrap();
+        let actual_state = doc.state().to_json();
         assert_eq!(actual_state, expected)
+    }
+
+    #[test]
+    fn test_set_mutation() {
+        let mut doc = Document::init();
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {},
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Some change".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root().key("the-state".to_string()),
+                value: Value::from_json(&json_value),
+            }],
+        )
+        .unwrap();
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "the-state": {
+                    "cards_by_id": {},
+                    "size_of_cards": 12.0,
+                    "numRounds": 11.0,
+                    "cards": [1.0, false]
+                }
+            }
+        "#,
+        )
+        .unwrap();
+        assert_eq!(expected, doc.state().to_json());
+
+        doc.create_and_apply_change(
+            Some("another change".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root()
+                    .key("the-state".to_string())
+                    .key("size_of_cards".to_string()),
+                value: Value::from_json(&serde_json::Value::Number(
+                    serde_json::Number::from_f64(10.0).unwrap(),
+                )),
+            }],
+        )
+        .unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "the-state": {
+                    "cards_by_id": {},
+                    "size_of_cards": 10.0,
+                    "numRounds": 11.0,
+                    "cards": [1.0, false]
+                }
+            }
+        "#,
+        )
+        .unwrap();
+        assert_eq!(expected, doc.state().to_json());
+    }
+
+    #[test]
+    fn test_move_ops() {
+        let mut doc = Document::init();
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jack": {"value": 11}
+                },
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Init".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root(),
+                value: Value::from_json(&json_value),
+            }],
+        )
+        .unwrap();
+        println!("Doc state: {:?}", doc.state().to_json());
+        doc.create_and_apply_change(
+            Some("Move jack".to_string()),
+            vec![
+                ChangeRequest::Move {
+                    from: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jack".to_string()),
+                    to: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jill".to_string()),
+                },
+                ChangeRequest::Move {
+                    from: Path::root().key("size_of_cards".to_string()),
+                    to: Path::root().key("number_of_cards".to_string()),
+                },
+            ],
+        )
+        .unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jill": {"value": 11.0}
+                },
+                "number_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        )
+        .unwrap();
+        assert_eq!(expected, doc.state().to_json());
+    }
+
+    #[test]
+    fn test_delete_op() {
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {
+                    "jack": {"value": 11}
+                },
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0, false]
+            }
+        "#,
+        )
+        .unwrap();
+        let mut doc = Document::init();
+        doc.create_and_apply_change(
+            Some("Init".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root(),
+                value: Value::from_json(&json_value),
+            }],
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("Delete everything".to_string()),
+            vec![
+                ChangeRequest::Delete {
+                    path: Path::root()
+                        .key("cards_by_id".to_string())
+                        .key("jack".to_string()),
+                },
+                ChangeRequest::Delete {
+                    path: Path::root()
+                        .key("cards".to_string())
+                        .index(ListIndex::Index(1)),
+                },
+            ],
+        )
+        .unwrap();
+
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "cards_by_id": {},
+                "size_of_cards": 12.0,
+                "numRounds": 11.0,
+                "cards": [1.0]
+            }
+        "#,
+        )
+        .unwrap();
+        assert_eq!(expected, doc.state().to_json());
+    }
+
+    #[test]
+    fn test_insert_ops() {
+        let json_value: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "values": [1.0, false]
+            }
+        "#,
+        )
+        .unwrap();
+        let mut doc = Document::init();
+        doc.create_and_apply_change(
+            Some("Initial".to_string()),
+            vec![ChangeRequest::Set {
+                path: Path::root(),
+                value: Value::from_json(&json_value),
+            }],
+        )
+        .unwrap();
+        let person_json: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "name": "fred",
+                "surname": "johnson"
+            }
+            "#,
+        )
+        .unwrap();
+        doc.create_and_apply_change(
+            Some("list additions".to_string()),
+            vec![
+                ChangeRequest::InsertAfter {
+                    path: Path::root()
+                        .key("values".to_string())
+                        .index(ListIndex::Head),
+                    value: Value::from_json(&person_json),
+                },
+                ChangeRequest::InsertAfter {
+                    path: Path::root()
+                        .key("values".to_string())
+                        .index(ListIndex::Index(1)),
+                    value: Value::from_json(&serde_json::Value::String("final".to_string())),
+                },
+            ],
+        )
+        .unwrap();
+        let expected: serde_json::Value = serde_json::from_str(
+            r#"
+            {
+                "values": [
+                    {
+                        "name": "fred",
+                        "surname": "johnson"
+                    },
+                    1.0,
+                    false,
+                    "final"
+                ]
+            }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(expected, doc.state().to_json());
     }
 }
