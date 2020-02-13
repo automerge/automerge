@@ -32,7 +32,7 @@ pub fn applyChanges(state: &State, changes: JsValue) -> Array {
   let newState = state.clone();
   let patch = newState.backend.borrow_mut().apply_changes(c);
   let ret = Array::new();
-  ret.push(&newState);
+  ret.push(&newState.into());
   ret.push(&JsValue::from_serde(&patch).ok().into());
   ret
 }
@@ -53,7 +53,7 @@ pub fn applyLocalChange(state: &State, change: JsValue) -> Array {
   let newState = state.clone();
   let patch = newState.backend.borrow_mut().apply_local_change(c);
   let ret = Array::new();
-  ret.push(&newState.clone().into());
+  ret.push(&newState.into());
   ret.push(&JsValue::from_serde(&patch).ok().into());
   ret
 }
