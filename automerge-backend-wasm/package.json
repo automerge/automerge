@@ -1,0 +1,13 @@
+{
+  "author": "Orion Henry <orion@inkandswitch.com>",
+  "name": "automerge-backend-wasm",
+  "version": "0.1.0",
+  "main": "./pkg/index.js",
+  "scripts": {
+    "build": "rimraf pkg && wasm-pack build --target nodejs --out-name index",
+    "test": "cargo test && wasm-pack test --node"
+  },
+  "devDependencies": {
+    "rimraf": "^2.6.3"
+  }
+}

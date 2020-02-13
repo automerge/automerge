@@ -1,12 +1,18 @@
+#[macro_use]
+extern crate serde;
+
 mod protocol;
 mod error;
 
-use crate::protocol::{Change, ActorID, Clock};
+pub use crate::protocol::{Change, ActorID, Clock};
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Backend  {
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Patch {}
+
 
 impl Backend {
     pub fn init() -> Backend {
