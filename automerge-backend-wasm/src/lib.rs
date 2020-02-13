@@ -1,6 +1,9 @@
 extern crate automerge_backend;
 extern crate serde_json;
+use std::cell::RefCell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
+use js_sys::Array;
 use automerge_backend::{Backend, ActorID, Change, Clock};
 
 // When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
@@ -20,79 +23,88 @@ extern "C" {
 // We need a wrapper object to attach the wasm-bindgen on
 #[wasm_bindgen]
 #[derive(PartialEq,Debug, Clone)]
-pub struct State { backend: Backend }
+pub struct State { backend: Rc<RefCell<Backend>> }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn applyChanges(state: &mut State, changes: JsValue) -> JsValue {
+pub fn applyChanges(state: &State, changes: JsValue) -> Array {
   let c: Vec<Change> = changes.into_serde().unwrap();
-  let patch = state.backend.apply_changes(c);
-  JsValue::from_serde(&patch).ok().into()
-/*
-  // attempt to get the [state,patch] tuple working
-  // return ... -> Array
+  let newState = state.clone();
+  let patch = newState.backend.borrow_mut().apply_changes(c);
   let ret = Array::new();
-  ret.push(&state.clone().into());
+  ret.push(&newState);
   ret.push(&JsValue::from_serde(&patch).ok().into());
   ret
-*/
+}
+
+#[wasm_bindgen]
+pub struct Bar { }
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn foo() -> Bar {
+  Bar {}
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn applyLocalChange(state: &mut State, change: JsValue) -> JsValue {
+pub fn applyLocalChange(state: &State, change: JsValue) -> Array {
   let c: Change = change.into_serde().unwrap();
-  let patch = state.backend.apply_local_change(c);
+  let newState = state.clone();
+  let patch = newState.backend.borrow_mut().apply_local_change(c);
+  let ret = Array::new();
+  ret.push(&newState.clone().into());
+  ret.push(&JsValue::from_serde(&patch).ok().into());
+  ret
+}
+
+#[allow(non_snake_case)]
+#[wasm_bindgen]
+pub fn getPatch(state: &State) -> JsValue {
+  let patch = state.backend.borrow().get_patch();
   JsValue::from_serde(&patch).ok().into()
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn getPatch(state: &mut State) -> JsValue {
-  let patch = state.backend.get_patch();
-  JsValue::from_serde(&patch).ok().into()
-}
-
-#[allow(non_snake_case)]
-#[wasm_bindgen]
-pub fn getChanges(state: &mut State) -> JsValue {
-  let changes = state.backend.get_changes();
+pub fn getChanges(state: &State) -> JsValue {
+  let changes = state.backend.borrow().get_changes();
   JsValue::from_serde(&changes).ok().into()
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn getChangesForActorId(state: &mut State, actorId: JsValue) -> JsValue {
+pub fn getChangesForActorId(state: &State, actorId: JsValue) -> JsValue {
   let a: ActorID = actorId.into_serde().unwrap();
-  let changes = state.backend.get_changes_for_actor_id(a);
+  let changes = state.backend.borrow().get_changes_for_actor_id(a);
   JsValue::from_serde(&changes).ok().into()
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn getMissingChanges(state: &mut State, clock: JsValue) -> JsValue {
+pub fn getMissingChanges(state: &State, clock: JsValue) -> JsValue {
   let c: Clock = clock.into_serde().unwrap();
-  let changes = state.backend.get_missing_changes(c);
+  let changes = state.backend.borrow().get_missing_changes(c);
   JsValue::from_serde(&changes).ok().into()
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
-pub fn getMissingDeps(state: &mut State) -> JsValue {
-  let clock = state.backend.get_missing_deps();
+pub fn getMissingDeps(state: &State) -> JsValue {
+  let clock = state.backend.borrow().get_missing_deps();
   JsValue::from_serde(&clock).ok().into()
 }
 
 #[allow(non_snake_case)]
 #[wasm_bindgen]
 pub fn merge(state: &mut State, remote: State) -> JsValue {
-  let patch = state.backend.merge(&remote.backend);
+  let patch = state.backend.borrow_mut().merge(&remote.backend.borrow());
   JsValue::from_serde(&patch).ok().into()
 }
 
 #[wasm_bindgen]
 pub fn init() -> State {
-  State { backend: automerge_backend::Backend::init() }
+  State { backend: Rc::new(RefCell::new(Backend::init())) }
 }
 
 #[wasm_bindgen(start)]
