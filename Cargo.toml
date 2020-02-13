@@ -1,19 +1,5 @@
-[package]
-name = "automerge"
-version = "0.0.2"
-authors = ["Alex Good <alex@memoryandthought.me>"]
-edition = "2018"
-license = "MIT"
-homepage = "https://github.com/alexjg/automerge-rs"
-repository = "https://github.com/alexjg/automerge-rs"
-categories = ["data-structures"]
-description = "Rust implementation of the Automerge replicated JSON datatype"
+[workspace]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[lib]
-name = "automerge"
-
-[dependencies]
-serde = { version = "^1.0", features=["derive"] }
-serde_json = "^1.0"
-uuid = { version = "^0.5.1", features=["v4"] }
+members = [
+    "automerge",
+]
