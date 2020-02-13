@@ -1,30 +1,84 @@
-mod protocol;
 mod error;
+mod protocol;
 
-use crate::protocol::{Change, ActorID, Clock};
+use crate::protocol::{ActorID, Change, Clock, DataType, Key, ObjectID, PrimitiveValue};
 
-pub struct Backend  {
+pub struct Backend {}
+
+pub enum ElementValue {
+    Primitive(PrimitiveValue),
+    Link(ObjectID),
 }
 
-pub struct Patch {}
+pub enum SequenceType {
+    List,
+    Text,
+}
+
+pub enum MapType {
+    Map,
+    Table,
+}
+
+pub enum DiffAction {
+    CreateMap(ObjectID, MapType),
+    CreateList(ObjectID, SequenceType),
+    MaxElem(ObjectID, u32),
+    RemoveMapKey(ObjectID, Key),
+    SetMapKey(ObjectID, Key, PrimitiveValue, Option<DataType>),
+    RemoveSequenceElement(ObjectID, u32, Option<DataType>),
+    InsertSequenceElement(ObjectID, u32, ElementValue, Option<DataType>),
+    SetSequenceElement(ObjectID, u32, ElementValue),
+}
+
+struct Conflict {
+    actor: ActorID,
+    value: ElementValue,
+    datatype: Option<DataType>
+}
+
+struct Diff {
+    action: DiffAction,
+    conflicts: Vec<Conflict>
+}
+
+pub struct Patch {
+    can_undo: bool,
+    can_redo: bool,
+    clock: Clock,
+    deps: Clock,
+    diffs: Vec<Diff>,
+}
+
+impl Patch {
+    fn empty() -> Patch {
+        Patch {
+            can_undo: false,
+            can_redo: false,
+            clock: Clock::empty(),
+            deps: Clock::empty(),
+            diffs: Vec::new(),
+        }
+    }
+}
 
 impl Backend {
     pub fn init() -> Backend {
-        Backend{}
+        Backend {}
     }
 
     pub fn apply_changes(&mut self, _changes: Vec<Change>) -> Patch {
-        Patch{}
+        Patch::empty()
     }
 
     pub fn apply_local_change(&mut self, _change: Change) -> Patch {
-        Patch{}
+        Patch::empty()
     }
 
     pub fn get_patch(&self) -> Patch {
-        Patch{}
+        Patch::empty()
     }
-    
+
     pub fn get_changes(&self) -> Vec<Change> {
         Vec::new()
     }
@@ -42,9 +96,8 @@ impl Backend {
     }
 
     pub fn merge(&mut self, _remote: &Backend) -> Patch {
-        Patch{}
+        Patch::empty()
     }
-
 }
 
 #[cfg(test)]
