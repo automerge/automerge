@@ -10,7 +10,7 @@
 //! The output of this can then be deserialized like so
 //!
 //! ```rust,no_run
-//! # use automerge::Change;
+//! # use automerge_backend::Change;
 //! let changes_str = "<paste the contents of the output here>";
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```

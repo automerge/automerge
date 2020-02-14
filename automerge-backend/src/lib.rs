@@ -49,6 +49,7 @@ pub struct Diff {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all="camelCase")]
 pub struct Patch {
     pub can_undo: bool,
     pub can_redo: bool,
