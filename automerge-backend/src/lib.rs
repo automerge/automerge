@@ -1,7 +1,9 @@
 mod error;
 mod protocol;
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 use serde::ser::SerializeMap;
+use serde::de::{MapAccess, Visitor, Error};
+use std::fmt;
 
 pub use crate::protocol::{ActorID, Change, Clock, DataType, Key, ObjectID, PrimitiveValue};
 
@@ -60,6 +62,39 @@ impl Serialize for Conflict {
             }
         };
         map_serializer.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Conflict {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> 
+        where D: Deserializer<'de> {
+        struct ConflictVisitor;
+        impl <'de> Visitor<'de> for ConflictVisitor {
+            type Value = Conflict;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("A conflict object")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Conflict, V::Error> 
+                where V: MapAccess<'de> {
+                let mut actor = None;
+                let mut value = None;
+                let mut datatype = None;
+
+                while let Some(key) = map.next_key()? {
+                }
+
+                let actor = actor.ok_or_else(|| Error::missing_field("actor"))?;
+                let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                Ok(Conflict{
+                    actor,
+                    value,
+                    datatype,
+                })
+            }
+
+        }
     }
 }
 
