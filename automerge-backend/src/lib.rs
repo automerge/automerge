@@ -5,12 +5,13 @@ use serde::Serialize;
 
 pub use crate::protocol::{ActorID, Change, Clock, DataType, Key, ObjectID, PrimitiveValue};
 
+#[derive(Debug, PartialEq, Clone)]
 pub enum ElementValue {
     Primitive(PrimitiveValue),
     Link(ObjectID),
 }
 
-#[derive(Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum SequenceType {
     #[serde(rename="list")]
     List,
@@ -18,7 +19,7 @@ pub enum SequenceType {
     Text,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum MapType {
     #[serde(rename="map")]
     Map,
@@ -26,6 +27,7 @@ pub enum MapType {
     Table,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum DiffAction {
     CreateMap(ObjectID, MapType),
     CreateList(ObjectID, SequenceType),
@@ -37,12 +39,14 @@ pub enum DiffAction {
     SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Conflict {
     pub actor: ActorID,
     pub value: ElementValue,
     pub datatype: Option<DataType>
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Diff {
     pub action: DiffAction,
     pub conflicts: Vec<Conflict>

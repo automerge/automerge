@@ -1,5 +1,8 @@
-use crate::{Conflict, Diff, DiffAction, ElementValue};
-use serde::de::{Error, MapAccess, Visitor};
+use crate::{
+    ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, MapType, ObjectID, PrimitiveValue,
+    SequenceType, Key,
+};
+use serde::de::{Error, Unexpected, MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -26,50 +29,85 @@ impl Serialize for Conflict {
     }
 }
 
-//impl<'de> Deserialize<'de> for Conflict {
-//fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//where D: Deserializer<'de> {
-//struct ConflictVisitor;
-//impl <'de> Visitor<'de> for ConflictVisitor {
-//type Value = Conflict;
+impl<'de> Deserialize<'de> for Conflict {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] = &["actor", "value", "datatype", "link"];
+        struct ConflictVisitor;
+        impl<'de> Visitor<'de> for ConflictVisitor {
+            type Value = Conflict;
 
-//fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-//formatter.write_str("A conflict object")
-//}
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("A conflict object")
+            }
 
-//fn visit_map<V>(self, mut map: V) -> Result<Conflict, V::Error>
-//where V: MapAccess<'de> {
-//let mut actor = None;
-//let mut value = None;
-//let mut datatype = None;
+            fn visit_map<V>(self, mut map: V) -> Result<Conflict, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut actor: Option<ActorID> = None;
+                let mut value_raw: Option<PrimitiveValue> = None;
+                let mut datatype: Option<DataType> = None;
+                let mut link: Option<bool> = None;
 
-//while let Some((key, value)) = map.next_key()? {
-//match key {
-//"actor" => {
-//if actor.is_some() {
-//return Err(Error::duplicate_field("actor"));
-//}
-//actor = Some(value)
-//}
-//}
-//}
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_ref() {
+                        "actor" => {
+                            if actor.is_some() {
+                                return Err(Error::duplicate_field("actor"));
+                            }
+                            actor = Some(map.next_value()?);
+                        }
+                        "datatype" => {
+                            if datatype.is_some() {
+                                return Err(Error::duplicate_field("datatype"));
+                            }
+                            datatype = Some(map.next_value()?);
+                        }
+                        "value" => {
+                            if value_raw.is_some() {
+                                return Err(Error::duplicate_field("value"));
+                            }
+                            value_raw = Some(map.next_value()?);
+                        }
+                        "link" => {
+                            if link.is_some() {
+                                return Err(Error::duplicate_field("link"));
+                            }
+                            link = Some(map.next_value()?);
+                        }
+                        _ => return Err(Error::unknown_field(&key, FIELDS)),
+                    }
+                }
 
-//let actor = actor.ok_or_else(|| Error::missing_field("actor"))?;
-//let value = value.ok_or_else(|| Error::missing_field("value"))?;
-//Ok(Conflict{
-//actor,
-//value,
-//datatype,
-//})
-//}
-//}
-//deserializer.deserialize_struct(
-//"Conflict",
-//&["actor", "value", "datatype", "link"],
-//ConflictVisitor,
-//)
-//}
-//}
+                let actor = actor.ok_or_else(|| Error::missing_field("actor"))?;
+                let value_raw = value_raw.ok_or_else(|| Error::missing_field("value"))?;
+                let is_link = link.unwrap_or(false);
+                let value = match (is_link, value_raw) {
+                    (true, PrimitiveValue::Str(s)) => {
+                        let oid = match s.as_ref() {
+                            "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
+                            id => ObjectID::ID(id.to_string()),
+                        };
+                        ElementValue::Link(oid)
+                    }
+                    (false, v) => ElementValue::Primitive(v),
+                    _ => return Err(Error::custom(
+                        "Received a conflict with `link` set to true but no string in 'value' key",
+                    )),
+                };
+                Ok(Conflict {
+                    actor,
+                    value,
+                    datatype,
+                })
+            }
+        }
+        deserializer.deserialize_struct("Conflict", FIELDS, ConflictVisitor)
+    }
+}
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -163,12 +201,227 @@ impl Serialize for Diff {
     }
 }
 
+impl<'de> Deserialize<'de> for Diff {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &'static [&'static str] = &["actor", "value", "datatype", "link"];
+        struct DiffVisitor;
+        impl<'de> Visitor<'de> for DiffVisitor {
+            type Value = Diff;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("A diff object")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Diff, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut object_id: Option<ObjectID> = None;
+                let mut type_str: Option<String> = None;
+                let mut seq: Option<u32> = None;
+                let mut action: Option<String> = None;
+                let mut key: Option<Key> =  None;
+                let mut value: Option<PrimitiveValue> = None;
+                let mut datatype: Option<DataType> = None;
+                let mut conflicts: Option<Vec<Conflict>> = None;
+                let mut index: Option<u32> = None;
+                let mut is_link: Option<bool> = None;
+
+                while let Some(map_key) = map.next_key::<String>()? {
+                    match map_key.as_ref() {
+                        "obj" => {
+                            if object_id.is_some() {
+                                return Err(Error::duplicate_field("obj"));
+                            }
+                            object_id = Some(map.next_value()?);
+                        },
+                        "type" => {
+                            if type_str.is_some() {
+                                return Err(Error::duplicate_field("type"));
+                            }
+                            type_str = Some(map.next_value()?);
+                        },
+                        "seq" => {
+                            if seq.is_some() {
+                                return Err(Error::duplicate_field("seq"));
+                            }
+                            seq = Some(map.next_value()?);
+                        },
+                        "action" => {
+                            if action.is_some() {
+                                return Err(Error::duplicate_field("action"));
+                            }
+                            action = Some(map.next_value()?);
+                        },
+                        "key" => {
+                            if key.is_some() {
+                                return Err(Error::duplicate_field("key"));
+                            }
+                            key = Some(map.next_value()?);
+                        },
+                        "value" => {
+                            if value.is_some() {
+                                return Err(Error::duplicate_field("value"));
+                            }
+                            value = Some(map.next_value()?);
+                        },
+                        "datatype" => {
+                            if datatype.is_some() {
+                                return Err(Error::duplicate_field("datatype"));
+                            }
+                            datatype = Some(map.next_value()?);
+                        },
+                        "conflicts" => {
+                            if conflicts.is_some() {
+                                return Err(Error::duplicate_field("conflicts"));
+                            }
+                            conflicts = Some(map.next_value()?);
+                        },
+                        "index" => {
+                            if index.is_some() {
+                                return Err(Error::duplicate_field("index"));
+                            }
+                            index = Some(map.next_value()?);
+                        },
+                        "link" => {
+                            if is_link.is_some() {
+                                return Err(Error::duplicate_field("link"));
+                            }
+                            is_link = Some(map.next_value()?);
+                        },
+                        _ => return Err(Error::unknown_field(&map_key, FIELDS)),
+                    }
+                }
+
+                let is_link = is_link.unwrap_or(false);
+                let value = match (is_link, value) {
+                    (true, Some(PrimitiveValue::Str(s))) => {
+                        let oid = match s.as_ref() {
+                            "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
+                            id => ObjectID::ID(id.to_string()),
+                        };
+                        Some(ElementValue::Link(oid))
+                    }
+                    (false, Some(v)) => Some(ElementValue::Primitive(v)),
+                    (_, None) => None,
+                    _ => return Err(Error::custom(
+                        "Received a diff with `link` set to true but no string in 'value' key",
+                    )),
+                };
+
+                let diff_action = match action {
+                    Some(action_str) => match action_str.as_ref() {
+                        "create" => {
+                            let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
+                            let create_type = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            match create_type.as_ref() {
+                                "map" => DiffAction::CreateMap(obj_id, MapType::Map),
+                                "table" => DiffAction::CreateMap(obj_id, MapType::Table),
+                                "list" => DiffAction::CreateList(obj_id, SequenceType::List),
+                                "text" => DiffAction::CreateList(obj_id, SequenceType::Text),
+                                _ => return Err(Error::invalid_value(Unexpected::Str(&create_type), &"A valid object type"))
+                            }
+                        },
+                        "maxElem" => {
+                            let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
+                            let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                            let seq_type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let seq_type = match seq_type_str.as_ref() {
+                                "list" => SequenceType::List,
+                                "text" => SequenceType::Text,
+                                _ => return Err(Error::invalid_value(Unexpected::Str(&seq_type_str), &"A valid sequence type")),
+                            };
+                            let seq = match value {
+                                ElementValue::Primitive(PrimitiveValue::Number(n)) => n as u32,
+                                _ => return Err(Error::custom("Invalid value for maxElem.value"))
+                            };
+                            DiffAction::MaxElem(obj_id, seq, seq_type)
+                        },
+                        "remove" => {
+                            let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
+                            match key {
+                                Some(k) => {
+                                    let map_type = match type_str.as_ref() {
+                                        "map" => MapType::Map,
+                                        "table" => MapType::Table,
+                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid map type")),
+                                    };
+                                    DiffAction::RemoveMapKey(obj_id, map_type, k)
+                                },
+                                None => {
+                                    let seq_type = match type_str.as_ref() {
+                                        "list" => SequenceType::List,
+                                        "text" => SequenceType::Text,
+                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                                    };
+                                    let index = index.ok_or_else(|| Error::missing_field("index"))?;
+                                    DiffAction::RemoveSequenceElement(obj_id, seq_type, index)
+                                }
+                            }
+                        },
+                        "set" => {
+                            let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
+                            let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                            match key {
+                                Some(k) => {
+                                    let map_type = match type_str.as_ref() {
+                                        "map" => MapType::Map,
+                                        "table" => MapType::Table,
+                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid map type")),
+                                    };
+                                    DiffAction::SetMapKey(obj_id, map_type, k, value, datatype)
+                                },
+                                None => {
+                                    let seq_type = match type_str.as_ref() {
+                                        "list" => SequenceType::List,
+                                        "text" => SequenceType::Text,
+                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                                    };
+                                    let index = index.ok_or_else(|| Error::missing_field("index"))?;
+                                    DiffAction::SetSequenceElement(obj_id, seq_type, index, value, datatype)
+                                }
+                            }
+                        },
+                        "insert" => {
+                            let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
+                            let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                            let seq_type = match type_str.as_ref() {
+                                "list" => SequenceType::List,
+                                "text" => SequenceType::Text,
+                                _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                            };
+                            let index = index.ok_or_else(|| Error::missing_field("index"))?;
+                            DiffAction::InsertSequenceElement(obj_id, seq_type, index, value, datatype)
+                        },
+                        _ => return Err(Error::invalid_value(Unexpected::Str(&action_str), &"A valid action string"))
+                    },
+                    None => return Err(Error::missing_field("action")),
+                };
+
+                let conflicts = conflicts.ok_or_else(|| Error::missing_field("conflicts"))?;
+
+                Ok(Diff {
+                    action: diff_action,
+                    conflicts,
+                })
+            }
+        }
+        deserializer.deserialize_struct("Conflict", FIELDS, DiffVisitor)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //use super::*;
     use crate::{
-        DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID, PrimitiveValue,
-        SequenceType,
+        ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
+        PrimitiveValue, SequenceType,
     };
     use serde_json;
 
@@ -530,7 +783,8 @@ mod tests {
                         "conflicts": []
                     }
                     "#,
-                ).unwrap(),
+                )
+                .unwrap(),
             },
             TestCase {
                 name: "SetSequenceElement(list with primitive and datatype)",
@@ -556,17 +810,67 @@ mod tests {
                         "conflicts": []
                     }
                     "#,
-                ).unwrap(),
-            }
+                )
+                .unwrap(),
+            },
         ];
-        for testcase in testcases {
-            let serialized = serde_json::to_value(testcase.diff)
+        for ref testcase in testcases {
+            let serialized = serde_json::to_value(testcase.diff.clone())
                 .expect(&std::format!("Failed to deserialize {}", testcase.name));
             assert_eq!(
                 testcase.json, serialized,
                 "TestCase {} did not match",
                 testcase.name
             );
+            let deserialized: Diff = serde_json::from_value(serialized).expect(
+                &std::format!("Failed to deserialize for {}", testcase.name));
+            assert_eq!(
+                testcase.diff, deserialized,
+                "TestCase {} failed the round trip",
+                testcase.name
+            );
         }
+    }
+
+    #[test]
+    fn test_deserialize_conflict_link() {
+        let json = serde_json::from_str(
+            r#"
+            {
+                "actor": "1234",
+                "value": "someid",
+                "link": true
+            }
+            "#,
+        )
+        .unwrap();
+        let expected = Conflict {
+            actor: ActorID("1234".to_string()),
+            value: ElementValue::Link(ObjectID::ID("someid".to_string())),
+            datatype: None,
+        };
+        let actual: Conflict = serde_json::from_value(json).unwrap();
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_deserialize_conflict_nolink() {
+        let json = serde_json::from_str(
+            r#"
+            {
+                "actor": "1234",
+                "value": 5,
+                "datatype": "counter"
+            }
+            "#,
+        )
+        .unwrap();
+        let expected = Conflict {
+            actor: ActorID("1234".to_string()),
+            value: ElementValue::Primitive(PrimitiveValue::Number(5.0)),
+            datatype: Some(DataType::Counter),
+        };
+        let actual: Conflict = serde_json::from_value(json).unwrap();
+        assert_eq!(expected, actual);
     }
 }
