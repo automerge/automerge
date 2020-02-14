@@ -85,14 +85,3 @@ pub fn merge(state: &mut State, remote: State) -> JsValue {
 pub fn init() -> State {
   State { backend: Backend::init() }
 }
-
-#[wasm_bindgen(start)]
-pub fn main_js() -> Result<(), JsValue> {
-  // better error messages in debug mode.
-  #[cfg(debug_assertions)]
-  console_error_panic_hook::set_once();
-
-  // any startup or boiler plate code goes here
-
-  Ok(())
-}
