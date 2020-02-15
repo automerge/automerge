@@ -60,8 +60,8 @@ mod change_request;
 mod document;
 mod error;
 
-pub use change_request::{ChangeRequest, Path, ListIndex};
-pub use document::Document;
 pub use automerge_backend::AutomergeError;
 pub use automerge_backend::Change;
 pub use automerge_backend::Value;
+pub use change_request::{ChangeRequest, ListIndex, Path};
+pub use document::Document;

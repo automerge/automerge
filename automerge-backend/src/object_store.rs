@@ -3,9 +3,9 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ElementID, ObjectID, Operation};
+use crate::{Diff, DiffAction, MapType};
 use std::collections::HashMap;
 use std::str::FromStr;
-use crate::{Diff, DiffAction, MapType};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -154,7 +154,7 @@ impl ObjectStore {
                 }
             }
         }
-        Ok(Diff{
+        Ok(Diff {
             action: DiffAction::CreateMap(ObjectID::Root, MapType::Map),
             conflicts: Vec::new(),
         })

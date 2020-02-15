@@ -39,7 +39,6 @@ pub enum ListIndex {
 pub struct Path(Vec<PathElement>);
 
 impl Path {
-
     /// A path at the root of the document
     pub fn root() -> Path {
         Path(vec![PathElement::Root])
@@ -53,7 +52,7 @@ impl Path {
         Path(elems)
     }
 
-    /// Returns a new path which points to the element under this key in the 
+    /// Returns a new path which points to the element under this key in the
     /// current path
     pub fn key(&self, key: String) -> Path {
         let mut elems = self.0.clone();

@@ -1,5 +1,5 @@
+use crate::{ActorID, Clock, DataType, Key, ObjectID, PrimitiveValue};
 use serde::Serialize;
-use crate::{ObjectID, PrimitiveValue, DataType, ActorID, Key, Clock};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ElementValue {
@@ -69,4 +69,3 @@ impl Patch {
         }
     }
 }
-

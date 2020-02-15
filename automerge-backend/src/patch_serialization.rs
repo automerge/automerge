@@ -1,8 +1,8 @@
 use crate::{
-    ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, MapType, ObjectID, PrimitiveValue,
-    SequenceType, Key,
+    ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
+    PrimitiveValue, SequenceType,
 };
-use serde::de::{Error, Unexpected, MapAccess, Visitor};
+use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -223,7 +223,7 @@ impl<'de> Deserialize<'de> for Diff {
                 let mut type_str: Option<String> = None;
                 let mut seq: Option<u32> = None;
                 let mut action: Option<String> = None;
-                let mut key: Option<Key> =  None;
+                let mut key: Option<Key> = None;
                 let mut value: Option<PrimitiveValue> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut conflicts: Option<Vec<Conflict>> = None;
@@ -237,109 +237,122 @@ impl<'de> Deserialize<'de> for Diff {
                                 return Err(Error::duplicate_field("obj"));
                             }
                             object_id = Some(map.next_value()?);
-                        },
+                        }
                         "type" => {
                             if type_str.is_some() {
                                 return Err(Error::duplicate_field("type"));
                             }
                             type_str = Some(map.next_value()?);
-                        },
+                        }
                         "seq" => {
                             if seq.is_some() {
                                 return Err(Error::duplicate_field("seq"));
                             }
                             seq = Some(map.next_value()?);
-                        },
+                        }
                         "action" => {
                             if action.is_some() {
                                 return Err(Error::duplicate_field("action"));
                             }
                             action = Some(map.next_value()?);
-                        },
+                        }
                         "key" => {
                             if key.is_some() {
                                 return Err(Error::duplicate_field("key"));
                             }
                             key = Some(map.next_value()?);
-                        },
+                        }
                         "value" => {
                             if value.is_some() {
                                 return Err(Error::duplicate_field("value"));
                             }
                             value = Some(map.next_value()?);
-                        },
+                        }
                         "datatype" => {
                             if datatype.is_some() {
                                 return Err(Error::duplicate_field("datatype"));
                             }
                             datatype = Some(map.next_value()?);
-                        },
+                        }
                         "conflicts" => {
                             if conflicts.is_some() {
                                 return Err(Error::duplicate_field("conflicts"));
                             }
                             conflicts = Some(map.next_value()?);
-                        },
+                        }
                         "index" => {
                             if index.is_some() {
                                 return Err(Error::duplicate_field("index"));
                             }
                             index = Some(map.next_value()?);
-                        },
+                        }
                         "link" => {
                             if is_link.is_some() {
                                 return Err(Error::duplicate_field("link"));
                             }
                             is_link = Some(map.next_value()?);
-                        },
+                        }
                         _ => return Err(Error::unknown_field(&map_key, FIELDS)),
                     }
                 }
 
                 let is_link = is_link.unwrap_or(false);
-                let value = match (is_link, value) {
-                    (true, Some(PrimitiveValue::Str(s))) => {
-                        let oid = match s.as_ref() {
-                            "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
-                            id => ObjectID::ID(id.to_string()),
-                        };
-                        Some(ElementValue::Link(oid))
-                    }
-                    (false, Some(v)) => Some(ElementValue::Primitive(v)),
-                    (_, None) => None,
-                    _ => return Err(Error::custom(
-                        "Received a diff with `link` set to true but no string in 'value' key",
-                    )),
-                };
+                let value =
+                    match (is_link, value) {
+                        (true, Some(PrimitiveValue::Str(s))) => {
+                            let oid = match s.as_ref() {
+                                "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
+                                id => ObjectID::ID(id.to_string()),
+                            };
+                            Some(ElementValue::Link(oid))
+                        }
+                        (false, Some(v)) => Some(ElementValue::Primitive(v)),
+                        (_, None) => None,
+                        _ => return Err(Error::custom(
+                            "Received a diff with `link` set to true but no string in 'value' key",
+                        )),
+                    };
 
                 let diff_action = match action {
                     Some(action_str) => match action_str.as_ref() {
                         "create" => {
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
-                            let create_type = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let create_type =
+                                type_str.ok_or_else(|| Error::missing_field("type"))?;
                             match create_type.as_ref() {
                                 "map" => DiffAction::CreateMap(obj_id, MapType::Map),
                                 "table" => DiffAction::CreateMap(obj_id, MapType::Table),
                                 "list" => DiffAction::CreateList(obj_id, SequenceType::List),
                                 "text" => DiffAction::CreateList(obj_id, SequenceType::Text),
-                                _ => return Err(Error::invalid_value(Unexpected::Str(&create_type), &"A valid object type"))
+                                _ => {
+                                    return Err(Error::invalid_value(
+                                        Unexpected::Str(&create_type),
+                                        &"A valid object type",
+                                    ))
+                                }
                             }
-                        },
+                        }
                         "maxElem" => {
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
                             let value = value.ok_or_else(|| Error::missing_field("value"))?;
-                            let seq_type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
+                            let seq_type_str =
+                                type_str.ok_or_else(|| Error::missing_field("type"))?;
                             let seq_type = match seq_type_str.as_ref() {
                                 "list" => SequenceType::List,
                                 "text" => SequenceType::Text,
-                                _ => return Err(Error::invalid_value(Unexpected::Str(&seq_type_str), &"A valid sequence type")),
+                                _ => {
+                                    return Err(Error::invalid_value(
+                                        Unexpected::Str(&seq_type_str),
+                                        &"A valid sequence type",
+                                    ))
+                                }
                             };
                             let seq = match value {
                                 ElementValue::Primitive(PrimitiveValue::Number(n)) => n as u32,
-                                _ => return Err(Error::custom("Invalid value for maxElem.value"))
+                                _ => return Err(Error::custom("Invalid value for maxElem.value")),
                             };
                             DiffAction::MaxElem(obj_id, seq, seq_type)
-                        },
+                        }
                         "remove" => {
                             let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
@@ -348,21 +361,32 @@ impl<'de> Deserialize<'de> for Diff {
                                     let map_type = match type_str.as_ref() {
                                         "map" => MapType::Map,
                                         "table" => MapType::Table,
-                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid map type")),
+                                        _ => {
+                                            return Err(Error::invalid_value(
+                                                Unexpected::Str(&type_str),
+                                                &"A valid map type",
+                                            ))
+                                        }
                                     };
                                     DiffAction::RemoveMapKey(obj_id, map_type, k)
-                                },
+                                }
                                 None => {
                                     let seq_type = match type_str.as_ref() {
                                         "list" => SequenceType::List,
                                         "text" => SequenceType::Text,
-                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                                        _ => {
+                                            return Err(Error::invalid_value(
+                                                Unexpected::Str(&type_str),
+                                                &"A valid sequence type",
+                                            ))
+                                        }
                                     };
-                                    let index = index.ok_or_else(|| Error::missing_field("index"))?;
+                                    let index =
+                                        index.ok_or_else(|| Error::missing_field("index"))?;
                                     DiffAction::RemoveSequenceElement(obj_id, seq_type, index)
                                 }
                             }
-                        },
+                        }
                         "set" => {
                             let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
@@ -372,21 +396,34 @@ impl<'de> Deserialize<'de> for Diff {
                                     let map_type = match type_str.as_ref() {
                                         "map" => MapType::Map,
                                         "table" => MapType::Table,
-                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid map type")),
+                                        _ => {
+                                            return Err(Error::invalid_value(
+                                                Unexpected::Str(&type_str),
+                                                &"A valid map type",
+                                            ))
+                                        }
                                     };
                                     DiffAction::SetMapKey(obj_id, map_type, k, value, datatype)
-                                },
+                                }
                                 None => {
                                     let seq_type = match type_str.as_ref() {
                                         "list" => SequenceType::List,
                                         "text" => SequenceType::Text,
-                                        _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                                        _ => {
+                                            return Err(Error::invalid_value(
+                                                Unexpected::Str(&type_str),
+                                                &"A valid sequence type",
+                                            ))
+                                        }
                                     };
-                                    let index = index.ok_or_else(|| Error::missing_field("index"))?;
-                                    DiffAction::SetSequenceElement(obj_id, seq_type, index, value, datatype)
+                                    let index =
+                                        index.ok_or_else(|| Error::missing_field("index"))?;
+                                    DiffAction::SetSequenceElement(
+                                        obj_id, seq_type, index, value, datatype,
+                                    )
                                 }
                             }
-                        },
+                        }
                         "insert" => {
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
                             let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
@@ -394,12 +431,24 @@ impl<'de> Deserialize<'de> for Diff {
                             let seq_type = match type_str.as_ref() {
                                 "list" => SequenceType::List,
                                 "text" => SequenceType::Text,
-                                _ => return Err(Error::invalid_value(Unexpected::Str(&type_str), &"A valid sequence type")),
+                                _ => {
+                                    return Err(Error::invalid_value(
+                                        Unexpected::Str(&type_str),
+                                        &"A valid sequence type",
+                                    ))
+                                }
                             };
                             let index = index.ok_or_else(|| Error::missing_field("index"))?;
-                            DiffAction::InsertSequenceElement(obj_id, seq_type, index, value, datatype)
-                        },
-                        _ => return Err(Error::invalid_value(Unexpected::Str(&action_str), &"A valid action string"))
+                            DiffAction::InsertSequenceElement(
+                                obj_id, seq_type, index, value, datatype,
+                            )
+                        }
+                        _ => {
+                            return Err(Error::invalid_value(
+                                Unexpected::Str(&action_str),
+                                &"A valid action string",
+                            ))
+                        }
                     },
                     None => return Err(Error::missing_field("action")),
                 };
@@ -822,8 +871,8 @@ mod tests {
                 "TestCase {} did not match",
                 testcase.name
             );
-            let deserialized: Diff = serde_json::from_value(serialized).expect(
-                &std::format!("Failed to deserialize for {}", testcase.name));
+            let deserialized: Diff = serde_json::from_value(serialized)
+                .expect(&std::format!("Failed to deserialize for {}", testcase.name));
             assert_eq!(
                 testcase.diff, deserialized,
                 "TestCase {} failed the round trip",

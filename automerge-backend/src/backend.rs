@@ -1,14 +1,14 @@
-use crate::{Clock, Patch, Change, OpSet, ActorID};
+use crate::{ActorID, Change, Clock, OpSet, Patch};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
-    op_set: OpSet
+    op_set: OpSet,
 }
 
 impl Backend {
     pub fn init() -> Backend {
         Backend {
-            op_set: OpSet::init()
+            op_set: OpSet::init(),
         }
     }
 
@@ -48,8 +48,8 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ActorID, Backend, Change, Clock, Diff, DiffAction, ElementValue, Key, MapType, ObjectID, Operation,
-        Patch, PrimitiveValue,
+        ActorID, Backend, Change, Clock, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
+        Operation, Patch, PrimitiveValue,
     };
 
     struct TestCase {
@@ -96,7 +96,11 @@ mod tests {
         for testcase in testcases {
             let mut backend = Backend::init();
             let patch = backend.apply_changes(testcase.changes);
-            assert_eq!(testcase.expected_patch, patch, "Patches not equal for {}", testcase.name); 
+            assert_eq!(
+                testcase.expected_patch, patch,
+                "Patches not equal for {}",
+                testcase.name
+            );
         }
     }
 }
