@@ -27,8 +27,8 @@ impl Backend {
         })
     }
 
-    pub fn apply_local_change(&mut self, _change: Change) -> Patch {
-        Patch::empty()
+    pub fn apply_local_change(&mut self, _change: Change) -> Result<Patch, AutomergeError> {
+        Ok(Patch::empty())
     }
 
     pub fn get_patch(&self) -> Patch {
@@ -51,8 +51,8 @@ impl Backend {
         Clock::empty()
     }
 
-    pub fn merge(&mut self, _remote: &Backend) -> Patch {
-        Patch::empty()
+    pub fn merge(&mut self, _remote: &Backend) -> Result<Patch, AutomergeError> {
+        Ok(Patch::empty())
     }
 }
 
@@ -60,7 +60,7 @@ impl Backend {
 mod tests {
     use crate::{
         ActorID, Backend, Change, Clock, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-        Operation, Patch, PrimitiveValue,
+        Operation, Patch, PrimitiveValue, DataType
     };
 
     struct TestCase {
@@ -72,37 +72,84 @@ mod tests {
     #[test]
     fn test_diffs() {
         let actor1 = ActorID::new();
-        let testcases = vec![TestCase {
-            name: "Assign to key in map",
-            changes: vec![Change {
-                actor_id: actor1.clone(),
-                seq: 1,
-                dependencies: Clock::empty(),
-                message: None,
-                operations: vec![Operation::Set {
-                    object_id: ObjectID::Root,
-                    key: Key("bird".to_string()),
-                    value: PrimitiveValue::Str("magpie".to_string()),
-                    datatype: None,
+        let testcases = vec![
+            TestCase {
+                name: "Assign to key in map",
+                changes: vec![Change {
+                    actor_id: actor1.clone(),
+                    seq: 1,
+                    dependencies: Clock::empty(),
+                    message: None,
+                    operations: vec![Operation::Set {
+                        object_id: ObjectID::Root,
+                        key: Key("bird".to_string()),
+                        value: PrimitiveValue::Str("magpie".to_string()),
+                        datatype: None,
+                    }],
                 }],
-            }],
-            expected_patch: Patch {
-                can_undo: false,
-                can_redo: false,
-                clock: Clock::empty().with_dependency(&actor1, 1),
-                deps: Clock::empty().with_dependency(&actor1, 1),
-                diffs: vec![Diff {
-                    action: DiffAction::SetMapKey(
-                        ObjectID::Root,
-                        MapType::Map,
-                        Key("bird".to_string()),
-                        ElementValue::Primitive(PrimitiveValue::Str("magpie".to_string())),
-                        None,
-                    ),
-                    conflicts: Vec::new(),
-                }],
+                expected_patch: Patch {
+                    can_undo: false,
+                    can_redo: false,
+                    clock: Clock::empty().with_dependency(&actor1, 1),
+                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    diffs: vec![Diff {
+                        action: DiffAction::SetMapKey(
+                            ObjectID::Root,
+                            MapType::Map,
+                            Key("bird".to_string()),
+                            ElementValue::Primitive(PrimitiveValue::Str("magpie".to_string())),
+                            None,
+                        ),
+                        conflicts: Vec::new(),
+                    }],
+                },
             },
-        }];
+            TestCase {
+                name: "Increment a key in a map",
+                changes: vec![
+                    Change {
+                        actor_id: actor1.clone(),
+                        seq: 1,
+                        dependencies: Clock::empty(),
+                        message: None,
+                        operations: vec![Operation::Set {
+                            object_id: ObjectID::Root,
+                            key: Key("counter".to_string()),
+                            value: PrimitiveValue::Number(1.0),
+                            datatype: Some(DataType::Counter),
+                        }],
+                    },
+                    Change {
+                        actor_id: actor1.clone(),
+                        seq: 1,
+                        dependencies: Clock::empty(),
+                        message: None,
+                        operations: vec![Operation::Set {
+                            object_id: ObjectID::Root,
+                            key: Key("bird".to_string()),
+                            value: PrimitiveValue::Str("magpie".to_string()),
+                            datatype: None,
+                        }],
+                    }
+                ],
+                expected_patch: Patch {
+                    can_undo: false,
+                    can_redo: false,
+                    clock: Clock::empty().with_dependency(&actor1, 1),
+                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    diffs: vec![Diff {
+                        action: DiffAction::SetMapKey(
+                            ObjectID::Root,
+                            MapType::Map,
+                            Key("bird".to_string()),
+                            ElementValue::Primitive(PrimitiveValue::Str("magpie".to_string())),
+                            None,
+                        ),
+                        conflicts: Vec::new(),
+                    }],
+                },
+            },
+        ];
 
         for testcase in testcases {
             let mut backend = Backend::init();

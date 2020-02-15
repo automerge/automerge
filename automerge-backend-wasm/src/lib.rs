@@ -35,7 +35,7 @@ pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValu
 #[wasm_bindgen(js_name = applyLocalChange)]
 pub fn apply_local_change(mut state: State, change: JsValue) -> Result<Array, JsValue> {
     let c: Change = from_value(change)?;
-    let patch = state.backend.apply_local_change(c);
+    let patch = state.backend.apply_local_change(c).map_err(automerge_error_to_js)?;
     let ret = Array::new();
     ret.push(&state.into());
     ret.push(&to_value(&patch)?);
@@ -76,7 +76,7 @@ pub fn get_missing_deps(state: &State) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn merge(state: &mut State, remote: State) -> Result<JsValue, JsValue> {
-    let patch = state.backend.merge(&remote.backend);
+    let patch = state.backend.merge(&remote.backend).map_err(automerge_error_to_js)?;
     Ok(to_value(&patch)?)
 }
 
