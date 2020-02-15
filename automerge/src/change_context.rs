@@ -1,17 +1,17 @@
-use crate::actor_histories::ActorHistories;
+use automerge_backend::ActorHistories;
 /// This module handles creating changes. Most of the machinery here is related
 /// to resolving paths from ChangeRequests, and generating operations to create
 /// and modify data in the op set.
 use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
-use crate::object_store::ObjectHistory;
-use crate::object_store::ObjectStore;
-use crate::op_set::list_ops_in_order;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{
+use automerge_backend::ObjectHistory;
+use automerge_backend::ObjectStore;
+use automerge_backend::list_ops_in_order;
+use automerge_backend::OperationWithMetadata;
+use automerge_backend::{
     ActorID, Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue,
 };
-use crate::value::Value;
+use automerge_backend::Value;
 use std::convert::TryInto;
 
 #[derive(Clone, Debug)]

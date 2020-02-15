@@ -1,4 +1,4 @@
-use crate::value::Value;
+use automerge_backend::Value;
 
 /// Represents the various changes that you can make to a document, all of
 /// these use a "path" to refer to parts of the document. You can generate

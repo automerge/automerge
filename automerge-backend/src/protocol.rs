@@ -65,6 +65,13 @@ impl Serialize for ObjectID {
 pub struct Key(pub String);
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ActorID(pub String);
+
+impl ActorID {
+    pub fn new() -> ActorID {
+        ActorID(uuid::Uuid::new_v4().to_string())
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct Clock(pub HashMap<ActorID, u32>);
 
@@ -73,7 +80,7 @@ impl Clock {
         Clock(HashMap::new())
     }
 
-    pub(crate) fn with_dependency(&self, actor_id: &ActorID, new_seq: u32) -> Clock {
+    pub fn with_dependency(&self, actor_id: &ActorID, new_seq: u32) -> Clock {
         let mut result = self.0.clone();
         result.insert(actor_id.clone(), new_seq);
         Clock(result)
@@ -103,7 +110,7 @@ impl Clock {
             .all(|(actor_id, seq)| self.0.get(actor_id).unwrap_or(&0) >= seq)
     }
 
-    pub(crate) fn seq_for(&self, actor_id: &ActorID) -> u32 {
+    pub fn seq_for(&self, actor_id: &ActorID) -> u32 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 }
@@ -278,13 +285,13 @@ pub enum Operation {
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "actor")]
-    pub(crate) actor_id: ActorID,
+    pub actor_id: ActorID,
     #[serde(rename = "ops")]
-    pub(crate) operations: Vec<Operation>,
-    pub(crate) seq: u32,
-    pub(crate) message: Option<String>,
+    pub operations: Vec<Operation>,
+    pub seq: u32,
+    pub message: Option<String>,
     #[serde(rename = "deps")]
-    pub(crate) dependencies: Clock,
+    pub dependencies: Clock,
 }
 
 #[cfg(test)]

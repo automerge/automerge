@@ -1,9 +1,9 @@
-use super::op_set::OpSet;
+use automerge_backend::OpSet;
 use super::{AutomergeError, ChangeRequest};
 use crate::change_context::ChangeContext;
 use crate::error::InvalidChangeRequest;
-use crate::protocol::{ActorID, Change};
-use crate::value::Value;
+use automerge_backend::{ActorID, Change};
+use automerge_backend::Value;
 use uuid;
 
 pub struct Document {
@@ -61,10 +61,10 @@ impl Document {
 mod tests {
     use super::*;
     use crate::change_request::{ListIndex, Path};
-    use crate::protocol::{
+    use automerge_backend::{
         ActorID, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
     };
-    use crate::value::Value;
+    use automerge_backend::Value;
     use serde_json;
     use std::collections::HashMap;
 

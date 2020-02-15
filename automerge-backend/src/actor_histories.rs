@@ -6,7 +6,7 @@ use std::collections::HashMap;
 /// received from each actor. This is necessary because a change only ships its
 /// direct dependencies in `deps` but we need all dependencies to determine
 /// whether two operations occurrred concurrently.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ActorHistories(HashMap<ActorID, HashMap<u32, Clock>>);
 
 impl ActorHistories {

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 /// Possible values of an element of the state. Using this rather than
 /// serde_json::Value because we'll probably want to make the core logic
 /// independent of serde in order to be `no_std` compatible.
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>),

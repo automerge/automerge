@@ -13,6 +13,7 @@ use crate::object_store::{ObjectHistory, ObjectStore};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
+use crate::Diff;
 use std::collections::HashMap;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
@@ -28,7 +29,7 @@ use std::collections::HashMap;
 /// object store, starting with the root object ID and constructing the value
 /// at each node by examining the concurrent operationsi which are active for
 /// that node.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct OpSet {
     pub object_store: ObjectStore,
     pub actor_histories: ActorHistories,
@@ -204,7 +205,7 @@ impl OpSet {
     }
 }
 
-pub(crate) fn list_ops_in_order<'a>(
+pub fn list_ops_in_order<'a>(
     operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations>,
     following: &HashMap<ElementID, Vec<ElementID>>,
 ) -> Result<Vec<(ElementID, &'a ConcurrentOperations)>, AutomergeError> {

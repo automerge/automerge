@@ -55,20 +55,13 @@
 //! .unwrap();
 //! assert_eq!(expected, doc.state().to_json());
 //! ```
-mod actor_histories;
 mod change_context;
 mod change_request;
-mod concurrent_operations;
 mod document;
 mod error;
-mod object_store;
-mod op_set;
-mod operation_with_metadata;
-mod protocol;
-mod value;
 
 pub use change_request::{ChangeRequest, Path, ListIndex};
 pub use document::Document;
-pub use error::AutomergeError;
-pub use protocol::Change;
-pub use value::Value;
+pub use automerge_backend::AutomergeError;
+pub use automerge_backend::Change;
+pub use automerge_backend::Value;

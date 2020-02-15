@@ -5,13 +5,14 @@ use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ElementID, ObjectID, Operation};
 use std::collections::HashMap;
 use std::str::FromStr;
+use crate::{Diff, DiffAction, MapType};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
 /// a sequence (tables and text are effectively the maps and sequences
 /// respectively).
-#[derive(Debug, Clone)]
-pub(crate) enum ObjectHistory {
+#[derive(Debug, Clone, PartialEq)]
+pub enum ObjectHistory {
     Map {
         operations_by_key: HashMap<String, ConcurrentOperations>,
     },
@@ -25,7 +26,7 @@ pub(crate) enum ObjectHistory {
 
 /// The ObjectStore is responsible for storing the concurrent operations seen
 /// for each object ID and for the logic of incorporating a new operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ObjectStore {
     operations_by_object_id: HashMap<ObjectID, ObjectHistory>,
 }
@@ -42,18 +43,18 @@ impl ObjectStore {
         }
     }
 
-    pub(crate) fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
+    pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
         self.operations_by_object_id.get(object_id)
     }
 
     /// Incorporates a new operation into the object store. The caller is
     /// responsible for ensuring that all causal dependencies of the new
     /// operation have already been applied.
-    pub(crate) fn apply_operation(
+    pub fn apply_operation(
         &mut self,
         actor_histories: &ActorHistories,
         op_with_metadata: OperationWithMetadata,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Diff, AutomergeError> {
         match op_with_metadata.operation {
             Operation::MakeMap { object_id } | Operation::MakeTable { object_id } => {
                 let object = ObjectHistory::Map {
@@ -153,6 +154,9 @@ impl ObjectStore {
                 }
             }
         }
-        Ok(())
+        Ok(Diff{
+            action: DiffAction::CreateMap(ObjectID::Root, MapType::Map),
+            conflicts: Vec::new(),
+        })
     }
 }

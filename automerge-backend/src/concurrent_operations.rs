@@ -6,8 +6,8 @@ use std::cmp::PartialOrd;
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
-#[derive(Debug, Clone)]
-pub(crate) struct ConcurrentOperations {
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConcurrentOperations {
     operations: Vec<OperationWithMetadata>,
 }
 
@@ -18,7 +18,7 @@ impl ConcurrentOperations {
         }
     }
 
-    pub(crate) fn active_op(&self) -> Option<&OperationWithMetadata> {
+    pub fn active_op(&self) -> Option<&OperationWithMetadata> {
         // operations are sorted in incorporate_new_op, so the first op is the
         // active one
         self.operations.first()
