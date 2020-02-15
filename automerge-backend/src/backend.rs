@@ -1,4 +1,4 @@
-use crate::{ActorID, Change, Clock, OpSet, Patch};
+use crate::{ActorID, Change, Clock, OpSet, Patch, AutomergeError, Diff};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -12,8 +12,19 @@ impl Backend {
         }
     }
 
-    pub fn apply_changes(&mut self, _changes: Vec<Change>) -> Patch {
-        Patch::empty()
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+        let nested_diffs = changes
+            .into_iter()
+            .map(|c| self.op_set.apply_change(c))
+            .collect::<Result<Vec<Vec<Diff>>, AutomergeError>>()?;
+        let diffs = nested_diffs.into_iter().flatten().collect();
+        Ok(Patch {
+            can_undo: false,
+            can_redo: false,
+            clock: self.op_set.clock.clone(),
+            deps: self.op_set.clock.clone(),
+            diffs,
+        })
     }
 
     pub fn apply_local_change(&mut self, _change: Change) -> Patch {
@@ -95,7 +106,7 @@ mod tests {
 
         for testcase in testcases {
             let mut backend = Backend::init();
-            let patch = backend.apply_changes(testcase.changes);
+            let patch = backend.apply_changes(testcase.changes).unwrap();
             assert_eq!(
                 testcase.expected_patch, patch,
                 "Patches not equal for {}",

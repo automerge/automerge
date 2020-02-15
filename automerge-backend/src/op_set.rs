@@ -51,18 +51,20 @@ impl OpSet {
 
     /// Adds a change to the internal queue of operations, then iteratively
     /// applies all causally ready changes until there are none remaining
-    pub fn apply_change(&mut self, change: Change) -> Result<(), AutomergeError> {
+    pub fn apply_change(&mut self, change: Change) -> Result<Vec<Diff>, AutomergeError> {
         self.queue.push(change);
-        self.apply_causally_ready_changes()?;
+        let diffs = self.apply_causally_ready_changes()?;
         self.state = self.walk(&ObjectID::Root)?;
-        Ok(())
+        Ok(diffs)
     }
 
-    fn apply_causally_ready_changes(&mut self) -> Result<(), AutomergeError> {
+    fn apply_causally_ready_changes(&mut self) -> Result<Vec<Diff>, AutomergeError> {
+        let mut diffs = Vec::new();
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            self.apply_causally_ready_change(next_change)?
+            let change_diffs = self.apply_causally_ready_change(next_change)?;
+            diffs.extend(change_diffs);
         }
-        Ok(())
+        Ok(diffs)
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -80,26 +82,28 @@ impl OpSet {
         None
     }
 
-    fn apply_causally_ready_change(&mut self, change: Change) -> Result<(), AutomergeError> {
+    fn apply_causally_ready_change(&mut self, change: Change) -> Result<Vec<Diff>, AutomergeError> {
         if self.actor_histories.is_applied(&change) {
-            return Ok(());
+            return Ok(Vec::new());
         }
         self.actor_histories.add_change(&change);
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
+        let mut diffs = Vec::new();
         for operation in change.operations {
             let op_with_metadata = OperationWithMetadata {
                 sequence: seq,
                 actor_id: actor_id.clone(),
                 operation: operation.clone(),
             };
-            self.object_store
+            let diff = self.object_store
                 .apply_operation(&self.actor_histories, op_with_metadata)?;
+            diffs.push(diff);
         }
         self.clock = self
             .clock
             .with_dependency(&change.actor_id.clone(), change.seq);
-        Ok(())
+        Ok(diffs)
     }
 
     pub fn root_value(&self) -> &Value {
@@ -114,7 +118,7 @@ impl OpSet {
             .history_for_object_id(object_id)
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
         match object_history {
-            ObjectHistory::Map { operations_by_key } => self.interpret_map_ops(operations_by_key),
+            ObjectHistory::Map { operations_by_key, .. } => self.interpret_map_ops(operations_by_key),
             ObjectHistory::List {
                 operations_by_elemid,
                 insertions,
