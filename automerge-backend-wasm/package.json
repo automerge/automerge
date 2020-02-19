@@ -7,9 +7,11 @@
   "main": "./pkg/index.js",
   "scripts": {
     "build": "rimraf pkg && wasm-pack build --target nodejs --out-name index",
+    "mocha": "yarn build && mocha",
     "test": "cargo test && wasm-pack test --node"
   },
   "devDependencies": {
+    "mocha": "^6.2.0",
     "automerge":"^0.12.1",
     "rimraf": "^2.6.3"
   }

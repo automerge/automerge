@@ -19,7 +19,7 @@ extern "C" {
 #[derive(PartialEq,Debug, Clone)]
 pub struct State { backend: Backend }
 
-#[wasm_bindgen(js_name = applyChange)]
+#[wasm_bindgen(js_name = applyChanges)]
 pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array,JsValue> {
   let c: Vec<Change> = from_value(changes)?;
   let patch = state.backend.apply_changes(c);
@@ -51,7 +51,7 @@ pub fn get_changes(state: &State) -> Result<JsValue,JsValue> {
   Ok(to_value(&changes)?)
 }
 
-#[wasm_bindgen(js_name = getChangesForActorId)]
+#[wasm_bindgen(js_name = getChangesForActor)]
 pub fn get_changes_for_actorid(state: &State, actorid: JsValue) -> Result<JsValue,JsValue> {
   let a: ActorID = from_value(actorid)?;
   let changes = state.backend.get_changes_for_actor_id(a);
