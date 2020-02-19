@@ -5,8 +5,6 @@ use js_sys::Array;
 use serde_wasm_bindgen::{from_value,to_value};
 use automerge_backend::{Backend, ActorID, Change, Clock};
 
-// When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
-// allocator.
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -17,7 +15,6 @@ extern "C" {
   fn log(s: &str);
 }
 
-// We need a wrapper object to attach the wasm-bindgen on
 #[wasm_bindgen]
 #[derive(PartialEq,Debug, Clone)]
 pub struct State { backend: Backend }
