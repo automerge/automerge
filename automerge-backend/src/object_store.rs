@@ -4,6 +4,7 @@ use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::{
     Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID, Operation, SequenceType,
+    list_ops_in_order
 };
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -17,6 +18,7 @@ pub enum ObjectHistory {
     Map {
         operations_by_key: HashMap<String, ConcurrentOperations>,
         map_type: MapType,
+        object_id: ObjectID,
     },
     List {
         operations_by_elemid: HashMap<ElementID, ConcurrentOperations>,
@@ -24,30 +26,11 @@ pub enum ObjectHistory {
         following: HashMap<ElementID, Vec<ElementID>>,
         max_elem: u32,
         sequence_type: SequenceType,
+        object_id: ObjectID,
     },
 }
 
 impl ObjectHistory {
-    fn object_type(&self) -> ObjectType {
-        match self {
-            ObjectHistory::Map {
-                map_type: MapType::Map,
-                ..
-            } => ObjectType::Map,
-            ObjectHistory::Map {
-                map_type: MapType::Table,
-                ..
-            } => ObjectType::Table,
-            ObjectHistory::List {
-                sequence_type: SequenceType::List,
-                ..
-            } => ObjectType::List,
-            ObjectHistory::List {
-                sequence_type: SequenceType::Text,
-                ..
-            } => ObjectType::Text,
-        }
-    }
 
     fn handle_mutating_op(
         &mut self,
@@ -74,13 +57,94 @@ impl ObjectHistory {
         };
         prior_ops.incorporate_new_op(op_with_metadata, actor_histories)
     }
-}
 
-pub enum ObjectType {
-    Map,
-    Table,
-    Text,
-    List,
+    fn diff_for_key(&self, key: &Key) -> Result<Diff, AutomergeError> {
+        let action = match self {
+            ObjectHistory::Map {
+                object_id,
+                operations_by_key,
+                map_type,
+                ..
+            } => operations_by_key
+                .get(&key.0)
+                .and_then(|ops| {
+                    ops.active_op().map(|op| match &op.operation {
+                        Operation::Set {
+                            object_id,
+                            key,
+                            value,
+                            datatype,
+                        } => DiffAction::SetMapKey(
+                            object_id.clone(),
+                            map_type.clone(),
+                            key.clone(),
+                            ElementValue::Primitive(value.clone()),
+                            datatype.clone(),
+                        ),
+                        Operation::Link {
+                            object_id,
+                            key,
+                            value,
+                        } => DiffAction::SetMapKey(
+                            object_id.clone(),
+                            map_type.clone(),
+                            key.clone(),
+                            ElementValue::Link(value.clone()),
+                            None,
+                        ),
+                        _ => panic!("Should not happen for objects"),
+                    })
+                })
+                .unwrap_or(DiffAction::RemoveMapKey(
+                    object_id.clone(),
+                    map_type.clone(),
+                    key.clone(),
+                )),
+            ObjectHistory::List { object_id, operations_by_elemid, following, sequence_type, .. } => {
+                let ops_in_order = list_ops_in_order(operations_by_elemid, following).expect("Internal error: corrupted list");
+                let element_id = key.as_element_id().map_err(|e| AutomergeError::InvalidObjectType("Received list operation with invalid element ID".to_string()))?;
+                operations_by_elemid
+                    .get(&element_id)
+                    .and_then(|ops| {
+                        ops.active_op().map(|op| match &op.operation {
+                            Operation::Set {
+                                object_id,
+                                key,
+                                value,
+                                datatype,
+                            } => DiffAction::SetSequenceElement(
+                                object_id.clone(),
+                                sequence_type.clone(),
+                                key.clone(),
+                                ElementValue::Primitive(value.clone()),
+                                datatype.clone(),
+                            ),
+                            Operation::Link {
+                                object_id,
+                                key,
+                                value,
+                            } => DiffAction::SetMapKey(
+                                object_id.clone(),
+                                map_type.clone(),
+                                key.clone(),
+                                ElementValue::Link(value.clone()),
+                                None,
+                            ),
+                            _ => panic!("Should not happen for objects"),
+                        })
+                    })
+                .unwrap_or(DiffAction::RemoveMapKey(
+                    object_id.clone(),
+                    map_type.clone(),
+                    key.clone(),
+                ))
+            }
+        };
+        Ok(Diff {
+            action,
+            conflicts: Vec::new(),
+        })
+    }
 }
 
 /// The ObjectStore is responsible for storing the concurrent operations seen
@@ -95,6 +159,7 @@ impl ObjectStore {
         let root = ObjectHistory::Map {
             operations_by_key: HashMap::new(),
             map_type: MapType::Map,
+            object_id: ObjectID::Root,
         };
         let mut ops_by_id = HashMap::new();
         ops_by_id.insert(ObjectID::Root, root);
@@ -124,6 +189,7 @@ impl ObjectStore {
                 let object = ObjectHistory::Map {
                     operations_by_key: HashMap::new(),
                     map_type: MapType::Map,
+                    object_id: object_id.clone(),
                 };
                 self.operations_by_object_id.insert(object_id, object);
             }
@@ -131,6 +197,7 @@ impl ObjectStore {
                 let object = ObjectHistory::Map {
                     operations_by_key: HashMap::new(),
                     map_type: MapType::Table,
+                    object_id: object_id.clone(),
                 };
                 self.operations_by_object_id.insert(object_id, object);
             }
@@ -141,6 +208,7 @@ impl ObjectStore {
                     following: HashMap::new(),
                     max_elem: 0,
                     sequence_type: SequenceType::Text,
+                    object_id: object_id.clone(),
                 };
                 self.operations_by_object_id.insert(object_id, object);
             }
@@ -151,50 +219,16 @@ impl ObjectStore {
                     following: HashMap::new(),
                     max_elem: 0,
                     sequence_type: SequenceType::Text,
+                    object_id: object_id.clone(),
                 };
                 self.operations_by_object_id.insert(object_id, object);
             }
-            Operation::Set {
+            Operation::Link {
                 ref object_id,
                 ref key,
-                ref value,
-                ref datatype,
                 ..
-            } => {
-                let object = self
-                    .operations_by_object_id
-                    .get_mut(&object_id)
-                    .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-                match object.object_type() {
-                    ObjectType::Map => {
-                        diff = Diff {
-                            action: DiffAction::SetMapKey(
-                                object_id.clone(),
-                                MapType::Map,
-                                key.clone(),
-                                ElementValue::Primitive(value.clone()),
-                                datatype.clone(),
-                            ),
-                            conflicts: Vec::new(),
-                        }
-                    },
-                    ObjectType::Table => {
-                        diff = Diff {
-                            action: DiffAction::SetMapKey(
-                                object_id.clone(),
-                                MapType::Table,
-                                key.clone(),
-                                ElementValue::Primitive(value.clone()),
-                                datatype.clone(),
-                            ),
-                            conflicts: Vec::new(),
-                        }
-                    }
-                    _ => {}
-                };
-                object.handle_mutating_op(op_with_metadata.clone(), actor_histories, key)?;
             }
-            Operation::Link {
+            | Operation::Set{
                 ref object_id,
                 ref key,
                 ..
@@ -213,6 +247,7 @@ impl ObjectStore {
                     .get_mut(&object_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
                 object.handle_mutating_op(op_with_metadata.clone(), actor_histories, key)?;
+                diff = object.diff_for_key(key)
             }
             Operation::Insert {
                 ref list_id,
@@ -259,5 +294,4 @@ impl ObjectStore {
         }
         Ok(diff)
     }
-
 }

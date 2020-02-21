@@ -63,6 +63,15 @@ impl Serialize for ObjectID {
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 pub struct Key(pub String);
+
+impl Key {
+    
+    pub fn as_element_id(&self) -> Result<ElementID, error::InvalidElementID> {
+        ElementID::from_str(&self.0)
+    }
+
+}
+
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ActorID(pub String);
 

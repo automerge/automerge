@@ -121,29 +121,28 @@ mod tests {
                     },
                     Change {
                         actor_id: actor1.clone(),
-                        seq: 1,
+                        seq: 2,
                         dependencies: Clock::empty(),
                         message: None,
-                        operations: vec![Operation::Set {
+                        operations: vec![Operation::Increment {
                             object_id: ObjectID::Root,
-                            key: Key("bird".to_string()),
-                            value: PrimitiveValue::Str("magpie".to_string()),
-                            datatype: None,
+                            key: Key("counter".to_string()),
+                            value: 2.0,
                         }],
                     }
                 ],
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 1),
-                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    clock: Clock::empty().with_dependency(&actor1, 2),
+                    deps: Clock::empty().with_dependency(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
                             MapType::Map,
-                            Key("bird".to_string()),
-                            ElementValue::Primitive(PrimitiveValue::Str("magpie".to_string())),
-                            None,
+                            Key("counter".to_string()),
+                            ElementValue::Primitive(PrimitiveValue::Number(3.0)),
+                            Some(DataType::Counter),
                         ),
                         conflicts: Vec::new(),
                     }],
@@ -153,9 +152,9 @@ mod tests {
 
         for testcase in testcases {
             let mut backend = Backend::init();
-            let patch = backend.apply_changes(testcase.changes).unwrap();
+            let patches = testcase.changes.into_iter().map(|c| backend.apply_changes(vec![c]).unwrap());
             assert_eq!(
-                testcase.expected_patch, patch,
+                testcase.expected_patch, patches.last().unwrap(),
                 "Patches not equal for {}",
                 testcase.name
             );

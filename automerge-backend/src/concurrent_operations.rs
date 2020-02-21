@@ -1,7 +1,9 @@
 use crate::actor_histories::ActorHistories;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{DataType, Operation, PrimitiveValue};
+use crate::{
+    DataType, Operation, PrimitiveValue,
+};
 use std::cmp::PartialOrd;
 
 /// Represents a set of operations which are relevant to either an element ID
@@ -24,6 +26,8 @@ impl ConcurrentOperations {
         self.operations.first()
     }
 
+    /// Updates this set of operations based on a new operation. Returns a diff
+    /// which represents the new state
     pub(crate) fn incorporate_new_op(
         &mut self,
         new_op: OperationWithMetadata,
