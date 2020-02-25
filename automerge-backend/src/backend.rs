@@ -1,4 +1,4 @@
-use crate::{ActorID, Change, Clock, OpSet, Patch, AutomergeError, Diff};
+use crate::{ActorID, AutomergeError, Change, Clock, Diff, OpSet, Patch};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -59,8 +59,8 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ActorID, Backend, Change, Clock, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-        Operation, Patch, PrimitiveValue, DataType
+        ActorID, Backend, Change, Clock, DataType, Diff, DiffAction, ElementValue, Key, MapType,
+        ObjectID, Operation, Patch, PrimitiveValue,
     };
 
     struct TestCase {
@@ -129,7 +129,7 @@ mod tests {
                             key: Key("counter".to_string()),
                             value: 2.0,
                         }],
-                    }
+                    },
                 ],
                 expected_patch: Patch {
                     can_undo: false,
@@ -152,9 +152,13 @@ mod tests {
 
         for testcase in testcases {
             let mut backend = Backend::init();
-            let patches = testcase.changes.into_iter().map(|c| backend.apply_changes(vec![c]).unwrap());
+            let patches = testcase
+                .changes
+                .into_iter()
+                .map(|c| backend.apply_changes(vec![c]).unwrap());
             assert_eq!(
-                testcase.expected_patch, patches.last().unwrap(),
+                testcase.expected_patch,
+                patches.last().unwrap(),
                 "Patches not equal for {}",
                 testcase.name
             );

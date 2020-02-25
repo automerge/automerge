@@ -34,7 +34,7 @@ impl<'de> Deserialize<'de> for Conflict {
     where
         D: Deserializer<'de>,
     {
-        const FIELDS: &'static [&'static str] = &["actor", "value", "datatype", "link"];
+        const FIELDS: &[&str] = &["actor", "value", "datatype", "link"];
         struct ConflictVisitor;
         impl<'de> Visitor<'de> for ConflictVisitor {
             type Value = Conflict;
@@ -206,7 +206,7 @@ impl<'de> Deserialize<'de> for Diff {
     where
         D: Deserializer<'de>,
     {
-        const FIELDS: &'static [&'static str] = &["actor", "value", "datatype", "link"];
+        const FIELDS: &[&str] = &["actor", "value", "datatype", "link"];
         struct DiffVisitor;
         impl<'de> Visitor<'de> for DiffVisitor {
             type Value = Diff;

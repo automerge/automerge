@@ -50,7 +50,7 @@ impl ObjectHistory {
             } => {
                 let elem_id = ElementID::from_str(&key.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", key.0)))?;
                 operations_by_elemid
-                    .entry(elem_id.clone())
+                    .entry(elem_id)
                     .or_insert_with(ConcurrentOperations::new)
             }
         };
@@ -95,11 +95,9 @@ impl ObjectHistory {
                             _ => panic!("Should not happen for objects"),
                         })
                     })
-                    .unwrap_or(DiffAction::RemoveMapKey(
-                        object_id.clone(),
-                        map_type.clone(),
-                        key.clone(),
-                    )),
+                    .unwrap_or_else(|| {
+                        DiffAction::RemoveMapKey(object_id.clone(), map_type.clone(), key.clone())
+                    }),
             ),
             ObjectHistory::List {
                 object_id,
@@ -118,7 +116,7 @@ impl ObjectHistory {
                 let maybe_existing_index: Option<u32> = ops_in_order
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, (elem_id, ops))| ops.active_op().map(|_|(i, elem_id)))
+                    .filter_map(|(i, (elem_id, ops))| ops.active_op().map(|_| (i, elem_id)))
                     .find(|(_, elem_id)| elem_id == &&element_id)
                     .map(|(index, _)| index as u32);
                 let maybe_ops = operations_by_elemid.get(&element_id);
@@ -129,9 +127,9 @@ impl ObjectHistory {
                             .map(|op| match &op.operation {
                                 Operation::Set {
                                     object_id,
-                                    key: _,
                                     value,
                                     datatype,
+                                    ..
                                 } => DiffAction::SetSequenceElement(
                                     object_id.clone(),
                                     sequence_type.clone(),
@@ -140,9 +138,7 @@ impl ObjectHistory {
                                     datatype.clone(),
                                 ),
                                 Operation::Link {
-                                    object_id,
-                                    key: _,
-                                    value,
+                                    object_id, value, ..
                                 } => DiffAction::SetSequenceElement(
                                     object_id.clone(),
                                     sequence_type.clone(),
@@ -152,11 +148,13 @@ impl ObjectHistory {
                                 ),
                                 _ => panic!("Should not happen for lists"),
                             })
-                            .unwrap_or(DiffAction::RemoveSequenceElement(
-                                object_id.clone(),
-                                sequence_type.clone(),
-                                index,
-                            )),
+                            .unwrap_or_else(|| {
+                                DiffAction::RemoveSequenceElement(
+                                    object_id.clone(),
+                                    sequence_type.clone(),
+                                    index,
+                                )
+                            }),
                     ),
                     None => maybe_ops.and_then(|cops| cops.active_op()).map(|op| {
                         let (elem_value, datatype) = match &op.operation {
@@ -172,7 +170,7 @@ impl ObjectHistory {
                             .iter()
                             .take_while(|(e, _)| e != &element_id)
                             .enumerate()
-                            .filter_map(|(i, (_, ops))| ops.active_op().map(|_|i as u32))
+                            .filter_map(|(i, (_, ops))| ops.active_op().map(|_| i as u32))
                             .last()
                             .unwrap_or(0);
                         DiffAction::InsertSequenceElement(

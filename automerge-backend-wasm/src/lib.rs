@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, Backend, Change, Clock, AutomergeError};
+use automerge_backend::{ActorID, AutomergeError, Backend, Change, Clock};
 use js_sys::Array;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
@@ -25,7 +25,10 @@ pub struct State {
 #[wasm_bindgen(js_name = applyChange)]
 pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValue> {
     let c: Vec<Change> = from_value(changes)?;
-    let patch = state.backend.apply_changes(c).map_err(automerge_error_to_js)?;
+    let patch = state
+        .backend
+        .apply_changes(c)
+        .map_err(automerge_error_to_js)?;
     let ret = Array::new();
     ret.push(&state.into());
     ret.push(&to_value(&patch)?);
@@ -35,7 +38,10 @@ pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValu
 #[wasm_bindgen(js_name = applyLocalChange)]
 pub fn apply_local_change(mut state: State, change: JsValue) -> Result<Array, JsValue> {
     let c: Change = from_value(change)?;
-    let patch = state.backend.apply_local_change(c).map_err(automerge_error_to_js)?;
+    let patch = state
+        .backend
+        .apply_local_change(c)
+        .map_err(automerge_error_to_js)?;
     let ret = Array::new();
     ret.push(&state.into());
     ret.push(&to_value(&patch)?);
@@ -76,7 +82,10 @@ pub fn get_missing_deps(state: &State) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn merge(state: &mut State, remote: State) -> Result<JsValue, JsValue> {
-    let patch = state.backend.merge(&remote.backend).map_err(automerge_error_to_js)?;
+    let patch = state
+        .backend
+        .merge(&remote.backend)
+        .map_err(automerge_error_to_js)?;
     Ok(to_value(&patch)?)
 }
 
@@ -86,7 +95,6 @@ pub fn init() -> State {
         backend: Backend::init(),
     }
 }
-
 
 fn automerge_error_to_js(err: AutomergeError) -> JsValue {
     JsValue::from(std::format!("Automerge error: {}", err))

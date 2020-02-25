@@ -65,18 +65,16 @@ impl Serialize for ObjectID {
 pub struct Key(pub String);
 
 impl Key {
-    
     pub fn as_element_id(&self) -> Result<ElementID, error::InvalidElementID> {
         ElementID::from_str(&self.0)
     }
-
 }
 
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ActorID(pub String);
 
 impl ActorID {
-    pub fn new() -> ActorID {
+    pub fn random() -> ActorID {
         ActorID(uuid::Uuid::new_v4().to_string())
     }
 }

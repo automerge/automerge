@@ -317,7 +317,7 @@ impl<'a> ChangeContext<'a> {
                     )]
                 }
             })
-            .ok_or(InvalidChangeRequest(format!("Missing path: {:?}", path)))
+            .ok_or_else(|| InvalidChangeRequest(format!("Missing path: {:?}", path)))
     }
 
     pub(crate) fn create_move_operations(
@@ -325,23 +325,19 @@ impl<'a> ChangeContext<'a> {
         from: &Path,
         to: &Path,
     ) -> Result<Vec<Operation>, InvalidChangeRequest> {
-        let resolved_from = self.resolve_path(from).ok_or(InvalidChangeRequest(format!(
-            "Missing from path: {:?}",
-            from
-        )))?;
+        let resolved_from = self
+            .resolve_path(from)
+            .ok_or_else(|| InvalidChangeRequest(format!("Missing from path: {:?}", from)))?;
         let resolved_to = self
             .resolve_path(to)
-            .ok_or(InvalidChangeRequest(format!("Missing to path: {:?}", to)))?;
+            .ok_or_else(|| InvalidChangeRequest(format!("Missing to path: {:?}", to)))?;
 
         let move_source = resolved_from
             .as_move_source()
-            .ok_or(InvalidChangeRequest(format!(
-                "Invalid move source path: {:?}",
-                from
-            )))?;
+            .ok_or_else(|| InvalidChangeRequest(format!("Invalid move source path: {:?}", from)))?;
         let target = resolved_to
             .as_set_target()
-            .ok_or(InvalidChangeRequest(format!("Invalid to path: {:?}", to)))?;
+            .ok_or_else(|| InvalidChangeRequest(format!("Invalid to path: {:?}", to)))?;
 
         let delete_op = move_source.delete_op();
 
@@ -384,10 +380,7 @@ impl<'a> ChangeContext<'a> {
         self.resolve_path(path)
             .and_then(|r| r.as_move_source())
             .map(|source| source.delete_op())
-            .ok_or(InvalidChangeRequest(format!(
-                "Invalid delete path: {:?}",
-                path
-            )))
+            .ok_or_else(|| InvalidChangeRequest(format!("Invalid delete path: {:?}", path)))
     }
 
     pub(crate) fn create_increment_operation(
@@ -409,10 +402,9 @@ impl<'a> ChangeContext<'a> {
         let after_target = self
             .resolve_path(after)
             .and_then(|p| p.as_insert_after_target())
-            .ok_or(InvalidChangeRequest(format!(
-                "Invalid insert after path: {:?}",
-                after
-            )))?;
+            .ok_or_else(|| {
+                InvalidChangeRequest(format!("Invalid insert after path: {:?}", after))
+            })?;
         let next_elem_id =
             ElementID::SpecificElementID(actor_id.clone(), after_target.max_elem + 1);
         let insert_op = Operation::Insert {
@@ -512,7 +504,7 @@ impl<'a> ChangeContext<'a> {
                                 } => list_ops_in_order(operations_by_elemid, following).ok(),
                                 ObjectHistory::Map { .. } => None,
                             })
-                            .and_then(|ops| ops.get(*i).map(|o| o.clone()))
+                            .and_then(|ops| ops.get(*i).cloned())
                             .and_then(|(element_id, cops)| {
                                 cops.active_op().map(|o| (element_id, o.operation.clone()))
                             });
@@ -556,7 +548,7 @@ fn value_to_ops(actor_id: &ActorID, v: &Value) -> (ObjectID, Vec<Operation>) {
                 object_id: list_id.clone(),
             }];
             let mut elem_ops: Vec<Operation> = vs
-                .into_iter()
+                .iter()
                 .enumerate()
                 .map(|(index, elem_value)| {
                     let elem: u32 = (index + 1).try_into().unwrap();

@@ -15,6 +15,7 @@ use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, Primit
 use crate::value::Value;
 use crate::Diff;
 use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -96,11 +97,11 @@ impl OpSet {
                 actor_id: actor_id.clone(),
                 operation: operation.clone(),
             };
-            let diff = self.object_store
+            let diff = self
+                .object_store
                 .apply_operation(&self.actor_histories, op_with_metadata)?;
-            match diff {
-                Some(d) => diffs.push(d),
-                None => {}
+            if let Some(d) = diff {
+                diffs.push(d)
             }
         }
         self.clock = self
@@ -110,7 +111,7 @@ impl OpSet {
     }
 
     pub fn root_value(&self) -> &Value {
-        return &self.state;
+        &self.state
     }
 
     /// This is where we actually interpret the concurrent operations for each
@@ -121,7 +122,9 @@ impl OpSet {
             .history_for_object_id(object_id)
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
         match object_history {
-            ObjectHistory::Map { operations_by_key, .. } => self.interpret_map_ops(operations_by_key),
+            ObjectHistory::Map {
+                operations_by_key, ..
+            } => self.interpret_map_ops(operations_by_key),
             ObjectHistory::List {
                 operations_by_elemid,
                 insertions,
@@ -212,9 +215,9 @@ impl OpSet {
     }
 }
 
-pub fn list_ops_in_order<'a>(
-    operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations>,
-    following: &HashMap<ElementID, Vec<ElementID>>,
+pub fn list_ops_in_order<'a, S: BuildHasher>(
+    operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations, S>,
+    following: &HashMap<ElementID, Vec<ElementID>, S>,
 ) -> Result<Vec<(ElementID, &'a ConcurrentOperations)>, AutomergeError> {
     // First we construct a vector of operations to process in order based
     // on the insertion orders of the operations we've received

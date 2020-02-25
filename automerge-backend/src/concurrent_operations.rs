@@ -1,9 +1,7 @@
 use crate::actor_histories::ActorHistories;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::{
-    DataType, Operation, PrimitiveValue,
-};
+use crate::{DataType, Operation, PrimitiveValue};
 use std::cmp::PartialOrd;
 
 /// Represents a set of operations which are relevant to either an element ID
