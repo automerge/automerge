@@ -1,3 +1,4 @@
+use crate::patch::{Conflict, ElementValue};
 use crate::actor_histories::ActorHistories;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
@@ -22,6 +23,26 @@ impl ConcurrentOperations {
         // operations are sorted in incorporate_new_op, so the first op is the
         // active one
         self.operations.first()
+    }
+
+    pub fn conflicts(&self) -> Vec<Conflict> {
+        self.operations.split_first().map(|(_, tail)|{
+            tail.iter().map(|op| {
+                match &op.operation {
+                    Operation::Set{value, datatype, ..} => Conflict {
+                        actor: op.actor_id.clone(),
+                        value: ElementValue::Primitive(value.clone()),
+                        datatype: datatype.clone()
+                    },
+                    Operation::Link{value, ..} => Conflict {
+                        actor: op.actor_id.clone(),
+                        value: ElementValue::Link(value.clone()),
+                        datatype: None
+                    },
+                    _ => panic!("Invalid operation in concurrent ops")
+                }
+            }).collect()
+        }).unwrap_or_else(||Vec::new())
     }
 
     /// Updates this set of operations based on a new operation. Returns a diff

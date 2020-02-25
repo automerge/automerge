@@ -58,7 +58,7 @@ impl ObjectHistory {
     }
 
     fn diff_for_key(&self, key: &Key) -> Result<Option<Diff>, AutomergeError> {
-        let action = match self {
+        let diff = match self {
             ObjectHistory::Map {
                 object_id,
                 operations_by_key,
@@ -68,35 +68,46 @@ impl ObjectHistory {
                 operations_by_key
                     .get(&key.0)
                     .and_then(|ops| {
-                        ops.active_op().map(|op| match &op.operation {
-                            Operation::Set {
-                                object_id,
-                                key,
-                                value,
-                                datatype,
-                            } => DiffAction::SetMapKey(
-                                object_id.clone(),
-                                map_type.clone(),
-                                key.clone(),
-                                ElementValue::Primitive(value.clone()),
-                                datatype.clone(),
-                            ),
-                            Operation::Link {
-                                object_id,
-                                key,
-                                value,
-                            } => DiffAction::SetMapKey(
-                                object_id.clone(),
-                                map_type.clone(),
-                                key.clone(),
-                                ElementValue::Link(value.clone()),
-                                None,
-                            ),
-                            _ => panic!("Should not happen for objects"),
+                        ops.active_op().map(|op| {
+                            let action = match &op.operation {
+                                Operation::Set {
+                                    object_id,
+                                    key,
+                                    value,
+                                    datatype,
+                                } => DiffAction::SetMapKey(
+                                    object_id.clone(),
+                                    map_type.clone(),
+                                    key.clone(),
+                                    ElementValue::Primitive(value.clone()),
+                                    datatype.clone(),
+                                ),
+                                Operation::Link {
+                                    object_id,
+                                    key,
+                                    value,
+                                } => DiffAction::SetMapKey(
+                                    object_id.clone(),
+                                    map_type.clone(),
+                                    key.clone(),
+                                    ElementValue::Link(value.clone()),
+                                    None,
+                                ),
+                                _ => panic!("Should not happen for objects"),
+                            };
+                            Diff {
+                                action,
+                                conflicts: ops.conflicts(),
+                            }
                         })
                     })
-                    .unwrap_or_else(|| {
-                        DiffAction::RemoveMapKey(object_id.clone(), map_type.clone(), key.clone())
+                    .unwrap_or_else(|| Diff {
+                        action: DiffAction::RemoveMapKey(
+                            object_id.clone(),
+                            map_type.clone(),
+                            key.clone(),
+                        ),
+                        conflicts: Vec::new(),
                     }),
             ),
             ObjectHistory::List {
@@ -121,9 +132,9 @@ impl ObjectHistory {
                     .map(|(index, _)| index as u32);
                 let maybe_ops = operations_by_elemid.get(&element_id);
                 match maybe_existing_index {
-                    Some(index) => Some(
-                        maybe_ops
-                            .and_then(|cops| cops.active_op())
+                    Some(index) => maybe_ops.map(|cops| {
+                        let action = cops
+                            .active_op()
                             .map(|op| match &op.operation {
                                 Operation::Set {
                                     object_id,
@@ -154,40 +165,46 @@ impl ObjectHistory {
                                     sequence_type.clone(),
                                     index,
                                 )
-                            }),
-                    ),
-                    None => maybe_ops.and_then(|cops| cops.active_op()).map(|op| {
-                        let (elem_value, datatype) = match &op.operation {
-                            Operation::Set {
-                                value, datatype, ..
-                            } => (ElementValue::Primitive(value.clone()), datatype.clone()),
-                            Operation::Link { value, .. } => {
-                                (ElementValue::Link(value.clone()), None)
+                            });
+                        Diff {
+                            action,
+                            conflicts: cops.conflicts(),
+                        }
+                    }),
+                    None => maybe_ops.and_then(|cops| {
+                        cops.active_op().map(|op| {
+                            let (elem_value, datatype) = match &op.operation {
+                                Operation::Set {
+                                    value, datatype, ..
+                                } => (ElementValue::Primitive(value.clone()), datatype.clone()),
+                                Operation::Link { value, .. } => {
+                                    (ElementValue::Link(value.clone()), None)
+                                }
+                                _ => panic!("Should never happen"),
+                            };
+                            let insertion_index = ops_in_order
+                                .iter()
+                                .take_while(|(e, _)| e != &element_id)
+                                .enumerate()
+                                .filter_map(|(i, (_, ops))| ops.active_op().map(|_| i as u32))
+                                .last()
+                                .unwrap_or(0);
+                            Diff {
+                                action: DiffAction::InsertSequenceElement(
+                                    object_id.clone(),
+                                    sequence_type.clone(),
+                                    insertion_index + 1,
+                                    elem_value,
+                                    datatype,
+                                ),
+                                conflicts: cops.conflicts(),
                             }
-                            _ => panic!("Should never happen"),
-                        };
-                        let insertion_index = ops_in_order
-                            .iter()
-                            .take_while(|(e, _)| e != &element_id)
-                            .enumerate()
-                            .filter_map(|(i, (_, ops))| ops.active_op().map(|_| i as u32))
-                            .last()
-                            .unwrap_or(0);
-                        DiffAction::InsertSequenceElement(
-                            object_id.clone(),
-                            sequence_type.clone(),
-                            insertion_index + 1,
-                            elem_value,
-                            datatype,
-                        )
+                        })
                     }),
                 }
             }
         };
-        Ok(action.map(|a| Diff {
-            action: a,
-            conflicts: Vec::new(),
-        }))
+        Ok(diff)
     }
 }
 
