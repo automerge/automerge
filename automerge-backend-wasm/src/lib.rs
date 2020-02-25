@@ -3,8 +3,6 @@ use js_sys::Array;
 use serde_wasm_bindgen::{from_value, to_value};
 use wasm_bindgen::prelude::*;
 
-// When the `wee_alloc` feature is enabled, this uses `wee_alloc` as the global
-// allocator.
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -15,7 +13,6 @@ extern "C" {
     fn log(s: &str);
 }
 
-// We need a wrapper object to attach the wasm-bindgen on
 #[wasm_bindgen]
 #[derive(PartialEq, Debug, Clone)]
 pub struct State {
@@ -60,7 +57,7 @@ pub fn get_changes(state: &State) -> Result<JsValue, JsValue> {
     Ok(to_value(&changes)?)
 }
 
-#[wasm_bindgen(js_name = getChangesForActorId)]
+#[wasm_bindgen(js_name = getChangesForActor)]
 pub fn get_changes_for_actorid(state: &State, actorid: JsValue) -> Result<JsValue, JsValue> {
     let a: ActorID = from_value(actorid)?;
     let changes = state.backend.get_changes_for_actor_id(a);
