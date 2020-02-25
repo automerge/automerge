@@ -98,7 +98,10 @@ impl OpSet {
             };
             let diff = self.object_store
                 .apply_operation(&self.actor_histories, op_with_metadata)?;
-            diffs.push(diff);
+            match diff {
+                Some(d) => diffs.push(d),
+                None => {}
+            }
         }
         self.clock = self
             .clock
