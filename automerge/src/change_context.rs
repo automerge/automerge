@@ -461,7 +461,9 @@ impl<'a> ChangeContext<'a> {
                     let op = self
                         .get_operations_for_object_id(&containing_object_id)
                         .and_then(|history| match history {
-                            ObjectHistory::Map { operations_by_key, .. } => Some(operations_by_key),
+                            ObjectHistory::Map {
+                                operations_by_key, ..
+                            } => Some(operations_by_key),
                             ObjectHistory::List { .. } => None,
                         })
                         .and_then(|kvs| kvs.get(key))
