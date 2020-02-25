@@ -252,8 +252,12 @@ impl ObjectStore {
                     map_type: MapType::Map,
                     object_id: object_id.clone(),
                 };
-                self.operations_by_object_id.insert(object_id, object);
-                None
+                self.operations_by_object_id
+                    .insert(object_id.clone(), object);
+                Some(Diff {
+                    action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
+                    conflicts: Vec::new(),
+                })
             }
             Operation::MakeTable { object_id } => {
                 let object = ObjectHistory::Map {
@@ -261,8 +265,12 @@ impl ObjectStore {
                     map_type: MapType::Table,
                     object_id: object_id.clone(),
                 };
-                self.operations_by_object_id.insert(object_id, object);
-                None
+                self.operations_by_object_id
+                    .insert(object_id.clone(), object);
+                Some(Diff {
+                    action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
+                    conflicts: Vec::new(),
+                })
             }
             Operation::MakeList { object_id } => {
                 let object = ObjectHistory::List {
@@ -273,8 +281,12 @@ impl ObjectStore {
                     sequence_type: SequenceType::Text,
                     object_id: object_id.clone(),
                 };
-                self.operations_by_object_id.insert(object_id, object);
-                None
+                self.operations_by_object_id
+                    .insert(object_id.clone(), object);
+                Some(Diff {
+                    action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
+                    conflicts: Vec::new(),
+                })
             }
             Operation::MakeText { object_id } => {
                 let object = ObjectHistory::List {
@@ -285,8 +297,12 @@ impl ObjectStore {
                     sequence_type: SequenceType::Text,
                     object_id: object_id.clone(),
                 };
-                self.operations_by_object_id.insert(object_id, object);
-                None
+                self.operations_by_object_id
+                    .insert(object_id.clone(), object);
+                Some(Diff {
+                    action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
+                    conflicts: Vec::new(),
+                })
             }
             Operation::Link {
                 ref object_id,

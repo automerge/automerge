@@ -77,6 +77,10 @@ impl ActorID {
     pub fn random() -> ActorID {
         ActorID(uuid::Uuid::new_v4().to_string())
     }
+
+    pub fn from_string(raw: String) -> ActorID {
+        ActorID(raw)
+    }
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
@@ -143,6 +147,10 @@ impl ElementID {
             ElementID::Head => Key("_head".to_string()),
             ElementID::SpecificElementID(actor_id, elem) => Key(format!("{}:{}", actor_id.0, elem)),
         }
+    }
+
+    pub fn from_actor_and_elem(actor: ActorID, elem: u32) -> ElementID {
+        ElementID::SpecificElementID(actor, elem)
     }
 }
 
