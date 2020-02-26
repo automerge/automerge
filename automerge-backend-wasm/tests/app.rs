@@ -11,18 +11,9 @@ use serde_wasm_bindgen::{from_value, to_value};
 use serde_json::{from_str, to_string};
 use js_sys::{ JSON };
 
-/*
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
-*/
-
 #[test]
 fn test_basic() {
   assert_eq!(1, 1);
-  println!("RUN TEST BASIC");
 }
 
 #[wasm_bindgen_test]

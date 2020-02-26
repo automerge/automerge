@@ -12,15 +12,11 @@ describe('Automerge.Backend', () => {
       ]}
       const s0 = Backend.init()
       const [s1, patch1] = Backend.applyChanges(s0, [change1])
-      console.log("PATCH1",patch1)
       assert.deepEqual(patch1, {
         canUndo: false, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
-        diffs: [{action: 'set', obj: ROOT_ID, path: [], type: 'map', key: 'bird', value: 'magpie'}]
+        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', key: 'bird', value: 'magpie'}]
       })
     })
-  })
-})
-/*
 
     it('should increment a key in a map', () => {
       const actor = uuid()
@@ -35,7 +31,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'set', obj: ROOT_ID, path: [], type: 'map', key: 'counter', value: 3, datatype: 'counter'}]
+        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', key: 'counter', value: 3, datatype: 'counter'}]
       })
     })
 
@@ -51,7 +47,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {actor1: 1, actor2: 1}, deps: {actor1: 1, actor2: 1},
-        diffs: [{action: 'set', obj: ROOT_ID, path: [], type: 'map', key: 'bird', value: 'blackbird',
+        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', key: 'bird', value: 'blackbird',
           conflicts: [{actor: 'actor1', value: 'magpie'}]}
       ]})
     })
@@ -69,7 +65,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'remove', obj: ROOT_ID, path: [], type: 'map', key: 'bird'}]
+        diffs: [{action: 'remove', obj: ROOT_ID, type: 'map', key: 'bird'}]
       })
     })
 
@@ -86,8 +82,8 @@ describe('Automerge.Backend', () => {
         canUndo: false, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
         diffs: [
           {action: 'create', obj: birds,   type: 'map'},
-          {action: 'set',    obj: birds,   type: 'map', path: null, key: 'wrens', value: 3},
-          {action: 'set',    obj: ROOT_ID, type: 'map', path: [],   key: 'birds', value: birds, link: true}
+          {action: 'set',    obj: birds,   type: 'map', key: 'wrens', value: 3},
+          {action: 'set',    obj: ROOT_ID, type: 'map', key: 'birds', value: birds, link: true}
         ]
       })
     })
@@ -107,7 +103,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'set', obj: birds, type: 'map', path: ['birds'], key: 'sparrows', value: 15}]
+        diffs: [{action: 'set', obj: birds, type: 'map', key: 'sparrows', value: 15}]
       })
     })
 
@@ -125,8 +121,8 @@ describe('Automerge.Backend', () => {
         canUndo: false, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
         diffs: [
           {action: 'create', obj: birds,   type: 'list'},
-          {action: 'insert', obj: birds,   type: 'list', path: null, index: 0, value: 'chaffinch', elemId: `${actor}:1`},
-          {action: 'set',    obj: ROOT_ID, type: 'map',  path: [],   key: 'birds', value: birds, link: true}
+          {action: 'insert', obj: birds,   type: 'list', index: 0, value: 'chaffinch', elemId: `${actor}:1`},
+          {action: 'set',    obj: ROOT_ID, type: 'map',  key: 'birds', value: birds, link: true}
         ]
       })
     })
@@ -147,7 +143,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'set', obj: birds, type: 'list', path: ['birds'], index: 0, value: 'greenfinch'}]
+        diffs: [{action: 'set', obj: birds, type: 'list', index: 0, value: 'greenfinch'}]
       })
     })
 
@@ -167,7 +163,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'remove', obj: birds, type: 'list', path: ['birds'], index: 0}]
+        diffs: [{action: 'remove', obj: birds, type: 'list', index: 0}]
       })
     })
 
@@ -186,7 +182,7 @@ describe('Automerge.Backend', () => {
       const [s2, patch2] = Backend.applyChanges(s1, [change2])
       assert.deepEqual(patch2, {
         canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-        diffs: [{action: 'maxElem', obj: birds, value: 1, type: 'list', path: ['birds']}]
+        diffs: [{action: 'maxElem', obj: birds, value: 1, type: 'list'}]
       })
     })
 
@@ -199,7 +195,7 @@ describe('Automerge.Backend', () => {
       const [s1, patch] = Backend.applyChanges(s0, [change])
       assert.deepEqual(patch, {
         canUndo: false, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
-        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', path: [], key: 'now', value: now.getTime(), datatype: 'timestamp'}]
+        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', key: 'now', value: now.getTime(), datatype: 'timestamp'}]
       })
     })
 
@@ -217,9 +213,9 @@ describe('Automerge.Backend', () => {
         canUndo: false, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
         diffs: [
           {action: 'create', obj: list,    type: 'list'},
-          {action: 'insert', obj: list,    type: 'list', path: null, index: 0,
+          {action: 'insert', obj: list,    type: 'list', index: 0,
             value: now.getTime(), elemId: `${actor}:1`, datatype: 'timestamp'},
-          {action: 'set',    obj: ROOT_ID, type: 'map',  path: [],   key: 'list', value: list, link: true}
+          {action: 'set',    obj: ROOT_ID, type: 'map',  key: 'list', value: list, link: true}
         ]
       })
     })
@@ -235,7 +231,7 @@ describe('Automerge.Backend', () => {
       const [s1, patch1] = Backend.applyLocalChange(s0, change1)
       assert.deepEqual(patch1, {
         actor, seq: 1, canUndo: true, canRedo: false, clock: {[actor]: 1}, deps: {[actor]: 1},
-        diffs: [{action: 'set', obj: ROOT_ID, path: [], type: 'map', key: 'bird', value: 'magpie'}]
+        diffs: [{action: 'set', obj: ROOT_ID, type: 'map', key: 'bird', value: 'magpie'}]
       })
     })
 
@@ -440,4 +436,3 @@ describe('Automerge.Backend', () => {
     })
   })
 })
-*/
