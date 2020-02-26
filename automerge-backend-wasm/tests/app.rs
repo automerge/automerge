@@ -2,19 +2,9 @@
 
 extern crate automerge_backend_wasm;
 
-use automerge_backend_wasm::log;
-use automerge_backend::{ Change, Operation, ObjectID, PrimitiveValue, Key };
+use automerge_backend::{ Operation, ObjectID, PrimitiveValue, Key };
 use wasm_bindgen::JsValue;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
-use serde_wasm_bindgen::{from_value, to_value};
-use serde_json::{from_str, to_string};
-use js_sys::{ JSON };
-
-#[test]
-fn test_basic() {
-  assert_eq!(1, 1);
-}
+use wasm_bindgen_test::{wasm_bindgen_test};
 
 #[wasm_bindgen_test]
 fn test_wasm() {
@@ -25,18 +15,9 @@ fn test_wasm() {
     datatype: None
   };
 
-  let json_str1 = serde_json::to_string(&op1).unwrap();
-  let js_value : JsValue = JsValue::from_serde(&json_str1).unwrap();
-  let json_str2 : String = js_value.into_serde().unwrap();
-  let op2: Operation = serde_json::from_str(&json_str2).unwrap();
+  let js_value = JsValue::from_serde(&op1).unwrap();
+  let op2 : Operation = js_value.into_serde().unwrap();
 
-  log(format!("op1 == op2: {:?} {:?}", op1, op2).as_str());
   assert_eq!(op1, op2);
-
-  let js_value : JsValue = serde_wasm_bindgen::to_value(&op1).unwrap();
-  let op2 : Operation = serde_wasm_bindgen::from_value(js_value).unwrap();
-
-  log(format!("op1 == op2: {:?} {:?}", op1, op2).as_str());
-  assert_eq!(op2, op2);
 }
 

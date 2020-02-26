@@ -15,22 +15,12 @@ extern "C" {
     pub fn log(s: &str);
 }
 
-const USE_SWB: bool = false;
-
 fn js_to_rust<T: DeserializeOwned>(value: JsValue) -> Result<T,JsValue> {
-  if USE_SWB {
-    serde_wasm_bindgen::from_value(value).map_err(swb_error_to_js)
-  } else {
-    value.into_serde().map_err(json_error_to_js)
-  }
+  value.into_serde().map_err(json_error_to_js)
 }
 
 fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue,JsValue> {
-  if USE_SWB {
-    serde_wasm_bindgen::to_value(&value).map_err(swb_error_to_js)
-  } else {
-    JsValue::from_serde(&value).map_err(json_error_to_js)
-  }
+  JsValue::from_serde(&value).map_err(json_error_to_js)
 }
 
 
@@ -122,6 +112,3 @@ fn json_error_to_js(err: serde_json::Error) -> JsValue {
     JsValue::from(std::format!("serde_json error: {}", err))
 }
 
-fn swb_error_to_js(err: serde_wasm_bindgen::Error) -> JsValue {
-    JsValue::from(std::format!("serde_wasm_bindgen error: {}", err))
-}
