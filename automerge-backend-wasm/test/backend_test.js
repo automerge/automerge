@@ -18,6 +18,9 @@ describe('Automerge.Backend', () => {
         diffs: [{action: 'set', obj: ROOT_ID, path: [], type: 'map', key: 'bird', value: 'magpie'}]
       })
     })
+  })
+})
+/*
 
     it('should increment a key in a map', () => {
       const actor = uuid()
@@ -437,3 +440,4 @@ describe('Automerge.Backend', () => {
     })
   })
 })
+*/

@@ -2,42 +2,50 @@
 
 extern crate automerge_backend_wasm;
 
-use futures::prelude::*;
+use automerge_backend_wasm::log;
+use automerge_backend::{ Change, Operation, ObjectID, PrimitiveValue, Key };
 use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+use serde_wasm_bindgen::{from_value, to_value};
+use serde_json::{from_str, to_string};
+use js_sys::{ JSON };
 
-use automerge_backend_wasm::{applyChanges, init};
+/*
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
+*/
 
-wasm_bindgen_test_configure!(run_in_browser);
-
-// This runs a unit test in native Rust, so it can only use Rust APIs.
 #[test]
-fn rust_test() {
-    assert_eq!(1, 1);
-    println!("TEST BEGIN");
-    let mut s1 = init();
-    let s2 = applyChanges(&mut s1, JsValue::from_str("hello"));
-    //  println!("s1");
-    //  println!("s2 {}", s2);
-    println!("TEST END");
+fn test_basic() {
+  assert_eq!(1, 1);
+  println!("RUN TEST BASIC");
 }
 
-// This runs a unit test in the browser, so it can use browser APIs.
 #[wasm_bindgen_test]
-fn web_test() {
-    assert_eq!(1, 1);
+fn test_wasm() {
+  let op1 : Operation = Operation::Set {
+    object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+    key: Key("somekeyid".to_string()),
+    value: PrimitiveValue::Boolean(true),
+    datatype: None
+  };
+
+  let json_str1 = serde_json::to_string(&op1).unwrap();
+  let js_value : JsValue = JsValue::from_serde(&json_str1).unwrap();
+  let json_str2 : String = js_value.into_serde().unwrap();
+  let op2: Operation = serde_json::from_str(&json_str2).unwrap();
+
+  log(format!("op1 == op2: {:?} {:?}", op1, op2).as_str());
+  assert_eq!(op1, op2);
+
+  let js_value : JsValue = serde_wasm_bindgen::to_value(&op1).unwrap();
+  let op2 : Operation = serde_wasm_bindgen::from_value(js_value).unwrap();
+
+  log(format!("op1 == op2: {:?} {:?}", op1, op2).as_str());
+  assert_eq!(op2, op2);
 }
 
-// This runs a unit test in the browser, and in addition it supports asynchronous Future APIs.
-#[wasm_bindgen_test(async)]
-fn async_test() -> impl Future<Item = (), Error = JsValue> {
-    // Creates a JavaScript Promise which will asynchronously resolve with the value 42.
-    let promise = js_sys::Promise::resolve(&JsValue::from(42));
-
-    // Converts that Promise into a Future.
-    // The unit test will wait for the Future to resolve.
-    JsFuture::from(promise).map(|x| {
-        assert_eq!(x, 42);
-    })
-}

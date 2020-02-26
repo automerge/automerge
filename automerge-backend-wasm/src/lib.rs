@@ -10,8 +10,9 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
+    pub fn log(s: &str);
 }
+
 
 #[wasm_bindgen]
 #[derive(PartialEq, Debug, Clone)]
@@ -19,7 +20,7 @@ pub struct State {
     backend: Backend,
 }
 
-#[wasm_bindgen(js_name = applyChange)]
+#[wasm_bindgen(js_name = applyChanges)]
 pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValue> {
     let c: Vec<Change> = from_value(changes)?;
     let patch = state
