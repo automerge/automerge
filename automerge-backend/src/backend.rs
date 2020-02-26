@@ -60,7 +60,7 @@ impl Backend {
 mod tests {
     use crate::{
         ActorID, Backend, Change, Clock, Conflict, DataType, Diff, DiffAction, ElementValue, Key,
-        MapType, ObjectID, Operation, Patch, PrimitiveValue,
+        MapType, ObjectID, Operation, Patch, PrimitiveValue, ElementID, SequenceType
     };
 
     struct TestCase {
@@ -324,45 +324,72 @@ mod tests {
             //]
             //})
             //})
-            //TestCase {
-            //name: "create lists",
-            //changes: vec![Change{
-            //actor_id: actor1.clone(),
-            //seq: 1,
-            //dependencies: Clock::empty(),
-            //message: None,
-            //operations: vec![
-            //Operation::MakeList{object_id: ObjectID::ID("birds".to_string())},
-            //Operation::Insert{list_id: ObjectID::ID("birds".to_string()), key: ElementID::Head, elem: 1},
-            //Operation::Set{
-            //object_id: ObjectID::ID("birds".to_string()),
-            //key: ElementID::from_actor_and_elem(actor1.clone(), 1).as_key(),
-            //value: PrimitiveValue::Str("chaffinch".to_string()),
-            //datatype: None,
-            //},
-            //Operation::Link{
-            //object_id: ObjectID::Root,
-            //key: Key("birds".to_string()),
-            //value: ObjectID::ID("birds".to_string()),
-            //}
-            //]
-            //}],
-            //expected_patch: Patch {
-            //can_undo: false,
-            //can_redo: false,
-            //clock: Clock::empty().with_dependency(&actor1, 1),
-            //deps: Clock::empty().with_dependency(&actor1, 1),
-            //diffs: vec![
-            //Diff{
-            //action: DiffAction::CreateList(ObjectID::ID("birds".to_string()), SequenceType::List),
-            //conflicts: Vec::new(),
-            //},
-            //Diff{
-
-            //}
-            //]
-            //}
-            //}
+            TestCase {
+                name: "create lists",
+                changes: vec![Change {
+                    actor_id: actor1.clone(),
+                    seq: 1,
+                    dependencies: Clock::empty(),
+                    message: None,
+                    operations: vec![
+                        Operation::MakeList {
+                            object_id: ObjectID::ID("birds".to_string()),
+                        },
+                        Operation::Insert {
+                            list_id: ObjectID::ID("birds".to_string()),
+                            key: ElementID::Head,
+                            elem: 1,
+                        },
+                        Operation::Set {
+                            object_id: ObjectID::ID("birds".to_string()),
+                            key: ElementID::from_actor_and_elem(actor1.clone(), 1).as_key(),
+                            value: PrimitiveValue::Str("chaffinch".to_string()),
+                            datatype: None,
+                        },
+                        Operation::Link {
+                            object_id: ObjectID::Root,
+                            key: Key("birds".to_string()),
+                            value: ObjectID::ID("birds".to_string()),
+                        },
+                    ],
+                }],
+                expected_patch: Patch {
+                    can_undo: false,
+                    can_redo: false,
+                    clock: Clock::empty().with_dependency(&actor1, 1),
+                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    diffs: vec![
+                        Diff {
+                            action: DiffAction::CreateList(
+                                ObjectID::ID("birds".to_string()),
+                                SequenceType::List,
+                            ),
+                            conflicts: Vec::new(),
+                        },
+                        Diff {
+                            action: DiffAction::InsertSequenceElement(
+                                ObjectID::ID("birds".to_string()),
+                                SequenceType::List,
+                                0,
+                                ElementValue::Primitive(PrimitiveValue::Str("chaffinch".to_string())),
+                                None,
+                                ElementID::from_actor_and_elem(actor1.clone(), 1)
+                            ),
+                            conflicts: Vec::new()
+                        },
+                        Diff {
+                            action: DiffAction::SetMapKey(
+                                ObjectID::Root,
+                                MapType::Map,
+                                Key("birds".to_string()),
+                                ElementValue::Link(ObjectID::ID("birds".to_string())),
+                                None,
+                            ),
+                            conflicts: Vec::new()
+                        }
+                    ],
+                },
+            },
         ];
 
         for testcase in testcases {

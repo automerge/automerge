@@ -57,7 +57,7 @@ impl ObjectHistory {
         prior_ops.incorporate_new_op(op_with_metadata, actor_histories)
     }
 
-    fn diff_for_key(&self, key: &Key) -> Result<Option<Diff>, AutomergeError> {
+    fn diff_for_key(&self, key: &Key, current_op: &OperationWithMetadata) -> Result<Option<Diff>, AutomergeError> {
         let diff = match self {
             ObjectHistory::Map {
                 object_id,
@@ -117,8 +117,12 @@ impl ObjectHistory {
                 sequence_type,
                 ..
             } => {
-                let ops_in_order = list_ops_in_order(operations_by_elemid, following)
-                    .expect("Internal error: corrupted list");
+                let ops_in_order: Vec<(ElementID, &ConcurrentOperations)> = list_ops_in_order(operations_by_elemid, following)
+                    .expect("Internal error: corrupted list")
+                    .into_iter()
+                    .filter(|(_, cops)| cops.active_op().map(|o| o != current_op).unwrap_or(true))
+                    .collect();
+
                 let element_id = key.as_element_id().map_err(|_| {
                     AutomergeError::InvalidObjectType(
                         "Received list operation with invalid element ID".to_string(),
@@ -126,8 +130,8 @@ impl ObjectHistory {
                 })?;
                 let maybe_existing_index: Option<u32> = ops_in_order
                     .iter()
+                    .filter_map(|(elem_id, ops)| ops.active_op().map(|_| elem_id))
                     .enumerate()
-                    .filter_map(|(i, (elem_id, ops))| ops.active_op().map(|_| (i, elem_id)))
                     .find(|(_, elem_id)| elem_id == &&element_id)
                     .map(|(index, _)| index as u32);
                 let maybe_ops = operations_by_elemid.get(&element_id);
@@ -193,9 +197,10 @@ impl ObjectHistory {
                                 action: DiffAction::InsertSequenceElement(
                                     object_id.clone(),
                                     sequence_type.clone(),
-                                    insertion_index + 1,
+                                    insertion_index,
                                     elem_value,
                                     datatype,
+                                    element_id.clone(),
                                 ),
                                 conflicts: cops.conflicts(),
                             }
@@ -278,7 +283,7 @@ impl ObjectStore {
                     insertions: HashMap::new(),
                     following: HashMap::new(),
                     max_elem: 0,
-                    sequence_type: SequenceType::Text,
+                    sequence_type: SequenceType::List,
                     object_id: object_id.clone(),
                 };
                 self.operations_by_object_id
@@ -328,7 +333,7 @@ impl ObjectStore {
                     .get_mut(&object_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
                 object.handle_mutating_op(op_with_metadata.clone(), actor_histories, key)?;
-                object.diff_for_key(key)?
+                object.diff_for_key(key, &op_with_metadata)?
             }
             Operation::Insert {
                 ref list_id,
