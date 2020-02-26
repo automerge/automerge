@@ -1,4 +1,4 @@
-use crate::{ActorID, Clock, DataType, Key, ObjectID, PrimitiveValue};
+use crate::{ActorID, Clock, DataType, Key, ObjectID, PrimitiveValue, ElementID};
 use serde::Serialize;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -31,7 +31,7 @@ pub enum DiffAction {
     RemoveMapKey(ObjectID, MapType, Key),
     SetMapKey(ObjectID, MapType, Key, ElementValue, Option<DataType>),
     RemoveSequenceElement(ObjectID, SequenceType, u32),
-    InsertSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
+    InsertSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>, ElementID),
     SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 

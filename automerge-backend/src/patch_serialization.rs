@@ -1,6 +1,6 @@
 use crate::{
     ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-    PrimitiveValue, SequenceType,
+    PrimitiveValue, SequenceType, ElementID
 };
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
@@ -162,11 +162,12 @@ impl Serialize for Diff {
                 map_serializer.serialize_entry("obj", &oid)?;
                 map_serializer.serialize_entry("index", &index)?;
             }
-            DiffAction::InsertSequenceElement(oid, seq_type, index, value, datatype) => {
+            DiffAction::InsertSequenceElement(oid, seq_type, index, value, datatype, element_id) => {
                 map_serializer.serialize_entry("action", "insert")?;
                 map_serializer.serialize_entry("type", &seq_type)?;
                 map_serializer.serialize_entry("obj", &oid)?;
                 map_serializer.serialize_entry("index", &index)?;
+                map_serializer.serialize_entry("elemId", &element_id)?;
                 match value {
                     ElementValue::Primitive(v) => map_serializer.serialize_entry("value", &v)?,
                     ElementValue::Link(linked_oid) => {
@@ -229,6 +230,7 @@ impl<'de> Deserialize<'de> for Diff {
                 let mut conflicts: Option<Vec<Conflict>> = None;
                 let mut index: Option<u32> = None;
                 let mut is_link: Option<bool> = None;
+                let mut elem_id: Option<ElementID> = None;
 
                 while let Some(map_key) = map.next_key::<String>()? {
                     match map_key.as_ref() {
@@ -291,6 +293,12 @@ impl<'de> Deserialize<'de> for Diff {
                                 return Err(Error::duplicate_field("link"));
                             }
                             is_link = Some(map.next_value()?);
+                        },
+                        "elemId" => {
+                            if elem_id.is_some() {
+                                return Err(Error::duplicate_field("elemId"));
+                            }
+                            elem_id = Some(map.next_value()?);
                         }
                         _ => return Err(Error::unknown_field(&map_key, FIELDS)),
                     }
@@ -428,6 +436,7 @@ impl<'de> Deserialize<'de> for Diff {
                             let obj_id = object_id.ok_or_else(|| Error::missing_field("obj"))?;
                             let type_str = type_str.ok_or_else(|| Error::missing_field("type"))?;
                             let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                            let elem_id = elem_id.ok_or_else(|| Error::missing_field("elemId"))?;
                             let seq_type = match type_str.as_ref() {
                                 "list" => SequenceType::List,
                                 "text" => SequenceType::Text,
@@ -440,7 +449,7 @@ impl<'de> Deserialize<'de> for Diff {
                             };
                             let index = index.ok_or_else(|| Error::missing_field("index"))?;
                             DiffAction::InsertSequenceElement(
-                                obj_id, seq_type, index, value, datatype,
+                                obj_id, seq_type, index, value, datatype, elem_id,
                             )
                         }
                         _ => {
@@ -470,7 +479,7 @@ mod tests {
     //use super::*;
     use crate::{
         ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-        PrimitiveValue, SequenceType,
+        PrimitiveValue, SequenceType, ElementID
     };
     use serde_json;
 
@@ -763,6 +772,7 @@ mod tests {
                         5,
                         ElementValue::Primitive(PrimitiveValue::Str("hi".to_string())),
                         None,
+                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1)
                     ),
                     conflicts: Vec::new(),
                 },
@@ -774,7 +784,8 @@ mod tests {
                         "type": "list",
                         "index": 5,
                         "value": "hi",
-                        "conflicts": []
+                        "conflicts": [],
+                        "elemId": "someactor:1"
                     }
                     "#,
                 )
@@ -789,6 +800,7 @@ mod tests {
                         5,
                         ElementValue::Link(ObjectID::ID("5678".to_string())),
                         Some(DataType::Timestamp),
+                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1)
                     ),
                     conflicts: Vec::new(),
                 },
@@ -802,7 +814,8 @@ mod tests {
                         "value": "5678",
                         "link": true,
                         "conflicts": [],
-                        "datatype": "timestamp"
+                        "datatype": "timestamp",
+                        "elemId": "someactor:1"
                     }
                     "#,
                 )
