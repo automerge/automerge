@@ -8,10 +8,12 @@ mod operation_with_metadata;
 mod patch;
 mod patch_serialization;
 mod protocol;
+mod protocol_serialization;
 mod value;
 
 pub use crate::protocol::{
     ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
+    ChangeRequest, ChangeRequestType
 };
 pub use actor_histories::ActorHistories;
 pub use backend::Backend;
