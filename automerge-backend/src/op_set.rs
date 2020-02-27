@@ -13,7 +13,7 @@ use crate::object_store::{ObjectHistory, ObjectStore, MapState, ListState};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
-use crate::Diff;
+use crate::{Diff, DiffAction};
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
@@ -107,7 +107,7 @@ impl OpSet {
         self.clock = self
             .clock
             .with_dependency(&change.actor_id.clone(), change.seq);
-        Ok(diffs)
+        Ok(Self::simplify_diffs(diffs))
     }
 
     pub fn root_value(&self) -> &Value {
@@ -213,6 +213,36 @@ impl OpSet {
 
         Ok(Value::List(result))
     }
+
+    /// Remove any redundant diffs 
+    fn simplify_diffs(diffs: Vec<Diff>) -> Vec<Diff> {
+        let mut result = Vec::new();
+        let mut known_maxelems: HashMap<ObjectID, u32> = HashMap::new();
+
+        for diff in diffs.into_iter().rev() {
+            if let DiffAction::MaxElem(ref oid, max_elem, _) = diff.action {
+                if let Some(current_max) = known_maxelems.get(oid){
+                    if current_max < &max_elem {
+                        known_maxelems.insert(oid.clone(), max_elem);
+                        result.push(diff);
+                    }
+                }
+            } else if let DiffAction::InsertSequenceElement(ref oid, _, _, _, _, ElementID::SpecificElementID(_, max_elem)) = diff.action {
+                if let Some(current_max) = known_maxelems.get(&oid) {
+                    if current_max < &max_elem {
+                        known_maxelems.insert(oid.clone(), max_elem);
+                    }
+                }
+                result.push(diff);
+            } else {
+                result.push(diff);
+            }
+        };
+        
+        result.reverse();
+        result
+    }
+
 }
 
 pub fn list_ops_in_order<'a, S: BuildHasher>(

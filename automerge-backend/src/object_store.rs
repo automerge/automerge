@@ -140,7 +140,7 @@ impl ListState {
         actor_id: &ActorID,
         elem_id: &ElementID,
         elem: u32,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Diff, AutomergeError> {
         let inserted_elemid = ElementID::SpecificElementID(actor_id.clone(), elem);
         if self.insertions.contains_key(&inserted_elemid) {
             return Err(AutomergeError::InvalidChange(format!(
@@ -156,11 +156,18 @@ impl ListState {
             .or_insert_with(Vec::new);
         following_ops.push(inserted_elemid.clone());
 
-        self.operations_by_elemid
+        let ops = self.operations_by_elemid
             .entry(inserted_elemid)
             .or_insert_with(ConcurrentOperations::new);
         self.max_elem = std::cmp::max(self.max_elem, elem);
-        Ok(())
+        Ok(Diff {
+            action: DiffAction::MaxElem(
+                self.object_id.clone(),
+                self.max_elem, 
+                self.sequence_type.clone()
+            ),
+            conflicts: ops.conflicts(),
+        })
     }
 }
 
@@ -367,10 +374,9 @@ impl ObjectStore {
                         )))
                     }
                     ObjectHistory::List(liststate) => {
-                        liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?
+                        Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?)
                     }
-                };
-                None
+                }
             }
         };
         Ok(diff)
