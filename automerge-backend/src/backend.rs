@@ -1,4 +1,4 @@
-use crate::{ActorID, AutomergeError, Change, Clock, Diff, OpSet, Patch};
+use crate::{ActorID, AutomergeError, Change, Clock, Diff, OpSet, Patch, ChangeRequest};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -27,7 +27,7 @@ impl Backend {
         })
     }
 
-    pub fn apply_local_change(&mut self, _change: Change) -> Result<Patch, AutomergeError> {
+    pub fn apply_local_change(&mut self, _change: ChangeRequest) -> Result<Patch, AutomergeError> {
         Ok(Patch::empty())
     }
 
