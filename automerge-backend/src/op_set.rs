@@ -9,7 +9,7 @@
 use crate::actor_histories::ActorHistories;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::object_store::{ObjectHistory, ObjectStore, MapState, ListState};
+use crate::object_store::{ListState, MapState, ObjectHistory, ObjectStore};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
@@ -214,35 +214,40 @@ impl OpSet {
         Ok(Value::List(result))
     }
 
-    /// Remove any redundant diffs 
+    /// Remove any redundant diffs
     fn simplify_diffs(diffs: Vec<Diff>) -> Vec<Diff> {
         let mut result = Vec::new();
         let mut known_maxelems: HashMap<ObjectID, u32> = HashMap::new();
 
         for diff in diffs.into_iter().rev() {
             if let DiffAction::MaxElem(ref oid, max_elem, _) = diff.action {
-                if let Some(current_max) = known_maxelems.get(oid){
-                    if current_max < &max_elem {
-                        known_maxelems.insert(oid.clone(), max_elem);
-                        result.push(diff);
-                    }
+                let current_max = known_maxelems.get(oid).unwrap_or(&0);
+                if current_max < &max_elem {
+                    known_maxelems.insert(oid.clone(), max_elem);
+                    result.push(diff);
                 }
-            } else if let DiffAction::InsertSequenceElement(ref oid, _, _, _, _, ElementID::SpecificElementID(_, max_elem)) = diff.action {
-                if let Some(current_max) = known_maxelems.get(&oid) {
-                    if current_max < &max_elem {
-                        known_maxelems.insert(oid.clone(), max_elem);
-                    }
+            } else if let DiffAction::InsertSequenceElement(
+                ref oid,
+                _,
+                _,
+                _,
+                _,
+                ElementID::SpecificElementID(_, max_elem),
+            ) = diff.action
+            {
+                let current_max = known_maxelems.get(oid).unwrap_or(&0);
+                if current_max < &max_elem {
+                    known_maxelems.insert(oid.clone(), max_elem);
                 }
                 result.push(diff);
             } else {
                 result.push(diff);
             }
-        };
-        
+        }
+
         result.reverse();
         result
     }
-
 }
 
 pub fn list_ops_in_order<'a, S: BuildHasher>(
