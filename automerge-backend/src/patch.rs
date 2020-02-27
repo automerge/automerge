@@ -51,21 +51,27 @@ pub struct Diff {
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub actor: Option<ActorID>,
     pub can_undo: bool,
     pub can_redo: bool,
     pub clock: Clock,
     pub deps: Clock,
     pub diffs: Vec<Diff>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub seq: Option<u32>
 }
 
 impl Patch {
     pub fn empty() -> Patch {
         Patch {
+            actor: None,
             can_undo: false,
             can_redo: false,
             clock: Clock::empty(),
             deps: Clock::empty(),
             diffs: Vec::new(),
+            seq: None,
         }
     }
 }

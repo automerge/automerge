@@ -19,16 +19,29 @@ impl Backend {
             .collect::<Result<Vec<Vec<Diff>>, AutomergeError>>()?;
         let diffs = nested_diffs.into_iter().flatten().collect();
         Ok(Patch {
+            actor: None,
             can_undo: false,
             can_redo: false,
             clock: self.op_set.clock.clone(),
             deps: self.op_set.clock.clone(),
             diffs,
+            seq: None,
         })
     }
 
-    pub fn apply_local_change(&mut self, _change: Change) -> Result<Patch, AutomergeError> {
-        Ok(Patch::empty())
+    pub fn apply_local_change(&mut self, change: Change) -> Result<Patch, AutomergeError> {
+        let actor_id = change.actor_id.clone();
+        let seq = change.seq;
+        let diffs = self.op_set.apply_change(change)?;
+        Ok(Patch {
+            actor: Some(actor_id),
+            can_undo: true,
+            can_redo: false,
+            clock: self.op_set.clock.clone(),
+            deps: self.op_set.clock.clone(),
+            diffs,
+            seq: Some(seq),
+        })
     }
 
     pub fn get_patch(&self) -> Patch {

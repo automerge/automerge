@@ -7,6 +7,7 @@
   "main": "./pkg/index.js",
   "scripts": {
     "build": "rimraf pkg && wasm-pack build --target nodejs --out-name index",
+    "release": "rimraf pkg && wasm-pack build --target nodejs --out-name index --release",
     "mocha": "yarn build && mocha --bail",
     "test": "cargo test && wasm-pack test --node"
   },
