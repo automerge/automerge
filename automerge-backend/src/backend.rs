@@ -371,25 +371,6 @@ mod tests {
                     ],
                 },
             },
-            //it('should apply updates inside lists', () => {
-              //const birds = uuid(), actor = uuid()
-              //const change1 = {actor, seq: 1, deps: {}, ops: [
-                //{action: 'makeList', obj: birds},
-                //{action: 'ins',      obj: birds,   key: '_head',      elem: 1},
-                //{action: 'set',      obj: birds,   key: `${actor}:1`, value: 'chaffinch'},
-                //{action: 'link',     obj: ROOT_ID, key: 'birds',      value: birds}
-              //]}
-              //const change2 = {actor, seq: 2, deps: {}, ops: [
-                //{action: 'set',      obj: birds,   key: `${actor}:1`, value: 'greenfinch'}
-              //]}
-              //const s0 = Backend.init()
-              //const [s1, patch1] = Backend.applyChanges(s0, [change1])
-              //const [s2, patch2] = Backend.applyChanges(s1, [change2])
-              //assert.deepEqual(patch2, {
-                //canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
-                //diffs: [{action: 'set', obj: birds, type: 'list', path: ['birds'], index: 0, value: 'greenfinch'}]
-              //})
-            //})
             TestCase {
                 name: "apply update inside lists",
                 changes: vec![
@@ -448,6 +429,79 @@ mod tests {
                     }]
                 }
             },
+            //it('should delete list elements', () => {
+              //const birds = uuid(), actor = uuid()
+              //const change1 = {actor, seq: 1, deps: {}, ops: [
+                //{action: 'makeList', obj: birds},
+                //{action: 'ins',      obj: birds,   key: '_head',      elem: 1},
+                //{action: 'set',      obj: birds,   key: `${actor}:1`, value: 'chaffinch'},
+                //{action: 'link',     obj: ROOT_ID, key: 'birds',      value: birds}
+              //]}
+              //const change2 = {actor, seq: 2, deps: {}, ops: [
+                //{action: 'del',      obj: birds,   key: `${actor}:1`}
+              //]}
+              //const s0 = Backend.init()
+              //const [s1, patch1] = Backend.applyChanges(s0, [change1])
+              //const [s2, patch2] = Backend.applyChanges(s1, [change2])
+              //assert.deepEqual(patch2, {
+                //canUndo: false, canRedo: false, clock: {[actor]: 2}, deps: {[actor]: 2},
+                //diffs: [{action: 'remove', obj: birds, type: 'list', path: ['birds'], index: 0}]
+              //})
+            //})
+            TestCase {
+                name: "delete list elements",
+                changes: vec![
+                    Change{
+                        actor_id: actor1.clone(),
+                        seq: 1,
+                        dependencies: Clock::empty(),
+                        message: None,
+                        operations: vec![
+                            Operation::MakeList{object_id: ObjectID::ID("birds".to_string())},
+                            Operation::Insert{
+                                list_id: ObjectID::ID("birds".to_string()),
+                                key: ElementID::Head,
+                                elem: 1
+                            },
+                            Operation::Set{
+                                object_id: ObjectID::ID("birds".to_string()),
+                                key: Key("actor1:1".to_string()),
+                                value: PrimitiveValue::Str("chaffinch".to_string()),
+                                datatype: None
+                            },
+                            Operation::Link{
+                                object_id: ObjectID::Root,
+                                key: Key("birds".to_string()),
+                                value: ObjectID::ID("birds".to_string()),
+                            }
+                        ]
+                    },
+                    Change{
+                        actor_id: actor1.clone(),
+                        seq: 2,
+                        dependencies: Clock::empty(),
+                        message: None,
+                        operations: vec![Operation::Delete{
+                            object_id: ObjectID::ID("birds".to_string()),
+                            key: Key("actor1:1".to_string())
+                        }]
+                    }
+                ],
+                expected_patch: Patch {
+                    can_undo: false,
+                    can_redo: false,
+                    clock: Clock::empty().with_dependency(&actor1, 2),
+                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    diffs: vec![Diff{
+                        action: DiffAction::RemoveSequenceElement(
+                            ObjectID::ID("birds".to_string()),
+                            SequenceType::List,
+                            0
+                        ),
+                        conflicts: Vec::new(),
+                    }]
+                }
+            }
         ];
 
         for testcase in testcases {
