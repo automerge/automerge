@@ -5,7 +5,7 @@ use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
 use automerge_backend::list_ops_in_order;
 use automerge_backend::ActorHistories;
-use automerge_backend::ObjectHistory;
+use automerge_backend::ObjectState;
 use automerge_backend::ObjectStore;
 use automerge_backend::MapState;
 use automerge_backend::ListState;
@@ -207,7 +207,7 @@ impl<'a> ChangeContext<'a> {
         }
     }
 
-    fn get_operations_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
+    fn get_operations_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
         self.object_store.history_for_object_id(object_id)
     }
 
@@ -455,10 +455,10 @@ impl<'a> ChangeContext<'a> {
                     let op = self
                         .get_operations_for_object_id(&containing_object_id)
                         .and_then(|history| match history {
-                            ObjectHistory::Map(MapState {
+                            ObjectState::Map(MapState {
                                 operations_by_key, ..
                             }) => Some(operations_by_key),
-                            ObjectHistory::List { .. } => None,
+                            ObjectState::List { .. } => None,
                         })
                         .and_then(|kvs| kvs.get(key))
                         .and_then(|cops| cops.active_op())
@@ -470,11 +470,11 @@ impl<'a> ChangeContext<'a> {
                         Some(Operation::Link { value, .. }) => {
                             match self.get_operations_for_object_id(&value) {
                                 None => return None,
-                                Some(ObjectHistory::Map { .. }) => {
+                                Some(ObjectState::Map { .. }) => {
                                     resolved_elements.push(ResolvedPathElement::Map(value.clone()));
                                     containing_object_id = value.clone()
                                 }
-                                Some(ObjectHistory::List(ListState{ max_elem, .. })) => {
+                                Some(ObjectState::List(ListState{ max_elem, .. })) => {
                                     resolved_elements
                                         .push(ResolvedPathElement::List(value.clone(), *max_elem));
                                     containing_object_id = value.clone()
@@ -489,7 +489,7 @@ impl<'a> ChangeContext<'a> {
                 PathElement::Index(index) => match index {
                     ListIndex::Head => {
                         match self.get_operations_for_object_id(&containing_object_id) {
-                            Some(ObjectHistory::List { .. }) => {
+                            Some(ObjectState::List { .. }) => {
                                 resolved_elements.push(ResolvedPathElement::Index(ElementID::Head))
                             }
                             _ => return None,
@@ -499,12 +499,12 @@ impl<'a> ChangeContext<'a> {
                         let op = self
                             .get_operations_for_object_id(&containing_object_id)
                             .and_then(|history| match history {
-                                ObjectHistory::List(ListState{
+                                ObjectState::List(ListState{
                                     operations_by_elemid,
                                     following,
                                     ..
                                 }) => list_ops_in_order(operations_by_elemid, following).ok(),
-                                ObjectHistory::Map { .. } => None,
+                                ObjectState::Map { .. } => None,
                             })
                             .and_then(|ops| ops.get(*i).cloned())
                             .and_then(|(element_id, cops)| {
@@ -518,12 +518,12 @@ impl<'a> ChangeContext<'a> {
                             Some((_, Operation::Link { value, .. })) => {
                                 match self.get_operations_for_object_id(&value) {
                                     None => return None,
-                                    Some(ObjectHistory::Map { .. }) => {
+                                    Some(ObjectState::Map { .. }) => {
                                         resolved_elements
                                             .push(ResolvedPathElement::Map(value.clone()));
                                         containing_object_id = value
                                     }
-                                    Some(ObjectHistory::List(ListState{ max_elem, .. })) => {
+                                    Some(ObjectState::List(ListState{ max_elem, .. })) => {
                                         resolved_elements.push(ResolvedPathElement::List(
                                             value.clone(),
                                             *max_elem,

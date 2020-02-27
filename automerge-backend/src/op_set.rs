@@ -9,7 +9,7 @@
 use crate::actor_histories::ActorHistories;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::object_store::{ListState, MapState, ObjectHistory, ObjectStore};
+use crate::object_store::{ListState, MapState, ObjectState, ObjectStore};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
@@ -122,10 +122,10 @@ impl OpSet {
             .history_for_object_id(object_id)
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
         match object_history {
-            ObjectHistory::Map(MapState {
+            ObjectState::Map(MapState {
                 operations_by_key, ..
             }) => self.interpret_map_ops(operations_by_key),
-            ObjectHistory::List(ListState {
+            ObjectState::List(ListState {
                 operations_by_elemid,
                 insertions,
                 following,
