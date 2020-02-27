@@ -41,7 +41,7 @@ impl Backend {
         match change.request_type {
             ChangeRequestType::Change(ops) => {
                 let diffs = self.op_set.apply_change(Change {
-                    actor_id: change.actor_id.clone(),
+                    actor_id: change.actor_id,
                     operations: ops,
                     seq: seq,
                     message: change.message,
@@ -136,6 +136,8 @@ mod tests {
                         ),
                         conflicts: Vec::new(),
                     }],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -180,6 +182,8 @@ mod tests {
                         ),
                         conflicts: Vec::new(),
                     }],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -235,6 +239,8 @@ mod tests {
                             datatype: None,
                         }],
                     }],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -276,6 +282,8 @@ mod tests {
                         ),
                         conflicts: Vec::new(),
                     }],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -336,6 +344,8 @@ mod tests {
                             conflicts: Vec::new(),
                         },
                     ],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -402,6 +412,8 @@ mod tests {
                             conflicts: Vec::new()
                         }
                     ],
+                    seq: None,
+                    actor: None,
                 },
             },
             TestCase {
@@ -459,7 +471,9 @@ mod tests {
                             None,
                         ),
                         conflicts: Vec::new(),
-                    }]
+                    }],
+                    seq: None,
+                    actor: None,
                 }
             },
             TestCase {
@@ -513,7 +527,9 @@ mod tests {
                             0
                         ),
                         conflicts: Vec::new(),
-                    }]
+                    }],
+                    seq: None,
+                    actor: None,
                 }
             },
             TestCase {
@@ -563,7 +579,9 @@ mod tests {
                             SequenceType::List,
                         ),
                         conflicts: Vec::new(),
-                    }]
+                    }],
+                    seq: None,
+                    actor: None,
                 }
             }
         ];

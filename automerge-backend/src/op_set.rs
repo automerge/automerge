@@ -36,6 +36,9 @@ pub struct OpSet {
     pub actor_histories: ActorHistories,
     queue: Vec<Change>,
     pub clock: Clock,
+    undo_pos: u32,
+    undo_stack: Vec<Operation>,
+    redo_stack: Vec<Operation>,
     state: Value,
 }
 
@@ -47,6 +50,9 @@ impl OpSet {
             queue: Vec::new(),
             clock: Clock::empty(),
             state: Value::Map(HashMap::new()),
+            undo_pos: 0,
+            undo_stack: vec![],
+            redo_stack: vec![],
         }
     }
 
