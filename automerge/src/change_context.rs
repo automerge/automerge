@@ -7,6 +7,8 @@ use automerge_backend::list_ops_in_order;
 use automerge_backend::ActorHistories;
 use automerge_backend::ObjectHistory;
 use automerge_backend::ObjectStore;
+use automerge_backend::MapState;
+use automerge_backend::ListState;
 use automerge_backend::OperationWithMetadata;
 use automerge_backend::Value;
 use automerge_backend::{
@@ -453,9 +455,9 @@ impl<'a> ChangeContext<'a> {
                     let op = self
                         .get_operations_for_object_id(&containing_object_id)
                         .and_then(|history| match history {
-                            ObjectHistory::Map {
+                            ObjectHistory::Map(MapState {
                                 operations_by_key, ..
-                            } => Some(operations_by_key),
+                            }) => Some(operations_by_key),
                             ObjectHistory::List { .. } => None,
                         })
                         .and_then(|kvs| kvs.get(key))
@@ -472,7 +474,7 @@ impl<'a> ChangeContext<'a> {
                                     resolved_elements.push(ResolvedPathElement::Map(value.clone()));
                                     containing_object_id = value.clone()
                                 }
-                                Some(ObjectHistory::List { max_elem, .. }) => {
+                                Some(ObjectHistory::List(ListState{ max_elem, .. })) => {
                                     resolved_elements
                                         .push(ResolvedPathElement::List(value.clone(), *max_elem));
                                     containing_object_id = value.clone()
@@ -497,11 +499,11 @@ impl<'a> ChangeContext<'a> {
                         let op = self
                             .get_operations_for_object_id(&containing_object_id)
                             .and_then(|history| match history {
-                                ObjectHistory::List {
+                                ObjectHistory::List(ListState{
                                     operations_by_elemid,
                                     following,
                                     ..
-                                } => list_ops_in_order(operations_by_elemid, following).ok(),
+                                }) => list_ops_in_order(operations_by_elemid, following).ok(),
                                 ObjectHistory::Map { .. } => None,
                             })
                             .and_then(|ops| ops.get(*i).cloned())
@@ -521,7 +523,7 @@ impl<'a> ChangeContext<'a> {
                                             .push(ResolvedPathElement::Map(value.clone()));
                                         containing_object_id = value
                                     }
-                                    Some(ObjectHistory::List { max_elem, .. }) => {
+                                    Some(ObjectHistory::List(ListState{ max_elem, .. })) => {
                                         resolved_elements.push(ResolvedPathElement::List(
                                             value.clone(),
                                             *max_elem,

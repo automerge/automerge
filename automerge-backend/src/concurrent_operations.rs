@@ -1,4 +1,3 @@
-use crate::patch::Diff;
 use crate::actor_histories::ActorHistories;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;

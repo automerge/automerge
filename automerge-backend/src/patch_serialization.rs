@@ -505,8 +505,7 @@ mod tests {
                     {
                         "action": "create",
                         "obj": "1234",
-                        "type": "map",
-                        "conflicts": []
+                        "type": "map"
                     }
                     "#,
                 )
@@ -523,8 +522,7 @@ mod tests {
                     {
                         "action": "create",
                         "obj": "1234",
-                        "type": "table",
-                        "conflicts": []
+                        "type": "table"
                     }
                     "#,
                 )
@@ -544,8 +542,7 @@ mod tests {
                     {
                         "action": "create",
                         "obj": "1234",
-                        "type": "list",
-                        "conflicts": []
+                        "type": "list"
                     }
                     "#,
                 )
@@ -565,8 +562,7 @@ mod tests {
                     {
                         "action": "create",
                         "obj": "1234",
-                        "type": "text",
-                        "conflicts": []
+                        "type": "text"
                     }
                     "#,
                 )
@@ -588,8 +584,7 @@ mod tests {
                         "action": "maxElem",
                         "obj": "1234",
                         "type": "list",
-                        "value": 4,
-                        "conflicts": []
+                        "value": 4
                     }
                     "#,
                 )
@@ -611,8 +606,7 @@ mod tests {
                         "action": "maxElem",
                         "obj": "1234",
                         "type": "text",
-                        "value": 4,
-                        "conflicts": []
+                        "value": 4
                     }
                     "#,
                 )
@@ -634,8 +628,7 @@ mod tests {
                         "action": "remove",
                         "obj": "1234",
                         "type": "map",
-                        "key": "key",
-                        "conflicts": []
+                        "key": "key"
                     }
                     "#,
                 )
@@ -657,8 +650,7 @@ mod tests {
                         "action": "remove",
                         "obj": "1234",
                         "type": "table",
-                        "key": "key",
-                        "conflicts": []
+                        "key": "key"
                     }
                     "#,
                 )
@@ -684,8 +676,7 @@ mod tests {
                         "type": "map",
                         "key": "key",
                         "value": "5678",
-                        "link": true,
-                        "conflicts": []
+                        "link": true
                     }
                     "#,
                 )
@@ -712,8 +703,7 @@ mod tests {
                         "key": "key",
                         "value": "5678",
                         "link": true,
-                        "datatype": "counter",
-                        "conflicts": []
+                        "datatype": "counter"
                     }
                     "#,
                 )
@@ -735,8 +725,7 @@ mod tests {
                         "action": "remove",
                         "obj": "1234",
                         "type": "list",
-                        "index": 5,
-                        "conflicts": []
+                        "index": 5
                     }
                     "#,
                 )
@@ -758,8 +747,7 @@ mod tests {
                         "action": "remove",
                         "obj": "1234",
                         "type": "text",
-                        "index": 5,
-                        "conflicts": []
+                        "index": 5
                     }
                     "#,
                 )
@@ -786,7 +774,6 @@ mod tests {
                         "type": "list",
                         "index": 5,
                         "value": "hi",
-                        "conflicts": [],
                         "elemId": "someactor:1"
                     }
                     "#,
@@ -815,7 +802,6 @@ mod tests {
                         "index": 5,
                         "value": "5678",
                         "link": true,
-                        "conflicts": [],
                         "datatype": "timestamp",
                         "elemId": "someactor:1"
                     }
@@ -843,8 +829,7 @@ mod tests {
                         "type": "text",
                         "index": 5,
                         "value": "5678",
-                        "link": true,
-                        "conflicts": []
+                        "link": true
                     }
                     "#,
                 )
@@ -870,8 +855,7 @@ mod tests {
                         "type": "list",
                         "index": 5,
                         "value": "hi",
-                        "datatype": "counter",
-                        "conflicts": []
+                        "datatype": "counter"
                     }
                     "#,
                 )
