@@ -14,18 +14,18 @@ use std::collections::HashMap;
 /// a sequence (tables and text are effectively the maps and sequences
 /// respectively).
 #[derive(Debug, Clone, PartialEq)]
-pub enum ObjectHistory {
+pub enum ObjectState {
     Map(MapState),
     List(ListState),
 }
 
-impl ObjectHistory {
-    fn new_map(map_type: MapType, object_id: ObjectID) -> ObjectHistory {
-        ObjectHistory::Map(MapState::new(map_type, object_id))
+impl ObjectState {
+    fn new_map(map_type: MapType, object_id: ObjectID) -> ObjectState {
+        ObjectState::Map(MapState::new(map_type, object_id))
     }
 
-    fn new_sequence(sequence_type: SequenceType, object_id: ObjectID) -> ObjectHistory {
-        ObjectHistory::List(ListState::new(sequence_type, object_id))
+    fn new_sequence(sequence_type: SequenceType, object_id: ObjectID) -> ObjectState {
+        ObjectState::List(ListState::new(sequence_type, object_id))
     }
 }
 
@@ -244,7 +244,7 @@ impl MapState {
     }
 }
 
-impl ObjectHistory {
+impl ObjectState {
     fn handle_mutating_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
@@ -252,10 +252,10 @@ impl ObjectHistory {
         key: &Key,
     ) -> Result<Option<Diff>, AutomergeError> {
         match self {
-            ObjectHistory::Map(mapstate) => {
+            ObjectState::Map(mapstate) => {
                 mapstate.handle_mutating_op(op_with_metadata, actor_histories, key)
             }
-            ObjectHistory::List(liststate) => {
+            ObjectState::List(liststate) => {
                 liststate.handle_mutating_op(op_with_metadata, actor_histories, key)
             }
         }
@@ -266,12 +266,12 @@ impl ObjectHistory {
 /// for each object ID and for the logic of incorporating a new operation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectStore {
-    operations_by_object_id: HashMap<ObjectID, ObjectHistory>,
+    operations_by_object_id: HashMap<ObjectID, ObjectState>,
 }
 
 impl ObjectStore {
     pub(crate) fn new() -> ObjectStore {
-        let root = ObjectHistory::new_map(MapType::Map, ObjectID::Root);
+        let root = ObjectState::new_map(MapType::Map, ObjectID::Root);
         let mut ops_by_id = HashMap::new();
         ops_by_id.insert(ObjectID::Root, root);
         ObjectStore {
@@ -279,7 +279,7 @@ impl ObjectStore {
         }
     }
 
-    pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectHistory> {
+    pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
         self.operations_by_object_id.get(object_id)
     }
 
@@ -297,7 +297,7 @@ impl ObjectStore {
         //};
         let diff = match op_with_metadata.operation {
             Operation::MakeMap { object_id } => {
-                let object = ObjectHistory::new_map(MapType::Map, object_id.clone());
+                let object = ObjectState::new_map(MapType::Map, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
@@ -306,7 +306,7 @@ impl ObjectStore {
                 })
             }
             Operation::MakeTable { object_id } => {
-                let object = ObjectHistory::new_map(MapType::Table, object_id.clone());
+                let object = ObjectState::new_map(MapType::Table, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
@@ -315,7 +315,7 @@ impl ObjectStore {
                 })
             }
             Operation::MakeList { object_id } => {
-                let object = ObjectHistory::new_sequence(SequenceType::List, object_id.clone());
+                let object = ObjectState::new_sequence(SequenceType::List, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
@@ -324,7 +324,7 @@ impl ObjectStore {
                 })
             }
             Operation::MakeText { object_id } => {
-                let object = ObjectHistory::new_sequence(SequenceType::Text, object_id.clone());
+                let object = ObjectState::new_sequence(SequenceType::Text, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
@@ -367,13 +367,13 @@ impl ObjectStore {
                     .get_mut(&list_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(list_id.clone()))?;
                 match list {
-                    ObjectHistory::Map { .. } => {
+                    ObjectState::Map { .. } => {
                         return Err(AutomergeError::InvalidChange(format!(
                             "Insert operation received for object key (object ID: {:?}, key: {:?}",
                             list_id, key
                         )))
                     }
-                    ObjectHistory::List(liststate) => {
+                    ObjectState::List(liststate) => {
                         Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?)
                     }
                 }
