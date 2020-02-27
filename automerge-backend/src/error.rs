@@ -8,13 +8,14 @@ pub enum AutomergeError {
     MissingObjectError(ObjectID),
     InvalidObjectType(String),
     InvalidLinkTarget,
+    DuplicateChange(String),
     NotImplemented(String),
     InvalidChange(String),
 }
 
 impl fmt::Display for AutomergeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{:?}", self)
     }
 }
 

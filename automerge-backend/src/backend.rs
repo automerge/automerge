@@ -32,6 +32,12 @@ impl Backend {
     pub fn apply_local_change(&mut self, change: Change) -> Result<Patch, AutomergeError> {
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
+        if self.op_set.clock.seq_for(&actor_id) >= seq {
+            return Err(AutomergeError::DuplicateChange(
+                format!("Change request has already been applied {} {}",
+                actor_id.0,
+                seq)))
+        }
         let diffs = self.op_set.apply_change(change)?;
         Ok(Patch {
             actor: Some(actor_id),
