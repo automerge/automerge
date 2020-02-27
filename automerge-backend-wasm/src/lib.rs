@@ -1,5 +1,5 @@
 
-use automerge_backend::{ActorID, AutomergeError, Backend, Change, Clock};
+use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
 use js_sys::Array;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -45,7 +45,7 @@ pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValu
 
 #[wasm_bindgen(js_name = applyLocalChange)]
 pub fn apply_local_change(mut state: State, change: JsValue) -> Result<Array, JsValue> {
-    let c: Change = js_to_rust(change)?;
+    let c: ChangeRequest = js_to_rust(change)?;
     let patch = state
         .backend
         .apply_local_change(c)

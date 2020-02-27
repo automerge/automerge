@@ -1,4 +1,4 @@
-use crate::{ActorID, AutomergeError, Change, Clock, Diff, OpSet, Patch};
+use crate::{ActorID, AutomergeError, Change, Clock, Diff, OpSet, Patch, ChangeRequest, ChangeRequestType};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -29,7 +29,7 @@ impl Backend {
         })
     }
 
-    pub fn apply_local_change(&mut self, change: Change) -> Result<Patch, AutomergeError> {
+    pub fn apply_local_change(&mut self, change: ChangeRequest) -> Result<Patch, AutomergeError> {
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
         if self.op_set.clock.seq_for(&actor_id) >= seq {
@@ -38,16 +38,30 @@ impl Backend {
                 actor_id.0,
                 seq)))
         }
-        let diffs = self.op_set.apply_change(change)?;
-        Ok(Patch {
-            actor: Some(actor_id),
-            can_undo: true,
-            can_redo: false,
-            clock: self.op_set.clock.clone(),
-            deps: self.op_set.clock.clone(),
-            diffs,
-            seq: Some(seq),
-        })
+        match change.request_type {
+            ChangeRequestType::Change(ops) => {
+                let diffs = self.op_set.apply_change(Change {
+                    actor_id: change.actor_id.clone(),
+                    operations: ops,
+                    seq: seq,
+                    message: change.message,
+                    dependencies: change.dependencies,
+                })?;
+                Ok(Patch {
+                    actor: Some(actor_id),
+                    can_undo: true,
+                    can_redo: false,
+                    clock: self.op_set.clock.clone(),
+                    deps: self.op_set.clock.clone(),
+                    diffs,
+                    seq: Some(seq),
+                })
+            }, 
+            ChangeRequestType::Undo =>
+                Err(AutomergeError::NotImplemented("Undo".to_string())),
+            ChangeRequestType::Redo =>
+                Err(AutomergeError::NotImplemented("Redo".to_string())),
+        }
     }
 
     pub fn get_patch(&self) -> Patch {

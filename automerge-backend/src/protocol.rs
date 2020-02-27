@@ -309,6 +309,24 @@ pub struct Change {
     pub dependencies: Clock,
 }
 
+#[derive(PartialEq, Debug, Clone)]
+pub struct ChangeRequest {
+    pub actor_id: ActorID,
+    pub seq: u32,
+    pub message: Option<String>,
+    pub dependencies: Clock,
+    pub request_type: ChangeRequestType
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum ChangeRequestType {
+    Change(Vec<Operation>),
+    Undo,
+    Redo
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
