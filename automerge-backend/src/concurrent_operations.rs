@@ -51,11 +51,15 @@ impl ConcurrentOperations {
     }
 
     /// Updates this set of operations based on a new operation. 
+    ///
+    /// Returns the previous operations (multiple if concurrent) that this op
+    /// replaces
     pub(crate) fn incorporate_new_op(
         &mut self,
         new_op: OperationWithMetadata,
         actor_histories: &ActorHistories,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        let previous = self.operations.clone().into_iter().map(|o| o.operation).collect();
         let mut concurrent: Vec<OperationWithMetadata> = match new_op.operation {
             // If the operation is an increment op, then we are going to modify
             // any Set operations to reflect the increment ops in the next
@@ -108,7 +112,7 @@ impl ConcurrentOperations {
         concurrent.sort_by(|a, b| a.partial_cmp(b).unwrap());
         concurrent.reverse();
         self.operations = concurrent;
-        Ok(())
+        Ok(previous)
     }
 
 }

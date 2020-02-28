@@ -297,6 +297,22 @@ pub enum Operation {
     },
 }
 
+impl Operation {
+    pub fn object_id(&self) -> &ObjectID {
+        match self {
+            Operation::MakeMap{object_id}
+            | Operation::MakeTable{object_id}
+            | Operation::MakeList{object_id}
+            | Operation::MakeText{object_id}
+            | Operation::Insert{list_id: object_id, ..}
+            | Operation::Set{object_id, ..}
+            | Operation::Link{object_id, ..}
+            | Operation::Delete{object_id, ..}
+            | Operation::Increment{object_id,..} => object_id
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "actor")]

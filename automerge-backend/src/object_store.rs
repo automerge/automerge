@@ -52,12 +52,12 @@ impl ListState {
         }
     }
 
-    fn handle_mutating_op(
+    fn handle_assign_op(
         &mut self,
         op: OperationWithMetadata,
         actor_histories: &ActorHistories,
         key: &Key,
-    ) -> Result<Option<Diff>, AutomergeError> {
+    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
         let elem_id = key.as_element_id().map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", key.0)))?;
 
         // We have to clone this here in order to avoid holding a reference to
@@ -68,13 +68,13 @@ impl ListState {
 
         // This is a hack to avoid holding on to a mutable reference to self
         // when adding a new operation
-        let ops = {
+        let (undo_ops, ops) = {
             let mutable_ops = self
                 .operations_by_elemid
                 .entry(elem_id.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            mutable_ops.incorporate_new_op(op.clone(), actor_histories)?;
-            mutable_ops.clone()
+            let undo_ops = mutable_ops.incorporate_new_op(op.clone(), actor_histories)?;
+            (undo_ops, mutable_ops.clone())
         };
 
         let ops_in_order_after_this_op =
@@ -129,10 +129,10 @@ impl ListState {
             )),
             (None, None) => None,
         };
-        Ok(action.map(|action| Diff {
+        Ok((action.map(|action| Diff {
             action,
             conflicts: ops.conflicts(),
-        }))
+        }), undo_ops))
     }
 
     fn add_insertion(
@@ -188,21 +188,21 @@ impl MapState {
         }
     }
 
-    fn handle_mutating_op(
+    fn handle_assign_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
         actor_histories: &ActorHistories,
         key: &Key,
-    ) -> Result<Option<Diff>, AutomergeError> {
-        let ops = {
+    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+        let (undo_ops, ops) = {
             let mutable_ops = self
                 .operations_by_key
                 .entry(key.0.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            mutable_ops.incorporate_new_op(op_with_metadata, actor_histories)?;
-            mutable_ops.clone()
+            let undo_ops = mutable_ops.incorporate_new_op(op_with_metadata, actor_histories)?;
+            (undo_ops, mutable_ops.clone())
         };
-        Ok(Some(ops.active_op().map(|op| {
+        Ok((Some(ops.active_op().map(|op| {
             let action = match &op.operation {
                 Operation::Set {
                     object_id,
@@ -240,25 +240,39 @@ impl MapState {
                 key.clone()
             ),
             conflicts: ops.conflicts(),
-        })))
+        })), undo_ops))
     }
 }
 
 impl ObjectState {
-    fn handle_mutating_op(
+    fn handle_assign_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
         actor_histories: &ActorHistories,
         key: &Key,
-    ) -> Result<Option<Diff>, AutomergeError> {
-        match self {
+    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+
+        let (diff, mut undo_ops) = match self {
             ObjectState::Map(mapstate) => {
-                mapstate.handle_mutating_op(op_with_metadata, actor_histories, key)
+                mapstate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
             }
             ObjectState::List(liststate) => {
-                liststate.handle_mutating_op(op_with_metadata, actor_histories, key)
+                liststate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
             }
-        }
+        }?;
+
+        match &op_with_metadata.operation {
+            Operation::Increment{object_id, key, value} => {
+                undo_ops = vec![Operation::Increment{
+                    object_id: object_id.clone(),
+                    key: key.clone(),
+                    value: -value
+                }]
+            },
+            _ => {}
+        };
+
+        Ok((diff, undo_ops))
     }
 }
 
@@ -286,51 +300,51 @@ impl ObjectStore {
     /// Incorporates a new operation into the object store. The caller is
     /// responsible for ensuring that all causal dependencies of the new
     /// operation have already been applied.
+    ///
+    /// The return value is a tuple of a diff to send to the frontend, and 
+    /// a (possibly empty) vector of operations which will undo the operation
+    /// later.
     pub fn apply_operation(
         &mut self,
         actor_histories: &ActorHistories,
         op_with_metadata: OperationWithMetadata,
-    ) -> Result<Option<Diff>, AutomergeError> {
-        //let mut diff = Diff {
-        //action: DiffAction::CreateMap(ObjectID::Root, MapType::Map),
-        //conflicts: Vec::new(),
-        //};
-        let diff = match op_with_metadata.operation {
+    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+        let (diff, undo_ops) = match op_with_metadata.operation {
             Operation::MakeMap { object_id } => {
                 let object = ObjectState::new_map(MapType::Map, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                Some(Diff {
+                (Some(Diff {
                     action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
                     conflicts: Vec::new(),
-                })
+                }), Vec::new())
             }
             Operation::MakeTable { object_id } => {
                 let object = ObjectState::new_map(MapType::Table, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                Some(Diff {
+                (Some(Diff {
                     action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
                     conflicts: Vec::new(),
-                })
+                }), Vec::new())
             }
             Operation::MakeList { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::List, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                Some(Diff {
+                (Some(Diff {
                     action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
                     conflicts: Vec::new(),
-                })
+                }), Vec::new())
             }
             Operation::MakeText { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::Text, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                Some(Diff {
+                (Some(Diff {
                     action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
                     conflicts: Vec::new(),
-                })
+                }), Vec::new())
             }
             Operation::Link {
                 ref object_id,
@@ -355,7 +369,7 @@ impl ObjectStore {
                     .operations_by_object_id
                     .get_mut(&object_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-                object.handle_mutating_op(op_with_metadata.clone(), actor_histories, key)?
+                object.handle_assign_op(op_with_metadata.clone(), actor_histories, key)?
             }
             Operation::Insert {
                 ref list_id,
@@ -374,11 +388,11 @@ impl ObjectStore {
                         )))
                     }
                     ObjectState::List(liststate) => {
-                        Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?)
+                        (Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?), Vec::new())
                     }
                 }
             }
         };
-        Ok(diff)
+        Ok((diff, undo_ops))
     }
 }
