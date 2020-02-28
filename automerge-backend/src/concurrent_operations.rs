@@ -47,7 +47,7 @@ impl ConcurrentOperations {
                     })
                     .collect()
             })
-            .unwrap_or_else(|| Vec::new())
+            .unwrap_or_default()
     }
 
     /// Updates this set of operations based on a new operation.
