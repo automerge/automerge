@@ -75,18 +75,20 @@ impl ListState {
         let inserts = ops_in_order
             .iter()
             .rev()
-            .enumerate()
-            .filter_map(|(after,(_, ops))|
+            .filter_map(|(_, ops)| {
                 ops.active_op()
-                    .and_then(|op| list_op_to_assign_diff(&op.operation, &self.sequence_type, after as u32)
-                    .map(|action|
-                        Diff {
-                            action,
-                            conflicts: ops.conflicts(),
-                        }
-                    )
+                    .map(|active_op| (active_op, ops.conflicts()))
+            })
+            .enumerate()
+            .map(|(after, (active_op, conflicts))| Diff {
+                action: list_op_to_assign_diff(
+                    &active_op.operation,
+                    &self.sequence_type,
+                    after as u32,
                 )
-            );
+                .unwrap(),
+                conflicts,
+            });
 
         let tail = Diff {
             action: DiffAction::MaxElem(
@@ -249,20 +251,14 @@ impl MapState {
                 conflicts: Vec::new(),
             })
         }
-        diffs.extend(
-            self.operations_by_key
-                .iter()
-                .filter_map(|(_, ops)|
-                    ops.active_op()
-                        .and_then(|op| map_op_to_assign_diff(&op.operation, &self.map_type))
-                        .map(|action|
-                            Diff {
-                              action,
-                              conflicts: ops.conflicts(),
-                            }
-                        )
-                ),
-        );
+        diffs.extend(self.operations_by_key.iter().filter_map(|(_, ops)| {
+            ops.active_op()
+                .and_then(|op| map_op_to_assign_diff(&op.operation, &self.map_type))
+                .map(|action| Diff {
+                    action,
+                    conflicts: ops.conflicts(),
+                })
+        }));
         diffs
     }
 

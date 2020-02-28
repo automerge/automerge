@@ -82,7 +82,9 @@ impl Diff {
             oids.push(oid)
         }
         for c in self.conflicts.iter() {
-            if let Some(oid) = c.value.object_id() { oids.push(oid) }
+            if let Some(oid) = c.value.object_id() {
+                oids.push(oid)
+            }
         }
         oids
     }
