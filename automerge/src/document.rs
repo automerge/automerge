@@ -36,7 +36,7 @@ impl Document {
 
     /// Add a single change to the document
     pub fn apply_change(&mut self, change: Change) -> Result<(), AutomergeError> {
-        self.op_set.apply_change(change).map(|_| ())
+        self.op_set.apply_change(change, false).map(|_| ())
     }
 
     pub fn create_and_apply_change(
