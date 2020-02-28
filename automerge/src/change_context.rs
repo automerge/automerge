@@ -5,10 +5,10 @@ use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
 use automerge_backend::list_ops_in_order;
 use automerge_backend::ActorHistories;
+use automerge_backend::ListState;
+use automerge_backend::MapState;
 use automerge_backend::ObjectState;
 use automerge_backend::ObjectStore;
-use automerge_backend::MapState;
-use automerge_backend::ListState;
 use automerge_backend::OperationWithMetadata;
 use automerge_backend::Value;
 use automerge_backend::{
@@ -474,7 +474,7 @@ impl<'a> ChangeContext<'a> {
                                     resolved_elements.push(ResolvedPathElement::Map(value.clone()));
                                     containing_object_id = value.clone()
                                 }
-                                Some(ObjectState::List(ListState{ max_elem, .. })) => {
+                                Some(ObjectState::List(ListState { max_elem, .. })) => {
                                     resolved_elements
                                         .push(ResolvedPathElement::List(value.clone(), *max_elem));
                                     containing_object_id = value.clone()
@@ -499,7 +499,7 @@ impl<'a> ChangeContext<'a> {
                         let op = self
                             .get_operations_for_object_id(&containing_object_id)
                             .and_then(|history| match history {
-                                ObjectState::List(ListState{
+                                ObjectState::List(ListState {
                                     operations_by_elemid,
                                     following,
                                     ..
@@ -523,7 +523,7 @@ impl<'a> ChangeContext<'a> {
                                             .push(ResolvedPathElement::Map(value.clone()));
                                         containing_object_id = value
                                     }
-                                    Some(ObjectState::List(ListState{ max_elem, .. })) => {
+                                    Some(ObjectState::List(ListState { max_elem, .. })) => {
                                         resolved_elements.push(ResolvedPathElement::List(
                                             value.clone(),
                                             *max_elem,

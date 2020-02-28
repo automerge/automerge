@@ -1,6 +1,6 @@
 use crate::{
-    ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-    PrimitiveValue, SequenceType, ElementID
+    ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID,
+    PrimitiveValue, SequenceType,
 };
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
@@ -116,7 +116,7 @@ impl Serialize for Diff {
     {
         let mut map_serializer = serializer.serialize_map(None)?;
         if self.conflicts.len() > 0 {
-          map_serializer.serialize_entry("conflicts", &self.conflicts)?;
+            map_serializer.serialize_entry("conflicts", &self.conflicts)?;
         }
         match &self.action {
             DiffAction::CreateMap(oid, map_type) => {
@@ -164,7 +164,14 @@ impl Serialize for Diff {
                 map_serializer.serialize_entry("obj", &oid)?;
                 map_serializer.serialize_entry("index", &index)?;
             }
-            DiffAction::InsertSequenceElement(oid, seq_type, index, value, datatype, element_id) => {
+            DiffAction::InsertSequenceElement(
+                oid,
+                seq_type,
+                index,
+                value,
+                datatype,
+                element_id,
+            ) => {
                 map_serializer.serialize_entry("action", "insert")?;
                 map_serializer.serialize_entry("type", &seq_type)?;
                 map_serializer.serialize_entry("obj", &oid)?;
@@ -295,7 +302,7 @@ impl<'de> Deserialize<'de> for Diff {
                                 return Err(Error::duplicate_field("link"));
                             }
                             is_link = Some(map.next_value()?);
-                        },
+                        }
                         "elemId" => {
                             if elem_id.is_some() {
                                 return Err(Error::duplicate_field("elemId"));
@@ -480,8 +487,8 @@ impl<'de> Deserialize<'de> for Diff {
 mod tests {
     //use super::*;
     use crate::{
-        ActorID, Conflict, DataType, Diff, DiffAction, ElementValue, Key, MapType, ObjectID,
-        PrimitiveValue, SequenceType, ElementID
+        ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType,
+        ObjectID, PrimitiveValue, SequenceType,
     };
     use serde_json;
 
@@ -762,7 +769,7 @@ mod tests {
                         5,
                         ElementValue::Primitive(PrimitiveValue::Str("hi".to_string())),
                         None,
-                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1)
+                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1),
                     ),
                     conflicts: Vec::new(),
                 },
@@ -789,7 +796,7 @@ mod tests {
                         5,
                         ElementValue::Link(ObjectID::ID("5678".to_string())),
                         Some(DataType::Timestamp),
-                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1)
+                        ElementID::from_actor_and_elem(ActorID("someactor".to_string()), 1),
                     ),
                     conflicts: Vec::new(),
                 },

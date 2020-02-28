@@ -1,4 +1,4 @@
-use crate::{ActorID, Clock, DataType, Key, ObjectID, PrimitiveValue, ElementID};
+use crate::{ActorID, Clock, DataType, ElementID, Key, ObjectID, PrimitiveValue};
 use serde::Serialize;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -40,16 +40,23 @@ pub enum DiffAction {
     RemoveMapKey(ObjectID, MapType, Key),
     SetMapKey(ObjectID, MapType, Key, ElementValue, Option<DataType>),
     RemoveSequenceElement(ObjectID, SequenceType, u32),
-    InsertSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>, ElementID),
+    InsertSequenceElement(
+        ObjectID,
+        SequenceType,
+        u32,
+        ElementValue,
+        Option<DataType>,
+        ElementID,
+    ),
     SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 
 impl DiffAction {
     fn value(&self) -> Option<ElementValue> {
         match self {
-            DiffAction::SetMapKey(_, _, _, value,_) |
-            DiffAction::InsertSequenceElement(_, _, _, value, _, _) |
-            DiffAction::SetSequenceElement(_, _, _, value, _) => Some(value.clone()),
+            DiffAction::SetMapKey(_, _, _, value, _)
+            | DiffAction::InsertSequenceElement(_, _, _, value, _, _)
+            | DiffAction::SetSequenceElement(_, _, _, value, _) => Some(value.clone()),
             _ => None,
         }
     }
@@ -71,7 +78,9 @@ pub struct Diff {
 impl Diff {
     pub fn links(&self) -> Vec<ObjectID> {
         let mut oids = vec![];
-        self.action.value().map(|v| v.object_id().map(|oid| oids.push(oid)));
+        self.action
+            .value()
+            .map(|v| v.object_id().map(|oid| oids.push(oid)));
         for c in self.conflicts.iter() {
             c.value.object_id().map(|oid| oids.push(oid));
         }
@@ -90,7 +99,7 @@ pub struct Patch {
     pub deps: Clock,
     pub diffs: Vec<Diff>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u32>
+    pub seq: Option<u32>,
 }
 
 impl Patch {

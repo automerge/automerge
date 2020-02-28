@@ -50,7 +50,7 @@ impl ConcurrentOperations {
             .unwrap_or_else(|| Vec::new())
     }
 
-    /// Updates this set of operations based on a new operation. 
+    /// Updates this set of operations based on a new operation.
     pub(crate) fn incorporate_new_op(
         &mut self,
         new_op: OperationWithMetadata,
@@ -110,5 +110,4 @@ impl ConcurrentOperations {
         self.operations = concurrent;
         Ok(())
     }
-
 }
