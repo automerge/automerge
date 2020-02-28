@@ -127,7 +127,7 @@ impl ListState {
                 .operations_by_elemid
                 .entry(elem_id.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            let undo_ops = mutable_ops.incorporate_new_op(op.clone(), actor_histories)?;
+            let undo_ops = mutable_ops.incorporate_new_op(op, actor_histories)?;
             (undo_ops, mutable_ops.clone())
         };
 
@@ -138,7 +138,7 @@ impl ListState {
             .iter()
             .filter_map(|(elem_id, ops)| ops.active_op().map(|_| elem_id))
             .enumerate()
-            .find(|(_, elem_id)| elem_id == elem_id)
+            .find(|(_, op_elem_id)| &&elem_id == op_elem_id)
             .map(|(index, _)| index as u32);
 
         let index_and_value_after_op: Option<(u32, ElementValue, Option<DataType>)> =
@@ -146,7 +146,7 @@ impl ListState {
                 .iter()
                 .filter_map(|(elem_id, ops)| ops.active_op().map(|op| (op, elem_id)))
                 .enumerate()
-                .find(|(_, (_, elem_id))| elem_id == elem_id)
+                .find(|(_, (_, op_elem_id))| &&elem_id == op_elem_id)
                 .map(|(index, (op, _))| {
                     let (value, datatype) = match &op.operation {
                         Operation::Set {
@@ -344,19 +344,16 @@ impl ObjectState {
             }
         }?;
 
-        match &op_with_metadata.operation {
-            Operation::Increment {
-                object_id,
-                key,
-                value,
-            } => {
-                undo_ops = vec![Operation::Increment {
-                    object_id: object_id.clone(),
-                    key: key.clone(),
-                    value: -value,
-                }]
-            }
-            _ => {}
+        if let Operation::Increment {
+            object_id,
+            key,
+            value,
+        } = &op_with_metadata.operation {
+            undo_ops = vec![Operation::Increment {
+                object_id: object_id.clone(),
+                key: key.clone(),
+                value: -value,
+            }]
         };
 
         if undo_ops.is_empty() {
@@ -432,7 +429,7 @@ impl ObjectStore {
                     .ok()
                     .and_then(|elem_id| liststate.operations_by_elemid.get(&elem_id)),
             })
-            .map(|cops| cops.clone())
+            .cloned()
     }
 
     /// Incorporates a new operation into the object store. The caller is
@@ -454,7 +451,7 @@ impl ObjectStore {
                     .insert(object_id.clone(), object);
                 (
                     Some(Diff {
-                        action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
+                        action: DiffAction::CreateMap(object_id, MapType::Map),
                         conflicts: Vec::new(),
                     }),
                     Vec::new(),
@@ -466,7 +463,7 @@ impl ObjectStore {
                     .insert(object_id.clone(), object);
                 (
                     Some(Diff {
-                        action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
+                        action: DiffAction::CreateMap(object_id, MapType::Table),
                         conflicts: Vec::new(),
                     }),
                     Vec::new(),
@@ -478,7 +475,7 @@ impl ObjectStore {
                     .insert(object_id.clone(), object);
                 (
                     Some(Diff {
-                        action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
+                        action: DiffAction::CreateList(object_id, SequenceType::List),
                         conflicts: Vec::new(),
                     }),
                     Vec::new(),
@@ -490,7 +487,7 @@ impl ObjectStore {
                     .insert(object_id.clone(), object);
                 (
                     Some(Diff {
-                        action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
+                        action: DiffAction::CreateList(object_id, SequenceType::Text),
                         conflicts: Vec::new(),
                     }),
                     Vec::new(),

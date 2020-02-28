@@ -236,7 +236,7 @@ impl OpSet {
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
             let mut new_undo_stack: Vec<Vec<Operation>> =
-                new_undo_stack_slice.iter().cloned().collect();
+                new_undo_stack_slice.to_vec();
             new_undo_stack.push(undo_operations);
             self.undo_stack = new_undo_stack;
             self.undo_pos += 1;
