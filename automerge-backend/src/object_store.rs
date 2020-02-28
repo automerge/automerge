@@ -7,7 +7,7 @@ use crate::{
     list_ops_in_order, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID,
     Operation, SequenceType,
 };
-use std::collections::HashMap;
+use std::collections::{ HashMap, HashSet };
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -26,6 +26,14 @@ impl ObjectState {
 
     fn new_sequence(sequence_type: SequenceType, object_id: ObjectID) -> ObjectState {
         ObjectState::List(ListState::new(sequence_type, object_id))
+    }
+
+    // this feels like we should have a trait or something
+    fn generate_diffs(&self) -> Vec<Diff> {
+      match self {
+        ObjectState::Map(map_state) => map_state.generate_diffs(),
+        ObjectState::List(list_state) => list_state.generate_diffs(),
+      }
     }
 }
 
@@ -50,6 +58,39 @@ impl ListState {
             sequence_type,
             object_id,
         }
+    }
+
+    fn generate_diffs(&self) ->  Vec<Diff> {
+        let mut after = 0;
+        let ops_in_order = list_ops_in_order(&self.operations_by_elemid, &self.following).ok().unwrap_or(vec![]);
+        let mut diffs = vec![Diff {
+            action: DiffAction::CreateList(self.object_id.clone(), self.sequence_type.clone()),
+            conflicts: Vec::new(),
+        }];
+        diffs.extend(ops_in_order.iter().rev().filter_map(|(_,ops)|  {
+            ops.active_op()
+                .map(|op| {
+                  let tmp = list_op_to_assign_diff(&op.operation, &self.sequence_type, after)
+                      .map(|action|
+                          Diff {
+                            action: action,
+                            conflicts: ops.conflicts(),
+                          }
+                      );
+                  after += 1;
+                  tmp
+                })
+        }).flatten());
+        diffs.push(
+            Diff {
+                action: DiffAction::MaxElem(
+                    self.object_id.clone(),
+                    self.max_elem,
+                    self.sequence_type.clone()
+                ),
+                conflicts: vec![], // can there be conflicts?
+        });
+        diffs
     }
 
     fn handle_mutating_op(
@@ -163,7 +204,7 @@ impl ListState {
         Ok(Diff {
             action: DiffAction::MaxElem(
                 self.object_id.clone(),
-                self.max_elem, 
+                self.max_elem,
                 self.sequence_type.clone()
             ),
             conflicts: ops.conflicts(),
@@ -186,6 +227,28 @@ impl MapState {
             map_type,
             object_id,
         }
+    }
+
+    fn generate_diffs(&self) -> Vec<Diff> {
+        let mut diffs = vec![];
+        if self.object_id != ObjectID::Root {
+            diffs.push(
+                Diff {
+                    action: DiffAction::CreateMap(self.object_id.clone(), self.map_type.clone()),
+                    conflicts: vec![],
+                })
+        }
+        diffs.extend(self.operations_by_key.iter().filter_map(|(_, ops)|  {
+            ops.active_op()
+                .map(|op| map_op_to_assign_diff(&op.operation, &self.map_type)
+                .map(|action|
+                    Diff {
+                        action: action,
+                        conflicts: ops.conflicts(),
+                    }
+                ))
+        }).flatten());
+        diffs
     }
 
     fn handle_mutating_op(
@@ -277,6 +340,27 @@ impl ObjectStore {
         ObjectStore {
             operations_by_object_id: ops_by_id,
         }
+    }
+
+    pub fn generate_diffs(&self) -> Vec<Diff> {
+        let mut diffs = vec![];
+        let mut seen = HashSet::new();
+        let mut next : Vec<ObjectID> = vec![ ObjectID::Root ];
+
+        while !next.is_empty() {
+            let oid = next.pop().unwrap();
+            self.operations_by_object_id.get(&oid).map(|object_state| {
+                let new_diffs = object_state.generate_diffs();
+                for diff in new_diffs.iter() {
+                    for link in diff.links() {
+                        if !seen.contains(&link) { next.push(link) }
+                    }
+                }
+                diffs.push(new_diffs);
+                seen.insert(oid);
+            });
+        }
+        diffs.iter().rev().flatten().cloned().collect()
     }
 
     pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
@@ -382,3 +466,68 @@ impl ObjectStore {
         Ok(diff)
     }
 }
+
+fn map_op_to_assign_diff(op: &Operation, map_type: &MapType) -> Option<DiffAction> {
+    match op {
+        Operation::Set {
+            object_id,
+            key,
+            value,
+            datatype,
+        } => Some(DiffAction::SetMapKey(
+            object_id.clone(),
+            map_type.clone(),
+            key.clone(),
+            ElementValue::Primitive(value.clone()),
+            datatype.clone(),
+        )),
+        Operation::Link {
+            object_id,
+            key,
+            value,
+        } => Some(DiffAction::SetMapKey(
+            object_id.clone(),
+            map_type.clone(),
+            key.clone(),
+            ElementValue::Link(value.clone()),
+            None,
+        )),
+        _ =>
+            None,
+    }
+}
+
+fn list_op_to_assign_diff(op: &Operation, sequence_type: &SequenceType, after: u32) -> Option<DiffAction> {
+    match op {
+        Operation::Set {
+            ref object_id,
+            ref key,
+            ref value,
+            ref datatype,
+            ..
+        } => {
+            key.as_element_id().map(|eid|
+                DiffAction::InsertSequenceElement(
+                    object_id.clone(),
+                    sequence_type.clone(),
+                    after,
+                    ElementValue::Primitive(value.clone()),
+                    datatype.clone(),
+                    eid,
+                )).ok()
+        }
+        Operation::Link { value, object_id, key, .. } => {
+            key.as_element_id().map(|eid|
+              DiffAction::InsertSequenceElement(
+                  object_id.clone(),
+                  sequence_type.clone(),
+                  after,
+                  ElementValue::Link(value.clone()),
+                  None,
+                  eid,
+              )).ok()
+        }
+        _ => None,
+    }
+}
+

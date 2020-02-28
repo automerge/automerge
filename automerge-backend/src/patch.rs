@@ -7,6 +7,15 @@ pub enum ElementValue {
     Link(ObjectID),
 }
 
+impl ElementValue {
+    pub fn object_id(&self) -> Option<ObjectID> {
+        match self {
+            ElementValue::Link(object_id) => Some(object_id.clone()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub enum SequenceType {
     #[serde(rename = "list")]
@@ -35,6 +44,17 @@ pub enum DiffAction {
     SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 
+impl DiffAction {
+    fn value(&self) -> Option<ElementValue> {
+        match self {
+            DiffAction::SetMapKey(_, _, _, value,_) |
+            DiffAction::InsertSequenceElement(_, _, _, value, _, _) |
+            DiffAction::SetSequenceElement(_, _, _, value, _) => Some(value.clone()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Conflict {
     pub actor: ActorID,
@@ -46,6 +66,17 @@ pub struct Conflict {
 pub struct Diff {
     pub action: DiffAction,
     pub conflicts: Vec<Conflict>,
+}
+
+impl Diff {
+    pub fn links(&self) -> Vec<ObjectID> {
+        let mut oids = vec![];
+        self.action.value().map(|v| v.object_id().map(|oid| oids.push(oid)));
+        for c in self.conflicts.iter() {
+            c.value.object_id().map(|oid| oids.push(oid));
+        }
+        oids
+    }
 }
 
 #[derive(Serialize, Debug, PartialEq)]

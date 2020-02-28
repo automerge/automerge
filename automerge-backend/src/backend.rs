@@ -65,7 +65,15 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Patch {
-        Patch::empty()
+        Patch {
+            can_undo: false,
+            can_redo: false,
+            clock: self.op_set.clock.clone(),
+            deps: self.op_set.clock.clone(),
+            diffs: self.op_set.object_store.generate_diffs(),
+            actor: None,
+            seq: None,
+        }
     }
 
     pub fn get_changes(&self) -> Vec<Change> {
@@ -599,5 +607,50 @@ mod tests {
                 testcase.name
             );
         }
+    }
+
+    #[test]
+    fn test_get_patch() {
+        let mut backend = Backend::init();
+        let actor = ActorID::from_string("actor1".to_string());
+        let change1 = Change { actor_id: actor.clone(), seq: 1, dependencies: Clock::empty(), message: None, operations: vec![
+            Operation::Set {
+                object_id: ObjectID::Root,
+                key: Key("bird".to_string()),
+                value: PrimitiveValue::Str("magpie".to_string()),
+                datatype: None,
+            }]};
+        let change2 = Change { actor_id: actor.clone(), seq: 2, dependencies: Clock::empty(), message: None, operations: vec![
+            Operation::Set {
+                object_id: ObjectID::Root,
+                key: Key("bird".to_string()),
+                value: PrimitiveValue::Str("blackbird".to_string()),
+                datatype: None,
+            },
+        ]};
+        let _patch1 = backend.apply_changes(vec![change1, change2]).unwrap();
+        let patch2 = backend.get_patch();
+        let patch3 = Patch {
+                    can_undo: false,
+                    can_redo: false,
+                    clock: Clock::empty().with_dependency(&actor, 2),
+                    deps: Clock::empty().with_dependency(&actor, 2),
+                    seq: None,
+                    actor: None,
+                    diffs: vec![Diff{
+                        action: DiffAction::SetMapKey(
+                                ObjectID::Root,
+                                MapType::Map,
+                                Key("bird".to_string()),
+                                ElementValue::Primitive(PrimitiveValue::Str("blackbird".to_string())),
+                                None),
+                        conflicts: Vec::new(),
+                    }],
+        };
+        assert_eq!(
+            patch2,
+            patch3,
+            "Patches not equal test_get_patch"
+        );
     }
 }
