@@ -62,7 +62,23 @@ impl Backend {
                     seq: Some(seq),
                 })
             }
-            ChangeRequestType::Undo => Err(AutomergeError::NotImplemented("Undo".to_string())),
+            ChangeRequestType::Undo => {
+                let diffs = self.op_set.do_undo(
+                    change.actor_id.clone(),
+                    change.seq,
+                    change.message,
+                    change.dependencies
+                    )?;
+                Ok(Patch {
+                    actor: Some(actor_id),
+                    can_undo: false,
+                    can_redo: true,
+                    clock: self.op_set.clock.clone(),
+                    deps: self.op_set.clock.clone(),
+                    diffs,
+                    seq: Some(seq),
+                })
+            }
             ChangeRequestType::Redo => Err(AutomergeError::NotImplemented("Redo".to_string())),
         }
     }
@@ -97,6 +113,7 @@ mod tests {
     use crate::{
         ActorID, Backend, Change, Clock, Conflict, DataType, Diff, DiffAction, ElementID,
         ElementValue, Key, MapType, ObjectID, Operation, Patch, PrimitiveValue, SequenceType,
+        ChangeRequest, ChangeRequestType
     };
 
     struct ApplyChangeTestCase {
@@ -613,9 +630,117 @@ mod tests {
     }
 
     struct ApplyLocalChangeTestCase {
+        name: &'static str,
+        change_requests: Vec<ChangeRequest>,
+        expected_patches: Vec<Patch>,
     }
 
     #[test]
     fn test_apply_local_change() {
+        let actor1 = ActorID("actor1".to_string());
+        let birds = ObjectID::ID("birds".to_string());
+        let testcases = vec![
+            ApplyLocalChangeTestCase{
+                name: "Should undo",
+                change_requests: vec![
+                    ChangeRequest{
+                        actor_id: actor1.clone(),
+                        seq: 1,
+                        message: None,
+                        dependencies: Clock::empty(),
+                        request_type: ChangeRequestType::Change(vec![
+                            Operation::MakeMap{object_id: birds.clone()},
+                            Operation::Link{
+                                object_id: ObjectID::Root,
+                                key: Key("birds".to_string()),
+                                value: birds.clone(),
+                            },
+                            Operation::Set{
+                                object_id: birds.clone(),
+                                key: Key("chaffinch".to_string()),
+                                value: PrimitiveValue::Boolean(true),
+                                datatype: None,
+                            },
+                        ])
+                    },
+                    ChangeRequest {
+                        actor_id: actor1.clone(),
+                        seq: 2,
+                        message: None,
+                        dependencies: Clock::empty().with_dependency(&actor1, 1),
+                        request_type: ChangeRequestType::Undo,
+                    },
+                ],
+                expected_patches: vec![
+                    Patch{
+                        actor: Some(actor1.clone()),
+                        can_redo: false,
+                        can_undo: true,
+                        seq: Some(1),
+                        clock: Clock::empty().with_dependency(&actor1, 1),
+                        deps: Clock::empty().with_dependency(&actor1, 1),
+                        diffs: vec![
+                            Diff{
+                                action: DiffAction::CreateMap(birds.clone(), MapType::Map),
+                                conflicts: Vec::new(),
+                            },
+                            Diff {
+                                action: DiffAction::SetMapKey(
+                                    ObjectID::Root,
+                                    MapType::Map,
+                                    Key("birds".to_string()),
+                                    ElementValue::Link(birds.clone()),
+                                    None,
+                                ),
+                                conflicts: Vec::new(),
+                            },
+                            Diff {
+                                action: DiffAction::SetMapKey(
+                                    birds.clone(),
+                                    MapType::Map,
+                                    Key("chaffinch".to_string()),
+                                    ElementValue::Primitive(PrimitiveValue::Boolean(true)),
+                                    None,
+                                ),
+                                conflicts: Vec::new(),
+                            }
+                        ],
+                    },
+                    Patch{
+                        actor: Some(actor1.clone()),
+                        can_redo: true,
+                        can_undo: false,
+                        seq: Some(2),
+                        clock: Clock::empty().with_dependency(&actor1, 2),
+                        deps: Clock::empty().with_dependency(&actor1, 2),
+                        diffs: vec![
+                            Diff{
+                                action: DiffAction::RemoveMapKey(
+                                    ObjectID::Root,
+                                    MapType::Map,
+                                    Key("birds".to_string()),
+                                ),
+                                conflicts: Vec::new(),
+                            }
+                        ],
+                    }
+                ],
+            }
+        ];
+
+        for testcase in testcases {
+            let mut backend = Backend::init();
+            let patches: Vec<Patch> = testcase
+                .change_requests
+                .into_iter()
+                .map(|c| backend.apply_local_change(c).unwrap())
+                .collect();
+            assert_eq!(
+                testcase.expected_patches,
+                patches,
+                "Patches not equal for {}",
+                testcase.name
+            );
+        }
     }
 }

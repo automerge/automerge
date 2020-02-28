@@ -14,7 +14,7 @@ use crate::object_store::{ListState, MapState, ObjectState, ObjectStore};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
-use crate::{Diff, DiffAction};
+use crate::{Diff, DiffAction, ActorID};
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
@@ -54,6 +54,21 @@ impl OpSet {
             undo_pos: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+        }
+    }
+
+    pub fn do_undo(&mut self, actor_id: ActorID, seq: u32, message: Option<String>, dependencies: Clock) -> Result<Vec<Diff>, AutomergeError> {
+        if let Some(undo_ops) = self.undo_stack.pop() {
+            let change = Change{
+                actor_id,
+                seq,
+                message,
+                dependencies,
+                operations: undo_ops,
+            };
+            self.apply_change(change, false)
+        } else {
+            Err(AutomergeError::InvalidChange("No undo ops to execute".to_string()))
         }
     }
 
