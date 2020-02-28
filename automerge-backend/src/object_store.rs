@@ -129,10 +129,13 @@ impl ListState {
             )),
             (None, None) => None,
         };
-        Ok((action.map(|action| Diff {
-            action,
-            conflicts: ops.conflicts(),
-        }), undo_ops))
+        Ok((
+            action.map(|action| Diff {
+                action,
+                conflicts: ops.conflicts(),
+            }),
+            undo_ops,
+        ))
     }
 
     fn add_insertion(
@@ -156,15 +159,16 @@ impl ListState {
             .or_insert_with(Vec::new);
         following_ops.push(inserted_elemid.clone());
 
-        let ops = self.operations_by_elemid
+        let ops = self
+            .operations_by_elemid
             .entry(inserted_elemid)
             .or_insert_with(ConcurrentOperations::new);
         self.max_elem = std::cmp::max(self.max_elem, elem);
         Ok(Diff {
             action: DiffAction::MaxElem(
                 self.object_id.clone(),
-                self.max_elem, 
-                self.sequence_type.clone()
+                self.max_elem,
+                self.sequence_type.clone(),
             ),
             conflicts: ops.conflicts(),
         })
@@ -174,7 +178,7 @@ impl ListState {
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapState {
-    pub operations_by_key: HashMap<String, ConcurrentOperations>,
+    pub operations_by_key: HashMap<Key, ConcurrentOperations>,
     pub map_type: MapType,
     pub object_id: ObjectID,
 }
@@ -197,50 +201,57 @@ impl MapState {
         let (undo_ops, ops) = {
             let mutable_ops = self
                 .operations_by_key
-                .entry(key.0.clone())
+                .entry(key.clone())
                 .or_insert_with(ConcurrentOperations::new);
             let undo_ops = mutable_ops.incorporate_new_op(op_with_metadata, actor_histories)?;
             (undo_ops, mutable_ops.clone())
         };
-        Ok((Some(ops.active_op().map(|op| {
-            let action = match &op.operation {
-                Operation::Set {
-                    object_id,
-                    key,
-                    value,
-                    datatype,
-                } => DiffAction::SetMapKey(
-                    object_id.clone(),
-                    self.map_type.clone(),
-                    key.clone(),
-                    ElementValue::Primitive(value.clone()),
-                    datatype.clone(),
-                ),
-                Operation::Link {
-                    object_id,
-                    key,
-                    value,
-                } => DiffAction::SetMapKey(
-                    object_id.clone(),
-                    self.map_type.clone(),
-                    key.clone(),
-                    ElementValue::Link(value.clone()),
-                    None,
-                ),
-                _ => panic!("Should not happen for objects"),
-            };
-            Diff {
-                action,
-                conflicts: ops.conflicts(),
-            }
-        }).unwrap_or_else(|| Diff{
-            action: DiffAction::RemoveMapKey(
-                self.object_id.clone(),
-                self.map_type.clone(),
-                key.clone()
+        Ok((
+            Some(
+                ops.active_op()
+                    .map(|op| {
+                        let action = match &op.operation {
+                            Operation::Set {
+                                object_id,
+                                key,
+                                value,
+                                datatype,
+                            } => DiffAction::SetMapKey(
+                                object_id.clone(),
+                                self.map_type.clone(),
+                                key.clone(),
+                                ElementValue::Primitive(value.clone()),
+                                datatype.clone(),
+                            ),
+                            Operation::Link {
+                                object_id,
+                                key,
+                                value,
+                            } => DiffAction::SetMapKey(
+                                object_id.clone(),
+                                self.map_type.clone(),
+                                key.clone(),
+                                ElementValue::Link(value.clone()),
+                                None,
+                            ),
+                            _ => panic!("Should not happen for objects"),
+                        };
+                        Diff {
+                            action,
+                            conflicts: ops.conflicts(),
+                        }
+                    })
+                    .unwrap_or_else(|| Diff {
+                        action: DiffAction::RemoveMapKey(
+                            self.object_id.clone(),
+                            self.map_type.clone(),
+                            key.clone(),
+                        ),
+                        conflicts: ops.conflicts(),
+                    }),
             ),
-            conflicts: ops.conflicts(),
-        })), undo_ops))
+            undo_ops,
+        ))
     }
 }
 
@@ -251,7 +262,6 @@ impl ObjectState {
         actor_histories: &ActorHistories,
         key: &Key,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
-
         let (diff, mut undo_ops) = match self {
             ObjectState::Map(mapstate) => {
                 mapstate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
@@ -262,18 +272,22 @@ impl ObjectState {
         }?;
 
         match &op_with_metadata.operation {
-            Operation::Increment{object_id, key, value} => {
-                undo_ops = vec![Operation::Increment{
+            Operation::Increment {
+                object_id,
+                key,
+                value,
+            } => {
+                undo_ops = vec![Operation::Increment {
                     object_id: object_id.clone(),
                     key: key.clone(),
-                    value: -value
+                    value: -value,
                 }]
-            },
+            }
             _ => {}
         };
-        
+
         if undo_ops.is_empty() {
-            undo_ops.push(Operation::Delete{
+            undo_ops.push(Operation::Delete {
                 object_id: op_with_metadata.operation.object_id().clone(),
                 key: key.clone(),
             })
@@ -300,15 +314,35 @@ impl ObjectStore {
         }
     }
 
-    pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
+    pub fn state_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
         self.operations_by_object_id.get(object_id)
+    }
+
+    /// Get the ConcurrentOperations instance corresponding to a key in an
+    /// object. If the object is a list this function will attempt to convert
+    /// the key into an element ID
+    pub fn concurrent_operations_for_field(
+        &self,
+        object_id: &ObjectID,
+        key: &Key,
+    ) -> Option<ConcurrentOperations> {
+        self.operations_by_object_id
+            .get(object_id)
+            .and_then(|state| match state {
+                ObjectState::Map(mapstate) => mapstate.operations_by_key.get(&key),
+                ObjectState::List(liststate) => key
+                    .as_element_id()
+                    .ok()
+                    .and_then(|elem_id| liststate.operations_by_elemid.get(&elem_id)),
+            })
+            .map(|cops| cops.clone())
     }
 
     /// Incorporates a new operation into the object store. The caller is
     /// responsible for ensuring that all causal dependencies of the new
     /// operation have already been applied.
     ///
-    /// The return value is a tuple of a diff to send to the frontend, and 
+    /// The return value is a tuple of a diff to send to the frontend, and
     /// a (possibly empty) vector of operations which will undo the operation
     /// later.
     pub fn apply_operation(
@@ -321,37 +355,49 @@ impl ObjectStore {
                 let object = ObjectState::new_map(MapType::Map, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
-                    conflicts: Vec::new(),
-                }), Vec::new())
+                (
+                    Some(Diff {
+                        action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
+                        conflicts: Vec::new(),
+                    }),
+                    Vec::new(),
+                )
             }
             Operation::MakeTable { object_id } => {
                 let object = ObjectState::new_map(MapType::Table, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
-                    conflicts: Vec::new(),
-                }), Vec::new())
+                (
+                    Some(Diff {
+                        action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
+                        conflicts: Vec::new(),
+                    }),
+                    Vec::new(),
+                )
             }
             Operation::MakeList { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::List, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
-                    conflicts: Vec::new(),
-                }), Vec::new())
+                (
+                    Some(Diff {
+                        action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
+                        conflicts: Vec::new(),
+                    }),
+                    Vec::new(),
+                )
             }
             Operation::MakeText { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::Text, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
-                    conflicts: Vec::new(),
-                }), Vec::new())
+                (
+                    Some(Diff {
+                        action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
+                        conflicts: Vec::new(),
+                    }),
+                    Vec::new(),
+                )
             }
             Operation::Link {
                 ref object_id,
@@ -394,9 +440,10 @@ impl ObjectStore {
                             list_id, key
                         )))
                     }
-                    ObjectState::List(liststate) => {
-                        (Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?), Vec::new())
-                    }
+                    ObjectState::List(liststate) => (
+                        Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?),
+                        Vec::new(),
+                    ),
                 }
             }
         };

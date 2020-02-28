@@ -6,7 +6,6 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use std::collections::HashSet;
 use crate::actor_histories::ActorHistories;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
@@ -14,8 +13,9 @@ use crate::object_store::{ListState, MapState, ObjectState, ObjectStore};
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
 use crate::value::Value;
-use crate::{Diff, DiffAction, ActorID};
+use crate::{ActorID, Diff, DiffAction};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::BuildHasher;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
@@ -57,9 +57,68 @@ impl OpSet {
         }
     }
 
-    pub fn do_undo(&mut self, actor_id: ActorID, seq: u32, message: Option<String>, dependencies: Clock) -> Result<Vec<Diff>, AutomergeError> {
+    pub fn do_redo(
+        &mut self,
+        actor_id: ActorID,
+        seq: u32,
+        message: Option<String>,
+        dependencies: Clock,
+    ) -> Result<Vec<Diff>, AutomergeError> {
+        if let Some(redo_ops) = self.redo_stack.pop() {
+            let change = Change {
+                actor_id,
+                seq,
+                message,
+                dependencies,
+                operations: redo_ops,
+            };
+            self.apply_change(change, false)
+        } else {
+            Err(AutomergeError::InvalidChange("no redo ops".to_string()))
+        }
+    }
+
+    pub fn do_undo(
+        &mut self,
+        actor_id: ActorID,
+        seq: u32,
+        message: Option<String>,
+        dependencies: Clock,
+    ) -> Result<Vec<Diff>, AutomergeError> {
         if let Some(undo_ops) = self.undo_stack.pop() {
-            let change = Change{
+            let redo_ops = undo_ops
+                .iter()
+                .filter_map(|op| match &op {
+                    Operation::Increment {
+                        object_id: oid,
+                        key,
+                        value,
+                    } => Some(vec![Operation::Increment {
+                        object_id: oid.clone(),
+                        key: key.clone(),
+                        value: -value,
+                    }]),
+                    Operation::Set { object_id, key, .. }
+                    | Operation::Link { object_id, key, .. }
+                    | Operation::Delete { object_id, key } => self
+                        .object_store
+                        .concurrent_operations_for_field(object_id, key)
+                        .map(|cops| {
+                            if cops.active_op().is_some() {
+                                cops.pure_operations()
+                            } else {
+                                vec![Operation::Delete {
+                                    object_id: object_id.clone(),
+                                    key: key.clone(),
+                                }]
+                            }
+                        }),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            self.redo_stack.push(redo_ops);
+            let change = Change {
                 actor_id,
                 seq,
                 message,
@@ -68,23 +127,32 @@ impl OpSet {
             };
             self.apply_change(change, false)
         } else {
-            Err(AutomergeError::InvalidChange("No undo ops to execute".to_string()))
+            Err(AutomergeError::InvalidChange(
+                "No undo ops to execute".to_string(),
+            ))
         }
     }
 
     /// Adds a change to the internal queue of operations, then iteratively
     /// applies all causally ready changes until there are none remaining
     ///
-    /// If `make_undoable` is true, the op set will store a set of operations 
+    /// If `make_undoable` is true, the op set will store a set of operations
     /// which can be used to undo this change.
-    pub fn apply_change(&mut self, change: Change, make_undoable: bool) -> Result<Vec<Diff>, AutomergeError> {
+    pub fn apply_change(
+        &mut self,
+        change: Change,
+        make_undoable: bool,
+    ) -> Result<Vec<Diff>, AutomergeError> {
         self.queue.push(change);
         let diffs = self.apply_causally_ready_changes(make_undoable)?;
         self.state = self.walk(&ObjectID::Root)?;
         Ok(diffs)
     }
 
-    fn apply_causally_ready_changes(&mut self, make_undoable: bool) -> Result<Vec<Diff>, AutomergeError> {
+    fn apply_causally_ready_changes(
+        &mut self,
+        make_undoable: bool,
+    ) -> Result<Vec<Diff>, AutomergeError> {
         let mut diffs = Vec::new();
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             let change_diffs = self.apply_causally_ready_change(next_change, make_undoable)?;
@@ -108,7 +176,11 @@ impl OpSet {
         None
     }
 
-    fn apply_causally_ready_change(&mut self, change: Change, make_undoable: bool) -> Result<Vec<Diff>, AutomergeError> {
+    fn apply_causally_ready_change(
+        &mut self,
+        change: Change,
+        make_undoable: bool,
+    ) -> Result<Vec<Diff>, AutomergeError> {
         // This method is a little more complicated than it intuitively should
         // be due to the bookkeeping required for undo. If we're asked to make
         // this operation undoable we have to store the undo operations for
@@ -116,7 +188,7 @@ impl OpSet {
         // method. However, it's unnecessary to store undo operations for
         // objects which are created by this change (e.g if there's an insert
         // operation for a list which was created in this operation we only
-        // need the undo operation for the creation of the list to achieve 
+        // need the undo operation for the creation of the list to achieve
         // the undo), so we track newly created objects and only store undo
         // operations which don't operate on them.
         if self.actor_histories.is_applied(&change) {
@@ -127,15 +199,17 @@ impl OpSet {
         let seq = change.seq;
         let mut diffs = Vec::new();
         let mut undo_operations = Vec::new();
-        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();  
+        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
         for operation in change.operations {
-
             // Store newly created object IDs so we can decide whether we need
             // undo ops later
             match &operation {
-                Operation::MakeMap{object_id} | Operation::MakeList{object_id} | Operation:: MakeText{object_id} | Operation::MakeTable{object_id} => {
+                Operation::MakeMap { object_id }
+                | Operation::MakeList { object_id }
+                | Operation::MakeText { object_id }
+                | Operation::MakeTable { object_id } => {
                     new_object_ids.insert(object_id.clone());
-                },
+                }
                 _ => {}
             }
             let op_with_metadata = OperationWithMetadata {
@@ -147,7 +221,7 @@ impl OpSet {
                 .object_store
                 .apply_operation(&self.actor_histories, op_with_metadata)?;
 
-            // If this object is not created in this change then we need to 
+            // If this object is not created in this change then we need to
             // store the undo ops for it (if we're storing undo ops at all)
             if make_undoable && !(new_object_ids.contains(operation.object_id())) {
                 undo_operations.extend(undo_ops_for_this_op);
@@ -161,7 +235,8 @@ impl OpSet {
             .with_dependency(&change.actor_id.clone(), change.seq);
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-            let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.iter().cloned().collect();
+            let mut new_undo_stack: Vec<Vec<Operation>> =
+                new_undo_stack_slice.iter().cloned().collect();
             new_undo_stack.push(undo_operations);
             self.undo_stack = new_undo_stack;
             self.undo_pos += 1;
@@ -178,7 +253,7 @@ impl OpSet {
     fn walk(&self, object_id: &ObjectID) -> Result<Value, AutomergeError> {
         let object_history = self
             .object_store
-            .history_for_object_id(object_id)
+            .state_for_object_id(object_id)
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
         match object_history {
             ObjectState::Map(MapState {
@@ -195,7 +270,7 @@ impl OpSet {
 
     fn interpret_map_ops(
         &self,
-        ops_by_key: &HashMap<String, ConcurrentOperations>,
+        ops_by_key: &HashMap<Key, ConcurrentOperations>,
     ) -> Result<Value, AutomergeError> {
         let mut result: HashMap<String, Value> = HashMap::new();
         for (_, ops) in ops_by_key.iter() {

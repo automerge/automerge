@@ -50,7 +50,7 @@ impl ConcurrentOperations {
             .unwrap_or_else(|| Vec::new())
     }
 
-    /// Updates this set of operations based on a new operation. 
+    /// Updates this set of operations based on a new operation.
     ///
     /// Returns the previous operations (multiple if concurrent) that this op
     /// replaces
@@ -59,7 +59,12 @@ impl ConcurrentOperations {
         new_op: OperationWithMetadata,
         actor_histories: &ActorHistories,
     ) -> Result<Vec<Operation>, AutomergeError> {
-        let previous = self.operations.clone().into_iter().map(|o| o.operation).collect();
+        let previous = self
+            .operations
+            .clone()
+            .into_iter()
+            .map(|o| o.operation)
+            .collect();
         let mut concurrent: Vec<OperationWithMetadata> = match new_op.operation {
             // If the operation is an increment op, then we are going to modify
             // any Set operations to reflect the increment ops in the next
@@ -115,4 +120,10 @@ impl ConcurrentOperations {
         Ok(previous)
     }
 
+    pub fn pure_operations(&self) -> Vec<Operation> {
+        self.operations
+            .iter()
+            .map(|o| o.operation.clone())
+            .collect()
+    }
 }

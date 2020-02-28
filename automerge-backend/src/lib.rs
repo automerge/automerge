@@ -12,14 +12,14 @@ mod protocol_serialization;
 mod value;
 
 pub use crate::protocol::{
-    ActorID, Change, Clock, DataType, ElementID, Key, ObjectID, Operation, PrimitiveValue,
-    ChangeRequest, ChangeRequestType
+    ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, ObjectID,
+    Operation, PrimitiveValue,
 };
 pub use actor_histories::ActorHistories;
 pub use backend::Backend;
 pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;
-pub use object_store::{ObjectState, ObjectStore, MapState, ListState};
+pub use object_store::{ListState, MapState, ObjectState, ObjectStore};
 pub use op_set::{list_ops_in_order, OpSet};
 pub use operation_with_metadata::OperationWithMetadata;
 pub use patch::{Conflict, Diff, DiffAction, ElementValue, MapType, Patch, SequenceType};

@@ -300,15 +300,17 @@ pub enum Operation {
 impl Operation {
     pub fn object_id(&self) -> &ObjectID {
         match self {
-            Operation::MakeMap{object_id}
-            | Operation::MakeTable{object_id}
-            | Operation::MakeList{object_id}
-            | Operation::MakeText{object_id}
-            | Operation::Insert{list_id: object_id, ..}
-            | Operation::Set{object_id, ..}
-            | Operation::Link{object_id, ..}
-            | Operation::Delete{object_id, ..}
-            | Operation::Increment{object_id,..} => object_id
+            Operation::MakeMap { object_id }
+            | Operation::MakeTable { object_id }
+            | Operation::MakeList { object_id }
+            | Operation::MakeText { object_id }
+            | Operation::Insert {
+                list_id: object_id, ..
+            }
+            | Operation::Set { object_id, .. }
+            | Operation::Link { object_id, .. }
+            | Operation::Delete { object_id, .. }
+            | Operation::Increment { object_id, .. } => object_id,
         }
     }
 }
@@ -331,17 +333,15 @@ pub struct ChangeRequest {
     pub seq: u32,
     pub message: Option<String>,
     pub dependencies: Clock,
-    pub request_type: ChangeRequestType
+    pub request_type: ChangeRequestType,
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum ChangeRequestType {
     Change(Vec<Operation>),
     Undo,
-    Redo
+    Redo,
 }
-
-
 
 #[cfg(test)]
 mod tests {
