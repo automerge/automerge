@@ -99,7 +99,7 @@ mod tests {
         ElementValue, Key, MapType, ObjectID, Operation, Patch, PrimitiveValue, SequenceType,
     };
 
-    struct TestCase {
+    struct ApplyChangeTestCase {
         name: &'static str,
         changes: Vec<Change>,
         expected_patch: Patch,
@@ -110,7 +110,7 @@ mod tests {
         let actor1 = ActorID::from_string("actor1".to_string());
         let actor2 = ActorID::from_string("actor2".to_string());
         let testcases = vec![
-            TestCase {
+            ApplyChangeTestCase {
                 name: "Assign to key in map",
                 changes: vec![Change {
                     actor_id: actor1.clone(),
@@ -143,7 +143,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "Increment a key in a map",
                 changes: vec![
                     Change {
@@ -189,7 +189,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "should make a conflict on assignment to the same key",
                 changes: vec![
                     Change {
@@ -246,7 +246,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "delete a key from a map",
                 changes: vec![
                     Change {
@@ -289,7 +289,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "create nested maps",
                 changes: vec![Change {
                     actor_id: actor1.clone(),
@@ -351,7 +351,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "create lists",
                 changes: vec![Change {
                     actor_id: actor1.clone(),
@@ -421,7 +421,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "apply update inside lists",
                 changes: vec![
                     Change {
@@ -483,7 +483,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "delete list elements",
                 changes: vec![
                     Change {
@@ -541,7 +541,7 @@ mod tests {
                     actor: None,
                 },
             },
-            TestCase {
+            ApplyChangeTestCase {
                 name: "Handle list element insertion and deletion in the same change",
                 changes: vec![
                     Change {
@@ -610,5 +610,12 @@ mod tests {
                 testcase.name
             );
         }
+    }
+
+    struct ApplyLocalChangeTestCase {
+    }
+
+    #[test]
+    fn test_apply_local_change() {
     }
 }

@@ -271,6 +271,13 @@ impl ObjectState {
             },
             _ => {}
         };
+        
+        if undo_ops.is_empty() {
+            undo_ops.push(Operation::Delete{
+                object_id: op_with_metadata.operation.object_id().clone(),
+                key: key.clone(),
+            })
+        }
 
         Ok((diff, undo_ops))
     }
