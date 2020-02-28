@@ -315,17 +315,15 @@ pub struct ChangeRequest {
     pub seq: u32,
     pub message: Option<String>,
     pub dependencies: Clock,
-    pub request_type: ChangeRequestType
+    pub request_type: ChangeRequestType,
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum ChangeRequestType {
     Change(Vec<Operation>),
     Undo,
-    Redo
+    Redo,
 }
-
-
 
 #[cfg(test)]
 mod tests {

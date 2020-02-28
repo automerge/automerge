@@ -1,4 +1,3 @@
-
 use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
 use js_sys::Array;
 use serde::de::DeserializeOwned;
@@ -15,14 +14,13 @@ extern "C" {
     pub fn log(s: &str);
 }
 
-fn js_to_rust<T: DeserializeOwned>(value: JsValue) -> Result<T,JsValue> {
-  value.into_serde().map_err(json_error_to_js)
+fn js_to_rust<T: DeserializeOwned>(value: JsValue) -> Result<T, JsValue> {
+    value.into_serde().map_err(json_error_to_js)
 }
 
-fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue,JsValue> {
-  JsValue::from_serde(&value).map_err(json_error_to_js)
+fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
+    JsValue::from_serde(&value).map_err(json_error_to_js)
 }
-
 
 #[wasm_bindgen]
 #[derive(PartialEq, Debug, Clone)]
@@ -111,4 +109,3 @@ fn automerge_error_to_js(err: AutomergeError) -> JsValue {
 fn json_error_to_js(err: serde_json::Error) -> JsValue {
     JsValue::from(std::format!("serde_json error: {}", err))
 }
-

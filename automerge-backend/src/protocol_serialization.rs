@@ -1,4 +1,4 @@
-use crate::{ChangeRequest, ChangeRequestType, ActorID, Clock, Operation};
+use crate::{ActorID, ChangeRequest, ChangeRequestType, Clock, Operation};
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -18,7 +18,7 @@ impl Serialize for ChangeRequest {
             ChangeRequestType::Change(ops) => {
                 map_serializer.serialize_entry("requestType", "change")?;
                 map_serializer.serialize_entry("ops", &ops)?;
-            },
+            }
             ChangeRequestType::Undo => map_serializer.serialize_entry("requestType", "undo")?,
             ChangeRequestType::Redo => map_serializer.serialize_entry("requestType", "redo")?,
         };
@@ -91,18 +91,19 @@ impl<'de> Deserialize<'de> for ChangeRequest {
                         }
                         _ => return Err(Error::unknown_field(&key, FIELDS)),
                     }
-                };
+                }
 
                 let actor = actor.ok_or_else(|| Error::missing_field("actor"))?;
                 let deps = deps.ok_or_else(|| Error::missing_field("deps"))?;
-                let seq = seq.ok_or_else(||  Error::missing_field("seq"))?;
-                let request_type_str = request_type_str.ok_or_else(|| Error::missing_field("requestType"))?;
+                let seq = seq.ok_or_else(|| Error::missing_field("seq"))?;
+                let request_type_str =
+                    request_type_str.ok_or_else(|| Error::missing_field("requestType"))?;
 
                 let request_type = match request_type_str.as_ref() {
                     "change" => {
                         let ops = ops.ok_or_else(|| Error::missing_field("ops"))?;
                         ChangeRequestType::Change(ops)
-                    },
+                    }
                     "undo" => ChangeRequestType::Undo,
                     "redo" => ChangeRequestType::Redo,
                     _ => {
@@ -113,7 +114,13 @@ impl<'de> Deserialize<'de> for ChangeRequest {
                     }
                 };
 
-                Ok(ChangeRequest{actor_id: actor, dependencies: deps, seq, request_type, message: message.unwrap_or(None)})
+                Ok(ChangeRequest {
+                    actor_id: actor,
+                    dependencies: deps,
+                    seq,
+                    request_type,
+                    message: message.unwrap_or(None),
+                })
             }
         }
         deserializer.deserialize_struct("ChangeReqest", &FIELDS, ChangeRequestVisitor)

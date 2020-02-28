@@ -1,10 +1,19 @@
-use crate::{ActorID, Clock, DataType, Key, ObjectID, PrimitiveValue, ElementID};
+use crate::{ActorID, Clock, DataType, ElementID, Key, ObjectID, PrimitiveValue};
 use serde::Serialize;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ElementValue {
     Primitive(PrimitiveValue),
     Link(ObjectID),
+}
+
+impl ElementValue {
+    pub fn object_id(&self) -> Option<ObjectID> {
+        match self {
+            ElementValue::Link(object_id) => Some(object_id.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -31,8 +40,26 @@ pub enum DiffAction {
     RemoveMapKey(ObjectID, MapType, Key),
     SetMapKey(ObjectID, MapType, Key, ElementValue, Option<DataType>),
     RemoveSequenceElement(ObjectID, SequenceType, u32),
-    InsertSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>, ElementID),
+    InsertSequenceElement(
+        ObjectID,
+        SequenceType,
+        u32,
+        ElementValue,
+        Option<DataType>,
+        ElementID,
+    ),
     SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
+}
+
+impl DiffAction {
+    fn value(&self) -> Option<ElementValue> {
+        match self {
+            DiffAction::SetMapKey(_, _, _, value, _)
+            | DiffAction::InsertSequenceElement(_, _, _, value, _, _)
+            | DiffAction::SetSequenceElement(_, _, _, value, _) => Some(value.clone()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -48,6 +75,21 @@ pub struct Diff {
     pub conflicts: Vec<Conflict>,
 }
 
+impl Diff {
+    pub fn links(&self) -> Vec<ObjectID> {
+        let mut oids = Vec::new();
+        if let Some(oid) = self.action.value().and_then(|v| v.object_id()) {
+            oids.push(oid)
+        }
+        for c in self.conflicts.iter() {
+            if let Some(oid) = c.value.object_id() {
+                oids.push(oid)
+            }
+        }
+        oids
+    }
+}
+
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
@@ -59,7 +101,7 @@ pub struct Patch {
     pub deps: Clock,
     pub diffs: Vec<Diff>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u32>
+    pub seq: Option<u32>,
 }
 
 impl Patch {

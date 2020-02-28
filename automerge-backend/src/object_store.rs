@@ -7,7 +7,7 @@ use crate::{
     list_ops_in_order, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID,
     Operation, SequenceType,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -26,6 +26,14 @@ impl ObjectState {
 
     fn new_sequence(sequence_type: SequenceType, object_id: ObjectID) -> ObjectState {
         ObjectState::List(ListState::new(sequence_type, object_id))
+    }
+
+    // this feels like we should have a trait or something
+    fn generate_diffs(&self) -> Vec<Diff> {
+        match self {
+            ObjectState::Map(map_state) => map_state.generate_diffs(),
+            ObjectState::List(list_state) => list_state.generate_diffs(),
+        }
     }
 }
 
@@ -52,6 +60,52 @@ impl ListState {
         }
     }
 
+    fn generate_diffs(&self) -> Vec<Diff> {
+        let mut diffs = Vec::new();
+
+        let head = Diff {
+            action: DiffAction::CreateList(self.object_id.clone(), self.sequence_type.clone()),
+            conflicts: Vec::new(),
+        };
+
+        let ops_in_order = list_ops_in_order(&self.operations_by_elemid, &self.following)
+            .ok()
+            .unwrap_or_default();
+
+        let inserts = ops_in_order
+            .iter()
+            .rev()
+            .filter_map(|(_, ops)| {
+                ops.active_op()
+                    .map(|active_op| (active_op, ops.conflicts()))
+            })
+            .enumerate()
+            .map(|(after, (active_op, conflicts))| Diff {
+                action: list_op_to_assign_diff(
+                    &active_op.operation,
+                    &self.sequence_type,
+                    after as u32,
+                )
+                .unwrap(),
+                conflicts,
+            });
+
+        let tail = Diff {
+            action: DiffAction::MaxElem(
+                self.object_id.clone(),
+                self.max_elem,
+                self.sequence_type.clone(),
+            ),
+            conflicts: Vec::new(),
+        };
+
+        diffs.push(head);
+        diffs.extend(inserts);
+        diffs.push(tail);
+
+        diffs
+    }
+
     fn handle_mutating_op(
         &mut self,
         op: OperationWithMetadata,
@@ -73,7 +127,7 @@ impl ListState {
                 .operations_by_elemid
                 .entry(elem_id.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            mutable_ops.incorporate_new_op(op.clone(), actor_histories)?;
+            mutable_ops.incorporate_new_op(op, actor_histories)?;
             mutable_ops.clone()
         };
 
@@ -111,8 +165,8 @@ impl ListState {
                 self.object_id.clone(),
                 self.sequence_type.clone(),
                 after,
-                value.clone(),
-                datatype.clone(),
+                value,
+                datatype,
             )),
             (Some(before), None) => Some(DiffAction::RemoveSequenceElement(
                 self.object_id.clone(),
@@ -123,9 +177,9 @@ impl ListState {
                 self.object_id.clone(),
                 self.sequence_type.clone(),
                 after,
-                value.clone(),
-                datatype.clone(),
-                elem_id.clone(),
+                value,
+                datatype,
+                elem_id,
             )),
             (None, None) => None,
         };
@@ -156,15 +210,16 @@ impl ListState {
             .or_insert_with(Vec::new);
         following_ops.push(inserted_elemid.clone());
 
-        let ops = self.operations_by_elemid
+        let ops = self
+            .operations_by_elemid
             .entry(inserted_elemid)
             .or_insert_with(ConcurrentOperations::new);
         self.max_elem = std::cmp::max(self.max_elem, elem);
         Ok(Diff {
             action: DiffAction::MaxElem(
                 self.object_id.clone(),
-                self.max_elem, 
-                self.sequence_type.clone()
+                self.max_elem,
+                self.sequence_type.clone(),
             ),
             conflicts: ops.conflicts(),
         })
@@ -188,6 +243,25 @@ impl MapState {
         }
     }
 
+    fn generate_diffs(&self) -> Vec<Diff> {
+        let mut diffs = Vec::new();
+        if self.object_id != ObjectID::Root {
+            diffs.push(Diff {
+                action: DiffAction::CreateMap(self.object_id.clone(), self.map_type.clone()),
+                conflicts: Vec::new(),
+            })
+        }
+        diffs.extend(self.operations_by_key.iter().filter_map(|(_, ops)| {
+            ops.active_op()
+                .and_then(|op| map_op_to_assign_diff(&op.operation, &self.map_type))
+                .map(|action| Diff {
+                    action,
+                    conflicts: ops.conflicts(),
+                })
+        }));
+        diffs
+    }
+
     fn handle_mutating_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
@@ -202,45 +276,49 @@ impl MapState {
             mutable_ops.incorporate_new_op(op_with_metadata, actor_histories)?;
             mutable_ops.clone()
         };
-        Ok(Some(ops.active_op().map(|op| {
-            let action = match &op.operation {
-                Operation::Set {
-                    object_id,
-                    key,
-                    value,
-                    datatype,
-                } => DiffAction::SetMapKey(
-                    object_id.clone(),
-                    self.map_type.clone(),
-                    key.clone(),
-                    ElementValue::Primitive(value.clone()),
-                    datatype.clone(),
-                ),
-                Operation::Link {
-                    object_id,
-                    key,
-                    value,
-                } => DiffAction::SetMapKey(
-                    object_id.clone(),
-                    self.map_type.clone(),
-                    key.clone(),
-                    ElementValue::Link(value.clone()),
-                    None,
-                ),
-                _ => panic!("Should not happen for objects"),
-            };
-            Diff {
-                action,
-                conflicts: ops.conflicts(),
-            }
-        }).unwrap_or_else(|| Diff{
-            action: DiffAction::RemoveMapKey(
-                self.object_id.clone(),
-                self.map_type.clone(),
-                key.clone()
-            ),
-            conflicts: ops.conflicts(),
-        })))
+        Ok(Some(
+            ops.active_op()
+                .map(|op| {
+                    let action = match &op.operation {
+                        Operation::Set {
+                            object_id,
+                            key,
+                            value,
+                            datatype,
+                        } => DiffAction::SetMapKey(
+                            object_id.clone(),
+                            self.map_type.clone(),
+                            key.clone(),
+                            ElementValue::Primitive(value.clone()),
+                            datatype.clone(),
+                        ),
+                        Operation::Link {
+                            object_id,
+                            key,
+                            value,
+                        } => DiffAction::SetMapKey(
+                            object_id.clone(),
+                            self.map_type.clone(),
+                            key.clone(),
+                            ElementValue::Link(value.clone()),
+                            None,
+                        ),
+                        _ => panic!("Should not happen for objects"),
+                    };
+                    Diff {
+                        action,
+                        conflicts: ops.conflicts(),
+                    }
+                })
+                .unwrap_or_else(|| Diff {
+                    action: DiffAction::RemoveMapKey(
+                        self.object_id.clone(),
+                        self.map_type.clone(),
+                        key.clone(),
+                    ),
+                    conflicts: ops.conflicts(),
+                }),
+        ))
     }
 }
 
@@ -279,6 +357,30 @@ impl ObjectStore {
         }
     }
 
+    pub fn generate_diffs(&self) -> Vec<Diff> {
+        let mut diffs = Vec::new();
+        let mut seen = HashSet::new();
+        let mut next = vec![ObjectID::Root];
+
+        while !next.is_empty() {
+            let oid = next.pop().unwrap();
+            if let Some(object_state) = self.operations_by_object_id.get(&oid) {
+                let new_diffs = object_state.generate_diffs();
+                for diff in new_diffs.iter() {
+                    for link in diff.links() {
+                        if !seen.contains(&link) {
+                            next.push(link)
+                        }
+                    }
+                }
+                diffs.push(new_diffs);
+                seen.insert(oid);
+            }
+        }
+
+        diffs.iter().rev().flatten().cloned().collect()
+    }
+
     pub fn history_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
         self.operations_by_object_id.get(object_id)
     }
@@ -301,7 +403,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
+                    action: DiffAction::CreateMap(object_id, MapType::Map),
                     conflicts: Vec::new(),
                 })
             }
@@ -310,7 +412,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
+                    action: DiffAction::CreateMap(object_id, MapType::Table),
                     conflicts: Vec::new(),
                 })
             }
@@ -319,7 +421,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
+                    action: DiffAction::CreateList(object_id, SequenceType::List),
                     conflicts: Vec::new(),
                 })
             }
@@ -328,7 +430,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
+                    action: DiffAction::CreateList(object_id, SequenceType::Text),
                     conflicts: Vec::new(),
                 })
             }
@@ -380,5 +482,81 @@ impl ObjectStore {
             }
         };
         Ok(diff)
+    }
+}
+
+fn map_op_to_assign_diff(op: &Operation, map_type: &MapType) -> Option<DiffAction> {
+    match op {
+        Operation::Set {
+            object_id,
+            key,
+            value,
+            datatype,
+        } => Some(DiffAction::SetMapKey(
+            object_id.clone(),
+            map_type.clone(),
+            key.clone(),
+            ElementValue::Primitive(value.clone()),
+            datatype.clone(),
+        )),
+        Operation::Link {
+            object_id,
+            key,
+            value,
+        } => Some(DiffAction::SetMapKey(
+            object_id.clone(),
+            map_type.clone(),
+            key.clone(),
+            ElementValue::Link(value.clone()),
+            None,
+        )),
+        _ => None,
+    }
+}
+
+fn list_op_to_assign_diff(
+    op: &Operation,
+    sequence_type: &SequenceType,
+    after: u32,
+) -> Option<DiffAction> {
+    match op {
+        Operation::Set {
+            ref object_id,
+            ref key,
+            ref value,
+            ref datatype,
+            ..
+        } => key
+            .as_element_id()
+            .map(|eid| {
+                DiffAction::InsertSequenceElement(
+                    object_id.clone(),
+                    sequence_type.clone(),
+                    after,
+                    ElementValue::Primitive(value.clone()),
+                    datatype.clone(),
+                    eid,
+                )
+            })
+            .ok(),
+        Operation::Link {
+            value,
+            object_id,
+            key,
+            ..
+        } => key
+            .as_element_id()
+            .map(|eid| {
+                DiffAction::InsertSequenceElement(
+                    object_id.clone(),
+                    sequence_type.clone(),
+                    after,
+                    ElementValue::Link(value.clone()),
+                    None,
+                    eid,
+                )
+            })
+            .ok(),
+        _ => None,
     }
 }
