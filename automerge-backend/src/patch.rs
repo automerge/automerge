@@ -77,12 +77,12 @@ pub struct Diff {
 
 impl Diff {
     pub fn links(&self) -> Vec<ObjectID> {
-        let mut oids = vec![];
-        self.action
-            .value()
-            .map(|v| v.object_id().map(|oid| oids.push(oid)));
+        let mut oids = Vec::new();
+        if let Some(oid) = self.action.value().and_then(|v| v.object_id()) {
+            oids.push(oid)
+        }
         for c in self.conflicts.iter() {
-            c.value.object_id().map(|oid| oids.push(oid));
+            if let Some(oid) = c.value.object_id() { oids.push(oid) }
         }
         oids
     }

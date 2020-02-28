@@ -51,8 +51,8 @@ impl OpSet {
             clock: Clock::empty(),
             state: Value::Map(HashMap::new()),
             undo_pos: 0,
-            undo_stack: vec![],
-            redo_stack: vec![],
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 

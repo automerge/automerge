@@ -61,39 +61,46 @@ impl ListState {
     }
 
     fn generate_diffs(&self) -> Vec<Diff> {
-        let mut after = 0;
-        let ops_in_order = list_ops_in_order(&self.operations_by_elemid, &self.following)
-            .ok()
-            .unwrap_or(vec![]);
-        let mut diffs = vec![Diff {
+        let mut diffs = Vec::new();
+
+        let head = Diff {
             action: DiffAction::CreateList(self.object_id.clone(), self.sequence_type.clone()),
             conflicts: Vec::new(),
-        }];
-        diffs.extend(
-            ops_in_order
-                .iter()
-                .rev()
-                .filter_map(|(_, ops)| {
-                    ops.active_op().map(|op| {
-                        let tmp = list_op_to_assign_diff(&op.operation, &self.sequence_type, after)
-                            .map(|action| Diff {
-                                action: action,
-                                conflicts: ops.conflicts(),
-                            });
-                        after += 1;
-                        tmp
-                    })
-                })
-                .flatten(),
-        );
-        diffs.push(Diff {
+        };
+
+        let ops_in_order = list_ops_in_order(&self.operations_by_elemid, &self.following)
+            .ok()
+            .unwrap_or_default();
+
+        let inserts = ops_in_order
+            .iter()
+            .rev()
+            .enumerate()
+            .filter_map(|(after,(_, ops))|
+                ops.active_op()
+                    .and_then(|op| list_op_to_assign_diff(&op.operation, &self.sequence_type, after as u32)
+                    .map(|action|
+                        Diff {
+                            action,
+                            conflicts: ops.conflicts(),
+                        }
+                    )
+                )
+            );
+
+        let tail = Diff {
             action: DiffAction::MaxElem(
                 self.object_id.clone(),
                 self.max_elem,
                 self.sequence_type.clone(),
             ),
-            conflicts: vec![], // can there be conflicts?
-        });
+            conflicts: Vec::new(),
+        };
+
+        diffs.push(head);
+        diffs.extend(inserts);
+        diffs.push(tail);
+
         diffs
     }
 
@@ -118,7 +125,7 @@ impl ListState {
                 .operations_by_elemid
                 .entry(elem_id.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            mutable_ops.incorporate_new_op(op.clone(), actor_histories)?;
+            mutable_ops.incorporate_new_op(op, actor_histories)?;
             mutable_ops.clone()
         };
 
@@ -156,8 +163,8 @@ impl ListState {
                 self.object_id.clone(),
                 self.sequence_type.clone(),
                 after,
-                value.clone(),
-                datatype.clone(),
+                value,
+                datatype,
             )),
             (Some(before), None) => Some(DiffAction::RemoveSequenceElement(
                 self.object_id.clone(),
@@ -168,9 +175,9 @@ impl ListState {
                 self.object_id.clone(),
                 self.sequence_type.clone(),
                 after,
-                value.clone(),
-                datatype.clone(),
-                elem_id.clone(),
+                value,
+                datatype,
+                elem_id,
             )),
             (None, None) => None,
         };
@@ -235,25 +242,26 @@ impl MapState {
     }
 
     fn generate_diffs(&self) -> Vec<Diff> {
-        let mut diffs = vec![];
+        let mut diffs = Vec::new();
         if self.object_id != ObjectID::Root {
             diffs.push(Diff {
                 action: DiffAction::CreateMap(self.object_id.clone(), self.map_type.clone()),
-                conflicts: vec![],
+                conflicts: Vec::new(),
             })
         }
         diffs.extend(
             self.operations_by_key
                 .iter()
-                .filter_map(|(_, ops)| {
-                    ops.active_op().map(|op| {
-                        map_op_to_assign_diff(&op.operation, &self.map_type).map(|action| Diff {
-                            action: action,
-                            conflicts: ops.conflicts(),
-                        })
-                    })
-                })
-                .flatten(),
+                .filter_map(|(_, ops)|
+                    ops.active_op()
+                        .and_then(|op| map_op_to_assign_diff(&op.operation, &self.map_type))
+                        .map(|action|
+                            Diff {
+                              action,
+                              conflicts: ops.conflicts(),
+                            }
+                        )
+                ),
         );
         diffs
     }
@@ -354,13 +362,13 @@ impl ObjectStore {
     }
 
     pub fn generate_diffs(&self) -> Vec<Diff> {
-        let mut diffs = vec![];
+        let mut diffs = Vec::new();
         let mut seen = HashSet::new();
-        let mut next: Vec<ObjectID> = vec![ObjectID::Root];
+        let mut next = vec![ObjectID::Root];
 
         while !next.is_empty() {
             let oid = next.pop().unwrap();
-            self.operations_by_object_id.get(&oid).map(|object_state| {
+            if let Some(object_state) = self.operations_by_object_id.get(&oid) {
                 let new_diffs = object_state.generate_diffs();
                 for diff in new_diffs.iter() {
                     for link in diff.links() {
@@ -371,8 +379,9 @@ impl ObjectStore {
                 }
                 diffs.push(new_diffs);
                 seen.insert(oid);
-            });
+            }
         }
+
         diffs.iter().rev().flatten().cloned().collect()
     }
 
@@ -398,7 +407,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Map),
+                    action: DiffAction::CreateMap(object_id, MapType::Map),
                     conflicts: Vec::new(),
                 })
             }
@@ -407,7 +416,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateMap(object_id.clone(), MapType::Table),
+                    action: DiffAction::CreateMap(object_id, MapType::Table),
                     conflicts: Vec::new(),
                 })
             }
@@ -416,7 +425,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::List),
+                    action: DiffAction::CreateList(object_id, SequenceType::List),
                     conflicts: Vec::new(),
                 })
             }
@@ -425,7 +434,7 @@ impl ObjectStore {
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
                 Some(Diff {
-                    action: DiffAction::CreateList(object_id.clone(), SequenceType::Text),
+                    action: DiffAction::CreateList(object_id, SequenceType::Text),
                     conflicts: Vec::new(),
                 })
             }

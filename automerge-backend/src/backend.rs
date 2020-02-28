@@ -45,7 +45,7 @@ impl Backend {
                 let diffs = self.op_set.apply_change(Change {
                     actor_id: change.actor_id,
                     operations: ops,
-                    seq: seq,
+                    seq,
                     message: change.message,
                     dependencies: change.dependencies,
                 })?;

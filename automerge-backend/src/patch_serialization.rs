@@ -115,7 +115,7 @@ impl Serialize for Diff {
         S: Serializer,
     {
         let mut map_serializer = serializer.serialize_map(None)?;
-        if self.conflicts.len() > 0 {
+        if !self.conflicts.is_empty() {
             map_serializer.serialize_entry("conflicts", &self.conflicts)?;
         }
         match &self.action {
@@ -471,7 +471,7 @@ impl<'de> Deserialize<'de> for Diff {
                     None => return Err(Error::missing_field("action")),
                 };
 
-                let conflicts = conflicts.unwrap_or(vec![]);
+                let conflicts = conflicts.unwrap_or_default();
 
                 Ok(Diff {
                     action: diff_action,
