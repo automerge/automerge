@@ -22,8 +22,8 @@ impl Backend {
         let diffs = nested_diffs.into_iter().flatten().collect();
         Ok(Patch {
             actor: None,
-            can_undo: false,
-            can_redo: false,
+            can_undo: self.op_set.can_undo(),
+            can_redo: self.op_set.can_redo(),
             clock: self.op_set.clock.clone(),
             deps: self.op_set.clock.clone(),
             diffs,
@@ -54,8 +54,8 @@ impl Backend {
                 )?;
                 Ok(Patch {
                     actor: Some(actor_id),
-                    can_undo: true,
-                    can_redo: false,
+                    can_undo: self.op_set.can_undo(),
+                    can_redo: self.op_set.can_redo(),
                     clock: self.op_set.clock.clone(),
                     deps: self.op_set.clock.clone(),
                     diffs,
@@ -71,8 +71,8 @@ impl Backend {
                 )?;
                 Ok(Patch {
                     actor: Some(actor_id),
-                    can_undo: false,
-                    can_redo: true,
+                    can_undo: self.op_set.can_undo(),
+                    can_redo: self.op_set.can_redo(),
                     clock: self.op_set.clock.clone(),
                     deps: self.op_set.clock.clone(),
                     diffs,
@@ -88,8 +88,8 @@ impl Backend {
                 )?;
                 Ok(Patch {
                     actor: Some(actor_id),
-                    can_undo: true,
-                    can_redo: false,
+                    can_undo: self.op_set.can_undo(),
+                    can_redo: self.op_set.can_redo(),
                     clock: self.op_set.clock.clone(),
                     deps: self.op_set.clock.clone(),
                     diffs,
@@ -789,6 +789,20 @@ mod tests {
                         dependencies: Clock::empty().with_dependency(&actor1, 2),
                         request_type: ChangeRequestType::Redo,
                     },
+                    ChangeRequest {
+                        actor_id: actor1.clone(),
+                        seq: 4,
+                        message: None,
+                        dependencies: Clock::empty().with_dependency(&actor1, 3),
+                        request_type: ChangeRequestType::Undo,
+                    },
+                    ChangeRequest {
+                        actor_id: actor1.clone(),
+                        seq: 5,
+                        message: None,
+                        dependencies: Clock::empty().with_dependency(&actor1, 4),
+                        request_type: ChangeRequestType::Redo,
+                    },
                 ],
                 expected_patches: vec![
                     Patch {
@@ -859,22 +873,59 @@ mod tests {
                             conflicts: Vec::new(),
                         }],
                     },
+                    Patch {
+                        actor: Some(actor1.clone()),
+                        can_redo: true,
+                        can_undo: false,
+                        seq: Some(4),
+                        clock: Clock::empty().with_dependency(&actor1, 4),
+                        deps: Clock::empty().with_dependency(&actor1, 4),
+                        diffs: vec![Diff {
+                            action: DiffAction::RemoveMapKey(
+                                ObjectID::Root,
+                                MapType::Map,
+                                Key("birds".to_string()),
+                            ),
+                            conflicts: Vec::new(),
+                        }],
+                    },
+                    Patch {
+                        actor: Some(actor1.clone()),
+                        can_redo: false,
+                        can_undo: true,
+                        seq: Some(5),
+                        clock: Clock::empty().with_dependency(&actor1, 5),
+                        deps: Clock::empty().with_dependency(&actor1, 5),
+                        diffs: vec![Diff {
+                            action: DiffAction::SetMapKey(
+                                ObjectID::Root,
+                                MapType::Map,
+                                Key("birds".to_string()),
+                                ElementValue::Link(birds.clone()),
+                                None,
+                            ),
+                            conflicts: Vec::new(),
+                        }],
+                    },
                 ],
             },
         ];
 
         for testcase in testcases {
             let mut backend = Backend::init();
-            let patches: Vec<Patch> = testcase
+            let patches = testcase
                 .change_requests
                 .into_iter()
-                .map(|c| backend.apply_local_change(c).unwrap())
-                .collect();
-            assert_eq!(
-                testcase.expected_patches, patches,
-                "Patches not equal for {}",
-                testcase.name
-            );
+                .map(|c| backend.apply_local_change(c).unwrap());
+            for (index, (patch, expected_patch)) in
+                patches.zip(testcase.expected_patches).enumerate()
+            {
+                assert_eq!(
+                    patch, expected_patch,
+                    "Pathes no equal for testcase: {}, patch: {}",
+                    testcase.name, index
+                );
+            }
         }
     }
 

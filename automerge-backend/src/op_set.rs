@@ -72,6 +72,7 @@ impl OpSet {
                 dependencies,
                 operations: redo_ops,
             };
+            self.undo_pos += 1;
             self.apply_change(change, false)
         } else {
             Err(AutomergeError::InvalidChange("no redo ops".to_string()))
@@ -85,7 +86,7 @@ impl OpSet {
         message: Option<String>,
         dependencies: Clock,
     ) -> Result<Vec<Diff>, AutomergeError> {
-        if let Some(undo_ops) = self.undo_stack.pop() {
+        if let Some(undo_ops) = self.undo_stack.get(self.undo_pos - 1) {
             let redo_ops = undo_ops
                 .iter()
                 .filter_map(|op| match &op {
@@ -123,8 +124,9 @@ impl OpSet {
                 seq,
                 message,
                 dependencies,
-                operations: undo_ops,
+                operations: undo_ops.clone(),
             };
+            self.undo_pos -= 1;
             self.apply_change(change, false)
         } else {
             Err(AutomergeError::InvalidChange(
@@ -235,8 +237,7 @@ impl OpSet {
             .with_dependency(&change.actor_id.clone(), change.seq);
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-            let mut new_undo_stack: Vec<Vec<Operation>> =
-                new_undo_stack_slice.to_vec();
+            let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
             new_undo_stack.push(undo_operations);
             self.undo_stack = new_undo_stack;
             self.undo_pos += 1;
@@ -381,6 +382,14 @@ impl OpSet {
 
         result.reverse();
         result
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.undo_pos > 0
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
     }
 }
 
