@@ -35,6 +35,43 @@ impl ObjectState {
             ObjectState::List(list_state) => list_state.generate_diffs(),
         }
     }
+
+    fn handle_assign_op(
+        &mut self,
+        op_with_metadata: OperationWithMetadata,
+        actor_histories: &ActorHistories,
+        key: &Key,
+    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+        let (diff, mut undo_ops) = match self {
+            ObjectState::Map(mapstate) => {
+                mapstate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
+            }
+            ObjectState::List(liststate) => {
+                liststate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
+            }
+        }?;
+
+        if let Operation::Increment {
+            object_id,
+            key,
+            value,
+        } = &op_with_metadata.operation {
+            undo_ops = vec![Operation::Increment {
+                object_id: object_id.clone(),
+                key: key.clone(),
+                value: -value,
+            }]
+        };
+
+        if undo_ops.is_empty() {
+            undo_ops.push(Operation::Delete {
+                object_id: op_with_metadata.operation.object_id().clone(),
+                key: key.clone(),
+            })
+        }
+
+        Ok((diff, undo_ops))
+    }
 }
 
 /// Stores operations on list objects
@@ -325,45 +362,6 @@ impl MapState {
             ),
             undo_ops,
         ))
-    }
-}
-
-impl ObjectState {
-    fn handle_assign_op(
-        &mut self,
-        op_with_metadata: OperationWithMetadata,
-        actor_histories: &ActorHistories,
-        key: &Key,
-    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
-        let (diff, mut undo_ops) = match self {
-            ObjectState::Map(mapstate) => {
-                mapstate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
-            }
-            ObjectState::List(liststate) => {
-                liststate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
-            }
-        }?;
-
-        if let Operation::Increment {
-            object_id,
-            key,
-            value,
-        } = &op_with_metadata.operation {
-            undo_ops = vec![Operation::Increment {
-                object_id: object_id.clone(),
-                key: key.clone(),
-                value: -value,
-            }]
-        };
-
-        if undo_ops.is_empty() {
-            undo_ops.push(Operation::Delete {
-                object_id: op_with_metadata.operation.object_id().clone(),
-                key: key.clone(),
-            })
-        }
-
-        Ok((diff, undo_ops))
     }
 }
 
