@@ -55,7 +55,8 @@ impl ObjectState {
             object_id,
             key,
             value,
-        } = &op_with_metadata.operation {
+        } = &op_with_metadata.operation
+        {
             undo_ops = vec![Operation::Increment {
                 object_id: object_id.clone(),
                 key: key.clone(),

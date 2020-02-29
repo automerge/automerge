@@ -357,7 +357,7 @@ impl OpSet {
         for diff in diffs.into_iter().rev() {
             if let DiffAction::MaxElem(ref oid, max_elem, _) = diff.action {
                 let current_max = known_maxelems.get(oid).unwrap_or(&0);
-                if current_max < &max_elem {
+                if *current_max < max_elem {
                     known_maxelems.insert(oid.clone(), max_elem);
                     result.push(diff);
                 }
@@ -371,7 +371,7 @@ impl OpSet {
             ) = diff.action
             {
                 let current_max = known_maxelems.get(oid).unwrap_or(&0);
-                if current_max < &max_elem {
+                if *current_max < max_elem {
                     known_maxelems.insert(oid.clone(), max_elem);
                 }
                 result.push(diff);
