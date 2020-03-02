@@ -5,6 +5,7 @@ rust:
 - nightly
 cache: cargo
 before_script:
+- rustup self update
 - rustup component add clippy --toolchain=nightly || cargo install --git https://github.com/rust-lang/rust-clippy/ --force clippy #clippy is sometimes not availble for nightly
 - rustup component add rustfmt
 script:
