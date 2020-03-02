@@ -2,15 +2,16 @@ language: rust
 rust:
 - stable
 - beta
-- nightly
 cache: cargo
 before_script:
-- rustup component add clippy --toolchain=nightly || cargo install --git https://github.com/rust-lang/rust-clippy/ --force clippy #clippy is sometimes not availble for nightly
+- rustup self update
+- rustup component add clippy 
 - rustup component add rustfmt
 script:
-- cargo fmt -- --check
+- cargo fmt --all -- --check
 - cargo clippy --all-targets --all-features -- -D warnings
-- cargo test
+- cargo build --verbose --all
+- cargo test --verbose --all
 jobs:
   allow_failures:
   - rust: nightly
