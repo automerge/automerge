@@ -870,19 +870,17 @@ mod tests {
             },
         ];
         for testcase in testcases {
-            let serialized = serde_json::to_value(testcase.diff.clone())
-                .unwrap_or_else(|_| {
-                    panic!(std::format!("Failed to deserialize {}", testcase.name));
-                });
+            let serialized = serde_json::to_value(testcase.diff.clone()).unwrap_or_else(|_| {
+                panic!(std::format!("Failed to deserialize {}", testcase.name));
+            });
             assert_eq!(
                 testcase.json, serialized,
                 "TestCase {} did not match",
                 testcase.name
             );
-            let deserialized: Diff = serde_json::from_value(serialized)
-                .unwrap_or_else(|_| {
-                    panic!(std::format!("Failed to deserialize for {}", testcase.name));
-                });
+            let deserialized: Diff = serde_json::from_value(serialized).unwrap_or_else(|_| {
+                panic!(std::format!("Failed to deserialize for {}", testcase.name));
+            });
             assert_eq!(
                 testcase.diff, deserialized,
                 "TestCase {} failed the round trip",
