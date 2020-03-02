@@ -124,6 +124,30 @@ impl Clock {
     pub fn seq_for(&self, actor_id: &ActorID) -> u32 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
+
+    /// Returns true if all components of `clock1` are less than or equal to those
+    /// of `clock2` (both clocks given as Immutable.js Map objects). Returns false
+    /// if there is at least one component in which `clock1` is greater than
+    /// `clock2` (that is, either `clock1` is overall greater than `clock2`, or the
+    /// clocks are incomparable).
+    ///
+    /// TODO This feels like it should be a PartialOrd implementation but I
+    /// can't figure out quite what that should look like
+    ///
+    pub fn less_or_equal(&self, other: &Clock) -> bool {
+        self.0.iter().chain(other.0.iter()).all(|(actor_id, _)| {
+            self.0.get(actor_id).unwrap_or(&0) < other.0.get(actor_id).unwrap_or(&0)
+        })
+    }
+}
+
+impl<'a> IntoIterator for &'a Clock {
+    type Item = (&'a ActorID, &'a u32);
+    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u32>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]

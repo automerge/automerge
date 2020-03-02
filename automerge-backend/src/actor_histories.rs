@@ -46,12 +46,20 @@ impl ActorHistories {
         state.insert(change.seq, all_deps);
     }
 
-    fn transitive_dependencies(&mut self, actor_id: &ActorID, seq: u32) -> Clock {
+    pub fn transitive_dependencies(&self, actor_id: &ActorID, seq: u32) -> Clock {
         self.0
             .get(actor_id)
             .and_then(|deps| deps.get(&seq))
             .cloned()
             .unwrap_or_else(Clock::empty)
+    }
+
+    pub fn transitive_dependencies_of_clock(&self, clock: &Clock) -> Clock {
+        clock
+            .into_iter()
+            .fold(Clock::empty(), |clock, (actor_id, seq)| {
+                clock.upper_bound(&self.transitive_dependencies(actor_id, *seq))
+            })
     }
 
     /// Whether the two operations in question are concurrent

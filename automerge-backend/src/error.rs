@@ -11,6 +11,7 @@ pub enum AutomergeError {
     DuplicateChange(String),
     NotImplemented(String),
     InvalidChange(String),
+    DivergedState(String),
 }
 
 impl fmt::Display for AutomergeError {
