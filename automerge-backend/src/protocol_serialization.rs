@@ -218,8 +218,8 @@ mod tests {
             },
         ];
         for testcase in testcases {
-            let serialized = serde_json::to_value(testcase.change_request.clone())
-                .unwrap_or_else(|_| {
+            let serialized =
+                serde_json::to_value(testcase.change_request.clone()).unwrap_or_else(|_| {
                     panic!(std::format!("Failed to deserialize {}", testcase.name));
                 });
             assert_eq!(
@@ -227,8 +227,8 @@ mod tests {
                 "TestCase {} did not match",
                 testcase.name
             );
-            let deserialized: ChangeRequest = serde_json::from_value(serialized)
-                .unwrap_or_else(|_| {
+            let deserialized: ChangeRequest =
+                serde_json::from_value(serialized).unwrap_or_else(|_| {
                     panic!(std::format!("Failed to deserialize for {}", testcase.name));
                 });
             assert_eq!(
