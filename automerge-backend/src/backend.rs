@@ -901,7 +901,7 @@ mod tests {
                                 ObjectID::Root,
                                 MapType::Map,
                                 Key("birds".to_string()),
-                                ElementValue::Link(birds.clone()),
+                                ElementValue::Link(birds),
                                 None,
                             ),
                             conflicts: Vec::new(),

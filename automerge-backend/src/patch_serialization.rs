@@ -869,16 +869,20 @@ mod tests {
                 .unwrap(),
             },
         ];
-        for ref testcase in testcases {
+        for testcase in testcases {
             let serialized = serde_json::to_value(testcase.diff.clone())
-                .expect(&std::format!("Failed to deserialize {}", testcase.name));
+                .unwrap_or_else(|_| {
+                    panic!(std::format!("Failed to deserialize {}", testcase.name));
+                });
             assert_eq!(
                 testcase.json, serialized,
                 "TestCase {} did not match",
                 testcase.name
             );
             let deserialized: Diff = serde_json::from_value(serialized)
-                .expect(&std::format!("Failed to deserialize for {}", testcase.name));
+                .unwrap_or_else(|_| {
+                    panic!(std::format!("Failed to deserialize for {}", testcase.name));
+                });
             assert_eq!(
                 testcase.diff, deserialized,
                 "TestCase {} failed the round trip",
