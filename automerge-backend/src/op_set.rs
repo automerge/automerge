@@ -203,9 +203,14 @@ impl OpSet {
         // need the undo operation for the creation of the list to achieve
         // the undo), so we track newly created objects and only store undo
         // operations which don't operate on them.
-        if self.actor_histories.is_applied(&change) {
-            return Ok(Vec::new());
+        if let Some(actor_state) = self.states.get(&change.actor_id).and_then(|changes| changes.get((change.seq as usize) - 1)) {
+            if change == actor_state.change {
+              return Ok(Vec::new()); // its a duplicate - ignore
+            } else {
+              return Err(AutomergeError::InvalidChange("Invalid reuse of sequence number for actor".to_string()));
+            }
         }
+
         self.actor_histories.add_change(&change);
         self.history.push(change.clone());
         let states_for_actor = self
@@ -213,16 +218,6 @@ impl OpSet {
             .entry(change.actor_id.clone())
             .or_insert_with(Vec::new);
 
-        if (change.seq as usize) < states_for_actor.len()
-            && !states_for_actor
-                .get((change.seq as usize) - 1)
-                .map(|s| s.change == change)
-                .unwrap_or(false)
-        {
-            return Err(AutomergeError::InvalidChange(
-                "Invalid reuse of sequence number for actor".to_string(),
-            ));
-        };
         states_for_actor.push(ActorState {
             change: change.clone(),
             all_deps: self
