@@ -220,14 +220,15 @@ impl OpSet {
                 .unwrap_or(false)
         {
             return Err(AutomergeError::InvalidChange(
-                "Invalid sequence number for actor".to_string(),
+                "Invalid reuse of sequence number for actor".to_string(),
             ));
         };
         states_for_actor.push(ActorState {
             change: change.clone(),
             all_deps: self
                 .actor_histories
-                .transitive_dependencies(&change.actor_id, change.seq),
+                .transitive_dependencies(&change.actor_id, change.seq)
+                .with_dependency(&change.actor_id, change.seq - 1),
         });
 
         let actor_id = change.actor_id.clone();

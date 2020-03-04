@@ -990,4 +990,27 @@ mod tests {
         };
         assert_eq!(patch2, patch3, "Patches not equal test_get_patch");
     }
+
+    #[test]
+    fn test_get_missing_changes() {
+        let mut backend = Backend::init();
+        let actor = ActorID::from_string("actor1".to_string());
+        let change1 = Change {
+            actor_id: actor.clone(),
+            seq: 1,
+            dependencies: Clock::empty(),
+            message: None,
+            operations: vec![Operation::Set {
+                object_id: ObjectID::Root,
+                key: Key("bird".to_string()),
+                value: PrimitiveValue::Str("magpie".to_string()),
+                datatype: None,
+            }],
+        };
+        backend.apply_changes(vec![change1]).unwrap();
+        assert_eq!(
+            backend.get_missing_changes(Clock::empty().with_dependency(&actor, 1)),
+            Vec::new()
+        )
+    }
 }

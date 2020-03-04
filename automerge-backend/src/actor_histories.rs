@@ -60,6 +60,7 @@ impl ActorHistories {
             .fold(Clock::empty(), |clock, (actor_id, seq)| {
                 clock.upper_bound(&self.transitive_dependencies(actor_id, *seq))
             })
+            .upper_bound(clock)
     }
 
     /// Whether the two operations in question are concurrent
