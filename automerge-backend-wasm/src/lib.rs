@@ -94,7 +94,7 @@ impl State {
     }
 
     #[wasm_bindgen]
-    pub fn merge(&mut self, remote: State) -> Result<JsValue, JsValue> {
+    pub fn merge(&mut self, remote: &State) -> Result<JsValue, JsValue> {
         let patch = self
             .backend
             .merge(&remote.backend)
