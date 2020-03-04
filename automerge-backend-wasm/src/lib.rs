@@ -61,8 +61,8 @@ pub fn get_patch(state: &State) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = getChanges)]
-pub fn get_changes(state: &State) -> Result<JsValue, JsValue> {
-    let changes = state.backend.get_changes();
+pub fn get_changes(old_state: &State, new_state: &State) -> Result<JsValue, JsValue> {
+    let changes = old_state.backend.get_changes(&new_state.backend);
     rust_to_js(&changes)
 }
 
@@ -86,13 +86,22 @@ pub fn get_missing_deps(state: &State) -> Result<JsValue, JsValue> {
     rust_to_js(&clock)
 }
 
+#[wasm_bindgen(js_name = getClock)]
+pub fn get_clock(state: &State) -> Result<JsValue, JsValue> {
+    let clock = state.backend.clock();
+    rust_to_js(&clock)
+}
+
 #[wasm_bindgen]
-pub fn merge(state: &mut State, remote: State) -> Result<JsValue, JsValue> {
+pub fn merge(mut state: State, remote: State) -> Result<Array, JsValue> {
     let patch = state
         .backend
         .merge(&remote.backend)
         .map_err(automerge_error_to_js)?;
-    rust_to_js(&patch)
+    let ret = Array::new();
+    ret.push(&state.into());
+    ret.push(&rust_to_js(&patch)?);
+    Ok(ret)
 }
 
 #[wasm_bindgen]

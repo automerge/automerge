@@ -111,24 +111,30 @@ impl Backend {
         }
     }
 
-    pub fn get_changes(&self) -> Vec<Change> {
-        Vec::new()
+    /// Get changes which are in `other` but not in this backend
+    pub fn get_changes(&self, other: &Backend) -> Vec<Change> {
+        other.op_set.get_missing_changes(&self.op_set.clock)
     }
 
-    pub fn get_changes_for_actor_id(&self, _actor_id: ActorID) -> Vec<Change> {
-        Vec::new()
+    pub fn get_changes_for_actor_id(&self, actor_id: ActorID) -> Vec<Change> {
+        self.op_set.get_changes_for_actor_id(&actor_id)
     }
 
-    pub fn get_missing_changes(&self, _clock: Clock) -> Vec<Change> {
-        Vec::new()
+    pub fn get_missing_changes(&self, clock: Clock) -> Vec<Change> {
+        self.op_set.get_missing_changes(&clock)
     }
 
     pub fn get_missing_deps(&self) -> Clock {
-        Clock::empty()
+        self.op_set.get_missing_deps()
     }
 
-    pub fn merge(&mut self, _remote: &Backend) -> Result<Patch, AutomergeError> {
-        Ok(Patch::empty())
+    pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
+        let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
+        self.apply_changes(missing_changes)
+    }
+
+    pub fn clock(&self) -> Clock {
+        self.op_set.clock.clone()
     }
 }
 

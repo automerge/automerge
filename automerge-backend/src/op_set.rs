@@ -18,6 +18,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::BuildHasher;
 
+#[derive(Debug, PartialEq, Clone)]
+struct ActorState {
+    change: Change,
+    all_deps: Clock,
+}
+
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
 ///
@@ -40,6 +46,7 @@ pub struct OpSet {
     undo_pos: usize,
     undo_stack: Vec<Vec<Operation>>,
     redo_stack: Vec<Vec<Operation>>,
+    states: HashMap<ActorID, Vec<ActorState>>,
     state: Value,
 }
 
@@ -54,6 +61,7 @@ impl OpSet {
             undo_pos: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            states: HashMap::new(),
         }
     }
 
@@ -197,6 +205,28 @@ impl OpSet {
             return Ok(Vec::new());
         }
         self.actor_histories.add_change(&change);
+        let states_for_actor = self
+            .states
+            .entry(change.actor_id.clone())
+            .or_insert_with(Vec::new);
+
+        if (change.seq as usize) < states_for_actor.len()
+            && !states_for_actor
+                .get((change.seq as usize) - 1)
+                .map(|s| s.change == change)
+                .unwrap_or(false)
+        {
+            return Err(AutomergeError::InvalidChange(
+                "Invalid sequence number for actor".to_string(),
+            ));
+        };
+        states_for_actor.push(ActorState {
+            change: change.clone(),
+            all_deps: self
+                .actor_histories
+                .transitive_dependencies(&change.actor_id, change.seq),
+        });
+
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
         let mut diffs = Vec::new();
@@ -390,6 +420,35 @@ impl OpSet {
 
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
+    }
+
+    /// Get all the changes we have that are not in `for_clock`
+    pub fn get_missing_changes(&self, for_clock: &Clock) -> Vec<Change> {
+        let all_deps = self
+            .actor_histories
+            .transitive_dependencies_of_clock(for_clock);
+        self.states
+            .iter()
+            .flat_map(|(actor_id, actor_states)| {
+                actor_states
+                    .iter()
+                    .skip(all_deps.seq_for(actor_id) as usize)
+                    .map(|state| state.change.clone())
+            })
+            .collect()
+    }
+
+    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<Change> {
+        self.states
+            .get(actor_id)
+            .map(|states| states.iter().map(|s| s.change.clone()).collect())
+            .unwrap_or_else(Vec::new)
+    }
+
+    pub fn get_missing_deps(&self) -> Clock {
+        self.queue.iter().fold(Clock::empty(), |clock, change| {
+            clock.upper_bound(&change.dependencies)
+        })
     }
 }
 
