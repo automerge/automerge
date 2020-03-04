@@ -132,6 +132,10 @@ impl Backend {
         let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
         self.apply_changes(missing_changes)
     }
+
+    pub fn clock(&self) -> Clock {
+        self.op_set.clock.clone()
+    }
 }
 
 #[cfg(test)]
