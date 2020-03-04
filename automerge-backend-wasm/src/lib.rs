@@ -1,5 +1,4 @@
 use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
-use js_sys::Array;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -28,87 +27,81 @@ pub struct State {
     backend: Backend,
 }
 
-#[wasm_bindgen(js_name = applyChanges)]
-pub fn apply_changes(mut state: State, changes: JsValue) -> Result<Array, JsValue> {
-    let c: Vec<Change> = js_to_rust(changes)?;
-    let patch = state
-        .backend
-        .apply_changes(c)
-        .map_err(automerge_error_to_js)?;
-    let ret = Array::new();
-    ret.push(&state.into());
-    ret.push(&rust_to_js(&patch)?);
-    Ok(ret)
-}
-
-#[wasm_bindgen(js_name = applyLocalChange)]
-pub fn apply_local_change(mut state: State, change: JsValue) -> Result<Array, JsValue> {
-    let c: ChangeRequest = js_to_rust(change)?;
-    let patch = state
-        .backend
-        .apply_local_change(c)
-        .map_err(automerge_error_to_js)?;
-    let ret = Array::new();
-    ret.push(&state.into());
-    ret.push(&rust_to_js(&patch)?);
-    Ok(ret)
-}
-
-#[wasm_bindgen(js_name = getPatch)]
-pub fn get_patch(state: &State) -> Result<JsValue, JsValue> {
-    let patch = state.backend.get_patch();
-    rust_to_js(&patch)
-}
-
-#[wasm_bindgen(js_name = getChanges)]
-pub fn get_changes(old_state: &State, new_state: &State) -> Result<JsValue, JsValue> {
-    let changes = old_state.backend.get_changes(&new_state.backend);
-    rust_to_js(&changes)
-}
-
-#[wasm_bindgen(js_name = getChangesForActor)]
-pub fn get_changes_for_actorid(state: &State, actorid: JsValue) -> Result<JsValue, JsValue> {
-    let a: ActorID = js_to_rust(actorid)?;
-    let changes = state.backend.get_changes_for_actor_id(a);
-    rust_to_js(&changes)
-}
-
-#[wasm_bindgen(js_name = getMissingChanges)]
-pub fn get_missing_changes(state: &State, clock: JsValue) -> Result<JsValue, JsValue> {
-    let c: Clock = js_to_rust(clock)?;
-    let changes = state.backend.get_missing_changes(c);
-    rust_to_js(&changes)
-}
-
-#[wasm_bindgen(js_name = getMissingDeps)]
-pub fn get_missing_deps(state: &State) -> Result<JsValue, JsValue> {
-    let clock = state.backend.get_missing_deps();
-    rust_to_js(&clock)
-}
-
-#[wasm_bindgen(js_name = getClock)]
-pub fn get_clock(state: &State) -> Result<JsValue, JsValue> {
-    let clock = state.backend.clock();
-    rust_to_js(&clock)
-}
-
 #[wasm_bindgen]
-pub fn merge(mut state: State, remote: State) -> Result<Array, JsValue> {
-    let patch = state
-        .backend
-        .merge(&remote.backend)
-        .map_err(automerge_error_to_js)?;
-    let ret = Array::new();
-    ret.push(&state.into());
-    ret.push(&rust_to_js(&patch)?);
-    Ok(ret)
-}
+impl State {
+  #[wasm_bindgen(js_name = applyChanges)]
+  pub fn apply_changes(&mut self, changes: JsValue) -> Result<JsValue, JsValue> {
+      let c: Vec<Change> = js_to_rust(changes)?;
+      let patch = self
+          .backend
+          .apply_changes(c)
+          .map_err(automerge_error_to_js)?;
+      rust_to_js(&patch)
+  }
 
-#[wasm_bindgen]
-pub fn init() -> State {
+  #[wasm_bindgen(js_name = applyLocalChange)]
+  pub fn apply_local_change(&mut self, change: JsValue) -> Result<JsValue, JsValue> {
+      let c: ChangeRequest = js_to_rust(change)?;
+      let patch = self
+          .backend
+          .apply_local_change(c)
+          .map_err(automerge_error_to_js)?;
+      rust_to_js(&patch)
+  }
+
+  #[wasm_bindgen(js_name = getPatch)]
+  pub fn get_patch(&self) -> Result<JsValue, JsValue> {
+      let patch = self.backend.get_patch();
+      rust_to_js(&patch)
+  }
+
+  #[wasm_bindgen(js_name = getChanges)]
+  pub fn get_changes(&self, state: &State) -> Result<JsValue, JsValue> {
+      let changes = self.backend.get_changes(&state.backend);
+      rust_to_js(&changes)
+  }
+
+  #[wasm_bindgen(js_name = getChangesForActor)]
+  pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<JsValue, JsValue> {
+      let a: ActorID = js_to_rust(actorid)?;
+      let changes = self.backend.get_changes_for_actor_id(a);
+      rust_to_js(&changes)
+  }
+
+  #[wasm_bindgen(js_name = getMissingChanges)]
+  pub fn get_missing_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
+      let c: Clock = js_to_rust(clock)?;
+      let changes = self.backend.get_missing_changes(c);
+      rust_to_js(&changes)
+  }
+
+  #[wasm_bindgen(js_name = getMissingDeps)]
+  pub fn get_missing_deps(&self) -> Result<JsValue, JsValue> {
+      let clock = self.backend.get_missing_deps();
+      rust_to_js(&clock)
+  }
+
+  #[wasm_bindgen(js_name = getClock)]
+  pub fn get_clock(&self) -> Result<JsValue, JsValue> {
+      let clock = self.backend.clock();
+      rust_to_js(&clock)
+  }
+
+  #[wasm_bindgen]
+  pub fn merge(&mut self, remote: State) -> Result<JsValue, JsValue> {
+      let patch = self
+          .backend
+          .merge(&remote.backend)
+          .map_err(automerge_error_to_js)?;
+      rust_to_js(&patch)
+  }
+
+  #[wasm_bindgen]
+  pub fn new() -> State {
     State {
         backend: Backend::init(),
     }
+  }
 }
 
 fn automerge_error_to_js(err: AutomergeError) -> JsValue {
