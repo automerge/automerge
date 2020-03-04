@@ -99,6 +99,11 @@ impl Backend {
         }
     }
 
+    pub fn history(&self) -> Vec<Change> {
+        // TODO - use lifetime instead of clone?
+        self.op_set.history.clone()
+    }
+
     pub fn get_patch(&self) -> Patch {
         Patch {
             can_undo: false,

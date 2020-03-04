@@ -87,6 +87,12 @@ impl State {
         rust_to_js(&clock)
     }
 
+    #[wasm_bindgen(js_name = getHistory)]
+    pub fn get_history(&self) -> Result<JsValue, JsValue> {
+        let changes = self.backend.history();
+        rust_to_js(&changes)
+    }
+
     #[wasm_bindgen]
     pub fn merge(&mut self, remote: State) -> Result<JsValue, JsValue> {
         let patch = self

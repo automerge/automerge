@@ -1,5 +1,5 @@
 let Backend = require("./pkg")
-let { Map } = require('immutable')
+let { List, Map } = require('immutable')
 
 
 let init = () => {
@@ -26,6 +26,11 @@ let getClock = (backend) => {
   return Map( clock );
 }
 
+let getHistory = (backend) => {
+  let history = backend.getHistory();
+  return List(history.map(Map))
+}
+
 let getPatch = (backend) => backend.getPatch()
 let getChanges = (backend,other) => backend.getChanges(other)
 let getChangesForActor = (backend,actor) => backend.getChangesForActor(actor)
@@ -34,5 +39,5 @@ let getMissingDeps = (backend) => backend.getMissingDeps()
 
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,
-  getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock
+  getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock, getHistory
 }

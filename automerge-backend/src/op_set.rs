@@ -42,6 +42,7 @@ pub struct OpSet {
     pub object_store: ObjectStore,
     pub actor_histories: ActorHistories,
     queue: Vec<Change>,
+    pub history: Vec<Change>,
     pub clock: Clock,
     undo_pos: usize,
     undo_stack: Vec<Vec<Operation>>,
@@ -56,6 +57,7 @@ impl OpSet {
             object_store: ObjectStore::new(),
             actor_histories: ActorHistories::new(),
             queue: Vec::new(),
+            history: Vec::new(),
             clock: Clock::empty(),
             state: Value::Map(HashMap::new()),
             undo_pos: 0,
@@ -205,6 +207,7 @@ impl OpSet {
             return Ok(Vec::new());
         }
         self.actor_histories.add_change(&change);
+        self.history.push(change.clone());
         let states_for_actor = self
             .states
             .entry(change.actor_id.clone())
