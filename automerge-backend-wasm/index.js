@@ -1,13 +1,16 @@
 let Backend = require("./pkg")
 let { List, Map } = require('immutable')
 
+function toJS(obj) {
+  return (obj && obj.toJS) ? obj.toJS() : obj
+}
 
 let init = () => {
   return Backend.State.new();
 }
 
 let applyChanges = (backend,changes) => {
-  let patch = backend.applyChanges(changes);
+  let patch = backend.applyChanges(toJS(changes));
   return [ backend, patch ]
 }
 
