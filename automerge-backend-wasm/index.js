@@ -10,16 +10,19 @@ let init = () => {
 }
 
 let applyChanges = (backend,changes) => {
+  //console.log("BACK",backend,"CHANGES",toJS(changes).map( ch => `${ch.actor.slice(0,6)}:${ch.seq}`))
   let patch = backend.applyChanges(toJS(changes));
   return [ backend, patch ]
 }
 
 let applyLocalChange = (backend,change) => {
+  //console.log("BACK",backend,"LOCAL_CHANGE",[change].map( ch => `${ch.actor.slice(0,6)}:${ch.seq}`))
   let patch = backend.applyLocalChange(change);
   return [ backend, patch ]
 }
 
 let merge = (backend1,backend2) => {
+  //console.log("MERGE",backend1,backend2)
   let patch = backend1.merge(backend2);
   return [ backend1, patch ]
 }

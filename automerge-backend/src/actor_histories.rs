@@ -28,8 +28,7 @@ impl ActorHistories {
         self.0
             .get(&change.actor_id)
             .and_then(|clocks| clocks.get(&change.seq))
-            .map(|c| c.seq_for(&change.actor_id) >= change.seq)
-            .unwrap_or(false)
+            .is_some()
     }
 
     /// Update this ActorHistories to include the changes in `change`

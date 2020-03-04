@@ -1,3 +1,11 @@
+extern crate web_sys;
+
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    }
+}
+
 mod actor_histories;
 mod backend;
 mod concurrent_operations;

@@ -3,15 +3,16 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
+extern crate web_sys;
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    }
+}
+
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    pub fn log(s: &str);
-}
 
 fn js_to_rust<T: DeserializeOwned>(value: JsValue) -> Result<T, JsValue> {
     value.into_serde().map_err(json_error_to_js)
