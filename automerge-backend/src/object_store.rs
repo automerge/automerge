@@ -112,7 +112,6 @@ impl ListState {
 
         let inserts = ops_in_order
             .iter()
-            .rev()
             .filter_map(|(_, ops)| {
                 ops.active_op()
                     .map(|active_op| (active_op, ops.conflicts()))

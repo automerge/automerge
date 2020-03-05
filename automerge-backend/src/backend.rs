@@ -1031,4 +1031,132 @@ mod tests {
             Vec::new()
         )
     }
+
+    #[test]
+    fn test_get_patch_list_state() {
+        let birds = ObjectID::ID("birds".into());
+        let actor = ActorID("actor1".into());
+        let changes = vec![
+            Change {
+                actor_id: actor.clone(),
+                seq: 1,
+                dependencies: Clock::empty(),
+                message: None,
+                operations: vec![
+                    Operation::MakeList {
+                        object_id: birds.clone(),
+                    },
+                    Operation::Insert {
+                        list_id: birds.clone(),
+                        key: ElementID::Head,
+                        elem: 1,
+                    },
+                    Operation::Set {
+                        object_id: birds.clone(),
+                        key: Key("actor1:1".into()),
+                        value: PrimitiveValue::Str("chaffinch".into()),
+                        datatype: None,
+                    },
+                    Operation::Insert {
+                        list_id: birds.clone(),
+                        key: ElementID::from_actor_and_elem(actor.clone(), 1),
+                        elem: 2,
+                    },
+                    Operation::Set {
+                        object_id: birds.clone(),
+                        key: Key("actor1:2".into()),
+                        value: PrimitiveValue::Str("goldfinch".into()),
+                        datatype: None,
+                    },
+                    Operation::Link {
+                        object_id: ObjectID::Root,
+                        key: Key("birds".into()),
+                        value: birds.clone(),
+                    },
+                ],
+            },
+            Change {
+                actor_id: actor.clone(),
+                seq: 2,
+                dependencies: Clock::empty(),
+                message: None,
+                operations: vec![
+                    Operation::Delete {
+                        object_id: birds.clone(),
+                        key: Key("actor1:1".into()),
+                    },
+                    Operation::Insert {
+                        list_id: birds.clone(),
+                        key: ElementID::from_actor_and_elem(actor.clone(), 1),
+                        elem: 3,
+                    },
+                    Operation::Set {
+                        object_id: birds.clone(),
+                        key: Key("actor1:3".into()),
+                        value: PrimitiveValue::Str("greenfinch".into()),
+                        datatype: None,
+                    },
+                    Operation::Set {
+                        object_id: birds.clone(),
+                        key: Key("actor1:2".into()),
+                        value: PrimitiveValue::Str("goldfinches!!".into()),
+                        datatype: None,
+                    },
+                ],
+            },
+        ];
+        let expected_patch = Patch {
+            actor: None,
+            can_undo: false,
+            can_redo: false,
+            clock: Clock::empty().with_dependency(&actor, 2),
+            deps: Clock::empty().with_dependency(&actor, 2),
+            seq: None,
+            diffs: vec![
+                Diff {
+                    action: DiffAction::CreateList(birds.clone(), SequenceType::List),
+                    conflicts: Vec::new(),
+                },
+                Diff {
+                    action: DiffAction::InsertSequenceElement(
+                        birds.clone(),
+                        SequenceType::List,
+                        0,
+                        ElementValue::Primitive(PrimitiveValue::Str("greenfinch".into())),
+                        None,
+                        ElementID::from_actor_and_elem(actor.clone(), 3),
+                    ),
+                    conflicts: Vec::new(),
+                },
+                Diff {
+                    action: DiffAction::InsertSequenceElement(
+                        birds.clone(),
+                        SequenceType::List,
+                        1,
+                        ElementValue::Primitive(PrimitiveValue::Str("goldfinches!!".into())),
+                        None,
+                        ElementID::from_actor_and_elem(actor.clone(), 2),
+                    ),
+                    conflicts: Vec::new(),
+                },
+                Diff {
+                    action: DiffAction::MaxElem(birds.clone(), 3, SequenceType::List),
+                    conflicts: Vec::new(),
+                },
+                Diff {
+                    action: DiffAction::SetMapKey(
+                        ObjectID::Root,
+                        MapType::Map,
+                        Key("birds".into()),
+                        ElementValue::Link(birds),
+                        None,
+                    ),
+                    conflicts: Vec::new(),
+                },
+            ],
+        };
+        let mut backend = Backend::init();
+        backend.apply_changes(changes).unwrap();
+        assert_eq!(expected_patch, backend.get_patch());
+    }
 }

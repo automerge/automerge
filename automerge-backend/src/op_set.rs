@@ -488,10 +488,7 @@ pub fn list_ops_in_order<'a, S: BuildHasher>(
         if let Some(followers) = following.get(&next_element_id) {
             let mut sorted = followers.to_vec();
             sorted.sort();
-            sorted.reverse();
-            for follower in sorted {
-                to_process.push(follower.clone())
-            }
+            to_process.extend(sorted);
         }
     }
     Ok(ops_in_order)
