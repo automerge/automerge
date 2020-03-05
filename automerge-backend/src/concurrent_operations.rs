@@ -93,13 +93,16 @@ impl ConcurrentOperations {
             Operation::Increment {
                 value: inc_value, ..
             } => concurrent.iter_mut().for_each(|op| {
+                let op_clone = op.clone();
                 if let Operation::Set {
                     value: PrimitiveValue::Number(ref mut n),
                     datatype: Some(DataType::Counter),
                     ..
                 } = op.operation
                 {
-                    *n += inc_value
+                    if !(actor_histories.are_concurrent(&new_op, &op_clone)) {
+                        *n += inc_value
+                    }
                 }
             }),
             // All other operations are not relevant (e.g a concurrent
