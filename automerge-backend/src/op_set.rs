@@ -453,7 +453,12 @@ impl OpSet {
     pub fn get_missing_deps(&self) -> Clock {
         // TODO: there's a lot of internal copying going on in here for something kinda simple
         self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock.upper_bound(&change.dependencies).upper_bound(&Clock::new(&change.actor_id,change.seq - 1))
+            let c1 = clock.upper_bound(&change.dependencies);
+            if change.seq > 1 {
+              c1.upper_bound(&Clock::new(&change.actor_id,change.seq - 1))
+            } else {
+              c1
+            }
         })
     }
 }
