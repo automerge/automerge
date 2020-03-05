@@ -440,7 +440,7 @@ describe('Automerge.Backend', () => {
     it('should start with no history ', () => {
       const s0 = Backend.init()
       const history = Backend.getHistory(s0)
-      assert.deepEqual(history,List([]))
+      assert.deepEqual(history,[])
     })
   })
 })
