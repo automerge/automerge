@@ -127,7 +127,7 @@ impl Clock {
             .all(|(actor_id, seq)| self.0.get(actor_id).unwrap_or(&0) >= seq)
     }
 
-    pub fn seq_for(&self, actor_id: &ActorID) -> u32 {
+    pub fn at(&self, actor_id: &ActorID) -> u32 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 

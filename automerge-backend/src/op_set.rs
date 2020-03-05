@@ -427,20 +427,11 @@ impl OpSet {
         !self.redo_stack.is_empty()
     }
 
-    /// Get all the changes we have that are not in `for_clock`
-    pub fn get_missing_changes(&self, for_clock: &Clock) -> Vec<Change> {
-        let all_deps = self
-            .actor_histories
-            .transitive_dependencies_of_clock(for_clock);
-        self.states
-            .iter()
-            .flat_map(|(actor_id, actor_states)| {
-                actor_states
-                    .iter()
-                    .skip(all_deps.seq_for(actor_id) as usize)
-                    .map(|state| state.change.clone())
-            })
-            .collect()
+    /// Get all the changes we have that are not in `since`
+    // TODO: check with martin - this impl seems too simple to be right
+    pub fn get_missing_changes(&self, since: &Clock) -> Vec<Change> {
+        self.history.iter().filter(|change| change.seq > since.at(&change.actor_id))
+          .cloned().collect()
     }
 
     pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<Change> {

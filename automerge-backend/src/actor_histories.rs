@@ -19,7 +19,7 @@ impl ActorHistories {
         self.0
             .get(&op.actor_id)
             .and_then(|clocks| clocks.get(&op.sequence))
-            .map(|c| c.seq_for(actor))
+            .map(|c| c.at(actor))
             .unwrap_or(0)
     }
 
