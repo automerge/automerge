@@ -12,17 +12,20 @@ let init = () => {
   return Backend.State.new();
 }
 
-let applyChanges = (backend,changes) => {
+let applyChanges = (backend0,changes) => {
+  let backend = backend0.dupe()
   let patch = backend.applyChanges(toJS(changes));
   return [ backend, patch ]
 }
 
-let applyLocalChange = (backend,change) => {
+let applyLocalChange = (backend0,change) => {
+  let backend = backend0.dupe()
   let patch = backend.applyLocalChange(change);
   return [ backend, patch ]
 }
 
-let merge = (backend1,backend2) => {
+let merge = (backend0,backend2) => {
+  let backend1 = backend0.dupe()
   let patch = backend1.merge(backend2);
   return [ backend1, patch ]
 }

@@ -129,6 +129,11 @@ impl State {
     }
 
     #[wasm_bindgen]
+    pub fn dupe(&self) -> State {
+        self.clone()
+    }
+
+    #[wasm_bindgen]
     pub fn new() -> State {
         State {
             backend: Backend::init(),
