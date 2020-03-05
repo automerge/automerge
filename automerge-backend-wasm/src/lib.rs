@@ -64,7 +64,8 @@ impl State {
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, state: &State) -> Result<JsValue, JsValue> {
         log!("get_changes");
-        let changes = self.backend.get_changes(&state.backend);
+        let changes = self.backend.get_changes(&state.backend)
+          .map_err(automerge_error_to_js)?;
         rust_to_js(&changes)
     }
 

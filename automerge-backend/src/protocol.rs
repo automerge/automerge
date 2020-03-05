@@ -136,7 +136,7 @@ impl Clock {
     ///
     pub fn less_or_equal(&self, other: &Clock) -> bool {
         self.0.iter().chain(other.0.iter()).all(|(actor_id, _)| {
-            self.0.get(actor_id).unwrap_or(&0) < other.0.get(actor_id).unwrap_or(&0)
+            self.0.get(actor_id).unwrap_or(&0) <= other.0.get(actor_id).unwrap_or(&0)
         })
     }
 }
