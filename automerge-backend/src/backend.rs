@@ -50,7 +50,7 @@ impl Backend {
                         message: change.message,
                         dependencies: change.dependencies,
                     },
-                    true,
+                    change.undoable.unwrap_or(true),
                 )?;
                 Ok(Patch {
                     actor: Some(actor_id),

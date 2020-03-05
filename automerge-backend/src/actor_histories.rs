@@ -23,14 +23,6 @@ impl ActorHistories {
             .unwrap_or(0)
     }
 
-    /// Whether or not `change` is already part of this `ActorHistories`
-    pub(crate) fn is_applied(&self, change: &Change) -> bool {
-        self.0
-            .get(&change.actor_id)
-            .and_then(|clocks| clocks.get(&change.seq))
-            .is_some()
-    }
-
     /// Update this ActorHistories to include the changes in `change`
     pub(crate) fn add_change(&mut self, change: &Change) {
         let change_deps = change

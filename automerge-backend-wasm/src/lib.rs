@@ -7,7 +7,7 @@ extern crate web_sys;
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
+//        web_sys::console::log_1(&format!( $( $t )* ).into());
     }
 }
 
@@ -33,6 +33,7 @@ pub struct State {
 impl State {
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<JsValue, JsValue> {
+        log!("apply_changes {:?}", changes);
         let c: Vec<Change> = js_to_rust(changes)?;
         let patch = self
             .backend
@@ -43,6 +44,7 @@ impl State {
 
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<JsValue, JsValue> {
+        log!("apply_local_changes {:?}", change);
         let c: ChangeRequest = js_to_rust(change)?;
         let patch = self
             .backend
@@ -53,18 +55,21 @@ impl State {
 
     #[wasm_bindgen(js_name = getPatch)]
     pub fn get_patch(&self) -> Result<JsValue, JsValue> {
+        log!("get_patch");
         let patch = self.backend.get_patch();
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, state: &State) -> Result<JsValue, JsValue> {
+        log!("get_changes");
         let changes = self.backend.get_changes(&state.backend);
         rust_to_js(&changes)
     }
 
     #[wasm_bindgen(js_name = getChangesForActor)]
     pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<JsValue, JsValue> {
+        log!("get_changes_for_actorid");
         let a: ActorID = js_to_rust(actorid)?;
         let changes = self.backend.get_changes_for_actor_id(a);
         rust_to_js(&changes)
@@ -72,6 +77,7 @@ impl State {
 
     #[wasm_bindgen(js_name = getMissingChanges)]
     pub fn get_missing_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
+        log!("get_missing_changes");
         let c: Clock = js_to_rust(clock)?;
         let changes = self.backend.get_missing_changes(c);
         rust_to_js(&changes)
@@ -79,24 +85,28 @@ impl State {
 
     #[wasm_bindgen(js_name = getMissingDeps)]
     pub fn get_missing_deps(&self) -> Result<JsValue, JsValue> {
+        log!("get_missing_deps");
         let clock = self.backend.get_missing_deps();
         rust_to_js(&clock)
     }
 
     #[wasm_bindgen(js_name = getClock)]
     pub fn get_clock(&self) -> Result<JsValue, JsValue> {
+        log!("get_clock");
         let clock = self.backend.clock();
         rust_to_js(&clock)
     }
 
     #[wasm_bindgen(js_name = getHistory)]
     pub fn get_history(&self) -> Result<JsValue, JsValue> {
+        log!("get_history");
         let changes = self.backend.history();
         rust_to_js(&changes)
     }
 
     #[wasm_bindgen]
     pub fn merge(&mut self, remote: &State) -> Result<JsValue, JsValue> {
+        log!("merge");
         let patch = self
             .backend
             .merge(&remote.backend)

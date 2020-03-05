@@ -1,4 +1,5 @@
 const assert = require('assert')
+const { List } = require('immutable')
 const Backend = require('..')
 const uuid = require('automerge/src/uuid')
 const ROOT_ID = '00000000-0000-0000-0000-000000000000'
@@ -433,6 +434,13 @@ describe('Automerge.Backend', () => {
           {action: 'set',     obj: ROOT_ID, type: 'map',  key: 'list', value: list, link: true}
         ]
       })
+    })
+  })
+  describe('getHistory()', () => {
+    it('should start with no history ', () => {
+      const s0 = Backend.init()
+      const history = Backend.getHistory(s0)
+      assert.deepEqual(history,List([]))
     })
   })
 })

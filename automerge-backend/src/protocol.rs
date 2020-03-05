@@ -341,11 +341,12 @@ impl Operation {
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
-    #[serde(rename = "actor")]
-    pub actor_id: ActorID,
     #[serde(rename = "ops")]
     pub operations: Vec<Operation>,
+    #[serde(rename = "actor")]
+    pub actor_id: ActorID,
     pub seq: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(rename = "deps")]
     pub dependencies: Clock,
@@ -357,6 +358,7 @@ pub struct ChangeRequest {
     pub seq: u32,
     pub message: Option<String>,
     pub dependencies: Clock,
+    pub undoable: Option<bool>,
     pub request_type: ChangeRequestType,
 }
 

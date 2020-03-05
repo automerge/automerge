@@ -49,6 +49,7 @@ impl<'de> Deserialize<'de> for ChangeRequest {
                 let mut message: Option<Option<String>> = None;
                 let mut seq: Option<u32> = None;
                 let mut ops: Option<Vec<Operation>> = None;
+                let mut undoable: Option<bool> = None;
                 let mut request_type_str: Option<String> = None;
 
                 while let Some(key) = map.next_key::<String>()? {
@@ -76,6 +77,12 @@ impl<'de> Deserialize<'de> for ChangeRequest {
                                 return Err(Error::duplicate_field("seq"));
                             }
                             seq = Some(map.next_value()?);
+                        }
+                        "undoable" => {
+                            if undoable.is_some() {
+                                return Err(Error::duplicate_field("seq"));
+                            }
+                            undoable = Some(map.next_value()?);
                         }
                         "ops" => {
                             if ops.is_some() {
@@ -117,6 +124,7 @@ impl<'de> Deserialize<'de> for ChangeRequest {
                 Ok(ChangeRequest {
                     actor_id: actor,
                     dependencies: deps,
+                    undoable,
                     seq,
                     request_type,
                     message: message.unwrap_or(None),
