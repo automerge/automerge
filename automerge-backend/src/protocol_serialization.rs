@@ -22,6 +22,9 @@ impl Serialize for ChangeRequest {
             ChangeRequestType::Undo => map_serializer.serialize_entry("requestType", "undo")?,
             ChangeRequestType::Redo => map_serializer.serialize_entry("requestType", "redo")?,
         };
+        if let Some(undoable) = &self.undoable {
+            map_serializer.serialize_entry("undoable", undoable)?;
+        }
         map_serializer.end()
     }
 }
@@ -158,6 +161,7 @@ mod tests {
                     actor_id: actor.clone(),
                     seq: 1,
                     message: None,
+                    undoable: Some(false),
                     dependencies: Clock::empty().with_dependency(&actor, 1),
                     request_type: ChangeRequestType::Change(vec![Operation::MakeMap {
                         object_id: birds,
@@ -169,6 +173,7 @@ mod tests {
                             "actor": "actor1",
                             "seq": 1,
                             "message": null,
+                            "undoable": false,
                             "deps": {"actor1": 1},
                             "requestType": "change",
                             "ops": [{
@@ -186,6 +191,7 @@ mod tests {
                     actor_id: actor.clone(),
                     seq: 1,
                     message: None,
+                    undoable: None,
                     dependencies: Clock::empty().with_dependency(&actor, 1),
                     request_type: ChangeRequestType::Undo,
                 },
@@ -208,6 +214,7 @@ mod tests {
                     actor_id: actor.clone(),
                     seq: 1,
                     message: None,
+                    undoable: None,
                     dependencies: Clock::empty().with_dependency(&actor, 1),
                     request_type: ChangeRequestType::Redo,
                 },

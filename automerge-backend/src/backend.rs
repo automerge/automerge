@@ -1,5 +1,6 @@
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff, OpSet, Patch, Operation
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff, OpSet,
+    Operation, Patch,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -100,13 +101,13 @@ impl Backend {
     }
 
     pub fn undo_stack(&self) -> Vec<Vec<Operation>> {
-      // TODO - use lifetime instead of clone?
-      return self.op_set.undo_stack.clone()
+        // TODO - use lifetime instead of clone?
+        self.op_set.undo_stack.clone()
     }
 
     pub fn redo_stack(&self) -> Vec<Vec<Operation>> {
-      // TODO - use lifetime instead of clone?
-      return self.op_set.redo_stack.clone()
+        // TODO - use lifetime instead of clone?
+        self.op_set.redo_stack.clone()
     }
 
     pub fn history(&self) -> Vec<Change> {
@@ -693,6 +694,7 @@ mod tests {
                         seq: 1,
                         message: None,
                         dependencies: Clock::empty(),
+                        undoable: None,
                         request_type: ChangeRequestType::Change(vec![
                             Operation::MakeMap {
                                 object_id: birds.clone(),
@@ -714,6 +716,7 @@ mod tests {
                         actor_id: actor1.clone(),
                         seq: 2,
                         message: None,
+                        undoable: None,
                         dependencies: Clock::empty().with_dependency(&actor1, 1),
                         request_type: ChangeRequestType::Undo,
                     },
@@ -779,6 +782,7 @@ mod tests {
                         seq: 1,
                         message: None,
                         dependencies: Clock::empty(),
+                        undoable: None,
                         request_type: ChangeRequestType::Change(vec![
                             Operation::MakeMap {
                                 object_id: birds.clone(),
@@ -800,6 +804,7 @@ mod tests {
                         actor_id: actor1.clone(),
                         seq: 2,
                         message: None,
+                        undoable: None,
                         dependencies: Clock::empty().with_dependency(&actor1, 1),
                         request_type: ChangeRequestType::Undo,
                     },
@@ -807,6 +812,7 @@ mod tests {
                         actor_id: actor1.clone(),
                         seq: 3,
                         message: None,
+                        undoable: None,
                         dependencies: Clock::empty().with_dependency(&actor1, 2),
                         request_type: ChangeRequestType::Redo,
                     },
@@ -814,6 +820,7 @@ mod tests {
                         actor_id: actor1.clone(),
                         seq: 4,
                         message: None,
+                        undoable: None,
                         dependencies: Clock::empty().with_dependency(&actor1, 3),
                         request_type: ChangeRequestType::Undo,
                     },
@@ -821,6 +828,7 @@ mod tests {
                         actor_id: actor1.clone(),
                         seq: 5,
                         message: None,
+                        undoable: None,
                         dependencies: Clock::empty().with_dependency(&actor1, 4),
                         request_type: ChangeRequestType::Redo,
                     },

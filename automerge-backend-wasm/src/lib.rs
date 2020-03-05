@@ -7,8 +7,8 @@ extern crate web_sys;
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
-//        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
+        //        web_sys::console::log_1(&format!( $( $t )* ).into());
+    };
 }
 
 #[cfg(feature = "wee_alloc")]
@@ -29,6 +29,7 @@ pub struct State {
     backend: Backend,
 }
 
+#[allow(clippy::new_without_default)]
 #[wasm_bindgen]
 impl State {
     #[wasm_bindgen(js_name = applyChanges)]

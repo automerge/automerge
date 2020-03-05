@@ -203,11 +203,17 @@ impl OpSet {
         // need the undo operation for the creation of the list to achieve
         // the undo), so we track newly created objects and only store undo
         // operations which don't operate on them.
-        if let Some(actor_state) = self.states.get(&change.actor_id).and_then(|changes| changes.get((change.seq as usize) - 1)) {
+        if let Some(actor_state) = self
+            .states
+            .get(&change.actor_id)
+            .and_then(|changes| changes.get((change.seq as usize) - 1))
+        {
             if change == actor_state.change {
-              return Ok(Vec::new()); // its a duplicate - ignore
+                return Ok(Vec::new()); // its a duplicate - ignore
             } else {
-              return Err(AutomergeError::InvalidChange("Invalid reuse of sequence number for actor".to_string()));
+                return Err(AutomergeError::InvalidChange(
+                    "Invalid reuse of sequence number for actor".to_string(),
+                ));
             }
         }
 
