@@ -19,7 +19,7 @@ impl ActorHistories {
         self.0
             .get(&op.actor_id)
             .and_then(|clocks| clocks.get(&op.sequence))
-            .map(|c| c.at(actor))
+            .map(|c| c.get(actor))
             .unwrap_or(0)
     }
 
@@ -27,9 +27,9 @@ impl ActorHistories {
     pub(crate) fn add_change(&mut self, change: &Change) {
         let change_deps = change
             .dependencies
-            .with_dependency(&change.actor_id, change.seq - 1);
+            .with(&change.actor_id, change.seq - 1);
         let transitive = self.transitive_dependencies(&change.actor_id, change.seq);
-        let all_deps = transitive.upper_bound(&change_deps);
+        let all_deps = transitive.union(&change_deps);
         let state = self
             .0
             .entry(change.actor_id.clone())
@@ -49,9 +49,9 @@ impl ActorHistories {
         clock
             .into_iter()
             .fold(Clock::empty(), |clock, (actor_id, seq)| {
-                clock.upper_bound(&self.transitive_dependencies(actor_id, *seq))
+                clock.union(&self.transitive_dependencies(actor_id, *seq))
             })
-            .upper_bound(clock)
+            .union(clock)
     }
 
     /// Whether the two operations in question are concurrent

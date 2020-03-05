@@ -177,10 +177,8 @@ impl OpSet {
         let mut index = 0;
         while index < self.queue.len() {
             let change = self.queue.get(index).unwrap();
-            let deps = change
-                .dependencies
-                .with_dependency(&change.actor_id, change.seq - 1);
-            if self.clock.is_before_or_concurrent_with(&deps) {
+            let deps = change.dependencies.with(&change.actor_id, change.seq - 1);
+            if deps <= self.clock {
                 return Some(self.queue.remove(index));
             }
             index += 1
@@ -229,7 +227,7 @@ impl OpSet {
             all_deps: self
                 .actor_histories
                 .transitive_dependencies(&change.actor_id, change.seq)
-                .with_dependency(&change.actor_id, change.seq - 1),
+                .with(&change.actor_id, change.seq - 1),
         });
 
         let actor_id = change.actor_id.clone();
@@ -269,7 +267,7 @@ impl OpSet {
         }
         self.clock = self
             .clock
-            .with_dependency(&change.actor_id.clone(), change.seq);
+            .with(&change.actor_id.clone(), change.seq);
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
             let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
@@ -430,7 +428,7 @@ impl OpSet {
     /// Get all the changes we have that are not in `since`
     // TODO: check with martin - this impl seems too simple to be right
     pub fn get_missing_changes(&self, since: &Clock) -> Vec<Change> {
-        self.history.iter().filter(|change| change.seq > since.at(&change.actor_id))
+        self.history.iter().filter(|change| change.seq > since.get(&change.actor_id))
           .cloned().collect()
     }
 
@@ -444,12 +442,7 @@ impl OpSet {
     pub fn get_missing_deps(&self) -> Clock {
         // TODO: there's a lot of internal copying going on in here for something kinda simple
         self.queue.iter().fold(Clock::empty(), |clock, change| {
-            let c1 = clock.upper_bound(&change.dependencies);
-            if change.seq > 1 {
-              c1.upper_bound(&Clock::new(&change.actor_id,change.seq - 1))
-            } else {
-              c1
-            }
+            clock.union(&change.dependencies).with(&change.actor_id,change.seq - 1)
         })
     }
 }

@@ -87,63 +87,59 @@ impl ActorID {
 pub struct Clock(pub HashMap<ActorID, u32>);
 
 impl Clock {
-    pub fn new(actor_id: &ActorID, seq: u32) -> Clock {
-        let mut map = HashMap::new();
-        map.insert(actor_id.clone(), seq);
-        Clock(map)
-    }
 
     pub fn empty() -> Clock {
         Clock(HashMap::new())
     }
 
-    pub fn with_dependency(&self, actor_id: &ActorID, new_seq: u32) -> Clock {
-        let mut result = self.0.clone();
-        result.insert(actor_id.clone(), new_seq);
-        Clock(result)
+    pub fn with(&self, actor_id: &ActorID, seq: u32) -> Clock {
+        let mut result = self.clone();
+        result.set(actor_id, max(seq, self.get(actor_id)));
+        result
     }
 
-    pub fn upper_bound(&self, other: &Clock) -> Clock {
-        let mut result: HashMap<ActorID, u32> = HashMap::new();
-        self.0.iter().for_each(|(actor_id, seq)| {
-            result.insert(
-                actor_id.clone(),
-                max(*seq, *other.0.get(actor_id).unwrap_or(&(0 as u32))),
-            );
+    pub fn merge(&mut self, other: &Clock) {
+        other.into_iter().for_each(|(actor_id, seq)| {
+            self.set(actor_id, max(*seq, self.get(actor_id)));
         });
-        other.0.iter().for_each(|(actor_id, seq)| {
-            result.insert(
-                actor_id.clone(),
-                max(*seq, *self.0.get(actor_id).unwrap_or(&(0 as u32))),
-            );
-        });
-        Clock(result)
     }
 
-    pub fn is_before_or_concurrent_with(&self, other: &Clock) -> bool {
-        other
-            .0
-            .iter()
-            .all(|(actor_id, seq)| self.0.get(actor_id).unwrap_or(&0) >= seq)
+    pub fn union(&self, other: &Clock) -> Clock {
+        let mut result = self.clone();
+        result.merge(other);
+        result
     }
 
-    pub fn at(&self, actor_id: &ActorID) -> u32 {
+    pub fn set(&mut self, actor_id: &ActorID, seq: u32) {
+        if seq == 0 {
+          self.0.remove(actor_id);
+        } else {
+          self.0.insert(actor_id.clone(), seq);
+        }
+    }
+
+    pub fn get(&self, actor_id: &ActorID) -> u32 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 
-    /// Returns true if all components of `clock1` are less than or equal to those
-    /// of `clock2` (both clocks given as Immutable.js Map objects). Returns false
-    /// if there is at least one component in which `clock1` is greater than
-    /// `clock2` (that is, either `clock1` is overall greater than `clock2`, or the
-    /// clocks are incomparable).
-    ///
-    /// TODO This feels like it should be a PartialOrd implementation but I
-    /// can't figure out quite what that should look like
-    ///
-    pub fn less_or_equal(&self, other: &Clock) -> bool {
-        self.0.iter().chain(other.0.iter()).all(|(actor_id, _)| {
-            self.0.get(actor_id).unwrap_or(&0) <= other.0.get(actor_id).unwrap_or(&0)
+    fn less_or_equal(&self, other: &Clock) -> bool {
+        self.into_iter().all(|(actor_id, _)| {
+            self.get(actor_id) <= other.get(actor_id)
         })
+    }
+}
+
+// TODO : check with martin
+impl PartialOrd for Clock {
+    fn partial_cmp(&self, other: &Clock) -> Option<Ordering> {
+        let le1 = self.less_or_equal(other);
+        let le2 = other.less_or_equal(self);
+        match (le1,le2) {
+          (true, true) => Some(Ordering::Equal),
+          (true, false) => Some(Ordering::Less),
+          (false, true) => Some(Ordering::Greater),
+          (false, false) => None,
+        }
     }
 }
 

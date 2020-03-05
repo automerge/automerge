@@ -162,7 +162,7 @@ mod tests {
                     seq: 1,
                     message: None,
                     undoable: Some(false),
-                    dependencies: Clock::empty().with_dependency(&actor, 1),
+                    dependencies: Clock::empty().with(&actor, 1),
                     request_type: ChangeRequestType::Change(vec![Operation::MakeMap {
                         object_id: birds,
                     }]),
@@ -192,7 +192,7 @@ mod tests {
                     seq: 1,
                     message: None,
                     undoable: None,
-                    dependencies: Clock::empty().with_dependency(&actor, 1),
+                    dependencies: Clock::empty().with(&actor, 1),
                     request_type: ChangeRequestType::Undo,
                 },
                 json: serde_json::from_str(
@@ -215,7 +215,7 @@ mod tests {
                     seq: 1,
                     message: None,
                     undoable: None,
-                    dependencies: Clock::empty().with_dependency(&actor, 1),
+                    dependencies: Clock::empty().with(&actor, 1),
                     request_type: ChangeRequestType::Redo,
                 },
                 json: serde_json::from_str(

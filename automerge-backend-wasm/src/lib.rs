@@ -142,7 +142,7 @@ impl State {
         log!("fork_at");
         let clock: Clock = js_to_rust(_clock)?;
         let changes = self.backend.history().iter()
-          .filter(|change| clock.at(&change.actor_id) >= change.seq)
+          .filter(|change| clock.get(&change.actor_id) >= change.seq)
           .cloned().collect();
         let mut fork = State { backend: Backend::init() };
         let _patch = fork

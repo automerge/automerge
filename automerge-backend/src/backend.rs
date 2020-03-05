@@ -35,7 +35,7 @@ impl Backend {
     pub fn apply_local_change(&mut self, change: ChangeRequest) -> Result<Patch, AutomergeError> {
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
-        if self.op_set.clock.at(&actor_id) >= seq {
+        if self.op_set.clock.get(&actor_id) >= seq {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {} {}",
                 actor_id.0, seq
@@ -126,7 +126,8 @@ impl Backend {
 
     /// Get changes which are in `other` but not in this backend
     pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>,AutomergeError> {
-        if !self.clock().less_or_equal(other.clock()) {
+        // this should cover > and also concurrent
+        if ! (self.clock() <= other.clock()) {
             return Err(AutomergeError::DivergedState("Cannot diff two states that have diverged".to_string()))
         }
         Ok(other.op_set.get_missing_changes(&self.op_set.clock))
@@ -190,8 +191,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 1),
-                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    clock: Clock::empty().with(&actor1, 1),
+                    deps: Clock::empty().with(&actor1, 1),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
@@ -236,8 +237,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 2),
-                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    clock: Clock::empty().with(&actor1, 2),
+                    deps: Clock::empty().with(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
@@ -284,11 +285,11 @@ mod tests {
                     can_undo: false,
                     can_redo: false,
                     clock: Clock::empty()
-                        .with_dependency(&actor1, 1)
-                        .with_dependency(&actor2, 1),
+                        .with(&actor1, 1)
+                        .with(&actor2, 1),
                     deps: Clock::empty()
-                        .with_dependency(&actor1, 1)
-                        .with_dependency(&actor2, 1),
+                        .with(&actor1, 1)
+                        .with(&actor2, 1),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
@@ -338,8 +339,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 2),
-                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    clock: Clock::empty().with(&actor1, 2),
+                    deps: Clock::empty().with(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::RemoveMapKey(
                             ObjectID::Root,
@@ -379,8 +380,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 1),
-                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    clock: Clock::empty().with(&actor1, 1),
+                    deps: Clock::empty().with(&actor1, 1),
                     diffs: vec![
                         Diff {
                             action: DiffAction::CreateMap(
@@ -446,8 +447,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 1),
-                    deps: Clock::empty().with_dependency(&actor1, 1),
+                    clock: Clock::empty().with(&actor1, 1),
+                    deps: Clock::empty().with(&actor1, 1),
                     diffs: vec![
                         Diff {
                             action: DiffAction::CreateList(
@@ -530,8 +531,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 2),
-                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    clock: Clock::empty().with(&actor1, 2),
+                    deps: Clock::empty().with(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::SetSequenceElement(
                             ObjectID::ID("birds".to_string()),
@@ -590,8 +591,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 2),
-                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    clock: Clock::empty().with(&actor1, 2),
+                    deps: Clock::empty().with(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::RemoveSequenceElement(
                             ObjectID::ID("birds".to_string()),
@@ -644,8 +645,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty().with_dependency(&actor1, 2),
-                    deps: Clock::empty().with_dependency(&actor1, 2),
+                    clock: Clock::empty().with(&actor1, 2),
+                    deps: Clock::empty().with(&actor1, 2),
                     diffs: vec![Diff {
                         action: DiffAction::MaxElem(
                             ObjectID::ID("birds".to_string()),
@@ -717,7 +718,7 @@ mod tests {
                         seq: 2,
                         message: None,
                         undoable: None,
-                        dependencies: Clock::empty().with_dependency(&actor1, 1),
+                        dependencies: Clock::empty().with(&actor1, 1),
                         request_type: ChangeRequestType::Undo,
                     },
                 ],
@@ -727,8 +728,8 @@ mod tests {
                         can_redo: false,
                         can_undo: true,
                         seq: Some(1),
-                        clock: Clock::empty().with_dependency(&actor1, 1),
-                        deps: Clock::empty().with_dependency(&actor1, 1),
+                        clock: Clock::empty().with(&actor1, 1),
+                        deps: Clock::empty().with(&actor1, 1),
                         diffs: vec![
                             Diff {
                                 action: DiffAction::CreateMap(birds.clone(), MapType::Map),
@@ -761,8 +762,8 @@ mod tests {
                         can_redo: true,
                         can_undo: false,
                         seq: Some(2),
-                        clock: Clock::empty().with_dependency(&actor1, 2),
-                        deps: Clock::empty().with_dependency(&actor1, 2),
+                        clock: Clock::empty().with(&actor1, 2),
+                        deps: Clock::empty().with(&actor1, 2),
                         diffs: vec![Diff {
                             action: DiffAction::RemoveMapKey(
                                 ObjectID::Root,
@@ -805,7 +806,7 @@ mod tests {
                         seq: 2,
                         message: None,
                         undoable: None,
-                        dependencies: Clock::empty().with_dependency(&actor1, 1),
+                        dependencies: Clock::empty().with(&actor1, 1),
                         request_type: ChangeRequestType::Undo,
                     },
                     ChangeRequest {
@@ -813,7 +814,7 @@ mod tests {
                         seq: 3,
                         message: None,
                         undoable: None,
-                        dependencies: Clock::empty().with_dependency(&actor1, 2),
+                        dependencies: Clock::empty().with(&actor1, 2),
                         request_type: ChangeRequestType::Redo,
                     },
                     ChangeRequest {
@@ -821,7 +822,7 @@ mod tests {
                         seq: 4,
                         message: None,
                         undoable: None,
-                        dependencies: Clock::empty().with_dependency(&actor1, 3),
+                        dependencies: Clock::empty().with(&actor1, 3),
                         request_type: ChangeRequestType::Undo,
                     },
                     ChangeRequest {
@@ -829,7 +830,7 @@ mod tests {
                         seq: 5,
                         message: None,
                         undoable: None,
-                        dependencies: Clock::empty().with_dependency(&actor1, 4),
+                        dependencies: Clock::empty().with(&actor1, 4),
                         request_type: ChangeRequestType::Redo,
                     },
                 ],
@@ -839,8 +840,8 @@ mod tests {
                         can_redo: false,
                         can_undo: true,
                         seq: Some(1),
-                        clock: Clock::empty().with_dependency(&actor1, 1),
-                        deps: Clock::empty().with_dependency(&actor1, 1),
+                        clock: Clock::empty().with(&actor1, 1),
+                        deps: Clock::empty().with(&actor1, 1),
                         diffs: vec![
                             Diff {
                                 action: DiffAction::CreateMap(birds.clone(), MapType::Map),
@@ -873,8 +874,8 @@ mod tests {
                         can_redo: true,
                         can_undo: false,
                         seq: Some(2),
-                        clock: Clock::empty().with_dependency(&actor1, 2),
-                        deps: Clock::empty().with_dependency(&actor1, 2),
+                        clock: Clock::empty().with(&actor1, 2),
+                        deps: Clock::empty().with(&actor1, 2),
                         diffs: vec![Diff {
                             action: DiffAction::RemoveMapKey(
                                 ObjectID::Root,
@@ -889,8 +890,8 @@ mod tests {
                         can_redo: false,
                         can_undo: true,
                         seq: Some(3),
-                        clock: Clock::empty().with_dependency(&actor1, 3),
-                        deps: Clock::empty().with_dependency(&actor1, 3),
+                        clock: Clock::empty().with(&actor1, 3),
+                        deps: Clock::empty().with(&actor1, 3),
                         diffs: vec![Diff {
                             action: DiffAction::SetMapKey(
                                 ObjectID::Root,
@@ -907,8 +908,8 @@ mod tests {
                         can_redo: true,
                         can_undo: false,
                         seq: Some(4),
-                        clock: Clock::empty().with_dependency(&actor1, 4),
-                        deps: Clock::empty().with_dependency(&actor1, 4),
+                        clock: Clock::empty().with(&actor1, 4),
+                        deps: Clock::empty().with(&actor1, 4),
                         diffs: vec![Diff {
                             action: DiffAction::RemoveMapKey(
                                 ObjectID::Root,
@@ -923,8 +924,8 @@ mod tests {
                         can_redo: false,
                         can_undo: true,
                         seq: Some(5),
-                        clock: Clock::empty().with_dependency(&actor1, 5),
-                        deps: Clock::empty().with_dependency(&actor1, 5),
+                        clock: Clock::empty().with(&actor1, 5),
+                        deps: Clock::empty().with(&actor1, 5),
                         diffs: vec![Diff {
                             action: DiffAction::SetMapKey(
                                 ObjectID::Root,
@@ -991,8 +992,8 @@ mod tests {
         let patch3 = Patch {
             can_undo: false,
             can_redo: false,
-            clock: Clock::empty().with_dependency(&actor, 2),
-            deps: Clock::empty().with_dependency(&actor, 2),
+            clock: Clock::empty().with(&actor, 2),
+            deps: Clock::empty().with(&actor, 2),
             seq: None,
             actor: None,
             diffs: vec![Diff {
@@ -1027,7 +1028,7 @@ mod tests {
         };
         backend.apply_changes(vec![change1]).unwrap();
         assert_eq!(
-            backend.get_missing_changes(Clock::empty().with_dependency(&actor, 1)),
+            backend.get_missing_changes(Clock::empty().with(&actor, 1)),
             Vec::new()
         )
     }
@@ -1109,8 +1110,8 @@ mod tests {
             actor: None,
             can_undo: false,
             can_redo: false,
-            clock: Clock::empty().with_dependency(&actor, 2),
-            deps: Clock::empty().with_dependency(&actor, 2),
+            clock: Clock::empty().with(&actor, 2),
+            deps: Clock::empty().with(&actor, 2),
             seq: None,
             diffs: vec![
                 Diff {
