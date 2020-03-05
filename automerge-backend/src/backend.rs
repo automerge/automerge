@@ -100,19 +100,16 @@ impl Backend {
         }
     }
 
-    pub fn undo_stack(&self) -> Vec<Vec<Operation>> {
-        // TODO - use lifetime instead of clone?
-        self.op_set.undo_stack.clone()
+    pub fn undo_stack(&self) -> &Vec<Vec<Operation>> {
+        &self.op_set.undo_stack
     }
 
-    pub fn redo_stack(&self) -> Vec<Vec<Operation>> {
-        // TODO - use lifetime instead of clone?
-        self.op_set.redo_stack.clone()
+    pub fn redo_stack(&self) -> &Vec<Vec<Operation>> {
+        &self.op_set.redo_stack
     }
 
-    pub fn history(&self) -> Vec<Change> {
-        // TODO - use lifetime instead of clone?
-        self.op_set.history.clone()
+    pub fn history(&self) -> &Vec<Change> {
+        &self.op_set.history
     }
 
     pub fn get_patch(&self) -> Patch {

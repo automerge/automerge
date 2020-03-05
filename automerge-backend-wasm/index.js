@@ -1,5 +1,5 @@
 let Backend = require("./pkg")
-let { fromJS, List, Map } = require('immutable')
+let { fromJS, List } = require('immutable')
 
 function toJS(obj) {
   if (List.isList(obj)) {
@@ -9,53 +9,68 @@ function toJS(obj) {
 }
 
 let init = () => {
-  return Backend.State.new();
+  return { state: Backend.State.new(), clock: {}, frozen: false };
 }
 
-let applyChanges = (backend0,changes) => {
-  let backend = backend0.fork()
-  let patch = backend.applyChanges(toJS(changes));
-  return [ backend, patch ]
+let clean = (backend) => {
+  if (backend.frozen) {
+    let state = backend.state.forkAt(backend.clock)
+    backend.state = state
+    backend.clock = state.getClock()
+    backend.frozen = false
+  }
+  return backend.state
 }
 
-let applyLocalChange = (backend0,change) => {
-  let backend = backend0.fork()
-  let patch = backend.applyLocalChange(change);
-  return [ backend, patch ]
+let mutate = (oldBackend,fn) => {
+  let state = clean(oldBackend)
+  let result = fn(state)
+  oldBackend.frozen = true
+  let newBackend = { state, clock: state.getClock(), frozen: false };
+  return [ newBackend, result ]
 }
 
-let merge = (backend0,backend2) => {
-  let backend1 = backend0.fork()
-  let patch = backend1.merge(backend2);
-  return [ backend1, patch ]
+let applyChanges = (backend,changes) => {
+  return mutate(backend, (b) => b.applyChanges(toJS(changes)));
+}
+
+let applyLocalChange = (backend,change) => {
+  return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
+}
+
+let merge = (backend1,backend2) => {
+//  let changes = backend2.getMissingChanges(backend1.clock)
+//  backend1.applyChanges(changes)
+//  let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
+//  self.apply_changes(missing_changes)
+  return mutate(backend1, (b) => b.merge(clean(backend2)));
 }
 
 let getClock = (backend) => {
-  let clock = backend.getClock();
-  return fromJS(clock);
+  return fromJS(backend.clock);
 }
 
 let getHistory = (backend) => {
   // TODO: I cant fromJS here b/c transit screws it up
-  let history = backend.getHistory();
+  let history = clean(backend).getHistory();
   return history
 }
 
 let getUndoStack = (backend) => {
-  let stack = backend.getUndoStack();
+  let stack = clean(backend).getUndoStack();
   return fromJS(stack)
 }
 
 let getRedoStack = (backend) => {
-  let stack = backend.getRedoStack();
+  let stack = clean(backend).getRedoStack();
   return fromJS(stack)
 }
 
-let getPatch = (backend) => backend.getPatch()
-let getChanges = (backend,other) => backend.getChanges(other)
-let getChangesForActor = (backend,actor) => backend.getChangesForActor(actor)
-let getMissingChanges = (backend,clock) => backend.getMissingChanges(clock)
-let getMissingDeps = (backend) => backend.getMissingDeps()
+let getPatch = (backend) => clean(backend).getPatch()
+let getChanges = (backend,other) => clean(backend).getChanges(clean(other))
+let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor)
+let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock)
+let getMissingDeps = (backend) => clean(backend).getMissingDeps()
 
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,

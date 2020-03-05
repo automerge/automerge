@@ -132,7 +132,24 @@ impl State {
 
     #[wasm_bindgen]
     pub fn fork(&self) -> State {
+        log!("fork");
         self.clone()
+    }
+
+    #[wasm_bindgen]
+    #[wasm_bindgen(js_name = forkAt)]
+    pub fn fork_at(&self, _clock: JsValue) -> Result<State,JsValue> {
+        log!("fork_at");
+        let clock: Clock = js_to_rust(_clock)?;
+        let changes = self.backend.history().iter()
+          .filter(|change| clock.seq_for(&change.actor_id) >= change.seq)
+          .cloned().collect();
+        let mut fork = State { backend: Backend::init() };
+        let _patch = fork
+            .backend
+            .apply_changes(changes)
+            .map_err(automerge_error_to_js)?;
+        Ok(fork)
     }
 
     #[wasm_bindgen]

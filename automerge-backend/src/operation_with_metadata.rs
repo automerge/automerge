@@ -16,10 +16,10 @@ pub struct OperationWithMetadata {
 /// elements
 impl PartialOrd for OperationWithMetadata {
     fn partial_cmp(&self, other: &OperationWithMetadata) -> Option<Ordering> {
-        if self.sequence == other.sequence {
-            Some(self.actor_id.cmp(&other.actor_id))
-        } else {
+        if self.actor_id == other.actor_id {
             Some(self.sequence.cmp(&other.sequence))
+        } else {
+            Some(self.actor_id.cmp(&other.actor_id))
         }
     }
 }
