@@ -38,6 +38,16 @@ let getHistory = (backend) => {
   return history
 }
 
+let getUndoStack = (backend) => {
+  let stack = backend.getUndoStack();
+  return fromJS(stack)
+}
+
+let getRedoStack = (backend) => {
+  let stack = backend.getRedoStack();
+  return fromJS(stack)
+}
+
 let getPatch = (backend) => backend.getPatch()
 let getChanges = (backend,other) => backend.getChanges(other)
 let getChangesForActor = (backend,actor) => backend.getChangesForActor(actor)
@@ -46,5 +56,6 @@ let getMissingDeps = (backend) => backend.getMissingDeps()
 
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,
-  getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock, getHistory
+  getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock,
+  getHistory, getUndoStack, getRedoStack
 }

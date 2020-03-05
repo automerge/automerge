@@ -1,5 +1,5 @@
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff, OpSet, Patch,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff, OpSet, Patch, Operation
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -97,6 +97,16 @@ impl Backend {
                 })
             }
         }
+    }
+
+    pub fn undo_stack(&self) -> Vec<Vec<Operation>> {
+      // TODO - use lifetime instead of clone?
+      return self.op_set.undo_stack.clone()
+    }
+
+    pub fn redo_stack(&self) -> Vec<Vec<Operation>> {
+      // TODO - use lifetime instead of clone?
+      return self.op_set.redo_stack.clone()
     }
 
     pub fn history(&self) -> Vec<Change> {

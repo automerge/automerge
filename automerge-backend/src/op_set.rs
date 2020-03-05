@@ -45,8 +45,8 @@ pub struct OpSet {
     pub history: Vec<Change>,
     pub clock: Clock,
     undo_pos: usize,
-    undo_stack: Vec<Vec<Operation>>,
-    redo_stack: Vec<Vec<Operation>>,
+    pub undo_stack: Vec<Vec<Operation>>,
+    pub redo_stack: Vec<Vec<Operation>>,
     states: HashMap<ActorID, Vec<ActorState>>,
     state: Value,
 }

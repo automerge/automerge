@@ -100,8 +100,22 @@ impl State {
     #[wasm_bindgen(js_name = getHistory)]
     pub fn get_history(&self) -> Result<JsValue, JsValue> {
         log!("get_history");
-        let changes = self.backend.history();
-        rust_to_js(&changes)
+        let history = self.backend.history();
+        rust_to_js(&history)
+    }
+
+    #[wasm_bindgen(js_name = getUndoStack)]
+    pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
+        log!("get_undo_stack");
+        let stack = self.backend.undo_stack();
+        rust_to_js(&stack)
+    }
+
+    #[wasm_bindgen(js_name = getRedoStack)]
+    pub fn get_redo_stack(&self) -> Result<JsValue, JsValue> {
+        log!("get_redo_stack");
+        let stack = self.backend.redo_stack();
+        rust_to_js(&stack)
     }
 
     #[wasm_bindgen]
