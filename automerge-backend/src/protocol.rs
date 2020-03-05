@@ -87,6 +87,12 @@ impl ActorID {
 pub struct Clock(pub HashMap<ActorID, u32>);
 
 impl Clock {
+    pub fn new(actor_id: &ActorID, seq: u32) -> Clock {
+        let mut map = HashMap::new();
+        map.insert(actor_id.clone(), seq);
+        Clock(map)
+    }
+
     pub fn empty() -> Clock {
         Clock(HashMap::new())
     }

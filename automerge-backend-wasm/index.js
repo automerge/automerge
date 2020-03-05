@@ -13,19 +13,19 @@ let init = () => {
 }
 
 let applyChanges = (backend0,changes) => {
-  let backend = backend0.dupe()
+  let backend = backend0.fork()
   let patch = backend.applyChanges(toJS(changes));
   return [ backend, patch ]
 }
 
 let applyLocalChange = (backend0,change) => {
-  let backend = backend0.dupe()
+  let backend = backend0.fork()
   let patch = backend.applyLocalChange(change);
   return [ backend, patch ]
 }
 
 let merge = (backend0,backend2) => {
-  let backend1 = backend0.dupe()
+  let backend1 = backend0.fork()
   let patch = backend1.merge(backend2);
   return [ backend1, patch ]
 }

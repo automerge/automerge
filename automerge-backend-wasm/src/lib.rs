@@ -131,7 +131,7 @@ impl State {
     }
 
     #[wasm_bindgen]
-    pub fn dupe(&self) -> State {
+    pub fn fork(&self) -> State {
         self.clone()
     }
 
