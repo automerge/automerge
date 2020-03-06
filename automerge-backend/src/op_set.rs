@@ -17,6 +17,7 @@ use crate::{ActorID, Diff, DiffAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::BuildHasher;
+use core::cmp::max;
 
 #[derive(Debug, PartialEq, Clone)]
 struct ActorState {
@@ -441,12 +442,14 @@ impl OpSet {
     }
 
     pub fn get_missing_deps(&self) -> Clock {
-        // TODO: there's a lot of internal copying going on in here for something kinda simple
-        self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock
-                .union(&change.dependencies)
-                .with(&change.actor_id, change.seq - 1)
-        })
+        let mut total = Clock::empty();
+        self.queue.iter().for_each(|change| {
+            let actor_id = &change.actor_id;
+            let seq = change.seq - 1;
+            total.merge(&change.dependencies);
+            total.set(actor_id, max(seq, total.get(actor_id)));
+        });
+        total
     }
 }
 
