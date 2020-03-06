@@ -25,9 +25,7 @@ impl ActorHistories {
 
     /// Update this ActorHistories to include the changes in `change`
     pub(crate) fn add_change(&mut self, change: &Change) {
-        let change_deps = change
-            .dependencies
-            .with(&change.actor_id, change.seq - 1);
+        let change_deps = change.dependencies.with(&change.actor_id, change.seq - 1);
         let transitive = self.transitive_dependencies(&change.actor_id, change.seq);
         let all_deps = transitive.union(&change_deps);
         let state = self

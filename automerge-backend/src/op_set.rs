@@ -265,9 +265,7 @@ impl OpSet {
                 diffs.push(d)
             }
         }
-        self.clock = self
-            .clock
-            .with(&change.actor_id.clone(), change.seq);
+        self.clock = self.clock.with(&change.actor_id.clone(), change.seq);
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
             let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
@@ -428,8 +426,11 @@ impl OpSet {
     /// Get all the changes we have that are not in `since`
     // TODO: check with martin - this impl seems too simple to be right
     pub fn get_missing_changes(&self, since: &Clock) -> Vec<Change> {
-        self.history.iter().filter(|change| change.seq > since.get(&change.actor_id))
-          .cloned().collect()
+        self.history
+            .iter()
+            .filter(|change| change.seq > since.get(&change.actor_id))
+            .cloned()
+            .collect()
     }
 
     pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<Change> {
@@ -442,7 +443,9 @@ impl OpSet {
     pub fn get_missing_deps(&self) -> Clock {
         // TODO: there's a lot of internal copying going on in here for something kinda simple
         self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock.union(&change.dependencies).with(&change.actor_id,change.seq - 1)
+            clock
+                .union(&change.dependencies)
+                .with(&change.actor_id, change.seq - 1)
         })
     }
 }

@@ -87,7 +87,6 @@ impl ActorID {
 pub struct Clock(pub HashMap<ActorID, u32>);
 
 impl Clock {
-
     pub fn empty() -> Clock {
         Clock(HashMap::new())
     }
@@ -112,9 +111,9 @@ impl Clock {
 
     pub fn set(&mut self, actor_id: &ActorID, seq: u32) {
         if seq == 0 {
-          self.0.remove(actor_id);
+            self.0.remove(actor_id);
         } else {
-          self.0.insert(actor_id.clone(), seq);
+            self.0.insert(actor_id.clone(), seq);
         }
     }
 
@@ -123,9 +122,8 @@ impl Clock {
     }
 
     fn less_or_equal(&self, other: &Clock) -> bool {
-        self.into_iter().all(|(actor_id, _)| {
-            self.get(actor_id) <= other.get(actor_id)
-        })
+        self.into_iter()
+            .all(|(actor_id, _)| self.get(actor_id) <= other.get(actor_id))
     }
 }
 
@@ -134,11 +132,11 @@ impl PartialOrd for Clock {
     fn partial_cmp(&self, other: &Clock) -> Option<Ordering> {
         let le1 = self.less_or_equal(other);
         let le2 = other.less_or_equal(self);
-        match (le1,le2) {
-          (true, true) => Some(Ordering::Equal),
-          (true, false) => Some(Ordering::Less),
-          (false, true) => Some(Ordering::Greater),
-          (false, false) => None,
+        match (le1, le2) {
+            (true, true) => Some(Ordering::Equal),
+            (true, false) => Some(Ordering::Less),
+            (false, true) => Some(Ordering::Greater),
+            (false, false) => None,
         }
     }
 }

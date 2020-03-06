@@ -125,10 +125,12 @@ impl Backend {
     }
 
     /// Get changes which are in `other` but not in this backend
-    pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>,AutomergeError> {
-        // this should cover > and also concurrent
-        if ! (self.clock() <= other.clock()) {
-            return Err(AutomergeError::DivergedState("Cannot diff two states that have diverged".to_string()))
+    pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>, AutomergeError> {
+        // this should cover Order::Greater but also also concurrent - use partial_ord() here?
+        if !(self.clock() <= other.clock()) {
+            return Err(AutomergeError::DivergedState(
+                "Cannot diff two states that have diverged".to_string(),
+            ));
         }
         Ok(other.op_set.get_missing_changes(&self.op_set.clock))
     }
@@ -284,12 +286,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty()
-                        .with(&actor1, 1)
-                        .with(&actor2, 1),
-                    deps: Clock::empty()
-                        .with(&actor1, 1)
-                        .with(&actor2, 1),
+                    clock: Clock::empty().with(&actor1, 1).with(&actor2, 1),
+                    deps: Clock::empty().with(&actor1, 1).with(&actor2, 1),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
