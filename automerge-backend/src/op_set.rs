@@ -442,6 +442,8 @@ impl OpSet {
     }
 
     pub fn get_missing_deps(&self) -> Clock {
+        // TODO: this is just the transitive deps of the queue
+        // some of these might be satisfied - minus out the op_set.clock?
         let mut total = Clock::empty();
         self.queue.iter().for_each(|change| {
             let actor_id = &change.actor_id;

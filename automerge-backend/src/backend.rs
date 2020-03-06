@@ -126,8 +126,7 @@ impl Backend {
 
     /// Get changes which are in `other` but not in this backend
     pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>, AutomergeError> {
-        // this should cover Order::Greater but also also concurrent - use partial_ord() here?
-        if !(self.clock() <= other.clock()) {
+        if !(self.clock().less_or_equal(other.clock())) {
             return Err(AutomergeError::DivergedState(
                 "Cannot diff two states that have diverged".to_string(),
             ));

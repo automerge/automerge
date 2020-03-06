@@ -121,7 +121,8 @@ impl Clock {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 
-    fn less_or_equal(&self, other: &Clock) -> bool {
+
+    pub fn less_or_equal(&self, other: &Clock) -> bool {
         self.into_iter()
             .all(|(actor_id, _)| self.get(actor_id) <= other.get(actor_id))
     }
