@@ -82,6 +82,15 @@ impl ActorStates {
             .entry(actor_id.clone())
             .or_insert_with(Vec::new);
 
+        if (change.seq as usize) - 1 != actor_changes.len() {
+            panic!(
+                "cant push c={:?}:{:?} at ${:?}",
+                change.actor_id,
+                change.seq,
+                actor_changes.len()
+            );
+        }
+
         actor_changes.push(change);
 
         let actor_deps = self.deps_by_actor.entry(actor_id).or_insert_with(Vec::new);
