@@ -287,6 +287,7 @@ impl OpSet {
         self.states
             .history
             .iter()
+            .map(|rc| rc.as_ref())
             .filter(|change| change.seq > since.get(&change.actor_id))
             .collect()
     }

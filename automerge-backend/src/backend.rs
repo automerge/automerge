@@ -108,8 +108,8 @@ impl Backend {
         &self.op_set.redo_stack
     }
 
-    pub fn history(&self) -> &Vec<Change> {
-        &self.op_set.states.history
+    pub fn history(&self) -> Vec<&Change> {
+        self.op_set.states.history.iter().map(|rc| rc.as_ref()).collect()
     }
 
     pub fn get_patch(&self) -> Patch {
@@ -1029,9 +1029,10 @@ mod tests {
             }],
         };
         backend.apply_changes(vec![change1]).unwrap();
+        let tmp : Vec<&Change> = Vec::new();
         assert_eq!(
             backend.get_missing_changes(Clock::empty().with(&actor, 1)),
-            Vec::new()
+            tmp
         )
     }
 
