@@ -64,8 +64,10 @@ impl State {
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, state: &State) -> Result<JsValue, JsValue> {
         log!("get_changes");
-        let changes = self.backend.get_changes(&state.backend)
-          .map_err(automerge_error_to_js)?;
+        let changes = self
+            .backend
+            .get_changes(&state.backend)
+            .map_err(automerge_error_to_js)?;
         rust_to_js(&changes)
     }
 
@@ -73,7 +75,7 @@ impl State {
     pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<JsValue, JsValue> {
         log!("get_changes_for_actorid");
         let a: ActorID = js_to_rust(actorid)?;
-        let changes = self.backend.get_changes_for_actor_id(a);
+        let changes = self.backend.get_changes_for_actor_id(&a);
         rust_to_js(&changes)
     }
 
@@ -138,13 +140,19 @@ impl State {
 
     #[wasm_bindgen]
     #[wasm_bindgen(js_name = forkAt)]
-    pub fn fork_at(&self, _clock: JsValue) -> Result<State,JsValue> {
+    pub fn fork_at(&self, _clock: JsValue) -> Result<State, JsValue> {
         log!("fork_at");
         let clock: Clock = js_to_rust(_clock)?;
-        let changes = self.backend.history().iter()
-          .filter(|change| clock.get(&change.actor_id) >= change.seq)
-          .cloned().collect();
-        let mut fork = State { backend: Backend::init() };
+        let changes = self
+            .backend
+            .history()
+            .iter()
+            .filter(|change| clock.get(&change.actor_id) >= change.seq)
+            .cloned()
+            .collect();
+        let mut fork = State {
+            backend: Backend::init(),
+        };
         let _patch = fork
             .backend
             .apply_changes(changes)

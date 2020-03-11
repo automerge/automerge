@@ -1,4 +1,4 @@
-use crate::actor_histories::ActorHistories;
+use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::patch::{Conflict, ElementValue};
@@ -57,7 +57,7 @@ impl ConcurrentOperations {
     pub(crate) fn incorporate_new_op(
         &mut self,
         new_op: OperationWithMetadata,
-        actor_histories: &ActorHistories,
+        actor_states: &ActorStates,
     ) -> Result<Vec<Operation>, AutomergeError> {
         let previous = self
             .operations
@@ -75,7 +75,7 @@ impl ConcurrentOperations {
             _ => self
                 .operations
                 .iter()
-                .filter(|op| actor_histories.are_concurrent(op, &new_op))
+                .filter(|op| actor_states.is_concurrent(&op, &new_op))
                 .cloned()
                 .collect(),
         };
@@ -100,7 +100,7 @@ impl ConcurrentOperations {
                     ..
                 } = op.operation
                 {
-                    if !(actor_histories.are_concurrent(&new_op, &op_clone)) {
+                    if !(actor_states.is_concurrent(&new_op, &op_clone)) {
                         *n += inc_value
                     }
                 }

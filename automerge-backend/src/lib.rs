@@ -7,7 +7,7 @@ macro_rules! log {
     }
 }
 
-mod actor_histories;
+mod actor_states;
 mod backend;
 mod concurrent_operations;
 mod error;
@@ -24,7 +24,7 @@ pub use crate::protocol::{
     ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, ObjectID,
     Operation, PrimitiveValue,
 };
-pub use actor_histories::ActorHistories;
+pub use actor_states::ActorStates;
 pub use backend::Backend;
 pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;

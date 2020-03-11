@@ -6,23 +6,16 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::actor_histories::ActorHistories;
+use crate::actor_states::ActorStates;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::object_store::{ListState, MapState, ObjectState, ObjectStore};
+use crate::object_store::ObjectStore;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ElementID, Key, ObjectID, Operation, PrimitiveValue};
-use crate::value::Value;
+use crate::protocol::{Change, Clock, ElementID, ObjectID, Operation};
 use crate::{ActorID, Diff, DiffAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::BuildHasher;
-
-#[derive(Debug, PartialEq, Clone)]
-struct ActorState {
-    change: Change,
-    all_deps: Clock,
-}
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -40,30 +33,24 @@ struct ActorState {
 #[derive(Debug, PartialEq, Clone)]
 pub struct OpSet {
     pub object_store: ObjectStore,
-    pub actor_histories: ActorHistories,
     queue: Vec<Change>,
-    pub history: Vec<Change>,
     pub clock: Clock,
     undo_pos: usize,
     pub undo_stack: Vec<Vec<Operation>>,
     pub redo_stack: Vec<Vec<Operation>>,
-    states: HashMap<ActorID, Vec<ActorState>>,
-    state: Value,
+    pub states: ActorStates,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
         OpSet {
             object_store: ObjectStore::new(),
-            actor_histories: ActorHistories::new(),
             queue: Vec::new(),
-            history: Vec::new(),
             clock: Clock::empty(),
-            state: Value::Map(HashMap::new()),
             undo_pos: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            states: HashMap::new(),
+            states: ActorStates::new(),
         }
     }
 
@@ -157,7 +144,6 @@ impl OpSet {
     ) -> Result<Vec<Diff>, AutomergeError> {
         self.queue.push(change);
         let diffs = self.apply_causally_ready_changes(make_undoable)?;
-        self.state = self.walk(&ObjectID::Root)?;
         Ok(diffs)
     }
 
@@ -201,41 +187,18 @@ impl OpSet {
         // need the undo operation for the creation of the list to achieve
         // the undo), so we track newly created objects and only store undo
         // operations which don't operate on them.
-        if let Some(actor_state) = self
-            .states
-            .get(&change.actor_id)
-            .and_then(|changes| changes.get((change.seq as usize) - 1))
-        {
-            if change == actor_state.change {
-                return Ok(Vec::new()); // its a duplicate - ignore
-            } else {
-                return Err(AutomergeError::InvalidChange(
-                    "Invalid reuse of sequence number for actor".to_string(),
-                ));
-            }
-        }
-
-        self.actor_histories.add_change(&change);
-        self.history.push(change.clone());
-        let states_for_actor = self
-            .states
-            .entry(change.actor_id.clone())
-            .or_insert_with(Vec::new);
-
-        states_for_actor.push(ActorState {
-            change: change.clone(),
-            all_deps: self
-                .actor_histories
-                .transitive_dependencies(&change.actor_id, change.seq)
-                .with(&change.actor_id, change.seq - 1),
-        });
-
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
+        let operations = change.operations.clone();
+
+        if !self.states.add_change(change)? {
+            return Ok(Vec::new()); // its a duplicate - ignore
+        }
+
         let mut diffs = Vec::new();
         let mut undo_operations = Vec::new();
         let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
-        for operation in change.operations {
+        for operation in operations {
             // Store newly created object IDs so we can decide whether we need
             // undo ops later
             match &operation {
@@ -254,7 +217,7 @@ impl OpSet {
             };
             let (diff, undo_ops_for_this_op) = self
                 .object_store
-                .apply_operation(&self.actor_histories, op_with_metadata)?;
+                .apply_operation(&self.states, op_with_metadata)?;
 
             // If this object is not created in this change then we need to
             // store the undo ops for it (if we're storing undo ops at all)
@@ -265,9 +228,7 @@ impl OpSet {
                 diffs.push(d)
             }
         }
-        self.clock = self
-            .clock
-            .with(&change.actor_id.clone(), change.seq);
+        self.clock = self.clock.with(&actor_id, seq);
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
             let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
@@ -276,110 +237,6 @@ impl OpSet {
             self.undo_pos += 1;
         };
         Ok(Self::simplify_diffs(diffs))
-    }
-
-    pub fn root_value(&self) -> &Value {
-        &self.state
-    }
-
-    /// This is where we actually interpret the concurrent operations for each
-    /// part of the object and construct the current state.
-    fn walk(&self, object_id: &ObjectID) -> Result<Value, AutomergeError> {
-        let object_history = self
-            .object_store
-            .state_for_object_id(object_id)
-            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-        match object_history {
-            ObjectState::Map(MapState {
-                operations_by_key, ..
-            }) => self.interpret_map_ops(operations_by_key),
-            ObjectState::List(ListState {
-                operations_by_elemid,
-                insertions,
-                following,
-                ..
-            }) => self.interpret_list_ops(operations_by_elemid, insertions, following),
-        }
-    }
-
-    fn interpret_map_ops(
-        &self,
-        ops_by_key: &HashMap<Key, ConcurrentOperations>,
-    ) -> Result<Value, AutomergeError> {
-        let mut result: HashMap<String, Value> = HashMap::new();
-        for (_, ops) in ops_by_key.iter() {
-            match ops.active_op() {
-                None => {}
-                Some(OperationWithMetadata { operation, .. }) => match operation {
-                    Operation::Set {
-                        key: Key(str_key),
-                        value,
-                        ..
-                    } => {
-                        result.insert(
-                            str_key.to_string(),
-                            match value {
-                                PrimitiveValue::Null => Value::Null,
-                                PrimitiveValue::Boolean(b) => Value::Boolean(*b),
-                                PrimitiveValue::Number(n) => Value::Number(*n),
-                                PrimitiveValue::Str(s) => Value::Str(s.to_string()),
-                            },
-                        );
-                    }
-                    Operation::Link {
-                        key: Key(str_key),
-                        value,
-                        ..
-                    } => {
-                        let linked_value = self.walk(value)?;
-                        result.insert(str_key.to_string(), linked_value);
-                    }
-                    Operation::Increment { .. } => {}
-                    op => {
-                        return Err(AutomergeError::NotImplemented(format!(
-                            "Interpret operation not implemented: {:?}",
-                            op
-                        )))
-                    }
-                },
-            }
-        }
-        Ok(Value::Map(result))
-    }
-
-    fn interpret_list_ops(
-        &self,
-        operations_by_elemid: &HashMap<ElementID, ConcurrentOperations>,
-        _insertions: &HashMap<ElementID, ElementID>,
-        following: &HashMap<ElementID, Vec<ElementID>>,
-    ) -> Result<Value, AutomergeError> {
-        let ops_in_order = list_ops_in_order(operations_by_elemid, following)?;
-
-        // Now that we have a list of `ConcurrentOperations` in the correct
-        // order, we need to interpret each one to construct the value that
-        // should appear at that position in the resulting sequence.
-        let result_with_errs =
-            ops_in_order
-                .iter()
-                .filter_map(|(_, ops)| -> Option<Result<Value, AutomergeError>> {
-                    ops.active_op().map(|op| match &op.operation {
-                        Operation::Set { value, .. } => Ok(match value {
-                            PrimitiveValue::Null => Value::Null,
-                            PrimitiveValue::Boolean(b) => Value::Boolean(*b),
-                            PrimitiveValue::Number(n) => Value::Number(*n),
-                            PrimitiveValue::Str(s) => Value::Str(s.to_string()),
-                        }),
-                        Operation::Link { value, .. } => self.walk(&value),
-                        op => Err(AutomergeError::NotImplemented(format!(
-                            "Interpret operation not implemented for list ops: {:?}",
-                            op
-                        ))),
-                    })
-                });
-
-        let result = result_with_errs.collect::<Result<Vec<Value>, AutomergeError>>()?;
-
-        Ok(Value::List(result))
     }
 
     /// Remove any redundant diffs
@@ -426,23 +283,20 @@ impl OpSet {
     }
 
     /// Get all the changes we have that are not in `since`
-    // TODO: check with martin - this impl seems too simple to be right
-    pub fn get_missing_changes(&self, since: &Clock) -> Vec<Change> {
-        self.history.iter().filter(|change| change.seq > since.get(&change.actor_id))
-          .cloned().collect()
-    }
-
-    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<Change> {
+    pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
         self.states
-            .get(actor_id)
-            .map(|states| states.iter().map(|s| s.change.clone()).collect())
-            .unwrap_or_else(Vec::new)
+            .history
+            .iter()
+            .filter(|change| change.seq > since.get(&change.actor_id))
+            .collect()
     }
 
     pub fn get_missing_deps(&self) -> Clock {
         // TODO: there's a lot of internal copying going on in here for something kinda simple
         self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock.union(&change.dependencies).with(&change.actor_id,change.seq - 1)
+            clock
+                .union(&change.dependencies)
+                .with(&change.actor_id, change.seq - 1)
         })
     }
 }

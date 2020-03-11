@@ -4,7 +4,7 @@
 use crate::change_request::{ChangeRequest, ListIndex, Path, PathElement};
 use crate::error::InvalidChangeRequest;
 use automerge_backend::list_ops_in_order;
-use automerge_backend::ActorHistories;
+use automerge_backend::ActorStates;
 use automerge_backend::ListState;
 use automerge_backend::MapState;
 use automerge_backend::ObjectState;
@@ -188,7 +188,7 @@ struct InsertAfterTarget {
 pub struct ChangeContext<'a> {
     object_store: ObjectStore,
     actor_id: ActorID,
-    actor_histories: &'a ActorHistories,
+    states: &'a ActorStates,
     clock: Clock,
 }
 
@@ -196,12 +196,12 @@ impl<'a> ChangeContext<'a> {
     pub fn new(
         object_store: &ObjectStore,
         actor_id: ActorID,
-        actor_histories: &'a ActorHistories,
+        states: &'a ActorStates,
         clock: Clock,
     ) -> ChangeContext<'a> {
         ChangeContext {
             object_store: object_store.clone(),
-            actor_histories,
+            states,
             actor_id,
             clock,
         }
@@ -250,12 +250,12 @@ impl<'a> ChangeContext<'a> {
                 ops.iter().for_each(|inner_ops| {
                     inner_ops.iter().for_each(|op| {
                         let op_with_meta = OperationWithMetadata {
-                            sequence: self.clock.seq_for(&self.actor_id) + 1,
+                            sequence: self.clock.get(&self.actor_id) + 1,
                             actor_id: self.actor_id.clone(),
                             operation: op.clone(),
                         };
                         self.object_store
-                            .apply_operation(self.actor_histories, op_with_meta)
+                            .apply_operation(self.states, op_with_meta)
                             .unwrap();
                     });
                 });
@@ -267,7 +267,7 @@ impl<'a> ChangeContext<'a> {
             .collect::<Result<Vec<Vec<Operation>>, InvalidChangeRequest>>()?;
         let ops = nested_ops.into_iter().flatten().collect::<Vec<Operation>>();
         let dependencies = self.clock.clone();
-        let seq = self.clock.seq_for(&self.actor_id) + 1;
+        let seq = self.clock.get(&self.actor_id) + 1;
         let change = Change {
             actor_id: self.actor_id.clone(),
             operations: ops,
