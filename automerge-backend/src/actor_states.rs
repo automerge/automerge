@@ -12,10 +12,13 @@ use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ActorStates {
+    pub history: Vec<Change>,
     change_by_actor: HashMap<ActorID, Vec<Change>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
+    // this lets me return a reference to an empty clock when needed
+    // without having to do any extra allocations or copies
+    // in the default path
     empty_clock: Clock,
-    pub history: Vec<Change>,
 }
 
 impl ActorStates {
