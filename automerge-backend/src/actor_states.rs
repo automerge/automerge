@@ -3,12 +3,6 @@ use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
-struct ActorState {
-    change: Change,
-    all_deps: Clock,
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub struct ActorStates {
     change_by_actor: HashMap<ActorID, Vec<Change>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
@@ -55,7 +49,6 @@ impl ActorStates {
         self.deps_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
-        //      self.get_actor_state(actor_id,seq).map(|actor_state| &actor_state.all_deps)
     }
 
     fn transitive_deps(&self, clock: &Clock) -> Clock {
@@ -96,13 +89,6 @@ impl ActorStates {
         actor_deps.push(all_deps);
 
         // TODO - panic if its the wrong seq!?
-
-        /*
-                states_for_actor.push(ActorState {
-                    change,
-                    all_deps,
-                });
-        */
 
         Ok(true)
     }
