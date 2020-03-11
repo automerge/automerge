@@ -1,4 +1,4 @@
-use crate::actor_histories::ActorHistories;
+use crate::actor_states::ActorStates;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
@@ -39,15 +39,15 @@ impl ObjectState {
     fn handle_assign_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
-        actor_histories: &ActorHistories,
+        actor_states: &ActorStates,
         key: &Key,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
         let (diff, mut undo_ops) = match self {
             ObjectState::Map(mapstate) => {
-                mapstate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
+                mapstate.handle_assign_op(op_with_metadata.clone(), actor_states, key)
             }
             ObjectState::List(liststate) => {
-                liststate.handle_assign_op(op_with_metadata.clone(), actor_histories, key)
+                liststate.handle_assign_op(op_with_metadata.clone(), actor_states, key)
             }
         }?;
 
@@ -146,7 +146,7 @@ impl ListState {
     fn handle_assign_op(
         &mut self,
         op: OperationWithMetadata,
-        actor_histories: &ActorHistories,
+        actor_states: &ActorStates,
         key: &Key,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
         let elem_id = key.as_element_id().map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", key.0)))?;
@@ -164,7 +164,7 @@ impl ListState {
                 .operations_by_elemid
                 .entry(elem_id.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            let undo_ops = mutable_ops.incorporate_new_op(op, actor_histories)?;
+            let undo_ops = mutable_ops.incorporate_new_op(op, actor_states)?;
             (undo_ops, mutable_ops.clone())
         };
 
@@ -305,17 +305,19 @@ impl MapState {
     fn handle_assign_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
-        actor_histories: &ActorHistories,
+        actor_states: &ActorStates,
         key: &Key,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+        //log!("NEW OP {:?}",op_with_metadata);
         let (undo_ops, ops) = {
             let mutable_ops = self
                 .operations_by_key
                 .entry(key.clone())
                 .or_insert_with(ConcurrentOperations::new);
-            let undo_ops = mutable_ops.incorporate_new_op(op_with_metadata, actor_histories)?;
+            let undo_ops = mutable_ops.incorporate_new_op(op_with_metadata, actor_states)?;
             (undo_ops, mutable_ops.clone())
         };
+        //log!("OPS {:?}",ops);
         Ok((
             Some(
                 ops.active_op()
@@ -439,7 +441,7 @@ impl ObjectStore {
     /// later.
     pub fn apply_operation(
         &mut self,
-        actor_histories: &ActorHistories,
+        actor_states: &ActorStates,
         op_with_metadata: OperationWithMetadata,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
         let (diff, undo_ops) = match op_with_metadata.operation {
@@ -514,7 +516,7 @@ impl ObjectStore {
                     .operations_by_object_id
                     .get_mut(&object_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-                object.handle_assign_op(op_with_metadata.clone(), actor_histories, key)?
+                object.handle_assign_op(op_with_metadata.clone(), actor_states, key)?
             }
             Operation::Insert {
                 ref list_id,

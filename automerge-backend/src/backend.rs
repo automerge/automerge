@@ -109,7 +109,7 @@ impl Backend {
     }
 
     pub fn history(&self) -> &Vec<Change> {
-        &self.op_set.history
+        &self.op_set.states.history
     }
 
     pub fn get_patch(&self) -> Patch {
@@ -125,19 +125,26 @@ impl Backend {
     }
 
     /// Get changes which are in `other` but not in this backend
-    pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>,AutomergeError> {
-        // this should cover > and also concurrent
-        if ! (self.clock() <= other.clock()) {
-            return Err(AutomergeError::DivergedState("Cannot diff two states that have diverged".to_string()))
+    pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>, AutomergeError> {
+        if self.clock().divergent(&other.clock()) {
+            return Err(AutomergeError::DivergedState(
+                "Cannot diff two states that have diverged".to_string(),
+            ));
         }
-        Ok(other.op_set.get_missing_changes(&self.op_set.clock))
+        Ok(other
+            .op_set
+            .get_missing_changes(&self.op_set.clock)
+            .iter()
+            .cloned()
+            .cloned()
+            .collect())
     }
 
-    pub fn get_changes_for_actor_id(&self, actor_id: ActorID) -> Vec<Change> {
-        self.op_set.get_changes_for_actor_id(&actor_id)
+    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<&Change> {
+        self.op_set.states.get(actor_id)
     }
 
-    pub fn get_missing_changes(&self, clock: Clock) -> Vec<Change> {
+    pub fn get_missing_changes(&self, clock: Clock) -> Vec<&Change> {
         self.op_set.get_missing_changes(&clock)
     }
 
@@ -146,7 +153,12 @@ impl Backend {
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
-        let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
+        let missing_changes = remote
+            .get_missing_changes(self.op_set.clock.clone())
+            .iter()
+            .cloned()
+            .cloned()
+            .collect();
         self.apply_changes(missing_changes)
     }
 
@@ -284,12 +296,8 @@ mod tests {
                 expected_patch: Patch {
                     can_undo: false,
                     can_redo: false,
-                    clock: Clock::empty()
-                        .with(&actor1, 1)
-                        .with(&actor2, 1),
-                    deps: Clock::empty()
-                        .with(&actor1, 1)
-                        .with(&actor2, 1),
+                    clock: Clock::empty().with(&actor1, 1).with(&actor2, 1),
+                    deps: Clock::empty().with(&actor1, 1).with(&actor2, 1),
                     diffs: vec![Diff {
                         action: DiffAction::SetMapKey(
                             ObjectID::Root,
