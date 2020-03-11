@@ -1,11 +1,20 @@
 use crate::error::AutomergeError;
+use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
+
+// ActorStates manages
+//    `change_by_actor` - a seq ordered vec of changes per actor
+//    `deps_by_actor` - a seq ordered vec of transitive deps per actor
+//    `history` - a list of all changes received in order
+// this struct is used for telling if two ops are concurrent or referencing
+// historic changes
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ActorStates {
     change_by_actor: HashMap<ActorID, Vec<Change>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
+    empty_clock: Clock,
     pub history: Vec<Change>,
 }
 
@@ -14,29 +23,22 @@ impl ActorStates {
         ActorStates {
             change_by_actor: HashMap::new(),
             deps_by_actor: HashMap::new(),
+            empty_clock: Clock::empty(),
             history: Vec::new(),
         }
     }
 
-    pub fn is_concurrent(
-        &self,
-        actor_id1: &ActorID,
-        seq1: u32,
-        actor_id2: &ActorID,
-        seq2: u32,
-    ) -> bool {
-        let clock1 = self.get_deps(actor_id1, seq1).unwrap();
-        let clock2 = self.get_deps(actor_id2, seq2).unwrap();
-        clock1.get(actor_id2) < seq2 && clock2.get(actor_id1) < seq1
+    pub fn is_concurrent(&self, op1: &OperationWithMetadata, op2: &OperationWithMetadata) -> bool {
+        let clock1 = self.get_deps(&op1.actor_id, op1.sequence);
+        let clock2 = self.get_deps(&op2.actor_id, op2.sequence);
+        clock1.get(&op2.actor_id) < op2.sequence && clock2.get(&op1.actor_id) < op1.sequence
     }
 
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
-        // FIXME - i know this can be simpler
-        if let Some(changes) = self.change_by_actor.get(actor_id) {
-            changes.iter().collect()
-        } else {
-            Vec::new()
-        }
+        self.change_by_actor
+            .get(actor_id)
+            .map(|vec| vec.iter().collect())
+            .unwrap_or_default()
     }
 
     fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Change> {
@@ -45,7 +47,12 @@ impl ActorStates {
             .and_then(|v| v.get((seq as usize) - 1))
     }
 
-    fn get_deps(&self, actor_id: &ActorID, seq: u32) -> Option<&Clock> {
+    fn get_deps(&self, actor_id: &ActorID, seq: u32) -> &Clock {
+        self.get_deps_option(actor_id, seq)
+            .unwrap_or(&self.empty_clock)
+    }
+
+    fn get_deps_option(&self, actor_id: &ActorID, seq: u32) -> Option<&Clock> {
         self.deps_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
@@ -55,11 +62,14 @@ impl ActorStates {
         let mut all_deps = clock.clone();
         clock
             .into_iter()
-            .filter_map(|(actor_id, seq)| self.get_deps(actor_id, *seq))
+            .filter_map(|(actor_id, seq)| self.get_deps_option(actor_id, *seq))
             .for_each(|deps| all_deps.merge(deps));
         all_deps
     }
 
+    // if the change is new - return Ok(true)
+    // if the change is a duplicate - dont insert and return Ok(false)
+    // if the change has a dup actor:seq but is different error
     pub(crate) fn add_change(&mut self, change: Change) -> Result<bool, AutomergeError> {
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
             if &change == c {

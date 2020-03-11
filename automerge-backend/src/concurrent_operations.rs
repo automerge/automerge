@@ -75,14 +75,7 @@ impl ConcurrentOperations {
             _ => self
                 .operations
                 .iter()
-                .filter(|op| {
-                    actor_states.is_concurrent(
-                        &op.actor_id,
-                        op.sequence,
-                        &new_op.actor_id,
-                        new_op.sequence,
-                    )
-                })
+                .filter(|op| actor_states.is_concurrent(&op, &new_op))
                 .cloned()
                 .collect(),
         };
@@ -107,12 +100,7 @@ impl ConcurrentOperations {
                     ..
                 } = op.operation
                 {
-                    if !(actor_states.is_concurrent(
-                        &new_op.actor_id,
-                        new_op.sequence,
-                        &op_clone.actor_id,
-                        op_clone.sequence,
-                    )) {
+                    if !(actor_states.is_concurrent(&new_op, &op_clone)) {
                         *n += inc_value
                     }
                 }

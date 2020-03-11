@@ -125,19 +125,13 @@ impl Backend {
     }
 
     /// Get changes which are in `other` but not in this backend
-    pub fn get_changes(&self, other: &Backend) -> Result<Vec<Change>, AutomergeError> {
+    pub fn get_changes<'a>(&self, other: &'a Backend) -> Result<Vec<&'a Change>, AutomergeError> {
         if self.clock().divergent(&other.clock()) {
             return Err(AutomergeError::DivergedState(
                 "Cannot diff two states that have diverged".to_string(),
             ));
         }
-        Ok(other
-            .op_set
-            .get_missing_changes(&self.op_set.clock)
-            .iter()
-            .cloned()
-            .cloned()
-            .collect())
+        Ok(other.op_set.get_missing_changes(&self.op_set.clock))
     }
 
     pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<&Change> {
