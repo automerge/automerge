@@ -41,7 +41,7 @@ impl ActorStates {
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
         self.change_by_actor
             .get(actor_id)
-            .map(|vec| vec.iter().map(|c| c.as_ref()).collect() )
+            .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
             .unwrap_or_default()
     }
 

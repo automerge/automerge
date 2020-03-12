@@ -109,7 +109,12 @@ impl Backend {
     }
 
     pub fn history(&self) -> Vec<&Change> {
-        self.op_set.states.history.iter().map(|rc| rc.as_ref()).collect()
+        self.op_set
+            .states
+            .history
+            .iter()
+            .map(|rc| rc.as_ref())
+            .collect()
     }
 
     pub fn get_patch(&self) -> Patch {

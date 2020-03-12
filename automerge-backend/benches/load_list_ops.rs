@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use automerge_backend::{Backend, ChangeRequest};
+use criterion::{criterion_group, criterion_main, Criterion};
 use std::fs::File;
 use std::io::BufReader;
 
@@ -11,12 +11,14 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("load 1000 list ops", |b| {
         b.iter(|| {
             let mut backend = Backend::init();
-            change_requests.clone().into_iter().for_each(|change_request| {
-                backend.apply_local_change(change_request).unwrap();
-            });
+            change_requests
+                .clone()
+                .into_iter()
+                .for_each(|change_request| {
+                    backend.apply_local_change(change_request).unwrap();
+                });
         });
     });
-
 }
 
 criterion_group!(
