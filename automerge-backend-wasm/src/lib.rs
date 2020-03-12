@@ -148,7 +148,7 @@ impl State {
             .history()
             .iter()
             .filter(|change| clock.get(&change.actor_id) >= change.seq)
-            .cloned()
+            .map(|&c| c.clone())
             .collect();
         let mut fork = State {
             backend: Backend::init(),

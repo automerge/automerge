@@ -2,6 +2,7 @@ use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 // ActorStates manages
 //    `change_by_actor` - a seq ordered vec of changes per actor
@@ -12,8 +13,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct ActorStates {
-    pub history: Vec<Change>,
-    change_by_actor: HashMap<ActorID, Vec<Change>>,
+    pub history: Vec<Rc<Change>>,
+    change_by_actor: HashMap<ActorID, Vec<Rc<Change>>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
     // this lets me return a reference to an empty clock when needed
     // without having to do any extra allocations or copies
@@ -40,11 +41,11 @@ impl ActorStates {
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
         self.change_by_actor
             .get(actor_id)
-            .map(|vec| vec.iter().collect())
+            .map(|vec| vec.iter().map(|c| c.as_ref()).collect() )
             .unwrap_or_default()
     }
 
-    fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Change> {
+    fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
         self.change_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
@@ -75,7 +76,7 @@ impl ActorStates {
     // if the change has a dup actor:seq but is different error
     pub(crate) fn add_change(&mut self, change: Change) -> Result<bool, AutomergeError> {
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
-            if &change == c {
+            if &change == c.as_ref() {
                 return Ok(false);
             } else {
                 return Err(AutomergeError::InvalidChange(
@@ -88,29 +89,28 @@ impl ActorStates {
         let all_deps = self.transitive_deps(&deps);
         let actor_id = change.actor_id.clone();
 
-        self.history.push(change.clone());
+        let rc = Rc::new(change);
+        self.history.push(rc.clone());
 
         let actor_changes = self
             .change_by_actor
             .entry(actor_id.clone())
             .or_insert_with(Vec::new);
 
-        if (change.seq as usize) - 1 != actor_changes.len() {
+        if (rc.seq as usize) - 1 != actor_changes.len() {
             panic!(
                 "cant push c={:?}:{:?} at ${:?}",
-                change.actor_id,
-                change.seq,
+                rc.actor_id,
+                rc.seq,
                 actor_changes.len()
             );
         }
 
-        actor_changes.push(change);
+        actor_changes.push(rc);
 
         let actor_deps = self.deps_by_actor.entry(actor_id).or_insert_with(Vec::new);
 
         actor_deps.push(all_deps);
-
-        // TODO - panic if its the wrong seq!?
 
         Ok(true)
     }

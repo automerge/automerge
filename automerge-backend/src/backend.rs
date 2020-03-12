@@ -108,8 +108,8 @@ impl Backend {
         &self.op_set.redo_stack
     }
 
-    pub fn history(&self) -> &Vec<Change> {
-        &self.op_set.states.history
+    pub fn history(&self) -> Vec<&Change> {
+        self.op_set.states.history.iter().map(|rc| rc.as_ref()).collect()
     }
 
     pub fn get_patch(&self) -> Patch {
