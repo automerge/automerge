@@ -375,7 +375,6 @@ pub enum ChangeRequestType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
     use std::iter::FromIterator;
 
     #[test]

@@ -4,7 +4,6 @@ use crate::error::InvalidChangeRequest;
 use automerge_backend::OpSet;
 use automerge_backend::Value;
 use automerge_backend::{ActorID, Change};
-use uuid;
 
 pub struct Document {
     op_set: OpSet,
@@ -62,7 +61,6 @@ mod tests {
     use super::*;
     use crate::change_request::{ListIndex, Path};
     use automerge_backend::Value;
-    use serde_json;
 
     #[test]
     #[ignore] // This is broken for some reason

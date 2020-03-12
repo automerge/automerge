@@ -490,7 +490,6 @@ mod tests {
         ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType,
         ObjectID, PrimitiveValue, SequenceType,
     };
-    use serde_json;
 
     struct TestCase {
         name: &'static str,

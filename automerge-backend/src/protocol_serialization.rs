@@ -142,7 +142,6 @@ impl<'de> Deserialize<'de> for ChangeRequest {
 mod tests {
     //use super::*;
     use crate::{ActorID, ChangeRequest, ChangeRequestType, Clock, ObjectID, Operation};
-    use serde_json;
 
     struct TestCase {
         name: &'static str,
