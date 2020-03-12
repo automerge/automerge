@@ -16,3 +16,10 @@ version = "0.3"
 features = [
   "console",
 ]
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "load_list_ops"
+harness = false

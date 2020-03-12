@@ -1031,7 +1031,7 @@ mod tests {
         backend.apply_changes(vec![change1]).unwrap();
         assert_eq!(
             backend.get_missing_changes(Clock::empty().with(&actor, 1)),
-            Vec::new()
+            Vec::<&Change>::new()
         )
     }
 
