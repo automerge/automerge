@@ -1,11 +1,11 @@
-use crate::protocol::ObjectID;
+use crate::protocol::OpID;
 use std::error::Error;
 use std::fmt;
 
 #[derive(Debug)]
 pub enum AutomergeError {
     DuplicateObjectError,
-    MissingObjectError(ObjectID),
+    MissingObjectError(OpID),
     InvalidObjectType(String),
     InvalidLinkTarget,
     DuplicateChange(String),

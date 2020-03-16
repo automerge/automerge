@@ -4,7 +4,7 @@ use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::ActorID;
 use crate::{
-    list_ops_in_order, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID,
+    list_ops_in_order, DataType, Diff, Diff2, DiffAction, ElementID, ElementValue, Key, MapType, OpID,
     Operation, SequenceType,
 };
 use std::collections::{HashMap, HashSet};
@@ -20,11 +20,11 @@ pub enum ObjectState {
 }
 
 impl ObjectState {
-    fn new_map(map_type: MapType, object_id: ObjectID) -> ObjectState {
+    fn new_map(map_type: MapType, object_id: OpID) -> ObjectState {
         ObjectState::Map(MapState::new(map_type, object_id))
     }
 
-    fn new_sequence(sequence_type: SequenceType, object_id: ObjectID) -> ObjectState {
+    fn new_sequence(sequence_type: SequenceType, object_id: OpID) -> ObjectState {
         ObjectState::List(ListState::new(sequence_type, object_id))
     }
 
@@ -36,13 +36,25 @@ impl ObjectState {
         }
     }
 
+    fn ops_by_key(&self, key: &Key) -> &Vec<OperationWithMetadata> {
+      match self {
+        ObjectState::Map(mapstate) => {
+          // FIXME
+          &mapstate.operations_by_key.get(key).unwrap().operations
+        }
+        ObjectState::List(liststate) => {
+          panic!("list not implemented yet");
+        }
+      }
+    }
+
     fn handle_assign_op(
         &mut self,
         op_with_metadata: OperationWithMetadata,
         actor_states: &ActorStates,
         key: &Key,
-    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
-        let (diff, mut undo_ops) = match self {
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        let mut undo_ops = match self {
             ObjectState::Map(mapstate) => {
                 mapstate.handle_assign_op(op_with_metadata.clone(), actor_states, key)
             }
@@ -66,12 +78,12 @@ impl ObjectState {
 
         if undo_ops.is_empty() {
             undo_ops.push(Operation::Delete {
-                object_id: op_with_metadata.operation.object_id().clone(),
+                object_id: op_with_metadata.operation.op_id().clone(),
                 key: key.clone(),
             })
         }
 
-        Ok((diff, undo_ops))
+        Ok(undo_ops)
     }
 }
 
@@ -83,11 +95,11 @@ pub struct ListState {
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub max_elem: u32,
     pub sequence_type: SequenceType,
-    pub object_id: ObjectID,
+    pub object_id: OpID,
 }
 
 impl ListState {
-    fn new(sequence_type: SequenceType, object_id: ObjectID) -> ListState {
+    fn new(sequence_type: SequenceType, object_id: OpID) -> ListState {
         ListState {
             operations_by_elemid: HashMap::new(),
             following: HashMap::new(),
@@ -148,7 +160,7 @@ impl ListState {
         op: OperationWithMetadata,
         actor_states: &ActorStates,
         key: &Key,
-    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
+    ) -> Result<Vec<Operation>, AutomergeError> {
         let elem_id = key.as_element_id().map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", key.0)))?;
 
         // We have to clone this here in order to avoid holding a reference to
@@ -220,13 +232,7 @@ impl ListState {
             )),
             (None, None) => None,
         };
-        Ok((
-            action.map(|action| Diff {
-                action,
-                conflicts: ops.conflicts(),
-            }),
-            undo_ops,
-        ))
+        Ok(undo_ops)
     }
 
     fn add_insertion(
@@ -271,11 +277,11 @@ impl ListState {
 pub struct MapState {
     pub operations_by_key: HashMap<Key, ConcurrentOperations>,
     pub map_type: MapType,
-    pub object_id: ObjectID,
+    pub object_id: OpID,
 }
 
 impl MapState {
-    fn new(map_type: MapType, object_id: ObjectID) -> MapState {
+    fn new(map_type: MapType, object_id: OpID) -> MapState {
         MapState {
             operations_by_key: HashMap::new(),
             map_type,
@@ -285,7 +291,7 @@ impl MapState {
 
     fn generate_diffs(&self) -> Vec<Diff> {
         let mut diffs = Vec::new();
-        if self.object_id != ObjectID::Root {
+        if self.object_id != OpID::Root {
             diffs.push(Diff {
                 action: DiffAction::CreateMap(self.object_id.clone(), self.map_type.clone()),
                 conflicts: Vec::new(),
@@ -307,63 +313,12 @@ impl MapState {
         op_with_metadata: OperationWithMetadata,
         actor_states: &ActorStates,
         key: &Key,
-    ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
-        //log!("NEW OP {:?}",op_with_metadata);
-        let (undo_ops, ops) = {
-            let mutable_ops = self
-                .operations_by_key
-                .entry(key.clone())
-                .or_insert_with(ConcurrentOperations::new);
-            let undo_ops = mutable_ops.incorporate_new_op(op_with_metadata, actor_states)?;
-            (undo_ops, mutable_ops.clone())
-        };
-        //log!("OPS {:?}",ops);
-        Ok((
-            Some(
-                ops.active_op()
-                    .map(|op| {
-                        let action = match &op.operation {
-                            Operation::Set {
-                                object_id,
-                                key,
-                                value,
-                                datatype,
-                            } => DiffAction::SetMapKey(
-                                object_id.clone(),
-                                self.map_type.clone(),
-                                key.clone(),
-                                ElementValue::Primitive(value.clone()),
-                                datatype.clone(),
-                            ),
-                            Operation::Link {
-                                object_id,
-                                key,
-                                value,
-                            } => DiffAction::SetMapKey(
-                                object_id.clone(),
-                                self.map_type.clone(),
-                                key.clone(),
-                                ElementValue::Link(value.clone()),
-                                None,
-                            ),
-                            _ => panic!("Should not happen for objects"),
-                        };
-                        Diff {
-                            action,
-                            conflicts: ops.conflicts(),
-                        }
-                    })
-                    .unwrap_or_else(|| Diff {
-                        action: DiffAction::RemoveMapKey(
-                            self.object_id.clone(),
-                            self.map_type.clone(),
-                            key.clone(),
-                        ),
-                        conflicts: ops.conflicts(),
-                    }),
-            ),
-            undo_ops,
-        ))
+    ) -> Result<Vec<Operation>, AutomergeError> {
+        let mutable_ops = self
+            .operations_by_key
+            .entry(key.clone())
+            .or_insert_with(ConcurrentOperations::new);
+        mutable_ops.incorporate_new_op(op_with_metadata, actor_states)
     }
 }
 
@@ -371,27 +326,27 @@ impl MapState {
 /// for each object ID and for the logic of incorporating a new operation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectStore {
-    operations_by_object_id: HashMap<ObjectID, ObjectState>,
+    operations_by_object_id: HashMap<OpID, ObjectState>,
 }
 
 impl ObjectStore {
     pub(crate) fn new() -> ObjectStore {
-        let root = ObjectState::new_map(MapType::Map, ObjectID::Root);
+        let root = ObjectState::new_map(MapType::Map, OpID::Root);
         let mut ops_by_id = HashMap::new();
-        ops_by_id.insert(ObjectID::Root, root);
+        ops_by_id.insert(OpID::Root, root);
         ObjectStore {
             operations_by_object_id: ops_by_id,
         }
     }
 
-    pub fn state_for_object_id(&self, object_id: &ObjectID) -> Option<&ObjectState> {
+    pub fn state_for_object_id(&self, object_id: &OpID) -> Option<&ObjectState> {
         self.operations_by_object_id.get(object_id)
     }
 
     pub fn generate_diffs(&self) -> Vec<Diff> {
         let mut diffs = Vec::new();
         let mut seen = HashSet::new();
-        let mut next = vec![ObjectID::Root];
+        let mut next = vec![OpID::Root];
 
         while !next.is_empty() {
             let oid = next.pop().unwrap();
@@ -417,7 +372,7 @@ impl ObjectStore {
     /// the key into an element ID
     pub fn concurrent_operations_for_field(
         &self,
-        object_id: &ObjectID,
+        object_id: &OpID,
         key: &Key,
     ) -> Option<ConcurrentOperations> {
         self.operations_by_object_id
@@ -442,56 +397,35 @@ impl ObjectStore {
     pub fn apply_operation(
         &mut self,
         actor_states: &ActorStates,
+        diff2: &mut Diff2,
+        op_seq: u64,
         op_with_metadata: OperationWithMetadata,
     ) -> Result<(Option<Diff>, Vec<Operation>), AutomergeError> {
-        let (diff, undo_ops) = match op_with_metadata.operation {
-            Operation::MakeMap { object_id } => {
-                let object = ObjectState::new_map(MapType::Map, object_id.clone());
+        let undo_ops = match op_with_metadata.operation {
+            Operation::MakeMap { object_id, key, pred } => {
+                let op_id = OpID::ID(op_seq, op_with_metadata.actor_id.0.clone());
+                let object = ObjectState::new_map(MapType::Map, op_id.clone());
                 self.operations_by_object_id
-                    .insert(object_id.clone(), object);
-                (
-                    Some(Diff {
-                        action: DiffAction::CreateMap(object_id, MapType::Map),
-                        conflicts: Vec::new(),
-                    }),
-                    Vec::new(),
-                )
+                    .insert(op_id, object);
+                Vec::new()
             }
             Operation::MakeTable { object_id } => {
                 let object = ObjectState::new_map(MapType::Table, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (
-                    Some(Diff {
-                        action: DiffAction::CreateMap(object_id, MapType::Table),
-                        conflicts: Vec::new(),
-                    }),
-                    Vec::new(),
-                )
+                Vec::new()
             }
             Operation::MakeList { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::List, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (
-                    Some(Diff {
-                        action: DiffAction::CreateList(object_id, SequenceType::List),
-                        conflicts: Vec::new(),
-                    }),
-                    Vec::new(),
-                )
+                Vec::new()
             }
             Operation::MakeText { object_id } => {
                 let object = ObjectState::new_sequence(SequenceType::Text, object_id.clone());
                 self.operations_by_object_id
                     .insert(object_id.clone(), object);
-                (
-                    Some(Diff {
-                        action: DiffAction::CreateList(object_id, SequenceType::Text),
-                        conflicts: Vec::new(),
-                    }),
-                    Vec::new(),
-                )
+                Vec::new()
             }
             Operation::Link {
                 ref object_id,
@@ -516,7 +450,9 @@ impl ObjectStore {
                     .operations_by_object_id
                     .get_mut(&object_id)
                     .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-                object.handle_assign_op(op_with_metadata.clone(), actor_states, key)?
+                let x = object.handle_assign_op(op_with_metadata.clone(), actor_states, key)?;
+                diff2.op(key, object.ops_by_key(key));
+                x
             }
             Operation::Insert {
                 ref list_id,
@@ -534,14 +470,11 @@ impl ObjectStore {
                             list_id, key
                         )))
                     }
-                    ObjectState::List(liststate) => (
-                        Some(liststate.add_insertion(&op_with_metadata.actor_id, key, *elem)?),
-                        Vec::new(),
-                    ),
+                    ObjectState::List(liststate) => Vec::new(),
                 }
             }
         };
-        Ok((diff, undo_ops))
+        Ok((None, undo_ops))
     }
 }
 
@@ -552,6 +485,7 @@ fn map_op_to_assign_diff(op: &Operation, map_type: &MapType) -> Option<DiffActio
             key,
             value,
             datatype,
+            ..
         } => Some(DiffAction::SetMapKey(
             object_id.clone(),
             map_type.clone(),

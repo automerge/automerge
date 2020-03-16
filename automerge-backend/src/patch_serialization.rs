@@ -1,12 +1,13 @@
 use crate::{
-    ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID,
-    PrimitiveValue, SequenceType,
+    ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType,
+    PrimitiveValue, SequenceType, OpID
 };
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+/*
 impl Serialize for Conflict {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -87,11 +88,7 @@ impl<'de> Deserialize<'de> for Conflict {
                 let is_link = link.unwrap_or(false);
                 let value = match (is_link, value_raw) {
                     (true, PrimitiveValue::Str(s)) => {
-                        let oid = match s.as_ref() {
-                            "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
-                            id => ObjectID::ID(id.to_string()),
-                        };
-                        ElementValue::Link(oid)
+                        ElementValue::Link(OpID.parse(s).unwrap()) //FIXME - error
                     }
                     (false, v) => ElementValue::Primitive(v),
                     _ => return Err(Error::custom(
@@ -229,7 +226,7 @@ impl<'de> Deserialize<'de> for Diff {
             where
                 V: MapAccess<'de>,
             {
-                let mut object_id: Option<ObjectID> = None;
+                let mut object_id: Option<OpID> = None;
                 let mut type_str: Option<String> = None;
                 let mut seq: Option<u32> = None;
                 let mut action: Option<String> = None;
@@ -318,8 +315,8 @@ impl<'de> Deserialize<'de> for Diff {
                     match (is_link, value) {
                         (true, Some(PrimitiveValue::Str(s))) => {
                             let oid = match s.as_ref() {
-                                "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
-                                id => ObjectID::ID(id.to_string()),
+                                "00000000-0000-0000-0000-000000000000" => OpID::Root,
+                                id => OpID.parse(s).unwrap(), //FIXME unwrap
                             };
                             Some(ElementValue::Link(oid))
                         }
@@ -488,7 +485,7 @@ mod tests {
     //use super::*;
     use crate::{
         ActorID, Conflict, DataType, Diff, DiffAction, ElementID, ElementValue, Key, MapType,
-        ObjectID, PrimitiveValue, SequenceType,
+        OpID, PrimitiveValue, SequenceType,
     };
     use serde_json;
 
@@ -931,3 +928,4 @@ mod tests {
         assert_eq!(expected, actual);
     }
 }
+*/

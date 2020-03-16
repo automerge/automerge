@@ -23,43 +23,67 @@ use std::str::FromStr;
 
 use crate::error;
 
+/*
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum ObjectID {
     ID(String),
     Root,
 }
+*/
 
-impl ObjectID {
-    fn parse(s: &str) -> ObjectID {
+impl OpID {
+    fn parse(s: &str) -> Option<OpID> {
         match s {
-            "00000000-0000-0000-0000-000000000000" => ObjectID::Root,
-            _ => ObjectID::ID(s.into()),
+            "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
+            _ => {
+                let mut i = s.split("@");
+                match (i.next(),i.next(),i.next()) {
+                  (Some(seq_str), Some(actor_str), None) =>
+                      seq_str.parse().ok().map(|seq| OpID::ID(seq, actor_str.to_string())),
+                  _ => None,
+                }
+            }
         }
     }
 }
 
-impl<'de> Deserialize<'de> for ObjectID {
+impl<'de> Deserialize<'de> for OpID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(ObjectID::parse(&s))
+        OpID::parse(&s).ok_or(de::Error::invalid_value(de::Unexpected::Str(&s),&"A valid OpID"))
     }
 }
 
-impl Serialize for ObjectID {
+impl Serialize for OpID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let id_str = match self {
-            ObjectID::Root => "00000000-0000-0000-0000-000000000000",
-            ObjectID::ID(id) => id,
-        };
-        serializer.serialize_str(id_str)
+        match self {
+            OpID::Root =>
+              serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
+            OpID::ID(seq,actor) =>
+              serializer.serialize_str(format!("{}@{}",seq,actor).as_str()),
+        }
     }
 }
+
+/*
+impl Serialize for OpID {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+      let s = match self {
+        OpID::Root => "00000000-0000-0000-0000-000000000000".to_string(),
+      };
+      serializer.serialize_str(s.as_str())
+    }
+}
+*/
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 pub struct Key(pub String);
@@ -263,71 +287,80 @@ pub enum DataType {
     Timestamp,
 }
 
+#[derive(Eq, PartialEq, Debug, Hash, Clone)]
+pub enum OpID {
+    ID(u64,String),
+    Root,
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 #[serde(tag = "action")]
 pub enum Operation {
     #[serde(rename = "makeMap")]
     MakeMap {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
+        key: Key,
+        pred: Vec<String>,
     },
     #[serde(rename = "makeList")]
     MakeList {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
     },
     #[serde(rename = "makeText")]
     MakeText {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
     },
     #[serde(rename = "ins")]
     Insert {
         #[serde(rename = "obj")]
-        list_id: ObjectID,
+        list_id: OpID,
         key: ElementID,
         elem: u32,
     },
     #[serde(rename = "set")]
     Set {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
         key: Key,
         value: PrimitiveValue,
+        pred: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         datatype: Option<DataType>,
     },
     #[serde(rename = "link")]
     Link {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
         key: Key,
-        value: ObjectID,
+        value: OpID,
     },
     #[serde(rename = "del")]
     Delete {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
         key: Key,
     },
     #[serde(rename = "inc")]
     Increment {
         #[serde(rename = "obj")]
-        object_id: ObjectID,
+        object_id: OpID,
         key: Key,
         value: f64,
     },
 }
 
 impl Operation {
-    pub fn object_id(&self) -> &ObjectID {
+    pub fn op_id(&self) -> &OpID {
         match self {
-            Operation::MakeMap { object_id }
+            Operation::MakeMap { object_id, .. }
             | Operation::MakeTable { object_id }
             | Operation::MakeList { object_id }
             | Operation::MakeText { object_id }
@@ -342,6 +375,7 @@ impl Operation {
     }
 }
 
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "ops")]
@@ -349,6 +383,9 @@ pub struct Change {
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
     pub seq: u32,
+    #[serde(rename = "startOp")]
+    pub start_op: u64,
+    pub time: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(rename = "deps")]
@@ -356,20 +393,35 @@ pub struct Change {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+pub struct Moment {
+  pub actor_id: ActorID,
+  pub seq: u32,
+}
+
+#[derive(Deserialize,PartialEq, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
     pub actor_id: ActorID,
     pub seq: u32,
     pub message: Option<String>,
     pub dependencies: Clock,
     pub undoable: Option<bool>,
+    pub ops: Option<Vec<Operation>>,
     pub request_type: ChangeRequestType,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Deserialize,PartialEq, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
 pub enum ChangeRequestType {
-    Change(Vec<Operation>),
+    Change,
     Undo,
     Redo,
+}
+
+impl ChangeRequest {
+  pub fn moment(&self) -> Moment {
+    Moment{ actor_id: self.actor_id.clone(), seq: self.seq }
+  }
 }
 
 #[cfg(test)]
@@ -378,6 +430,7 @@ mod tests {
     use serde_json;
     use std::iter::FromIterator;
 
+/*
     #[test]
     fn test_deserializing_operations() {
         let json_str = r#"{
@@ -546,4 +599,5 @@ mod tests {
         let result = serde_json::to_value(ElementID::Head).unwrap();
         assert_eq!(result, serde_json::Value::String("_head".to_string()));
     }
+*/
 }

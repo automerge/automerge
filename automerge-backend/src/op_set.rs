@@ -11,11 +11,12 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjectStore;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ElementID, ObjectID, Operation};
-use crate::{ActorID, Diff, DiffAction};
+use crate::protocol::{Change, Clock, ElementID, OpID, Operation};
+use crate::{ActorID, Diff2, Diff, DiffAction};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::BuildHasher;
+use core::cmp::max;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -39,6 +40,7 @@ pub struct OpSet {
     pub undo_stack: Vec<Vec<Operation>>,
     pub redo_stack: Vec<Vec<Operation>>,
     pub states: ActorStates,
+    pub max_op: u64,
 }
 
 impl OpSet {
@@ -51,6 +53,7 @@ impl OpSet {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             states: ActorStates::new(),
+            max_op: 0,
         }
     }
 
@@ -60,17 +63,20 @@ impl OpSet {
         seq: u32,
         message: Option<String>,
         dependencies: Clock,
-    ) -> Result<Vec<Diff>, AutomergeError> {
+        diff2: &mut Diff2,
+    ) -> Result<(), AutomergeError> {
         if let Some(redo_ops) = self.redo_stack.pop() {
             let change = Change {
                 actor_id,
+                start_op: 0, // FIXME
+                time: 0, // FIXME
                 seq,
                 message,
                 dependencies,
                 operations: redo_ops,
             };
             self.undo_pos += 1;
-            self.apply_change(change, false)
+            self.add_change(change, false, diff2)
         } else {
             Err(AutomergeError::InvalidChange("no redo ops".to_string()))
         }
@@ -82,7 +88,8 @@ impl OpSet {
         seq: u32,
         message: Option<String>,
         dependencies: Clock,
-    ) -> Result<Vec<Diff>, AutomergeError> {
+        diff2: &mut Diff2,
+    ) -> Result<(), AutomergeError> {
         if let Some(undo_ops) = self.undo_stack.get(self.undo_pos - 1) {
             let redo_ops = undo_ops
                 .iter()
@@ -117,6 +124,8 @@ impl OpSet {
                 .collect();
             self.redo_stack.push(redo_ops);
             let change = Change {
+                start_op: 0, // FIXME
+                time: 0, // FIXME
                 actor_id,
                 seq,
                 message,
@@ -124,7 +133,7 @@ impl OpSet {
                 operations: undo_ops.clone(),
             };
             self.undo_pos -= 1;
-            self.apply_change(change, false)
+            self.add_change(change, false, diff2)
         } else {
             Err(AutomergeError::InvalidChange(
                 "No undo ops to execute".to_string(),
@@ -137,26 +146,17 @@ impl OpSet {
     ///
     /// If `make_undoable` is true, the op set will store a set of operations
     /// which can be used to undo this change.
-    pub fn apply_change(
+    pub fn add_change(
         &mut self,
         change: Change,
         make_undoable: bool,
-    ) -> Result<Vec<Diff>, AutomergeError> {
+        diff2: &mut Diff2,
+    ) -> Result<(), AutomergeError> {
         self.queue.push(change);
-        let diffs = self.apply_causally_ready_changes(make_undoable)?;
-        Ok(diffs)
-    }
-
-    fn apply_causally_ready_changes(
-        &mut self,
-        make_undoable: bool,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        let mut diffs = Vec::new();
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            let change_diffs = self.apply_causally_ready_change(next_change, make_undoable)?;
-            diffs.extend(change_diffs);
+            self.apply_change(next_change, make_undoable, diff2)?;
         }
-        Ok(diffs)
+        Ok(())
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -172,10 +172,11 @@ impl OpSet {
         None
     }
 
-    fn apply_causally_ready_change(
+    fn apply_change(
         &mut self,
         change: Change,
         make_undoable: bool,
+        diff2: &mut Diff2,
     ) -> Result<Vec<Diff>, AutomergeError> {
         // This method is a little more complicated than it intuitively should
         // be due to the bookkeeping required for undo. If we're asked to make
@@ -190,6 +191,9 @@ impl OpSet {
         let actor_id = change.actor_id.clone();
         let seq = change.seq;
         let operations = change.operations.clone();
+        let start_op = change.start_op;
+        let mut seq_op = start_op + 0;
+        let num_ops = operations.len() as u64;
 
         if !self.states.add_change(change)? {
             return Ok(Vec::new()); // its a duplicate - ignore
@@ -197,16 +201,17 @@ impl OpSet {
 
         let mut diffs = Vec::new();
         let mut undo_operations = Vec::new();
-        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
+        let mut new_object_ids: HashSet<OpID> = HashSet::new();
+
         for operation in operations {
             // Store newly created object IDs so we can decide whether we need
             // undo ops later
             match &operation {
-                Operation::MakeMap { object_id }
+                  Operation::MakeMap { object_id, .. }
                 | Operation::MakeList { object_id }
                 | Operation::MakeText { object_id }
                 | Operation::MakeTable { object_id } => {
-                    new_object_ids.insert(object_id.clone());
+                    new_object_ids.insert(OpID::ID(seq_op,actor_id.0.clone()));
                 }
                 _ => {}
             }
@@ -217,18 +222,20 @@ impl OpSet {
             };
             let (diff, undo_ops_for_this_op) = self
                 .object_store
-                .apply_operation(&self.states, op_with_metadata)?;
+                .apply_operation(&self.states, diff2, seq_op, op_with_metadata)?;
 
             // If this object is not created in this change then we need to
             // store the undo ops for it (if we're storing undo ops at all)
-            if make_undoable && !(new_object_ids.contains(operation.object_id())) {
+            if make_undoable && !(new_object_ids.contains(operation.op_id())) {
                 undo_operations.extend(undo_ops_for_this_op);
             }
-            if let Some(d) = diff {
-                diffs.push(d)
-            }
+
+            seq_op += 1;
         }
+
+        self.max_op = max(self.max_op, start_op + num_ops - 1);
         self.clock = self.clock.with(&actor_id, seq);
+
         if make_undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
             let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
@@ -242,7 +249,7 @@ impl OpSet {
     /// Remove any redundant diffs
     fn simplify_diffs(diffs: Vec<Diff>) -> Vec<Diff> {
         let mut result = Vec::new();
-        let mut known_maxelems: HashMap<ObjectID, u32> = HashMap::new();
+        let mut known_maxelems: HashMap<OpID, u32> = HashMap::new();
 
         for diff in diffs.into_iter().rev() {
             if let DiffAction::MaxElem(ref oid, max_elem, _) = diff.action {

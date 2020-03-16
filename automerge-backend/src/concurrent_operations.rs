@@ -9,7 +9,7 @@ use std::cmp::PartialOrd;
 /// or object ID and which occurred without knowledge of each other
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConcurrentOperations {
-    operations: Vec<OperationWithMetadata>,
+    pub operations: Vec<OperationWithMetadata>,
 }
 
 impl ConcurrentOperations {

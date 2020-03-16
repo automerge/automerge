@@ -1,5 +1,7 @@
 let Backend = require("./pkg")
 let { fromJS, List } = require('immutable')
+let util = require('util')
+
 
 function toJS(obj) {
   if (List.isList(obj)) {
@@ -31,14 +33,17 @@ let mutate = (oldBackend,fn) => {
 }
 
 let applyChanges = (backend,changes) => {
+  console.log("APPLY CHANGES",util.inspect(changes,{depth: null}))
   return mutate(backend, (b) => b.applyChanges(toJS(changes)));
 }
 
 let applyLocalChange = (backend,change) => {
+  console.log("LOCAL CHANGE REQUEST",util.inspect(change,{depth:null}))
   return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
 }
 
 let merge = (backend1,backend2) => {
+  console.log("MERGE");
 //  let changes = backend2.getMissingChanges(backend1.clock)
 //  backend1.applyChanges(changes)
 //  let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());

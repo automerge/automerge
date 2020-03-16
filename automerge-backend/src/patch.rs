@@ -1,14 +1,17 @@
-use crate::{ActorID, Clock, DataType, ElementID, Key, ObjectID, PrimitiveValue};
-use serde::Serialize;
+use crate::{ActorID, Clock, DataType, ElementID, Key, OpID, PrimitiveValue, Operation, OperationWithMetadata };
+use serde::{ Serialize, Deserialize, Serializer };
+use std::collections::HashMap;
+
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ElementValue {
     Primitive(PrimitiveValue),
-    Link(ObjectID),
+    Link(OpID),
 }
 
 impl ElementValue {
-    pub fn object_id(&self) -> Option<ObjectID> {
+    pub fn object_id(&self) -> Option<OpID> {
         match self {
             ElementValue::Link(object_id) => Some(object_id.clone()),
             _ => None,
@@ -34,22 +37,114 @@ pub enum MapType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiffAction {
-    CreateMap(ObjectID, MapType),
-    CreateList(ObjectID, SequenceType),
-    MaxElem(ObjectID, u32, SequenceType),
-    RemoveMapKey(ObjectID, MapType, Key),
-    SetMapKey(ObjectID, MapType, Key, ElementValue, Option<DataType>),
-    RemoveSequenceElement(ObjectID, SequenceType, u32),
+    CreateMap(OpID, MapType),
+    CreateList(OpID, SequenceType),
+    MaxElem(OpID, u32, SequenceType),
+    RemoveMapKey(OpID, MapType, Key),
+    SetMapKey(OpID, MapType, Key, ElementValue, Option<DataType>),
+    RemoveSequenceElement(OpID, SequenceType, u32),
     InsertSequenceElement(
-        ObjectID,
+        OpID,
         SequenceType,
         u32,
         ElementValue,
         Option<DataType>,
         ElementID,
     ),
-    SetSequenceElement(ObjectID, SequenceType, u32, ElementValue, Option<DataType>),
+    SetSequenceElement(OpID, SequenceType, u32, ElementValue, Option<DataType>),
 }
+
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum Diff2 {
+  Map(MapDiff),
+  Table(MapDiff),
+  List(ListDiff),
+  Text(ListDiff),
+}
+
+impl Diff2 {
+  pub fn new() -> Diff2 {
+    Diff2::Map(MapDiff { object_id: OpID::Root, props: HashMap::new() })
+  }
+
+  pub fn op(&mut self, key: &Key, ops: &Vec<OperationWithMetadata>) {
+    match self {
+        Diff2::Map(mapdiff) => mapdiff.op(key, ops),
+        _ => panic!("not implemented yet"),
+    }
+  }
+}
+
+impl MapDiff {
+  pub fn op(&mut self, key: &Key, ops: &Vec<OperationWithMetadata>) {
+    let prop = self.props.entry(key.clone()).or_insert(HashMap::new());
+    ops.iter().rev().enumerate().for_each(|(n,OperationWithMetadata { ref actor_id, ref sequence, ref operation })| {
+      match operation {
+        Operation::Set { ref value, ref datatype, ..  } => {
+           let key = format!("{}@{}",n+1,actor_id.0);
+           let val = DiffValue { value: value.clone(), datatype: datatype.clone() };
+           prop.insert(key, DiffLink::Val(val));
+        },
+        _ => {} 
+      }
+    })
+  }
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase", tag = "action")]
+pub enum DiffEdit {
+  Insert { index: u32 },
+  Remove { index: u32 },
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MapDiff {
+  object_id: OpID,
+  props: HashMap<Key,HashMap<String,DiffLink>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDiff {
+  object_id: OpID,
+  edits: Vec<DiffEdit>,
+  props: HashMap<String,HashMap<String,DiffLink>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffValue {
+    value: PrimitiveValue,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    datatype: Option<DataType>
+}
+
+#[derive( Deserialize, Debug, PartialEq, Clone)]
+pub enum DiffLink {
+  Link(Diff2),
+  Val(DiffValue)
+}
+
+impl Serialize for DiffLink {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+      match self {
+        DiffLink::Link(diff2) => {
+          diff2.serialize(serializer)
+        }, 
+        DiffLink::Val(val) => {
+          val.serialize(serializer)
+        }
+      }
+    }
+}
+
 
 impl DiffAction {
     fn value(&self) -> Option<ElementValue> {
@@ -76,7 +171,7 @@ pub struct Diff {
 }
 
 impl Diff {
-    pub fn links(&self) -> Vec<ObjectID> {
+    pub fn links(&self) -> Vec<OpID> {
         let mut oids = Vec::new();
         if let Some(oid) = self.action.value().and_then(|v| v.object_id()) {
             oids.push(oid)
@@ -95,25 +190,13 @@ impl Diff {
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub actor: Option<ActorID>,
-    pub can_undo: bool,
-    pub can_redo: bool,
-    pub clock: Clock,
-    pub deps: Clock,
-    pub diffs: Vec<Diff>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u32>,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub clock: Option<Clock>,
+    pub version: u32,
+    pub diffs: Diff2,
 }
 
-impl Patch {
-    pub fn empty() -> Patch {
-        Patch {
-            actor: None,
-            can_undo: false,
-            can_redo: false,
-            clock: Clock::empty(),
-            deps: Clock::empty(),
-            diffs: Vec::new(),
-            seq: None,
-        }
-    }
-}

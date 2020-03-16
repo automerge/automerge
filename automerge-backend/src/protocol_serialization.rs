@@ -1,256 +1,79 @@
-use crate::{ActorID, ChangeRequest, ChangeRequestType, Clock, Operation};
+use crate::{ActorID, ChangeRequest, Clock, Operation, OpID};
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-impl Serialize for ChangeRequest {
+/*
+impl Serialize for OpID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut map_serializer = serializer.serialize_map(None)?;
-        map_serializer.serialize_entry("actor", &self.actor_id)?;
-        map_serializer.serialize_entry("deps", &self.dependencies)?;
-        map_serializer.serialize_entry("message", &self.message)?;
-        map_serializer.serialize_entry("seq", &self.seq)?;
-        match &self.request_type {
-            ChangeRequestType::Change(ops) => {
-                map_serializer.serialize_entry("requestType", "change")?;
-                map_serializer.serialize_entry("ops", &ops)?;
-            }
-            ChangeRequestType::Undo => map_serializer.serialize_entry("requestType", "undo")?,
-            ChangeRequestType::Redo => map_serializer.serialize_entry("requestType", "redo")?,
-        };
-        if let Some(undoable) = &self.undoable {
-            map_serializer.serialize_entry("undoable", undoable)?;
-        }
-        map_serializer.end()
+      let s = match self {
+        OpID::Root => "00000000-0000-0000-0000-000000000000".to_string(),
+        OpID::ID(seq,actor) => format!("{}@{}",seq,actor),
+      };
+      serializer.serialize_str(s.as_str())
     }
 }
 
-impl<'de> Deserialize<'de> for ChangeRequest {
+impl<'de> Deserialize<'de> for OpID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        const FIELDS: &[&str] = &["ops", "deps", "message", "seq", "actor", "requestType"];
-        struct ChangeRequestVisitor;
-        impl<'de> Visitor<'de> for ChangeRequestVisitor {
-            type Value = ChangeRequest;
+        struct OpIDVisitor;
+        impl<'de> Visitor<'de> for OpIDVisitor {
+            type Value = OpID;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("A change request object")
+                formatter.write_str("`00000000-0000-0000-0000-000000000000` or `$seq@$actor_id`")
             }
 
-            fn visit_map<V>(self, mut map: V) -> Result<ChangeRequest, V::Error>
+            fn visit_str<E>(self, v: &str) -> Result<OpID, E>
             where
-                V: MapAccess<'de>,
+                E: Error 
             {
-                let mut actor: Option<ActorID> = None;
-                let mut deps: Option<Clock> = None;
-                let mut message: Option<Option<String>> = None;
-                let mut seq: Option<u32> = None;
-                let mut ops: Option<Vec<Operation>> = None;
-                let mut undoable: Option<bool> = None;
-                let mut request_type_str: Option<String> = None;
+              let err = Error::invalid_value(Unexpected::Str(&v),&"A valid OpID");
 
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_ref() {
-                        "actor" => {
-                            if actor.is_some() {
-                                return Err(Error::duplicate_field("actor"));
-                            }
-                            actor = Some(map.next_value()?);
-                        }
-                        "deps" => {
-                            if deps.is_some() {
-                                return Err(Error::duplicate_field("deps"));
-                            }
-                            deps = Some(map.next_value()?);
-                        }
-                        "message" => {
-                            if message.is_some() {
-                                return Err(Error::duplicate_field("message"));
-                            }
-                            message = map.next_value()?;
-                        }
-                        "seq" => {
-                            if seq.is_some() {
-                                return Err(Error::duplicate_field("seq"));
-                            }
-                            seq = Some(map.next_value()?);
-                        }
-                        "undoable" => {
-                            if undoable.is_some() {
-                                return Err(Error::duplicate_field("seq"));
-                            }
-                            undoable = Some(map.next_value()?);
-                        }
-                        "ops" => {
-                            if ops.is_some() {
-                                return Err(Error::duplicate_field("ops"));
-                            }
-                            ops = Some(map.next_value()?);
-                        }
-                        "requestType" => {
-                            if request_type_str.is_some() {
-                                return Err(Error::duplicate_field("requestType"));
-                            }
-                            request_type_str = Some(map.next_value()?);
-                        }
-                        _ => return Err(Error::unknown_field(&key, FIELDS)),
-                    }
+              if v == "00000000-0000-0000-0000-000000000000" {
+                Ok(OpID::Root)
+              } else {
+                let mut i = v.split("@");
+                match (i.next(),i.next(),i.next()) {
+                  (Some(seq_str), Some(actor_str), None) => 
+                      if let Ok(seq) = seq_str.parse() {
+                        Ok(OpID::ID(seq, actor_str.to_string()))
+                      } else {
+                        Err(err)
+                      }
+                  _ => Err(err)
                 }
-
-                let actor = actor.ok_or_else(|| Error::missing_field("actor"))?;
-                let deps = deps.ok_or_else(|| Error::missing_field("deps"))?;
-                let seq = seq.ok_or_else(|| Error::missing_field("seq"))?;
-                let request_type_str =
-                    request_type_str.ok_or_else(|| Error::missing_field("requestType"))?;
-
-                let request_type = match request_type_str.as_ref() {
-                    "change" => {
-                        let ops = ops.ok_or_else(|| Error::missing_field("ops"))?;
-                        ChangeRequestType::Change(ops)
-                    }
-                    "undo" => ChangeRequestType::Undo,
-                    "redo" => ChangeRequestType::Redo,
-                    _ => {
-                        return Err(Error::invalid_value(
-                            Unexpected::Str(&request_type_str),
-                            &"A valid change request type",
-                        ))
-                    }
-                };
-
-                Ok(ChangeRequest {
-                    actor_id: actor,
-                    dependencies: deps,
-                    undoable,
-                    seq,
-                    request_type,
-                    message: message.unwrap_or(None),
-                })
+              }
             }
         }
-        deserializer.deserialize_struct("ChangeReqest", &FIELDS, ChangeRequestVisitor)
+        deserializer.deserialize_str(OpIDVisitor)
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {
-    //use super::*;
-    use crate::{ActorID, ChangeRequest, ChangeRequestType, Clock, ObjectID, Operation};
+    use crate::{ActorID, ChangeRequest, ChangeRequestType, Clock, OpID, Operation};
     use serde_json;
-
-    struct TestCase {
-        name: &'static str,
-        change_request: ChangeRequest,
-        json: serde_json::Value,
-    }
 
     #[test]
     fn do_tests() {
-        let actor = ActorID("actor1".to_string());
-        let birds = ObjectID::ID("birds".to_string());
-        let testcases: Vec<TestCase> = vec![
-            TestCase {
-                name: "change",
-                change_request: ChangeRequest {
-                    actor_id: actor.clone(),
-                    seq: 1,
-                    message: None,
-                    undoable: Some(false),
-                    dependencies: Clock::empty().with(&actor, 1),
-                    request_type: ChangeRequestType::Change(vec![Operation::MakeMap {
-                        object_id: birds,
-                    }]),
-                },
-                json: serde_json::from_str(
-                    r#"
-                        {
-                            "actor": "actor1",
-                            "seq": 1,
-                            "message": null,
-                            "undoable": false,
-                            "deps": {"actor1": 1},
-                            "requestType": "change",
-                            "ops": [{
-                                "action": "makeMap",
-                                "obj": "birds"
-                            }]
-                        }
-                        "#,
-                )
-                .unwrap(),
-            },
-            TestCase {
-                name: "undo",
-                change_request: ChangeRequest {
-                    actor_id: actor.clone(),
-                    seq: 1,
-                    message: None,
-                    undoable: None,
-                    dependencies: Clock::empty().with(&actor, 1),
-                    request_type: ChangeRequestType::Undo,
-                },
-                json: serde_json::from_str(
-                    r#"
-                        {
-                            "actor": "actor1",
-                            "seq": 1,
-                            "message": null,
-                            "deps": {"actor1": 1},
-                            "requestType": "undo"
-                        }
-                        "#,
-                )
-                .unwrap(),
-            },
-            TestCase {
-                name: "redo",
-                change_request: ChangeRequest {
-                    actor_id: actor.clone(),
-                    seq: 1,
-                    message: None,
-                    undoable: None,
-                    dependencies: Clock::empty().with(&actor, 1),
-                    request_type: ChangeRequestType::Redo,
-                },
-                json: serde_json::from_str(
-                    r#"
-                        {
-                            "actor": "actor1",
-                            "seq": 1,
-                            "message": null,
-                            "deps": {"actor1": 1},
-                            "requestType": "redo"
-                        }
-                        "#,
-                )
-                .unwrap(),
-            },
-        ];
-        for testcase in testcases {
-            let serialized =
-                serde_json::to_value(testcase.change_request.clone()).unwrap_or_else(|_| {
-                    panic!(std::format!("Failed to deserialize {}", testcase.name));
-                });
-            assert_eq!(
-                testcase.json, serialized,
-                "TestCase {} did not match",
-                testcase.name
-            );
-            let deserialized: ChangeRequest =
-                serde_json::from_value(serialized).unwrap_or_else(|_| {
-                    panic!(std::format!("Failed to deserialize for {}", testcase.name));
-                });
-            assert_eq!(
-                testcase.change_request, deserialized,
-                "TestCase {} failed the round trip",
-                testcase.name
-            );
-        }
+        let a = OpID::Root;
+        let b = OpID::ID(2,"909a8dcd-ad16-431c-8ecd-a9ca1a8dd8c6".to_string());
+        let c = serde_json::to_string(&a).unwrap();
+        let d = serde_json::to_string(&b).unwrap();
+        assert_eq!(c,"\"00000000-0000-0000-0000-000000000000\"".to_string());
+        assert_eq!(d,"\"2@909a8dcd-ad16-431c-8ecd-a9ca1a8dd8c6\"".to_string());
+        let e : OpID = serde_json::from_str(&c).unwrap();
+        let f : OpID = serde_json::from_str(&d).unwrap();
+        assert_eq!(a,e);
+        assert_eq!(b,f);
     }
 }

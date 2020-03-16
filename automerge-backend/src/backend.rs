@@ -1,103 +1,95 @@
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff, OpSet,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, Diff, OpSet,
     Operation, Patch,
 };
+use std::time::{ SystemTime, UNIX_EPOCH };
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
+    version: u32,
     op_set: OpSet,
 }
 
 impl Backend {
     pub fn init() -> Backend {
         Backend {
+            version: 0,
             op_set: OpSet::init(),
         }
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
-        let nested_diffs = changes
-            .into_iter()
-            .map(|c| self.op_set.apply_change(c, false))
-            .collect::<Result<Vec<Vec<Diff>>, AutomergeError>>()?;
-        let diffs = nested_diffs.into_iter().flatten().collect();
-        Ok(Patch {
-            actor: None,
-            can_undo: self.op_set.can_undo(),
-            can_redo: self.op_set.can_redo(),
-            clock: self.op_set.clock.clone(),
-            deps: self.op_set.clock.clone(),
-            diffs,
-            seq: None,
-        })
+    fn process_change_request(&self, request: ChangeRequest) -> Change {
+      let start_op = self.op_set.max_op + 1;
+      let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+      log!("CR {:?}",request);
+//      let operations = request.ops.unwrap().map(|op| => {
+//        let opId = OpID ( start_op + request.ops.len(), request.actor_id.clone() )
+//        let objType = objectTypes[op.obj] || opSet.getIn(['byObject', op.obj, '_init', 'action'])
+
+ //     })
+      Change {
+        start_op,
+        message: request.message,
+        actor_id: request.actor_id,
+        seq: request.seq,
+        dependencies: request.dependencies,
+        time,
+        operations: request.ops.unwrap(),
+      }
     }
 
-    pub fn apply_local_change(&mut self, change: ChangeRequest) -> Result<Patch, AutomergeError> {
-        let actor_id = change.actor_id.clone();
-        let seq = change.seq;
-        if self.op_set.clock.get(&actor_id) >= seq {
-            return Err(AutomergeError::DuplicateChange(format!(
-                "Change request has already been applied {} {}",
-                actor_id.0, seq
-            )));
+    fn make_patch(&self, diffs: Diff2, request: Option<&ChangeRequest>, is_incremental: bool) -> Patch {
+      Patch {
+        version: self.version,
+        can_undo: self.op_set.can_undo(),
+        can_redo: self.op_set.can_redo(),
+        diffs,
+        clock: if is_incremental { None } else { Some(self.op_set.clock.clone()) },
+        actor: request.map(|r| r.actor_id.clone()),
+        seq: request.map(|r| r.seq),
+      }
+    }
+
+    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+        self.version += 1;
+        let mut diff2 = Diff2::new();
+        for change in changes.drain(0..) {
+            self.op_set.add_change(change, false, &mut diff2)?;
         }
-        match change.request_type {
-            ChangeRequestType::Change(ops) => {
-                let diffs = self.op_set.apply_change(
-                    Change {
-                        actor_id: change.actor_id,
-                        operations: ops,
-                        seq,
-                        message: change.message,
-                        dependencies: change.dependencies,
-                    },
-                    change.undoable.unwrap_or(true),
-                )?;
-                Ok(Patch {
-                    actor: Some(actor_id),
-                    can_undo: self.op_set.can_undo(),
-                    can_redo: self.op_set.can_redo(),
-                    clock: self.op_set.clock.clone(),
-                    deps: self.op_set.clock.clone(),
-                    diffs,
-                    seq: Some(seq),
-                })
+        Ok(self.make_patch(diff2,None,true))
+    }
+
+    pub fn apply_local_change(&mut self, request: ChangeRequest) -> Result<Patch, AutomergeError> {
+        let mut diff2 = Diff2::new();
+        self.check_for_duplicate(&request)?;
+        self.version += 1;
+        let undoable = request.undoable.unwrap_or(true);
+        let tmp_request = request.clone(); // FIXME
+        let diffs = match request.request_type {
+            ChangeRequestType::Change => {
+                let change = self.process_change_request(request);
+                self.op_set.add_change(change, undoable, &mut diff2,)?
             }
             ChangeRequestType::Undo => {
-                let diffs = self.op_set.do_undo(
-                    change.actor_id.clone(),
-                    change.seq,
-                    change.message,
-                    change.dependencies,
-                )?;
-                Ok(Patch {
-                    actor: Some(actor_id),
-                    can_undo: self.op_set.can_undo(),
-                    can_redo: self.op_set.can_redo(),
-                    clock: self.op_set.clock.clone(),
-                    deps: self.op_set.clock.clone(),
-                    diffs,
-                    seq: Some(seq),
-                })
+                self.op_set.do_undo(
+                    request.actor_id.clone(),
+                    request.seq,
+                    request.message,
+                    request.dependencies,
+                    &mut diff2,
+                )?
             }
             ChangeRequestType::Redo => {
-                let diffs = self.op_set.do_redo(
-                    change.actor_id.clone(),
-                    change.seq,
-                    change.message,
-                    change.dependencies,
-                )?;
-                Ok(Patch {
-                    actor: Some(actor_id),
-                    can_undo: self.op_set.can_undo(),
-                    can_redo: self.op_set.can_redo(),
-                    clock: self.op_set.clock.clone(),
-                    deps: self.op_set.clock.clone(),
-                    diffs,
-                    seq: Some(seq),
-                })
+                self.op_set.do_redo(
+                    request.actor_id.clone(),
+                    request.seq,
+                    request.message,
+                    request.dependencies,
+                    &mut diff2,
+                )?
             }
-        }
+        };
+        Ok(self.make_patch(diff2,Some(&tmp_request),true))
     }
 
     pub fn undo_stack(&self) -> &Vec<Vec<Operation>> {
@@ -113,15 +105,9 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Patch {
-        Patch {
-            can_undo: false,
-            can_redo: false,
-            clock: self.op_set.clock.clone(),
-            deps: self.op_set.clock.clone(),
-            diffs: self.op_set.object_store.generate_diffs(),
-            actor: None,
-            seq: None,
-        }
+        panic!("not implemented");
+//        let diffs = self.op_set.object_store.generate_diffs();
+//        self.make_patch(diffs,None,false)
     }
 
     /// Get changes which are in `other` but not in this backend
@@ -159,10 +145,20 @@ impl Backend {
     pub fn clock(&self) -> &Clock {
         &self.op_set.clock
     }
+
+    fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(),AutomergeError> {
+        if self.op_set.clock.get(&request.actor_id) >= request.seq {
+            return Err(AutomergeError::DuplicateChange(format!(
+                "Change request has already been applied {}:{}", request.actor_id.0, request.seq
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+/*
     use crate::{
         ActorID, Backend, Change, ChangeRequest, ChangeRequestType, Clock, Conflict, DataType,
         Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID, Operation, Patch,
@@ -1163,4 +1159,5 @@ mod tests {
         backend.apply_changes(changes).unwrap();
         assert_eq!(expected_patch, backend.get_patch());
     }
+*/
 }
