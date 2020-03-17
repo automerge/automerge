@@ -33,19 +33,19 @@ impl ActorStates {
     }
 
     pub fn is_concurrent(&self, op1: &OperationWithMetadata, op2: &OperationWithMetadata) -> bool {
-        let clock1 = self.get_deps(&op1.actor_id, op1.sequence);
-        let clock2 = self.get_deps(&op2.actor_id, op2.sequence);
-        clock1.get(&op2.actor_id) < op2.sequence && clock2.get(&op1.actor_id) < op1.sequence
+        let clock1 = self.get_deps(&op1.actor_id, op1.seq);
+        let clock2 = self.get_deps(&op2.actor_id, op2.seq);
+        clock1.get(&op2.actor_id) < op2.seq && clock2.get(&op1.actor_id) < op1.seq
     }
 
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
         self.change_by_actor
             .get(actor_id)
-            .map(|vec| vec.iter().map(|c| c.as_ref()).collect() )
+            .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
             .unwrap_or_default()
     }
 
-    fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
+    pub fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
         self.change_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))

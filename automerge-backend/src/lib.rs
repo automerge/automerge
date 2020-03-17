@@ -15,9 +15,7 @@ mod object_store;
 mod op_set;
 mod operation_with_metadata;
 mod patch;
-mod patch_serialization;
 mod protocol;
-mod protocol_serialization;
 mod value;
 
 pub use crate::protocol::{
@@ -28,8 +26,8 @@ pub use actor_states::ActorStates;
 pub use backend::Backend;
 pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;
-pub use object_store::{ListState, MapState, ObjectState, ObjectStore};
+pub use object_store::{ListState, MapState, ObjectState};
 pub use op_set::{list_ops_in_order, OpSet};
 pub use operation_with_metadata::OperationWithMetadata;
-pub use patch::{Conflict, Diff2, Diff, DiffAction, ElementValue, MapType, Patch, SequenceType};
+pub use patch::{Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, SequenceType};
 pub use value::Value;

@@ -14,6 +14,7 @@
 //! let changes_str = "<paste the contents of the output here>";
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
+use crate::error::AutomergeError;
 use core::cmp::max;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -23,24 +24,22 @@ use std::str::FromStr;
 
 use crate::error;
 
-/*
-#[derive(Eq, PartialEq, Debug, Hash, Clone)]
-pub enum ObjectID {
-    ID(String),
-    Root,
-}
-*/
-
 impl OpID {
+    pub fn new(seq: u64, actor: &ActorID) -> OpID {
+        OpID::ID(seq, actor.0.clone())
+    }
+
     fn parse(s: &str) -> Option<OpID> {
         match s {
             "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
             _ => {
-                let mut i = s.split("@");
-                match (i.next(),i.next(),i.next()) {
-                  (Some(seq_str), Some(actor_str), None) =>
-                      seq_str.parse().ok().map(|seq| OpID::ID(seq, actor_str.to_string())),
-                  _ => None,
+                let mut i = s.split('@');
+                match (i.next(), i.next(), i.next()) {
+                    (Some(seq_str), Some(actor_str), None) => seq_str
+                        .parse()
+                        .ok()
+                        .map(|seq| OpID::ID(seq, actor_str.to_string())),
+                    _ => None,
                 }
             }
         }
@@ -53,7 +52,8 @@ impl<'de> Deserialize<'de> for OpID {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        OpID::parse(&s).ok_or(de::Error::invalid_value(de::Unexpected::Str(&s),&"A valid OpID"))
+        OpID::parse(&s)
+            .ok_or_else(|| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid OpID"))
     }
 }
 
@@ -63,34 +63,18 @@ impl Serialize for OpID {
         S: Serializer,
     {
         match self {
-            OpID::Root =>
-              serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
-            OpID::ID(seq,actor) =>
-              serializer.serialize_str(format!("{}@{}",seq,actor).as_str()),
+            OpID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
+            OpID::ID(seq, actor) => serializer.serialize_str(format!("{}@{}", seq, actor).as_str()),
         }
     }
 }
-
-/*
-impl Serialize for OpID {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-      let s = match self {
-        OpID::Root => "00000000-0000-0000-0000-000000000000".to_string(),
-      };
-      serializer.serialize_str(s.as_str())
-    }
-}
-*/
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 pub struct Key(pub String);
 
 impl Key {
-    pub fn as_element_id(&self) -> Result<ElementID, error::InvalidElementID> {
-        ElementID::from_str(&self.0)
+    pub fn as_element_id(&self) -> Result<ElementID, AutomergeError> {
+        ElementID::from_str(&self.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", self.0)))
     }
 }
 
@@ -109,6 +93,12 @@ impl ActorID {
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct Clock(pub HashMap<ActorID, u32>);
+
+impl Default for Clock {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
 
 impl Clock {
     pub fn empty() -> Clock {
@@ -289,8 +279,57 @@ pub enum DataType {
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum OpID {
-    ID(u64,String),
+    ID(u64, String),
     Root,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[serde(tag = "action")]
+pub enum OpRequest {
+    #[serde(rename = "makeMap")]
+    MakeMap {
+        obj: String,
+        key: Key,
+        child: String,
+    },
+    #[serde(rename = "set")]
+    Set {
+        obj: String,
+        key: Key,
+        value: PrimitiveValue,
+    },
+}
+
+impl OpRequest {
+    pub fn into_op(
+        self,
+        seq_num: u64,
+        actor: &ActorID,
+        objmap: &mut HashMap<String, OpID>,
+    ) -> Operation {
+        match self {
+            OpRequest::MakeMap { obj, key, child } => {
+                let opid = OpID::parse(&obj).unwrap_or_else(|| objmap.get(&obj).unwrap().clone());
+                let this = OpID::ID(seq_num, actor.0.clone());
+                objmap.insert(child, this);
+                Operation::MakeMap {
+                    object_id: opid,
+                    key,
+                    pred: Vec::new(),
+                }
+            }
+            OpRequest::Set { obj, key, value } => {
+                let opid = OpID::parse(&obj).unwrap_or_else(|| objmap.get(&obj).unwrap().clone());
+                Operation::Set {
+                    object_id: opid,
+                    key,
+                    value,
+                    pred: Vec::new(),
+                    datatype: None,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
@@ -307,16 +346,19 @@ pub enum Operation {
     MakeList {
         #[serde(rename = "obj")]
         object_id: OpID,
+        key: Key,
     },
     #[serde(rename = "makeText")]
     MakeText {
         #[serde(rename = "obj")]
         object_id: OpID,
+        key: Key,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
         #[serde(rename = "obj")]
         object_id: OpID,
+        key: Key,
     },
     #[serde(rename = "ins")]
     Insert {
@@ -358,12 +400,22 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn op_id(&self) -> &OpID {
+    pub fn is_make(&self) -> bool {
+        match self {
+            Operation::MakeMap { .. }
+            | Operation::MakeList { .. }
+            | Operation::MakeText { .. }
+            | Operation::MakeTable { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn obj(&self) -> &OpID {
         match self {
             Operation::MakeMap { object_id, .. }
-            | Operation::MakeTable { object_id }
-            | Operation::MakeList { object_id }
-            | Operation::MakeText { object_id }
+            | Operation::MakeTable { object_id, .. }
+            | Operation::MakeList { object_id, .. }
+            | Operation::MakeText { object_id, .. }
             | Operation::Insert {
                 list_id: object_id, ..
             }
@@ -374,7 +426,6 @@ impl Operation {
         }
     }
 }
-
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
@@ -392,36 +443,37 @@ pub struct Change {
     pub dependencies: Clock,
 }
 
+/*
 #[derive(PartialEq, Debug, Clone)]
 pub struct Moment {
   pub actor_id: ActorID,
   pub seq: u32,
 }
+*/
 
-#[derive(Deserialize,PartialEq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
-    pub actor_id: ActorID,
+    pub actor: ActorID,
     pub seq: u32,
+    pub version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    pub dependencies: Clock,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub undoable: Option<bool>,
-    pub ops: Option<Vec<Operation>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependencies: Option<Clock>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ops: Option<Vec<OpRequest>>,
     pub request_type: ChangeRequestType,
 }
 
-#[derive(Deserialize,PartialEq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeRequestType {
     Change,
     Undo,
     Redo,
-}
-
-impl ChangeRequest {
-  pub fn moment(&self) -> Moment {
-    Moment{ actor_id: self.actor_id.clone(), seq: self.seq }
-  }
 }
 
 #[cfg(test)]
@@ -430,174 +482,174 @@ mod tests {
     use serde_json;
     use std::iter::FromIterator;
 
-/*
-    #[test]
-    fn test_deserializing_operations() {
-        let json_str = r#"{
-            "ops": [
-                {
-                    "action": "makeMap",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                },
-                {
-                    "action": "makeList",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                },
-                {
-                    "action": "makeText",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                },
-                {
-                    "action": "makeTable",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                },
-                {
-                    "action": "ins",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "someactorid:6",
-                    "elem": 5
-                },
-                {
-                    "action": "ins",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "_head",
-                    "elem": 6
-                },
-                {
-                    "action": "set",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "sometimestamp",
-                    "value": 123456,
-                    "datatype": "timestamp"
-                },
-                {
-                    "action": "set",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "somekeyid",
-                    "value": true
-                },
-                {
-                    "action": "set",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "somekeyid",
-                    "value": 123
-                },
-                {
-                    "action": "set",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "somekeyid",
-                    "value": null
-                },
-                {
-                    "action": "link",
-                    "obj": "00000000-0000-0000-0000-000000000000",
-                    "key": "cards",
-                    "value": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                },
-                {
-                    "action": "del",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "somekey"
-                },
-                {
-                    "action": "inc",
-                    "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                    "key": "somekey",
-                    "value": 123
-                }
-            ],
-            "actor": "741e7221-11cc-4ef8-86ee-4279011569fd",
-            "seq": 1,
-            "deps": {
-                "someid": 0
-            },
-            "message": "Initialization"
-        }"#;
-        let change: Change = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(
-            change,
-            Change {
-                actor_id: ActorID("741e7221-11cc-4ef8-86ee-4279011569fd".to_string()),
-                operations: vec![
-                    Operation::MakeMap {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+    /*
+        #[test]
+        fn test_deserializing_operations() {
+            let json_str = r#"{
+                "ops": [
+                    {
+                        "action": "makeMap",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
                     },
-                    Operation::MakeList {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                    {
+                        "action": "makeList",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
                     },
-                    Operation::MakeText {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                    {
+                        "action": "makeText",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
                     },
-                    Operation::MakeTable {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                    {
+                        "action": "makeTable",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
                     },
-                    Operation::Insert {
-                        list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: ElementID::SpecificElementID(ActorID("someactorid".to_string()), 6),
-                        elem: 5,
+                    {
+                        "action": "ins",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "someactorid:6",
+                        "elem": 5
                     },
-                    Operation::Insert {
-                        list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: ElementID::Head,
-                        elem: 6,
+                    {
+                        "action": "ins",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "_head",
+                        "elem": 6
                     },
-                    Operation::Set {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("sometimestamp".to_string()),
-                        value: PrimitiveValue::Number(123_456.0),
-                        datatype: Some(DataType::Timestamp)
+                    {
+                        "action": "set",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "sometimestamp",
+                        "value": 123456,
+                        "datatype": "timestamp"
                     },
-                    Operation::Set {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("somekeyid".to_string()),
-                        value: PrimitiveValue::Boolean(true),
-                        datatype: None
+                    {
+                        "action": "set",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "somekeyid",
+                        "value": true
                     },
-                    Operation::Set {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("somekeyid".to_string()),
-                        value: PrimitiveValue::Number(123.0),
-                        datatype: None,
+                    {
+                        "action": "set",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "somekeyid",
+                        "value": 123
                     },
-                    Operation::Set {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("somekeyid".to_string()),
-                        value: PrimitiveValue::Null,
-                        datatype: None,
+                    {
+                        "action": "set",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "somekeyid",
+                        "value": null
                     },
-                    Operation::Link {
-                        object_id: ObjectID::Root,
-                        key: Key("cards".to_string()),
-                        value: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                    {
+                        "action": "link",
+                        "obj": "00000000-0000-0000-0000-000000000000",
+                        "key": "cards",
+                        "value": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
                     },
-                    Operation::Delete {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("somekey".to_string())
+                    {
+                        "action": "del",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "somekey"
                     },
-                    Operation::Increment {
-                        object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                        key: Key("somekey".to_string()),
-                        value: 123.0,
+                    {
+                        "action": "inc",
+                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
+                        "key": "somekey",
+                        "value": 123
                     }
                 ],
-                seq: 1,
-                message: Some("Initialization".to_string()),
-                dependencies: Clock(HashMap::from_iter(vec![(ActorID("someid".to_string()), 0)]))
-            }
-        );
-    }
+                "actor": "741e7221-11cc-4ef8-86ee-4279011569fd",
+                "seq": 1,
+                "deps": {
+                    "someid": 0
+                },
+                "message": "Initialization"
+            }"#;
+            let change: Change = serde_json::from_str(&json_str).unwrap();
+            assert_eq!(
+                change,
+                Change {
+                    actor_id: ActorID("741e7221-11cc-4ef8-86ee-4279011569fd".to_string()),
+                    operations: vec![
+                        Operation::MakeMap {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                        },
+                        Operation::MakeList {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                        },
+                        Operation::MakeText {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                        },
+                        Operation::MakeTable {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                        },
+                        Operation::Insert {
+                            list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: ElementID::SpecificElementID(ActorID("someactorid".to_string()), 6),
+                            elem: 5,
+                        },
+                        Operation::Insert {
+                            list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: ElementID::Head,
+                            elem: 6,
+                        },
+                        Operation::Set {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("sometimestamp".to_string()),
+                            value: PrimitiveValue::Number(123_456.0),
+                            datatype: Some(DataType::Timestamp)
+                        },
+                        Operation::Set {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("somekeyid".to_string()),
+                            value: PrimitiveValue::Boolean(true),
+                            datatype: None
+                        },
+                        Operation::Set {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("somekeyid".to_string()),
+                            value: PrimitiveValue::Number(123.0),
+                            datatype: None,
+                        },
+                        Operation::Set {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("somekeyid".to_string()),
+                            value: PrimitiveValue::Null,
+                            datatype: None,
+                        },
+                        Operation::Link {
+                            object_id: ObjectID::Root,
+                            key: Key("cards".to_string()),
+                            value: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
+                        },
+                        Operation::Delete {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("somekey".to_string())
+                        },
+                        Operation::Increment {
+                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
+                            key: Key("somekey".to_string()),
+                            value: 123.0,
+                        }
+                    ],
+                    seq: 1,
+                    message: Some("Initialization".to_string()),
+                    dependencies: Clock(HashMap::from_iter(vec![(ActorID("someid".to_string()), 0)]))
+                }
+            );
+        }
 
-    #[test]
-    fn test_deserialize_elementid() {
-        let json_str = "\"_head\"";
-        let elem: ElementID = serde_json::from_str(json_str).unwrap();
-        assert_eq!(elem, ElementID::Head);
-    }
+        #[test]
+        fn test_deserialize_elementid() {
+            let json_str = "\"_head\"";
+            let elem: ElementID = serde_json::from_str(json_str).unwrap();
+            assert_eq!(elem, ElementID::Head);
+        }
 
-    #[test]
-    fn test_serialize_elementid() {
-        let result = serde_json::to_value(ElementID::Head).unwrap();
-        assert_eq!(result, serde_json::Value::String("_head".to_string()));
-    }
-*/
+        #[test]
+        fn test_serialize_elementid() {
+            let result = serde_json::to_value(ElementID::Head).unwrap();
+            assert_eq!(result, serde_json::Value::String("_head".to_string()));
+        }
+    */
 }
