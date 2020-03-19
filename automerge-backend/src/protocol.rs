@@ -20,9 +20,49 @@ use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
+use std::fmt;
 use std::str::FromStr;
 
 use crate::error;
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum ObjType {
+    Map,
+    Table,
+    Text,
+    List,
+}
+
+#[derive(Eq, PartialEq, Debug, Hash, Clone)]
+pub enum OpID {
+    ID(u64, String),
+    Root,
+}
+
+impl Ord for OpID {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (OpID::Root, OpID::Root) => Ordering::Equal,
+            (_, OpID::Root) => Ordering::Greater,
+            (OpID::Root, _) => Ordering::Less,
+            (OpID::ID(counter1, actor1), OpID::ID(counter2, actor2)) => {
+                // Lamport compare
+                if counter1 != counter2 {
+                    counter1.cmp(&counter2)
+                } else {
+                    actor1.cmp(&actor2)
+                }
+            }
+        }
+    }
+}
+
+impl PartialOrd for OpID {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
@@ -62,9 +102,15 @@ impl Serialize for OpID {
     where
         S: Serializer,
     {
+        serializer.serialize_str(self.to_string().as_str())
+    }
+}
+
+impl fmt::Display for OpID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OpID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
-            OpID::ID(seq, actor) => serializer.serialize_str(format!("{}@{}", seq, actor).as_str()),
+            OpID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
+            OpID::ID(seq, actor) => write!(f, "{}@{}", seq, actor),
         }
     }
 }
@@ -179,19 +225,15 @@ pub enum PrimitiveValue {
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub enum ElementID {
     Head,
-    SpecificElementID(ActorID, u32),
+    ID(OpID),
 }
 
 impl ElementID {
     pub fn as_key(&self) -> Key {
         match self {
             ElementID::Head => Key("_head".to_string()),
-            ElementID::SpecificElementID(actor_id, elem) => Key(format!("{}:{}", actor_id.0, elem)),
+            ElementID::ID(opid) => Key(opid.to_string()),
         }
-    }
-
-    pub fn from_actor_and_elem(actor: ActorID, elem: u32) -> ElementID {
-        ElementID::SpecificElementID(actor, elem)
     }
 }
 
@@ -212,9 +254,7 @@ impl Serialize for ElementID {
     {
         match self {
             ElementID::Head => serializer.serialize_str("_head"),
-            ElementID::SpecificElementID(actor_id, elem) => {
-                serializer.serialize_str(&format!("{}:{}", actor_id.0, elem))
-            }
+            ElementID::ID(opid) => opid.serialize(serializer),
         }
     }
 }
@@ -225,20 +265,9 @@ impl FromStr for ElementID {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "_head" => Ok(ElementID::Head),
-            id => {
-                let components: Vec<&str> = id.split(':').collect();
-                match components.as_slice() {
-                    [actor_id, elem_str] => {
-                        let elem = u32::from_str(elem_str)
-                            .map_err(|_| error::InvalidElementID(id.to_string()))?;
-                        Ok(ElementID::SpecificElementID(
-                            ActorID((*actor_id).to_string()),
-                            elem,
-                        ))
-                    }
-                    _ => Err(error::InvalidElementID(id.to_string())),
-                }
-            }
+            id => Ok(ElementID::ID(
+                OpID::parse(id).ok_or(error::InvalidElementID(id.to_string()))?,
+            )),
         }
     }
 }
@@ -255,16 +284,7 @@ impl Ord for ElementID {
             (ElementID::Head, ElementID::Head) => Ordering::Equal,
             (ElementID::Head, _) => Ordering::Less,
             (_, ElementID::Head) => Ordering::Greater,
-            (
-                ElementID::SpecificElementID(self_actor, self_elem),
-                ElementID::SpecificElementID(other_actor, other_elem),
-            ) => {
-                if self_elem == other_elem {
-                    self_actor.cmp(other_actor)
-                } else {
-                    self_elem.cmp(other_elem)
-                }
-            }
+            (ElementID::ID(self_opid), ElementID::ID(other_opid)) => self_opid.cmp(other_opid),
         }
     }
 }
@@ -275,12 +295,6 @@ pub enum DataType {
     Counter,
     #[serde(rename = "timestamp")]
     Timestamp,
-}
-
-#[derive(Eq, PartialEq, Debug, Hash, Clone)]
-pub enum OpID {
-    ID(u64, String),
-    Root,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
@@ -296,6 +310,7 @@ pub enum OpRequest {
     Set {
         obj: String,
         key: Key,
+        insert: Option<bool>,
         value: PrimitiveValue,
     },
 }
@@ -318,12 +333,18 @@ impl OpRequest {
                     pred: Vec::new(),
                 }
             }
-            OpRequest::Set { obj, key, value } => {
+            OpRequest::Set {
+                obj,
+                key,
+                value,
+                insert,
+            } => {
                 let opid = OpID::parse(&obj).unwrap_or_else(|| objmap.get(&obj).unwrap().clone());
                 Operation::Set {
                     object_id: opid,
                     key,
                     value,
+                    insert,
                     pred: Vec::new(),
                     datatype: None,
                 }
@@ -340,42 +361,49 @@ pub enum Operation {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
-        pred: Vec<String>,
+        pred: Vec<OpID>,
     },
     #[serde(rename = "makeList")]
     MakeList {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
+        pred: Vec<OpID>,
     },
     #[serde(rename = "makeText")]
     MakeText {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
+        pred: Vec<OpID>,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
+        pred: Vec<OpID>,
     },
-    #[serde(rename = "ins")]
-    Insert {
-        #[serde(rename = "obj")]
-        list_id: OpID,
-        key: ElementID,
-        elem: u32,
-    },
+    /*
+        #[serde(rename = "ins")]
+        Insert {
+            #[serde(rename = "obj")]
+            list_id: OpID,
+            key: ElementID,
+            elem: u32,
+        },
+    */
     #[serde(rename = "set")]
     Set {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
         value: PrimitiveValue,
-        pred: Vec<String>,
+        pred: Vec<OpID>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         datatype: Option<DataType>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        insert: Option<bool>,
     },
     #[serde(rename = "link")]
     Link {
@@ -383,12 +411,14 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         value: OpID,
+        pred: Vec<OpID>,
     },
     #[serde(rename = "del")]
     Delete {
         #[serde(rename = "obj")]
         object_id: OpID,
         key: Key,
+        pred: Vec<OpID>,
     },
     #[serde(rename = "inc")]
     Increment {
@@ -396,6 +426,7 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         value: f64,
+        pred: Vec<OpID>,
     },
 }
 
@@ -416,9 +447,7 @@ impl Operation {
             | Operation::MakeTable { object_id, .. }
             | Operation::MakeList { object_id, .. }
             | Operation::MakeText { object_id, .. }
-            | Operation::Insert {
-                list_id: object_id, ..
-            }
+//            | Operation::Insert { list_id: object_id, ..  }
             | Operation::Set { object_id, .. }
             | Operation::Link { object_id, .. }
             | Operation::Delete { object_id, .. }

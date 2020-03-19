@@ -7,12 +7,12 @@
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
 use crate::actor_states::ActorStates;
-use crate::concurrent_operations::ConcurrentOperations;
+//use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::object_store::{ListState, ObjectState};
+use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, ElementID, OpID, Operation};
-use crate::{ActorID, Diff2, Key, MapType, SequenceType};
+use crate::{ActorID, Diff2, Key, MapType, ObjType, SequenceType};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -33,7 +33,7 @@ use std::hash::BuildHasher;
 /// that node.
 #[derive(Debug, PartialEq, Clone)]
 pub struct OpSet {
-    pub objs: HashMap<OpID, ObjectState>,
+    pub objs: HashMap<OpID, ObjState>,
     queue: Vec<Change>,
     pub clock: Clock,
     undo_pos: usize,
@@ -46,7 +46,7 @@ pub struct OpSet {
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = HashMap::new();
-        objs.insert(OpID::Root, ObjectState::new_map(MapType::Map, OpID::Root));
+        objs.insert(OpID::Root, ObjState::new(ObjType::Map));
 
         OpSet {
             objs,
@@ -101,25 +101,46 @@ impl OpSet {
                         object_id: oid,
                         key,
                         value,
+                        pred,
                     } => Some(vec![Operation::Increment {
                         object_id: oid.clone(),
                         key: key.clone(),
                         value: -value,
+                        pred: pred.clone(),
                     }]),
-                    Operation::Set { object_id, key, .. }
-                    | Operation::Link { object_id, key, .. }
-                    | Operation::Delete { object_id, key } => self
-                        .concurrent_operations_for_field(object_id, key)
-                        .map(|cops| {
-                            if cops.active_op().is_some() {
-                                cops.pure_operations()
-                            } else {
-                                vec![Operation::Delete {
-                                    object_id: object_id.clone(),
-                                    key: key.clone(),
-                                }]
-                            }
-                        }),
+                    Operation::Set {
+                        object_id,
+                        key,
+                        pred,
+                        ..
+                    }
+                    | Operation::Link {
+                        object_id,
+                        key,
+                        pred,
+                        ..
+                    }
+                    | Operation::Delete {
+                        object_id,
+                        key,
+                        pred,
+                        ..
+                    } => panic!("not implemented"),
+                    /*
+                                            self
+                                            .concurrent_operations_for_field(object_id, key)
+                                            .map(|cops| {
+                                                if cops.active_op().is_some() {
+                                                    cops.pure_operations()
+                                                } else {
+                                                    vec![Operation::Delete {
+                                                        object_id: object_id.clone(),
+                                                        key: key.clone(),
+                                                        pred: pred.clone(),
+                                                    }]
+                                                }
+                                            }),
+                    */
                     _ => None,
                 })
                 .flatten()
@@ -207,23 +228,23 @@ impl OpSet {
             // Store newly created object IDs so we can decide whether we need
             // undo ops later
             let metaop = OperationWithMetadata {
+                opid: OpID::ID(start_op + (n as u64), actor_id.0.clone()),
                 seq,
-                start_op: start_op + (n as u64),
                 actor_id: actor_id.clone(),
                 operation: operation.clone(),
             };
 
             if metaop.is_make() {
-                new_object_ids.insert(metaop.opid());
+                new_object_ids.insert(metaop.opid.clone());
             }
 
-            let undo_ops = self.apply_op(metaop, diff2)?;
+            self.apply_op(metaop, diff2)?;
 
             // If this object is not created in this change then we need to
             // store the undo ops for it (if we're storing undo ops at all)
 
             if make_undoable && !(new_object_ids.contains(operation.obj())) {
-                all_undo_ops.extend(undo_ops);
+                //all_undo_ops.extend(undo_ops);
             }
         }
 
@@ -248,39 +269,19 @@ impl OpSet {
             | Operation::MakeList { .. }
             | Operation::MakeText { .. }
             | Operation::Link { .. } => {
-                let opid = metaop.opid();
+                let opid = metaop.opid.clone();
                 let obj = self
                     .objs
                     .get_mut(&opid)
                     .ok_or_else(|| AutomergeError::MissingObjectError(opid))?;
-                obj.set_inbound(metaop.clone());
+                obj.inbound.insert(metaop.clone());
             }
             _ => {}
         }
         Ok(())
     }
 
-    fn apply_make(&mut self, metaop: &OperationWithMetadata) {
-        match metaop.operation {
-            Operation::MakeMap { .. } => {
-                let target = ObjectState::new_map(MapType::Map, metaop.opid());
-                self.objs.insert(metaop.opid(), target);
-            }
-            Operation::MakeTable { .. } => {
-                let target = ObjectState::new_map(MapType::Table, metaop.opid());
-                self.objs.insert(metaop.opid(), target);
-            }
-            Operation::MakeList { .. } => {
-                let target = ObjectState::new_sequence(SequenceType::List, metaop.opid());
-                self.objs.insert(metaop.opid(), target);
-            }
-            Operation::MakeText { .. } => {
-                let target = ObjectState::new_sequence(SequenceType::Text, metaop.opid());
-                self.objs.insert(metaop.opid(), target);
-            }
-            _ => {}
-        }
-    }
+    fn apply_make(&mut self, metaop: &OperationWithMetadata) {}
 
     /// Incorporates a new operation into the object store. The caller is
     /// responsible for ensuring that all causal dependencies of the new
@@ -291,101 +292,80 @@ impl OpSet {
     /// later.
     pub fn apply_op(
         &mut self,
-        metaop: OperationWithMetadata,
+        op: OperationWithMetadata,
         diff2: &mut Diff2,
-    ) -> Result<Vec<Operation>, AutomergeError> {
-        if metaop.is_make() {
-            self.apply_make(&metaop);
+    ) -> Result<(), AutomergeError> {
+
+        if let Some(obj_type) = op.make_type() {
+            self.objs.insert(op.opid.clone(), ObjState::new(obj_type));
         }
 
-        if metaop.is_link() {
-            self.apply_link(&metaop)?;
+        let object_id = op.object_id();
+
+        let path = self.get_path(&object_id)?;
+
+        let object = self.get_obj(&object_id)?;
+
+        let key = match op.insert() {
+          Some(elem) => {
+            object.insert_after(elem, op.clone())?;
+            Key(op.opid.to_string())
+          },
+          None => op.key().clone(),
+        };
+
+        let ops = object.props.entry(key.clone()).or_default();
+
+        let overwritten_ops = ops.incorporate_new_op(&op)?;
+
+        diff2.op(&key, &path, &ops.ops);
+
+        if let Some(child) = op.child() {
+          self.get_obj(&child)?.inbound.insert(op.clone());
         }
 
-        match metaop.operation {
-            Operation::MakeMap {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::MakeList {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::MakeText {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::MakeTable {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::Link {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::Set {
-                ref object_id,
-                ref key,
-                ..
-            }
-            | Operation::Delete {
-                ref object_id,
-                ref key,
-            }
-            | Operation::Increment {
-                ref object_id,
-                ref key,
-                ..
-            } => {
-                let object = self
-                    .objs
-                    .get_mut(&object_id)
-                    .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-                let undo = object.handle_assign_op(metaop.clone(), &self.states, key)?;
-                let ops = object.ops_for_key(key).clone();
-                let path = self.get_path(&object_id)?;
-                diff2.op(key, path.as_slice(), &ops);
-                Ok(undo)
-            }
-            Operation::Insert {
-                ref list_id,
-                ref key,
-                ref elem,
-            } => {
-                let liststate = self.get_list(&list_id)?;
-                liststate.add_insertion(&metaop.actor_id, key, *elem)?;
-                Ok(Vec::new())
+        for old in overwritten_ops.iter() {
+            if let Some(child) = old.child() {
+                self.get_obj(&child)?.inbound.remove(&old);
             }
         }
+
+        Ok(())
+    }
+
+    fn get_index_for_oid(&self, object: &ObjState, target: &OpID) -> Option<usize> {
+        object.ops_in_order().filter(|oid| {
+            object.props
+                .get(&Key(oid.to_string()))
+                .map(|ops| !ops.is_empty())
+                            .unwrap_or(false)
+        }).position(|o| target == o)
     }
 
     fn get_path(&self, object_id: &OpID) -> Result<Vec<OperationWithMetadata>, AutomergeError> {
         let mut oid = object_id;
         let mut path = Vec::new();
-        while let Some(metaop) = self.objs.get(oid).and_then(|os| os.inbound().as_ref()) {
-            oid = metaop.object_id().unwrap();
+        while let Some(metaop) = self.objs.get(oid).and_then(|os| os.inbound.iter().next()) {
+            oid = metaop.object_id();
             path.insert(0, metaop.clone());
         }
         Ok(path)
     }
 
-    fn get_list(&mut self, list_id: &OpID) -> Result<&mut ListState, AutomergeError> {
-        let list = self.get_obj(list_id)?;
-        match list {
-            ObjectState::Map { .. } => Err(AutomergeError::InvalidChange(format!(
-                "Insert operation received for object (object ID: {:?}",
-                list_id
-            ))),
-            ObjectState::List(liststate) => Ok(liststate),
+    /*
+        fn get_list(&mut self, list_id: &OpID) -> Result<&mut ListState, AutomergeError> {
+            let list = self.get_obj(list_id)?;
+            match list {
+                ObjectState::Map { .. } => Err(AutomergeError::InvalidChange(format!(
+                    "Insert operation received for object (object ID: {:?}",
+                    list_id
+                ))),
+                ObjectState::List(liststate) => Ok(liststate),
+            }
         }
-    }
+    */
 
-    fn get_obj(&mut self, object_id: &OpID) -> Result<&mut ObjectState, AutomergeError> {
+    fn get_obj(&mut self, object_id: &OpID) -> Result<&mut ObjState, AutomergeError> {
         let object = self
             .objs
             .get_mut(&object_id)
@@ -401,22 +381,19 @@ impl OpSet {
         !self.redo_stack.is_empty()
     }
 
+/*
     pub fn concurrent_operations_for_field(
         &self,
         object_id: &OpID,
         key: &Key,
-    ) -> Option<ConcurrentOperations> {
-        self.objs
+    ) -> Result<&[OperationWithMetadata], AutomergeError> {
+        Ok(self
+            .objs
             .get(object_id)
-            .and_then(|state| match state {
-                ObjectState::Map(mapstate) => mapstate.operations_by_key.get(&key),
-                ObjectState::List(liststate) => key
-                    .as_element_id()
-                    .ok()
-                    .and_then(|elem_id| liststate.operations_by_elemid.get(&elem_id)),
-            })
-            .cloned()
+            .and_then(|state| state.props.get(&key))
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?)
     }
+*/
 
     /// Get all the changes we have that are not in `since`
     pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
@@ -438,6 +415,7 @@ impl OpSet {
     }
 }
 
+/*
 pub fn list_ops_in_order<'a, S: BuildHasher>(
     operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations, S>,
     following: &HashMap<ElementID, Vec<ElementID>, S>,
@@ -474,3 +452,4 @@ pub fn list_ops_in_order<'a, S: BuildHasher>(
     }
     Ok(ops_in_order)
 }
+*/

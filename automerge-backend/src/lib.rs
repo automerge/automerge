@@ -19,15 +19,15 @@ mod protocol;
 mod value;
 
 pub use crate::protocol::{
-    ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, OpID,
-    Operation, PrimitiveValue,
+    ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, ObjType,
+    OpID, Operation, PrimitiveValue,
 };
 pub use actor_states::ActorStates;
 pub use backend::Backend;
 pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;
-pub use object_store::{ListState, MapState, ObjectState};
-pub use op_set::{list_ops_in_order, OpSet};
+pub use object_store::ObjState;
+pub use op_set::OpSet;
 pub use operation_with_metadata::OperationWithMetadata;
 pub use patch::{Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, SequenceType};
 pub use value::Value;
