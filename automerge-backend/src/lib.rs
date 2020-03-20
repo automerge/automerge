@@ -29,5 +29,7 @@ pub use error::AutomergeError;
 pub use object_store::ObjState;
 pub use op_set::OpSet;
 pub use operation_with_metadata::OperationWithMetadata;
-pub use patch::{Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, SequenceType};
+pub use patch::{
+    Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, PendingDiff, SequenceType,
+};
 pub use value::Value;

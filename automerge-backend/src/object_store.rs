@@ -1,10 +1,8 @@
 use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::ActorID;
 use crate::{
-    DataType, DiffAction, ElementID, ElementValue, Key, MapType, ObjType, OpID, Operation,
-    SequenceType, ConcurrentOperations,
+    ConcurrentOperations, DiffAction, ElementID, ElementValue, Key, MapType, ObjType, OpID,
 };
 use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
@@ -240,7 +238,7 @@ impl ListState {
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjState {
-    pub props: HashMap<Key, ConcurrentOperations>,//Vec<OperationWithMetadata>>,
+    pub props: HashMap<Key, ConcurrentOperations>, //Vec<OperationWithMetadata>>,
     pub obj_type: ObjType,
     //    pub op_id: OpID,
     pub inbound: HashSet<OperationWithMetadata>,
@@ -270,6 +268,22 @@ impl ObjState {
         }
     }
 
+    pub fn get_index_for(&self, target: &OpID) -> Result<usize, AutomergeError> {
+        self.ops_in_order()
+            .scan(0, |n, oid| {
+                let last = *n;
+                let key = Key(oid.to_string());
+                if let Some(ops) = self.props.get(&key) {
+                    if !ops.is_empty() {
+                        *n += 1;
+                    }
+                }
+                Some((last, oid))
+            })
+            .find_map(|(last, oid)| if oid == target { Some(last) } else { None })
+            .ok_or_else(|| AutomergeError::MissingObjectError(target.clone()))
+    }
+
     pub fn ops_in_order(&self) -> ElementIterator {
         ElementIterator {
             following: &self.following,
@@ -277,11 +291,7 @@ impl ObjState {
         }
     }
 
-    pub fn insert_after(
-        &mut self,
-        elem: ElementID,
-        op: OperationWithMetadata,
-    ) -> Result<(), AutomergeError> {
+    pub fn insert_after(&mut self, elem: ElementID, op: OperationWithMetadata) {
         let following = self.following.entry(elem).or_default();
         following.push(op);
         following.sort_unstable();
@@ -289,7 +299,6 @@ impl ObjState {
         //        let my_id = ElementID::ID(metaop.opid.clone());
         //        following.push(metaop.clone());
         //        let ops = self.insertion.insert(my_id, metaop);
-        Ok(())
     }
 
     /*

@@ -69,7 +69,11 @@ impl OpID {
         OpID::ID(seq, actor.0.clone())
     }
 
-    fn parse(s: &str) -> Option<OpID> {
+    pub fn to_key(&self) -> Key {
+        Key(self.to_string())
+    }
+
+    pub fn parse(s: &str) -> Option<OpID> {
         match s {
             "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
             _ => {
@@ -121,6 +125,10 @@ pub struct Key(pub String);
 impl Key {
     pub fn as_element_id(&self) -> Result<ElementID, AutomergeError> {
         ElementID::from_str(&self.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", self.0)))
+    }
+
+    pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
+        OpID::parse(&self.0).ok_or_else(|| AutomergeError::InvalidOpID(self.0.clone()))
     }
 }
 

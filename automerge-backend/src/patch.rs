@@ -55,6 +55,12 @@ pub enum DiffAction {
     SetSequenceElement(OpID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 
+pub enum PendingDiff {
+    Seq(OperationWithMetadata, usize),
+    Map(OperationWithMetadata),
+    NoOp,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff2 {
@@ -76,37 +82,70 @@ impl Diff2 {
         }
     }
 
-    fn inject_diff(&mut self, key: &Key, ops: &[OperationWithMetadata]) {
+    pub fn add_insert(&mut self, index: usize) -> &mut Diff2 {
+        self.edits
+            .get_or_insert_with(Vec::new)
+            .push(DiffEdit::Insert { index });
+        self
+    }
+
+    pub fn add_remove(&mut self, index: usize) -> &mut Diff2 {
+        self.edits
+            .get_or_insert_with(Vec::new)
+            .push(DiffEdit::Remove { index });
+        self
+    }
+
+    pub fn add_values(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
         let prop = self.props.entry(key.clone()).or_insert_with(HashMap::new);
-        ops.iter().for_each(|metaop| match metaop.operation {
-            Operation::Set {
-                ref value,
-                ref datatype,
-                ..
-            } => {
-                let key = metaop.opid.clone();
-                let val = DiffValue {
-                    value: value.clone(),
-                    datatype: datatype.clone(),
-                };
-                prop.insert(key, DiffLink::Val(val));
+        for metaop in ops.iter() {
+            match metaop.operation {
+                Operation::Set {
+                    ref value,
+                    ref datatype,
+                    ..
+                } => {
+                    let key = metaop.opid.clone();
+                    let val = DiffValue {
+                        value: value.clone(),
+                        datatype: datatype.clone(),
+                    };
+                    prop.insert(key, DiffLink::Val(val));
+                }
+                _ => panic!("not implemented"),
+                //_ => {}
             }
-            _ => panic!("not implemented"),
-            //_ => {}
-        })
+        }
+        self
     }
 
     pub fn op(
         &mut self,
         key: &Key,
         path: &[OperationWithMetadata],
+        insert: Option<usize>,
         concurrent_ops: &[OperationWithMetadata],
     ) {
         match path {
-            [] => self.inject_diff(key, concurrent_ops),
+            [] => {
+                if let Some(index) = insert {
+                    self.add_insert(index);
+                }
+                self.add_values(key, concurrent_ops);
+            }
             [head, tail @ ..] => {
                 let d = self.expand(head);
-                d.op(key, tail, concurrent_ops)
+                d.op(key, tail, insert, concurrent_ops)
+            }
+        }
+    }
+
+    pub fn cd(&mut self, path: &[OperationWithMetadata]) -> &mut Diff2 {
+        match path {
+            [] => self,
+            [head, tail @ ..] => {
+                let d = self.expand(head);
+                d.cd(tail)
             }
         }
     }
@@ -115,11 +154,16 @@ impl Diff2 {
         let key = metaop.key();
         let prop = self.props.entry(key.clone()).or_insert_with(HashMap::new);
         let opid = metaop.opid.clone();
+        let obj_type = metaop.make_type().unwrap();
+        let edits = match obj_type {
+            ObjType::Map | ObjType::Table => None,
+            ObjType::Text | ObjType::List => Some(Vec::new()),
+        };
         let link = prop.entry(opid.clone()).or_insert_with(|| {
             DiffLink::Link(Diff2 {
-                obj_type: metaop.make_type().unwrap(), // FIXME
+                obj_type,
                 object_id: opid,
-                edits: None,
+                edits,
                 props: HashMap::new(),
             })
         });
@@ -139,8 +183,8 @@ impl Default for Diff2 {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
-    Insert { index: u32 },
-    Remove { index: u32 },
+    Insert { index: usize },
+    Remove { index: usize },
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]

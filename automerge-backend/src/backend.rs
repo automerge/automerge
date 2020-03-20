@@ -1,6 +1,6 @@
 use crate::{
     ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
-    Operation, Patch,
+    Operation, Patch, PendingDiff,
 };
 use std::collections::HashMap;
 //use std::time::{ SystemTime, UNIX_EPOCH };
@@ -44,11 +44,14 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Diff2,
+        pending: Vec<PendingDiff>,
+        _diffs: Diff2,
         request: Option<&ChangeRequest>,
         is_incremental: bool,
-    ) -> Patch {
-        Patch {
+    ) -> Result<Patch, AutomergeError> {
+        let diffs = self.op_set.finalize_diffs(pending)?;
+
+        Ok(Patch {
             version: self.version,
             can_undo: self.op_set.can_undo(),
             can_redo: self.op_set.can_redo(),
@@ -60,20 +63,23 @@ impl Backend {
             },
             actor: request.map(|r| r.actor.clone()),
             seq: request.map(|r| r.seq),
-        }
+        })
     }
 
     pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
         self.version += 1;
         let mut diff2 = Diff2::new();
+        let mut diffs = Vec::new();
         for change in changes.drain(0..) {
-            self.op_set.add_change(change, false, &mut diff2)?;
+            self.op_set
+                .add_change(change, false, &mut diffs, &mut diff2)?;
         }
-        Ok(self.make_patch(diff2, None, true))
+        Ok(self.make_patch(diffs, diff2, None, true)?)
     }
 
     pub fn apply_local_change(&mut self, request: ChangeRequest) -> Result<Patch, AutomergeError> {
         let mut diff2 = Diff2::new();
+        let mut diffs = Vec::new();
         self.check_for_duplicate(&request)?;
         self.version += 1;
         let undoable = request.undoable.unwrap_or(true);
@@ -81,13 +87,15 @@ impl Backend {
         match request.request_type {
             ChangeRequestType::Change => {
                 let change = self.process_change_request(request);
-                self.op_set.add_change(change, undoable, &mut diff2)?
+                self.op_set
+                    .add_change(change, undoable, &mut diffs, &mut diff2)?
             }
             ChangeRequestType::Undo => self.op_set.do_undo(
                 request.actor.clone(),
                 request.seq,
                 request.message,
                 request.dependencies.unwrap_or_default(),
+                &mut diffs,
                 &mut diff2,
             )?,
             ChangeRequestType::Redo => self.op_set.do_redo(
@@ -95,10 +103,11 @@ impl Backend {
                 request.seq,
                 request.message,
                 request.dependencies.unwrap_or_default(),
+                &mut diffs,
                 &mut diff2,
             )?,
         };
-        Ok(self.make_patch(diff2, Some(&tmp_request), true))
+        Ok(self.make_patch(diffs, diff2, Some(&tmp_request), true)?)
     }
 
     pub fn undo_stack(&self) -> &Vec<Vec<Operation>> {

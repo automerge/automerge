@@ -7,16 +7,14 @@
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
 use crate::actor_states::ActorStates;
-//use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ElementID, OpID, Operation};
-use crate::{ActorID, Diff2, Key, MapType, ObjType, SequenceType};
+use crate::protocol::{Change, Clock, OpID, Operation};
+use crate::{ActorID, Diff2, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::hash::BuildHasher;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -66,6 +64,7 @@ impl OpSet {
         seq: u32,
         message: Option<String>,
         dependencies: Clock,
+        diffs: &mut Vec<PendingDiff>,
         diff2: &mut Diff2,
     ) -> Result<(), AutomergeError> {
         if let Some(redo_ops) = self.redo_stack.pop() {
@@ -79,7 +78,7 @@ impl OpSet {
                 operations: redo_ops,
             };
             self.undo_pos += 1;
-            self.add_change(change, false, diff2)
+            self.add_change(change, false, diffs, diff2)
         } else {
             Err(AutomergeError::InvalidChange("no redo ops".to_string()))
         }
@@ -91,6 +90,7 @@ impl OpSet {
         seq: u32,
         message: Option<String>,
         dependencies: Clock,
+        diffs: &mut Vec<PendingDiff>,
         diff2: &mut Diff2,
     ) -> Result<(), AutomergeError> {
         if let Some(undo_ops) = self.undo_stack.get(self.undo_pos - 1) {
@@ -108,24 +108,9 @@ impl OpSet {
                         value: -value,
                         pred: pred.clone(),
                     }]),
-                    Operation::Set {
-                        object_id,
-                        key,
-                        pred,
-                        ..
+                    Operation::Set { .. } | Operation::Link { .. } | Operation::Delete { .. } => {
+                        panic!("not implemented")
                     }
-                    | Operation::Link {
-                        object_id,
-                        key,
-                        pred,
-                        ..
-                    }
-                    | Operation::Delete {
-                        object_id,
-                        key,
-                        pred,
-                        ..
-                    } => panic!("not implemented"),
                     /*
                                             self
                                             .concurrent_operations_for_field(object_id, key)
@@ -156,7 +141,7 @@ impl OpSet {
                 operations: undo_ops.clone(),
             };
             self.undo_pos -= 1;
-            self.add_change(change, false, diff2)
+            self.add_change(change, false, diffs, diff2)
         } else {
             Err(AutomergeError::InvalidChange(
                 "No undo ops to execute".to_string(),
@@ -173,11 +158,12 @@ impl OpSet {
         &mut self,
         change: Change,
         make_undoable: bool,
+        diffs: &mut Vec<PendingDiff>,
         diff2: &mut Diff2,
     ) -> Result<(), AutomergeError> {
         self.queue.push(change);
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            self.apply_change(next_change, make_undoable, diff2)?;
+            self.apply_change(next_change, make_undoable, diffs, diff2)?;
         }
         Ok(())
     }
@@ -199,6 +185,7 @@ impl OpSet {
         &mut self,
         change: Change,
         make_undoable: bool,
+        diffs: &mut Vec<PendingDiff>,
         diff2: &mut Diff2,
     ) -> Result<(), AutomergeError> {
         // This method is a little more complicated than it intuitively should
@@ -221,7 +208,7 @@ impl OpSet {
             return Ok(());
         }
 
-        let mut all_undo_ops = Vec::new();
+        let all_undo_ops = Vec::new();
         let mut new_object_ids: HashSet<OpID> = HashSet::new();
 
         for (n, operation) in operations.iter().enumerate() {
@@ -238,7 +225,9 @@ impl OpSet {
                 new_object_ids.insert(metaop.opid.clone());
             }
 
-            self.apply_op(metaop, diff2)?;
+            let diff = self.apply_op(metaop, diff2)?;
+
+            diffs.push(diff);
 
             // If this object is not created in this change then we need to
             // store the undo ops for it (if we're storing undo ops at all)
@@ -262,27 +251,6 @@ impl OpSet {
         Ok(())
     }
 
-    fn apply_link(&mut self, metaop: &OperationWithMetadata) -> Result<(), AutomergeError> {
-        match metaop.operation {
-            Operation::MakeMap { .. }
-            | Operation::MakeTable { .. }
-            | Operation::MakeList { .. }
-            | Operation::MakeText { .. }
-            | Operation::Link { .. } => {
-                let opid = metaop.opid.clone();
-                let obj = self
-                    .objs
-                    .get_mut(&opid)
-                    .ok_or_else(|| AutomergeError::MissingObjectError(opid))?;
-                obj.inbound.insert(metaop.clone());
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn apply_make(&mut self, metaop: &OperationWithMetadata) {}
-
     /// Incorporates a new operation into the object store. The caller is
     /// responsible for ensuring that all causal dependencies of the new
     /// operation have already been applied.
@@ -294,52 +262,53 @@ impl OpSet {
         &mut self,
         op: OperationWithMetadata,
         diff2: &mut Diff2,
-    ) -> Result<(), AutomergeError> {
-
+    ) -> Result<PendingDiff, AutomergeError> {
         if let Some(obj_type) = op.make_type() {
             self.objs.insert(op.opid.clone(), ObjState::new(obj_type));
         }
 
         let object_id = op.object_id();
-
-        let path = self.get_path(&object_id)?;
-
         let object = self.get_obj(&object_id)?;
 
-        let key = match op.insert() {
-          Some(elem) => {
-            object.insert_after(elem, op.clone())?;
-            Key(op.opid.to_string())
-          },
-          None => op.key().clone(),
-        };
+        if object.is_seq() {
+            if op.is_insert() {
+                object.insert_after(op.key().as_element_id()?, op.clone());
+            }
 
-        let ops = object.props.entry(key.clone()).or_default();
+            let ops = object.props.entry(op.list_key()).or_default();
+            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let remaining_ops = ops.clone();
+            let is_empty = ops.is_empty();
 
-        let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let index = object.get_index_for(&op.list_key().to_opid()?)?;
 
-        diff2.op(&key, &path, &ops.ops);
+            self.unlink(&op, &overwritten_ops)?;
 
+            Ok(PendingDiff::Seq(op.clone(), index))
+        } else {
+            let ops = object.props.entry(op.key().clone()).or_default();
+            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            self.unlink(&op, &overwritten_ops)?;
+
+            Ok(PendingDiff::Map(op.clone()))
+        }
+    }
+
+    fn unlink(
+        &mut self,
+        op: &OperationWithMetadata,
+        overwritten: &[OperationWithMetadata],
+    ) -> Result<(), AutomergeError> {
         if let Some(child) = op.child() {
-          self.get_obj(&child)?.inbound.insert(op.clone());
+            self.get_obj(&child)?.inbound.insert(op.clone());
         }
 
-        for old in overwritten_ops.iter() {
+        for old in overwritten.iter() {
             if let Some(child) = old.child() {
                 self.get_obj(&child)?.inbound.remove(&old);
             }
         }
-
         Ok(())
-    }
-
-    fn get_index_for_oid(&self, object: &ObjState, target: &OpID) -> Option<usize> {
-        object.ops_in_order().filter(|oid| {
-            object.props
-                .get(&Key(oid.to_string()))
-                .map(|ops| !ops.is_empty())
-                            .unwrap_or(false)
-        }).position(|o| target == o)
     }
 
     fn get_path(&self, object_id: &OpID) -> Result<Vec<OperationWithMetadata>, AutomergeError> {
@@ -350,6 +319,58 @@ impl OpSet {
             path.insert(0, metaop.clone());
         }
         Ok(path)
+    }
+
+    pub fn finalize_diffs(
+        &self,
+        pending: Vec<PendingDiff>,
+    ) -> Result<Diff2, AutomergeError> {
+        let mut diff2 = Diff2::new();
+
+        log!("final mark0");
+        for diff in pending.iter() {
+            match diff {
+                PendingDiff::Seq(op, index) => {
+                    let object_id = op.object_id();
+                    let path = self.get_path(object_id)?;
+                    log!("LIST unwrap object {:?}",object_id);
+                    let object = self.objs.get(object_id).unwrap();
+                    log!("LIST unwrap ops {:?}",&op.list_key());
+                    let ops = object.props.get(&op.list_key()).unwrap();
+                    let is_insert = op.is_insert();
+
+                    log!("LIST ops {:?}",ops);
+
+                    let node = diff2.cd(&path);
+
+                    if is_insert {
+                        node.add_insert(*index);
+                    } else if ops.is_empty() {
+                        node.add_remove(*index);
+                    }
+
+                    if !ops.is_empty() {
+                        let final_index = object.get_index_for(&op.list_key().to_opid()?)?;
+                        let key = Key(final_index.to_string());
+                        node.add_values(&key, &ops);
+                    }
+                },
+                PendingDiff::Map(op) => {
+                    let object_id = op.object_id();
+                    let path = self.get_path(object_id)?;
+                    log!("MAP unwrap object {:?}",object_id);
+                    let object = self.objs.get(object_id).unwrap();
+                    let key = op.key();
+                    log!("MAP unwrap ops {:?}",&key);
+                    let ops = object.props.get(&key).unwrap();
+                    log!("MAP ops {:?}",ops);
+                    diff2.cd(&path).add_values(&key, &ops);
+                },
+                PendingDiff::NoOp => { },
+            }
+        }
+
+        Ok(diff2)
     }
 
     /*
@@ -381,19 +402,19 @@ impl OpSet {
         !self.redo_stack.is_empty()
     }
 
-/*
-    pub fn concurrent_operations_for_field(
-        &self,
-        object_id: &OpID,
-        key: &Key,
-    ) -> Result<&[OperationWithMetadata], AutomergeError> {
-        Ok(self
-            .objs
-            .get(object_id)
-            .and_then(|state| state.props.get(&key))
-            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?)
-    }
-*/
+    /*
+        pub fn concurrent_operations_for_field(
+            &self,
+            object_id: &OpID,
+            key: &Key,
+        ) -> Result<&[OperationWithMetadata], AutomergeError> {
+            Ok(self
+                .objs
+                .get(object_id)
+                .and_then(|state| state.props.get(&key))
+                .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?)
+        }
+    */
 
     /// Get all the changes we have that are not in `since`
     pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {

@@ -3,7 +3,6 @@ use crate::protocol::{
 };
 use std::cmp::{Ordering, PartialOrd};
 use std::hash::{Hash, Hasher};
-use std::str::FromStr;
 
 /// We deserialize individual operations as part of the `Change` structure, but
 /// we need access to the actor ID and sequence when applying each individual
@@ -65,7 +64,7 @@ impl OperationWithMetadata {
             | Operation::MakeList { .. }
             | Operation::MakeText { .. }
             | Operation::MakeTable { .. } => Some(&self.opid),
-            Operation::Link { ref value, .. } => panic!("not implemented"),
+            Operation::Link { .. } => panic!("not implemented"),
             _ => None,
         }
     }
@@ -124,8 +123,24 @@ impl OperationWithMetadata {
             | Operation::MakeTable { ref key, .. }
             | Operation::Delete { ref key, .. }
             | Operation::Increment { ref key, .. }
-            | Operation::Set { ref key, .. } 
+            | Operation::Set { ref key, .. }
             | Operation::Link { ref key, .. } => key,
+        }
+    }
+
+    pub fn list_key(&self) -> Key {
+        match self.operation {
+            Operation::Set {
+                insert: Some(true), ..
+            } => self.opid.to_key(),
+            Operation::MakeMap { ref key, .. }
+            | Operation::MakeList { ref key, .. }
+            | Operation::MakeText { ref key, .. }
+            | Operation::MakeTable { ref key, .. }
+            | Operation::Delete { ref key, .. }
+            | Operation::Increment { ref key, .. }
+            | Operation::Set { ref key, .. }
+            | Operation::Link { ref key, .. } => key.clone(),
         }
     }
 

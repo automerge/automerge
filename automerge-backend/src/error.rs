@@ -7,6 +7,7 @@ pub enum AutomergeError {
     DuplicateObjectError,
     MissingObjectError(OpID),
     InvalidObjectType(String),
+    InvalidOpID(String),
     InvalidLinkTarget,
     DuplicateChange(String),
     NotImplemented(String),
