@@ -1,6 +1,6 @@
 use crate::{
-    ActorID, Clock, DataType, ElementID, Key, ObjType, OpID, Operation, OperationWithMetadata,
-    PrimitiveValue,
+    ActorID, Clock, DataType, ElementID, Key, ObjType, OpID, OpSet, Operation,
+    OperationWithMetadata, PrimitiveValue,
 };
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
@@ -67,7 +67,8 @@ pub struct Diff2 {
     object_id: OpID,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     edits: Option<Vec<DiffEdit>>,
-    props: HashMap<Key, HashMap<OpID, DiffLink>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
     #[serde(rename = "type")]
     obj_type: ObjType,
 }
@@ -78,7 +79,7 @@ impl Diff2 {
             obj_type: ObjType::Map,
             object_id: OpID::Root,
             edits: None,
-            props: HashMap::new(),
+            props: None,
         }
     }
 
@@ -96,27 +97,74 @@ impl Diff2 {
         self
     }
 
+    pub fn is_seq(&self) -> bool {
+        match self.obj_type {
+            ObjType::Map | ObjType::Table => false,
+            ObjType::Text | ObjType::List => true,
+        }
+    }
+
+    pub fn touch(&mut self) -> &mut Diff2 {
+        if self.is_seq() {
+            self.edits.get_or_insert_with(Vec::new);
+        }
+        self.props.get_or_insert_with(HashMap::new);
+        self
+    }
+
     pub fn add_values(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
-        let prop = self.props.entry(key.clone()).or_insert_with(HashMap::new);
-        for metaop in ops.iter() {
-            match metaop.operation {
-                Operation::Set {
-                    ref value,
-                    ref datatype,
-                    ..
-                } => {
-                    let key = metaop.opid.clone();
-                    let val = DiffValue {
-                        value: value.clone(),
-                        datatype: datatype.clone(),
-                    };
-                    prop.insert(key, DiffLink::Val(val));
+        match ops {
+            [] => {
+                if self.is_seq() {
+                    self.edits.get_or_insert_with(Vec::new);
                 }
-                _ => panic!("not implemented"),
-                //_ => {}
+                self.props
+                    .get_or_insert_with(HashMap::new)
+                    .entry(key.clone())
+                    .or_insert_with(HashMap::new);
+                self
+            }
+            [head] => {
+                if self.is_seq() {
+                    self.edits.get_or_insert_with(Vec::new);
+                }
+                self.add_value(key, head)
+            }
+            [head, tail @ ..] => {
+                self.add_value(key, head);
+                self.add_values(key, tail) // tail recursion?
             }
         }
-        self
+    }
+
+    //    pub fn add_values2(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
+    fn add_value(&mut self, key: &Key, op: &OperationWithMetadata) -> &mut Diff2 {
+        match op.operation {
+            Operation::Set {
+                ref value,
+                ref datatype,
+                ..
+            } => {
+                let prop = self
+                    .props
+                    .get_or_insert_with(HashMap::new)
+                    .entry(key.clone())
+                    .or_insert_with(HashMap::new);
+                let key = op.opid.clone();
+                let val = DiffValue {
+                    value: value.clone(),
+                    datatype: datatype.clone(),
+                };
+                prop.insert(key, DiffLink::Val(val));
+                self
+            }
+            Operation::MakeMap { .. }
+            | Operation::MakeTable { .. }
+            | Operation::MakeList { .. }
+            | Operation::MakeText { .. } => self.expand(op),
+            _ => panic!("not implemented"),
+            //_ => {}
+        }
     }
 
     pub fn op(
@@ -140,31 +188,82 @@ impl Diff2 {
         }
     }
 
-    pub fn cd(&mut self, path: &[OperationWithMetadata]) -> &mut Diff2 {
+    pub fn expand_path(&mut self, path: &[(OpID, &Key, OpID)], op_set: &OpSet) -> &mut Diff2 {
         match path {
             [] => self,
-            [head, tail @ ..] => {
-                let d = self.expand(head);
-                d.cd(tail)
+            [(obj, key, target), tail @ ..] => {
+                if !self.has_child(key, obj) {
+                    op_set
+                        .objs
+                        .get(obj)
+                        .and_then(|obj| obj.props.get(key))
+                        .map(|ops| self.add_values(key, &ops));
+                }
+                let child = self.get_child(key, target).unwrap();
+                child.expand_path(tail, op_set)
             }
         }
     }
 
+    fn has_child(&self, key: &Key, target: &OpID) -> bool {
+        self.props
+            .as_ref()
+            .and_then(|p| {
+                p.get(key).and_then(|values| {
+                    values
+                        .iter()
+                        .filter_map(|(_, link)| match link {
+                            DiffLink::Link(ref diff) => {
+                                if diff.object_id == *target {
+                                    Some(diff)
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        })
+                        .next()
+                })
+            })
+            .is_some()
+    }
+
+    fn get_child(&mut self, key: &Key, target: &OpID) -> Option<&mut Diff2> {
+        self.props
+            .get_or_insert_with(HashMap::new)
+            .get_mut(key)
+            .and_then(|values| {
+                values
+                    .iter_mut()
+                    .filter_map(|(_, link)| match link {
+                        DiffLink::Link(ref mut diff) => {
+                            if diff.object_id == *target {
+                                Some(diff)
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    })
+                    .next()
+            })
+    }
+
     fn expand(&mut self, metaop: &OperationWithMetadata) -> &mut Diff2 {
         let key = metaop.key();
-        let prop = self.props.entry(key.clone()).or_insert_with(HashMap::new);
+        let prop = self
+            .props
+            .get_or_insert_with(HashMap::new)
+            .entry(key.clone())
+            .or_insert_with(HashMap::new);
         let opid = metaop.opid.clone();
         let obj_type = metaop.make_type().unwrap();
-        let edits = match obj_type {
-            ObjType::Map | ObjType::Table => None,
-            ObjType::Text | ObjType::List => Some(Vec::new()),
-        };
         let link = prop.entry(opid.clone()).or_insert_with(|| {
             DiffLink::Link(Diff2 {
                 obj_type,
                 object_id: opid,
-                edits,
-                props: HashMap::new(),
+                edits: None,
+                props: None,
             })
         });
         if let DiffLink::Link(ref mut diff) = link {

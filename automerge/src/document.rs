@@ -31,7 +31,7 @@ impl Document {
 
     /// Get the current state of the document as a serde_json value
     pub fn state(&self) -> &Value {
-      panic!("not implemented");
+        panic!("not implemented");
     }
 
     /// Add a single change to the document

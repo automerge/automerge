@@ -261,7 +261,7 @@ impl OpSet {
     pub fn apply_op(
         &mut self,
         op: OperationWithMetadata,
-        diff2: &mut Diff2,
+        _diff2: &mut Diff2,
     ) -> Result<PendingDiff, AutomergeError> {
         if let Some(obj_type) = op.make_type() {
             self.objs.insert(op.opid.clone(), ObjState::new(obj_type));
@@ -277,8 +277,6 @@ impl OpSet {
 
             let ops = object.props.entry(op.list_key()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
-            let remaining_ops = ops.clone();
-            let is_empty = ops.is_empty();
 
             let index = object.get_index_for(&op.list_key().to_opid()?)?;
 
@@ -311,37 +309,44 @@ impl OpSet {
         Ok(())
     }
 
-    fn get_path(&self, object_id: &OpID) -> Result<Vec<OperationWithMetadata>, AutomergeError> {
+    fn get_path(&self, object_id: &OpID) -> Result<Vec<(OpID, &Key, OpID)>, AutomergeError> {
         let mut oid = object_id;
         let mut path = Vec::new();
-        while let Some(metaop) = self.objs.get(oid).and_then(|os| os.inbound.iter().next()) {
-            oid = metaop.object_id();
-            path.insert(0, metaop.clone());
+        while let Some(inbound) = self.objs.get(oid).and_then(|o| o.inbound.iter().next()) {
+            oid = inbound.object_id();
+            path.insert(
+                0,
+                (
+                    inbound.object_id().clone(),
+                    inbound.key(),
+                    inbound.opid.clone(),
+                ),
+            );
+            /*
+                        let ops = self
+                            .objs
+                            .get(inbound.object_id())
+                            .and_then(|parent| parent.props.get(inbound.key()))
+                            .unwrap(); // FIXME
+            */
+            //let tmp = (inbound.key(), ops, oid.clone());
         }
         Ok(path)
     }
 
-    pub fn finalize_diffs(
-        &self,
-        pending: Vec<PendingDiff>,
-    ) -> Result<Diff2, AutomergeError> {
+    pub fn finalize_diffs(&self, pending: Vec<PendingDiff>) -> Result<Diff2, AutomergeError> {
         let mut diff2 = Diff2::new();
 
-        log!("final mark0");
         for diff in pending.iter() {
             match diff {
                 PendingDiff::Seq(op, index) => {
                     let object_id = op.object_id();
                     let path = self.get_path(object_id)?;
-                    log!("LIST unwrap object {:?}",object_id);
                     let object = self.objs.get(object_id).unwrap();
-                    log!("LIST unwrap ops {:?}",&op.list_key());
                     let ops = object.props.get(&op.list_key()).unwrap();
                     let is_insert = op.is_insert();
 
-                    log!("LIST ops {:?}",ops);
-
-                    let node = diff2.cd(&path);
+                    let node = diff2.expand_path(&path, self);
 
                     if is_insert {
                         node.add_insert(*index);
@@ -353,20 +358,19 @@ impl OpSet {
                         let final_index = object.get_index_for(&op.list_key().to_opid()?)?;
                         let key = Key(final_index.to_string());
                         node.add_values(&key, &ops);
+                    } else {
+                        node.touch();
                     }
-                },
+                }
                 PendingDiff::Map(op) => {
                     let object_id = op.object_id();
                     let path = self.get_path(object_id)?;
-                    log!("MAP unwrap object {:?}",object_id);
                     let object = self.objs.get(object_id).unwrap();
                     let key = op.key();
-                    log!("MAP unwrap ops {:?}",&key);
                     let ops = object.props.get(&key).unwrap();
-                    log!("MAP ops {:?}",ops);
-                    diff2.cd(&path).add_values(&key, &ops);
-                },
-                PendingDiff::NoOp => { },
+                    diff2.expand_path(&path, self).add_values(&key, &ops);
+                }
+                PendingDiff::NoOp => {}
             }
         }
 

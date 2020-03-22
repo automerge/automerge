@@ -1,9 +1,6 @@
-use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::patch::{Conflict, ElementValue};
-use crate::{DataType, Operation, PrimitiveValue};
-use std::cmp::PartialOrd;
+use crate::Operation;
 use std::ops::Deref;
 
 /// Represents a set of operations which are relevant to either an element ID
@@ -94,8 +91,15 @@ impl ConcurrentOperations {
             }
         }
 
-        if let Operation::Set { .. } = new_op.operation {
-            self.ops.push(new_op.clone());
+        match new_op.operation {
+            Operation::Set { .. }
+            | Operation::MakeTable { .. }
+            | Operation::MakeMap { .. }
+            | Operation::MakeText { .. }
+            | Operation::MakeList { .. } => {
+                self.ops.push(new_op.clone());
+            }
+            _ => {}
         }
 
         Ok(overwritten_ops)

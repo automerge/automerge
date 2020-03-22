@@ -274,7 +274,7 @@ impl FromStr for ElementID {
         match s {
             "_head" => Ok(ElementID::Head),
             id => Ok(ElementID::ID(
-                OpID::parse(id).ok_or(error::InvalidElementID(id.to_string()))?,
+                OpID::parse(id).ok_or_else(|| error::InvalidElementID(id.to_string()))?,
             )),
         }
     }

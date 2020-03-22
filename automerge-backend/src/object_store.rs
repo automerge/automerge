@@ -1,9 +1,6 @@
-use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::{
-    ConcurrentOperations, DiffAction, ElementID, ElementValue, Key, MapType, ObjType, OpID,
-};
+use crate::{ConcurrentOperations, ElementID, Key, ObjType, OpID};
 use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
 
