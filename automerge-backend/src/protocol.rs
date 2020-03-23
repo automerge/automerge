@@ -165,6 +165,12 @@ impl Clock {
         result
     }
 
+    pub fn without(&self, actor_id: &ActorID) -> Clock {
+        let mut result = self.clone();
+        result.0.remove(actor_id);
+        result
+    }
+
     pub fn merge(&mut self, other: &Clock) {
         other.into_iter().for_each(|(actor_id, seq)| {
             self.set(actor_id, max(*seq, self.get(actor_id)));
@@ -473,11 +479,10 @@ pub struct Change {
     pub seq: u32,
     #[serde(rename = "startOp")]
     pub start_op: u64,
-    pub time: u64,
+    pub time: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(rename = "deps")]
-    pub dependencies: Clock,
+    pub deps: Clock,
 }
 
 /*
@@ -493,16 +498,21 @@ pub struct Moment {
 pub struct ChangeRequest {
     pub actor: ActorID,
     pub seq: u32,
-    pub version: u32,
+    pub version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(default = "_true")]
+    pub undoable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub undoable: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dependencies: Option<Clock>,
+    pub deps: Option<Clock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ops: Option<Vec<OpRequest>>,
     pub request_type: ChangeRequestType,
+}
+
+// :-/
+fn _true() -> bool {
+    true
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]

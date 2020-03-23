@@ -16,6 +16,7 @@ mod op_set;
 mod operation_with_metadata;
 mod patch;
 mod protocol;
+mod time;
 mod value;
 
 pub use crate::protocol::{
@@ -27,7 +28,7 @@ pub use backend::Backend;
 pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;
 pub use object_store::ObjState;
-pub use op_set::OpSet;
+pub use op_set::{OpSet, Version};
 pub use operation_with_metadata::OperationWithMetadata;
 pub use patch::{
     Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, PendingDiff, SequenceType,

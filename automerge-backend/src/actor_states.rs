@@ -85,7 +85,7 @@ impl ActorStates {
             }
         }
 
-        let deps = change.dependencies.with(&change.actor_id, change.seq - 1);
+        let deps = change.deps.with(&change.actor_id, change.seq - 1);
         let all_deps = self.transitive_deps(&deps);
         let actor_id = change.actor_id.clone();
 

@@ -13,7 +13,6 @@ pub struct OperationWithMetadata {
     pub opid: OpID,
     pub seq: u32,
     pub actor_id: ActorID,
-    //pub start_op: u64,
     pub operation: Operation,
 }
 
@@ -44,10 +43,6 @@ impl Hash for OperationWithMetadata {
 }
 
 impl OperationWithMetadata {
-    //    pub fn opid(&self) -> OpID {
-    //        OpID::ID(self.start_op, self.actor_id.0.clone())
-    //    }
-
     pub fn make_type(&self) -> Option<ObjType> {
         match self.operation {
             Operation::MakeMap { .. } => Some(ObjType::Map),
@@ -185,26 +180,5 @@ impl OperationWithMetadata {
             _ => false,
         }
     }
-
-    /*
-        pub fn is_concurrent(&self, ops: &[OperationWithMetadata]) -> bool {
-            !ops.iter()
-                .map(|op| op.opid)
-                .eq(self.pred().iter().cloned())
-        }
-    */
 }
 
-/*
-/// Note, we can't implement Ord because the Operation contains floating point
-/// elements
-impl PartialOrd for OperationWithMetadata {
-    fn partial_cmp(&self, other: &OperationWithMetadata) -> Option<Ordering> {
-        if self.actor_id == other.actor_id {
-            Some(self.seq.cmp(&other.seq))
-        } else {
-            Some(self.actor_id.cmp(&other.actor_id))
-        }
-    }
-}
-*/

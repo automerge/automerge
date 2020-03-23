@@ -1,62 +1,75 @@
+use crate::time;
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
-    Operation, Patch, PendingDiff,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, OpID, OpSet,
+    Operation, Patch, PendingDiff, Version,
 };
+use crate::protocol::OpRequest;
 use std::collections::HashMap;
-//use std::time::{ SystemTime, UNIX_EPOCH };
+use std::time::SystemTime;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
-    version: u32,
+    versions: Vec<Version>,
     op_set: OpSet,
+    obj_alias: HashMap<String, OpID>,
 }
 
 impl Backend {
     pub fn init() -> Backend {
-        Backend {
+        let mut versions = Vec::new();
+        versions.push(Version {
             version: 0,
+            local_only: true,
             op_set: OpSet::init(),
+        });
+        Backend {
+            versions,
+            op_set: OpSet::init(),
+            obj_alias: HashMap::new(),
         }
     }
 
-    fn process_change_request(&self, request: ChangeRequest) -> Change {
-        let start_op = self.op_set.max_op + 1;
-        //      let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-        let time = 0;
-        let mut objmap: HashMap<String, OpID> = HashMap::new();
+    fn process_request(
+        &mut self,
+        request: &ChangeRequest,
+        op_set: &OpSet,
+        start_op: u64,
+    ) -> Result<Change, AutomergeError> {
+        let time = time::unix_timestamp();
         let actor_id = request.actor.clone();
-        Change {
+        let obj_alias = &mut self.obj_alias;
+        let operations = request.ops.as_ref().map(|ops| ops.iter().enumerate().map(|(n,rop)| {
+                let op_num = start_op + (n as u64);
+                rop_to_op(rop.clone(), op_num, &actor_id, op_set, obj_alias)
+           }).collect()).unwrap_or_default();
+        Ok(Change {
             start_op,
-            message: request.message,
-            actor_id: request.actor,
+            message: request.message.clone(),
+            actor_id: request.actor.clone(),
             seq: request.seq,
-            dependencies: request.dependencies.unwrap_or_default(),
+            deps: request
+                .deps
+                .clone()
+                .ok_or(AutomergeError::InvalidChangeRequest)?,
             time,
-            operations: request
-                .ops
-                .unwrap()
-                .into_iter()
-                .enumerate()
-                .map(|(i, rop)| rop.into_op(start_op + (i as u64), &actor_id, &mut objmap))
-                .collect(),
-        }
+            operations,
+        })
     }
 
     fn make_patch(
         &self,
         pending: Vec<PendingDiff>,
-        _diffs: Diff2,
         request: Option<&ChangeRequest>,
-        is_incremental: bool,
+        incremental: bool,
     ) -> Result<Patch, AutomergeError> {
         let diffs = self.op_set.finalize_diffs(pending)?;
 
         Ok(Patch {
-            version: self.version,
+            version: self.versions.last().map(|v| v.version).unwrap_or(0),
             can_undo: self.op_set.can_undo(),
             can_redo: self.op_set.can_redo(),
             diffs,
-            clock: if is_incremental {
+            clock: if incremental {
                 None
             } else {
                 Some(self.op_set.clock.clone())
@@ -66,48 +79,181 @@ impl Backend {
         })
     }
 
-    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
-        self.version += 1;
-        let mut diff2 = Diff2::new();
-        let mut diffs = Vec::new();
-        for change in changes.drain(0..) {
-            self.op_set
-                .add_change(change, false, &mut diffs, &mut diff2)?;
+    pub fn undo(
+        &mut self,
+        request: &ChangeRequest,
+        start_op: u64,
+    ) -> Result<Change, AutomergeError> {
+        let undo_pos = self.op_set.undo_pos;
+
+        if undo_pos < 1 || self.op_set.undo_stack.len() < undo_pos {
+            return Err(AutomergeError::InvalidChange(
+                "Cannot undo: there is nothing to be undone".to_string(),
+            ));
         }
-        Ok(self.make_patch(diffs, diff2, None, true)?)
+
+        let undo_ops = self.op_set.undo_stack.remove(undo_pos - 1);
+
+        let redo_ops = Vec::new();
+        // FIXME TODO - translate undo ops into redo ops
+
+        let change = Change {
+            actor_id: request.actor.clone(),
+            seq: request.seq,
+            start_op: start_op,
+            deps: request
+                .deps
+                .clone()
+                .ok_or(AutomergeError::InvalidChangeRequest)?,
+            message: request.message.clone(),
+            time: time::unix_timestamp(),
+            operations: undo_ops.clone(),
+        };
+
+        self.op_set.undo_pos -= 1;
+        self.op_set.redo_stack.push(redo_ops);
+
+        Ok(change)
     }
 
-    pub fn apply_local_change(&mut self, request: ChangeRequest) -> Result<Patch, AutomergeError> {
-        let mut diff2 = Diff2::new();
-        let mut diffs = Vec::new();
-        self.check_for_duplicate(&request)?;
-        self.version += 1;
-        let undoable = request.undoable.unwrap_or(true);
-        let tmp_request = request.clone(); // FIXME
-        match request.request_type {
-            ChangeRequestType::Change => {
-                let change = self.process_change_request(request);
-                self.op_set
-                    .add_change(change, undoable, &mut diffs, &mut diff2)?
-            }
-            ChangeRequestType::Undo => self.op_set.do_undo(
-                request.actor.clone(),
-                request.seq,
-                request.message,
-                request.dependencies.unwrap_or_default(),
-                &mut diffs,
-                &mut diff2,
-            )?,
-            ChangeRequestType::Redo => self.op_set.do_redo(
-                request.actor.clone(),
-                request.seq,
-                request.message,
-                request.dependencies.unwrap_or_default(),
-                &mut diffs,
-                &mut diff2,
-            )?,
+    pub fn redo(
+        &mut self,
+        request: &ChangeRequest,
+        start_op: u64,
+    ) -> Result<Change, AutomergeError> {
+        let change = Change {
+            actor_id: request.actor.clone(),
+            seq: request.seq,
+            start_op: start_op,
+            deps: request
+                .deps
+                .clone()
+                .ok_or(AutomergeError::InvalidChangeRequest)?,
+            message: request.message.clone(),
+            time: time::unix_timestamp(),
+            operations: self
+                .op_set
+                .redo_stack
+                .pop()
+                .ok_or(AutomergeError::InvalidChange("no redo ops".to_string()))?,
         };
-        Ok(self.make_patch(diffs, diff2, Some(&tmp_request), true)?)
+
+        self.op_set.undo_pos += 1;
+
+        Ok(change)
+    }
+
+    pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+        self.apply(changes, None, false, false)
+    }
+
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+        self.versions.iter_mut().for_each(|v| v.local_only = false);
+        self.apply(changes, None, false, true)
+    }
+
+    pub fn get_version(&self, version: u64) -> Result<&Version, AutomergeError> {
+        self.versions
+            .iter()
+            .find(|v| v.version == version)
+            .ok_or_else(|| AutomergeError::UnknownVersion(version))
+    }
+
+    fn apply(
+        &mut self,
+        mut changes: Vec<Change>,
+        request: Option<&ChangeRequest>,
+        undoable: bool,
+        incremental: bool,
+    ) -> Result<Patch, AutomergeError> {
+        let mut diffs = Vec::new();
+
+        for change in changes.drain(0..) {
+            self.op_set
+                .add_change(change, request.is_some(), undoable, &mut diffs)?;
+        }
+
+        //        let diffs2 = self.op_set.finalize_diffs(diffs); // FIXME
+
+        if incremental {
+            let version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
+            let version_obj = Version {
+                version,
+                local_only: true,
+                op_set: self.op_set.clone(),
+            };
+            self.versions.push(version_obj);
+        } else {
+            let version_obj = Version {
+                version: 0,
+                local_only: true,
+                op_set: self.op_set.clone(),
+            };
+            self.versions.clear();
+            self.versions.push(version_obj);
+        }
+
+        self.make_patch(diffs, request, true)
+    }
+
+    pub fn apply_local_change(
+        &mut self,
+        mut request: ChangeRequest,
+    ) -> Result<Patch, AutomergeError> {
+        self.op_set.check_for_duplicate(&request)?; // Change has already been applied
+
+        let version = self.get_version(request.version)?.clone();
+
+        let actor = request.actor.clone();
+        request
+            .deps
+            .get_or_insert_with(|| version.op_set.deps.without(&actor));
+
+        let start_op = self.op_set.max_op + 1;
+        let change = match request.request_type {
+            ChangeRequestType::Change => self.process_request(&request, &version.op_set, start_op)?,
+            ChangeRequestType::Undo => self.undo(&request, start_op)?,
+            ChangeRequestType::Redo => self.redo(&request, start_op)?,
+        };
+
+        let undoable = (request.request_type == ChangeRequestType::Change && request.undoable);
+
+        let patch = self.apply(vec![change.clone()], Some(&request), undoable, true)?;
+
+        self.finalize_version(request.version, change)?;
+
+        Ok(patch)
+
+        //        Ok(self.make_patch(diffs.unwrap(), Some(&tmp_request), true)?)
+    }
+
+    fn finalize_version(
+        &mut self,
+        request_version: u64,
+        change: Change,
+    ) -> Result<(), AutomergeError> {
+        // remove all versions older than this one
+        // i wish i had drain filter
+        let mut i = 0;
+        while i != self.versions.len() {
+            if self.versions[i].version < request_version {
+                self.versions.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        for v in self.versions.iter_mut() {
+            if v.local_only {
+                v.op_set = self.op_set.clone()
+            } else {
+                v.op_set = self.op_set.clone();
+                v.op_set
+                    .add_change(change.clone(), true, false, &mut Vec::new())?; // FIXME - should be passing None for diffs
+            }
+        }
+
+        Ok(())
     }
 
     pub fn undo_stack(&self) -> &Vec<Vec<Operation>> {
@@ -129,8 +275,8 @@ impl Backend {
 
     pub fn get_patch(&self) -> Patch {
         panic!("not implemented");
-        //        let diffs = self.op_set.object_store.generate_diffs();
-        //        self.make_patch(diffs,None,false)
+        //const diffs = OpSet.constructObject(state.get('opSet'), OpSet.ROOT_ID)
+        //return makePatch(state, diffs, null, false)
     }
 
     /// Get changes which are in `other` but not in this backend
@@ -168,1020 +314,42 @@ impl Backend {
     pub fn clock(&self) -> &Clock {
         &self.op_set.clock
     }
-
-    fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
-        if self.op_set.clock.get(&request.actor) >= request.seq {
-            return Err(AutomergeError::DuplicateChange(format!(
-                "Change request has already been applied {}:{}",
-                request.actor.0, request.seq
-            )));
-        }
-        Ok(())
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    /*
-        use crate::{
-            ActorID, Backend, Change, ChangeRequest, ChangeRequestType, Clock, Conflict, DataType,
-            Diff, DiffAction, ElementID, ElementValue, Key, MapType, ObjectID, Operation, Patch,
-            PrimitiveValue, SequenceType,
-        };
-
-        struct ApplyChangeTestCase {
-            name: &'static str,
-            changes: Vec<Change>,
-            expected_patch: Patch,
-        }
-
-        #[test]
-        fn test_diffs() {
-            let actor1 = ActorID::from_string("actor1".to_string());
-            let actor2 = ActorID::from_string("actor2".to_string());
-            let testcases = vec![
-                ApplyChangeTestCase {
-                    name: "Assign to key in map",
-                    changes: vec![Change {
-                        actor_id: actor1.clone(),
-                        seq: 1,
-                        dependencies: Clock::empty(),
-                        message: None,
-                        operations: vec![Operation::Set {
-                            object_id: ObjectID::Root,
-                            key: Key("bird".to_string()),
-                            value: PrimitiveValue::Str("magpie".to_string()),
-                            datatype: None,
-                        }],
-                    }],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 1),
-                        deps: Clock::empty().with(&actor1, 1),
-                        diffs: vec![Diff {
-                            action: DiffAction::SetMapKey(
-                                ObjectID::Root,
-                                MapType::Map,
-                                Key("bird".to_string()),
-                                ElementValue::Primitive(PrimitiveValue::Str("magpie".to_string())),
-                                None,
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "Increment a key in a map",
-                    changes: vec![
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Set {
-                                object_id: ObjectID::Root,
-                                key: Key("counter".to_string()),
-                                value: PrimitiveValue::Number(1.0),
-                                datatype: Some(DataType::Counter),
-                            }],
-                        },
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Increment {
-                                object_id: ObjectID::Root,
-                                key: Key("counter".to_string()),
-                                value: 2.0,
-                            }],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 2),
-                        deps: Clock::empty().with(&actor1, 2),
-                        diffs: vec![Diff {
-                            action: DiffAction::SetMapKey(
-                                ObjectID::Root,
-                                MapType::Map,
-                                Key("counter".to_string()),
-                                ElementValue::Primitive(PrimitiveValue::Number(3.0)),
-                                Some(DataType::Counter),
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "should make a conflict on assignment to the same key",
-                    changes: vec![
-                        Change {
-                            actor_id: ActorID::from_string("actor1".to_string()),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Set {
-                                object_id: ObjectID::Root,
-                                key: Key("bird".to_string()),
-                                value: PrimitiveValue::Str("magpie".to_string()),
-                                datatype: None,
-                            }],
-                        },
-                        Change {
-                            actor_id: ActorID::from_string("actor2".to_string()),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Set {
-                                object_id: ObjectID::Root,
-                                key: Key("bird".to_string()),
-                                value: PrimitiveValue::Str("blackbird".to_string()),
-                                datatype: None,
-                            }],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 1).with(&actor2, 1),
-                        deps: Clock::empty().with(&actor1, 1).with(&actor2, 1),
-                        diffs: vec![Diff {
-                            action: DiffAction::SetMapKey(
-                                ObjectID::Root,
-                                MapType::Map,
-                                Key("bird".to_string()),
-                                ElementValue::Primitive(PrimitiveValue::Str("blackbird".to_string())),
-                                None,
-                            ),
-                            conflicts: vec![Conflict {
-                                actor: actor1.clone(),
-                                value: ElementValue::Primitive(PrimitiveValue::Str(
-                                    "magpie".to_string(),
-                                )),
-                                datatype: None,
-                            }],
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "delete a key from a map",
-                    changes: vec![
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Set {
-                                object_id: ObjectID::Root,
-                                key: Key("bird".to_string()),
-                                value: PrimitiveValue::Str("magpie".to_string()),
-                                datatype: None,
-                            }],
-                        },
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Delete {
-                                object_id: ObjectID::Root,
-                                key: Key("bird".to_string()),
-                            }],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 2),
-                        deps: Clock::empty().with(&actor1, 2),
-                        diffs: vec![Diff {
-                            action: DiffAction::RemoveMapKey(
-                                ObjectID::Root,
-                                MapType::Map,
-                                Key("bird".to_string()),
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "create nested maps",
-                    changes: vec![Change {
-                        actor_id: actor1.clone(),
-                        seq: 1,
-                        dependencies: Clock::empty(),
-                        message: None,
-                        operations: vec![
-                            Operation::MakeMap {
-                                object_id: ObjectID::ID("birds".to_string()),
-                            },
-                            Operation::Set {
-                                object_id: ObjectID::ID("birds".to_string()),
-                                key: Key("wrens".to_string()),
-                                value: PrimitiveValue::Number(3.0),
-                                datatype: None,
-                            },
-                            Operation::Link {
-                                object_id: ObjectID::Root,
-                                key: Key("birds".to_string()),
-                                value: ObjectID::ID("birds".to_string()),
-                            },
-                        ],
-                    }],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 1),
-                        deps: Clock::empty().with(&actor1, 1),
-                        diffs: vec![
-                            Diff {
-                                action: DiffAction::CreateMap(
-                                    ObjectID::ID("birds".to_string()),
-                                    MapType::Map,
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                            Diff {
-                                action: DiffAction::SetMapKey(
-                                    ObjectID::ID("birds".to_string()),
-                                    MapType::Map,
-                                    Key("wrens".to_string()),
-                                    ElementValue::Primitive(PrimitiveValue::Number(3.0)),
-                                    None,
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                            Diff {
-                                action: DiffAction::SetMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                    ElementValue::Link(ObjectID::ID("birds".to_string())),
-                                    None,
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                        ],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "create lists",
-                    changes: vec![Change {
-                        actor_id: actor1.clone(),
-                        seq: 1,
-                        dependencies: Clock::empty(),
-                        message: None,
-                        operations: vec![
-                            Operation::MakeList {
-                                object_id: ObjectID::ID("birds".to_string()),
-                            },
-                            Operation::Insert {
-                                list_id: ObjectID::ID("birds".to_string()),
-                                key: ElementID::Head,
-                                elem: 1,
-                            },
-                            Operation::Set {
-                                object_id: ObjectID::ID("birds".to_string()),
-                                key: ElementID::from_actor_and_elem(actor1.clone(), 1).as_key(),
-                                value: PrimitiveValue::Str("chaffinch".to_string()),
-                                datatype: None,
-                            },
-                            Operation::Link {
-                                object_id: ObjectID::Root,
-                                key: Key("birds".to_string()),
-                                value: ObjectID::ID("birds".to_string()),
-                            },
-                        ],
-                    }],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 1),
-                        deps: Clock::empty().with(&actor1, 1),
-                        diffs: vec![
-                            Diff {
-                                action: DiffAction::CreateList(
-                                    ObjectID::ID("birds".to_string()),
-                                    SequenceType::List,
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                            Diff {
-                                action: DiffAction::InsertSequenceElement(
-                                    ObjectID::ID("birds".to_string()),
-                                    SequenceType::List,
-                                    0,
-                                    ElementValue::Primitive(PrimitiveValue::Str(
-                                        "chaffinch".to_string(),
-                                    )),
-                                    None,
-                                    ElementID::from_actor_and_elem(actor1.clone(), 1),
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                            Diff {
-                                action: DiffAction::SetMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                    ElementValue::Link(ObjectID::ID("birds".to_string())),
-                                    None,
-                                ),
-                                conflicts: Vec::new(),
-                            },
-                        ],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "apply update inside lists",
-                    changes: vec![
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![
-                                Operation::MakeList {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                },
-                                Operation::Insert {
-                                    list_id: ObjectID::ID("birds".to_string()),
-                                    key: ElementID::Head,
-                                    elem: 1,
-                                },
-                                Operation::Set {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                    key: Key("actor1:1".to_string()),
-                                    value: PrimitiveValue::Str("chaffinch".to_string()),
-                                    datatype: None,
-                                },
-                                Operation::Link {
-                                    object_id: ObjectID::Root,
-                                    key: Key("birds".to_string()),
-                                    value: ObjectID::ID("birds".to_string()),
-                                },
-                            ],
-                        },
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Set {
-                                object_id: ObjectID::ID("birds".to_string()),
-                                key: Key("actor1:1".to_string()),
-                                value: PrimitiveValue::Str("greenfinch".to_string()),
-                                datatype: None,
-                            }],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 2),
-                        deps: Clock::empty().with(&actor1, 2),
-                        diffs: vec![Diff {
-                            action: DiffAction::SetSequenceElement(
-                                ObjectID::ID("birds".to_string()),
-                                SequenceType::List,
-                                0,
-                                ElementValue::Primitive(PrimitiveValue::Str("greenfinch".to_string())),
-                                None,
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "delete list elements",
-                    changes: vec![
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![
-                                Operation::MakeList {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                },
-                                Operation::Insert {
-                                    list_id: ObjectID::ID("birds".to_string()),
-                                    key: ElementID::Head,
-                                    elem: 1,
-                                },
-                                Operation::Set {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                    key: Key("actor1:1".to_string()),
-                                    value: PrimitiveValue::Str("chaffinch".to_string()),
-                                    datatype: None,
-                                },
-                                Operation::Link {
-                                    object_id: ObjectID::Root,
-                                    key: Key("birds".to_string()),
-                                    value: ObjectID::ID("birds".to_string()),
-                                },
-                            ],
-                        },
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![Operation::Delete {
-                                object_id: ObjectID::ID("birds".to_string()),
-                                key: Key("actor1:1".to_string()),
-                            }],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 2),
-                        deps: Clock::empty().with(&actor1, 2),
-                        diffs: vec![Diff {
-                            action: DiffAction::RemoveSequenceElement(
-                                ObjectID::ID("birds".to_string()),
-                                SequenceType::List,
-                                0,
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-                ApplyChangeTestCase {
-                    name: "Handle list element insertion and deletion in the same change",
-                    changes: vec![
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![
-                                Operation::MakeList {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                },
-                                Operation::Link {
-                                    object_id: ObjectID::Root,
-                                    key: Key("birds".to_string()),
-                                    value: ObjectID::ID("birds".to_string()),
-                                },
-                            ],
-                        },
-                        Change {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            dependencies: Clock::empty(),
-                            message: None,
-                            operations: vec![
-                                Operation::Insert {
-                                    list_id: ObjectID::ID("birds".to_string()),
-                                    key: ElementID::Head,
-                                    elem: 1,
-                                },
-                                Operation::Delete {
-                                    object_id: ObjectID::ID("birds".to_string()),
-                                    key: Key("actor:1".to_string()),
-                                },
-                            ],
-                        },
-                    ],
-                    expected_patch: Patch {
-                        can_undo: false,
-                        can_redo: false,
-                        clock: Clock::empty().with(&actor1, 2),
-                        deps: Clock::empty().with(&actor1, 2),
-                        diffs: vec![Diff {
-                            action: DiffAction::MaxElem(
-                                ObjectID::ID("birds".to_string()),
-                                1,
-                                SequenceType::List,
-                            ),
-                            conflicts: Vec::new(),
-                        }],
-                        seq: None,
-                        actor: None,
-                    },
-                },
-            ];
-
-            for testcase in testcases {
-                let mut backend = Backend::init();
-                let patches = testcase
-                    .changes
-                    .into_iter()
-                    .map(|c| backend.apply_changes(vec![c]).unwrap());
-                assert_eq!(
-                    testcase.expected_patch,
-                    patches.last().unwrap(),
-                    "Patches not equal for {}",
-                    testcase.name
-                );
+fn rop_to_op(
+        rop: OpRequest,
+        seq_num: u64,
+        actor: &ActorID,
+        op_set: &OpSet,
+        obj_alias: &mut HashMap<String, OpID>,
+    ) -> Operation {
+        match rop {
+            OpRequest::MakeMap { obj, key, child } => {
+                let opid = OpID::parse(&obj).unwrap_or_else(|| obj_alias.get(&obj).unwrap().clone());
+                let this = OpID::ID(seq_num, actor.0.clone());
+                obj_alias.insert(child, this);
+                Operation::MakeMap {
+                    object_id: opid,
+                    key,
+                    pred: Vec::new(),
+                }
             }
-        }
-
-        struct ApplyLocalChangeTestCase {
-            name: &'static str,
-            change_requests: Vec<ChangeRequest>,
-            expected_patches: Vec<Patch>,
-        }
-
-        #[test]
-        fn test_apply_local_change() {
-            let actor1 = ActorID("actor1".to_string());
-            let birds = ObjectID::ID("birds".to_string());
-            let testcases = vec![
-                ApplyLocalChangeTestCase {
-                    name: "Should undo",
-                    change_requests: vec![
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            message: None,
-                            dependencies: Clock::empty(),
-                            undoable: None,
-                            request_type: ChangeRequestType::Change(vec![
-                                Operation::MakeMap {
-                                    object_id: birds.clone(),
-                                },
-                                Operation::Link {
-                                    object_id: ObjectID::Root,
-                                    key: Key("birds".to_string()),
-                                    value: birds.clone(),
-                                },
-                                Operation::Set {
-                                    object_id: birds.clone(),
-                                    key: Key("chaffinch".to_string()),
-                                    value: PrimitiveValue::Boolean(true),
-                                    datatype: None,
-                                },
-                            ]),
-                        },
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            message: None,
-                            undoable: None,
-                            dependencies: Clock::empty().with(&actor1, 1),
-                            request_type: ChangeRequestType::Undo,
-                        },
-                    ],
-                    expected_patches: vec![
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: false,
-                            can_undo: true,
-                            seq: Some(1),
-                            clock: Clock::empty().with(&actor1, 1),
-                            deps: Clock::empty().with(&actor1, 1),
-                            diffs: vec![
-                                Diff {
-                                    action: DiffAction::CreateMap(birds.clone(), MapType::Map),
-                                    conflicts: Vec::new(),
-                                },
-                                Diff {
-                                    action: DiffAction::SetMapKey(
-                                        ObjectID::Root,
-                                        MapType::Map,
-                                        Key("birds".to_string()),
-                                        ElementValue::Link(birds.clone()),
-                                        None,
-                                    ),
-                                    conflicts: Vec::new(),
-                                },
-                                Diff {
-                                    action: DiffAction::SetMapKey(
-                                        birds.clone(),
-                                        MapType::Map,
-                                        Key("chaffinch".to_string()),
-                                        ElementValue::Primitive(PrimitiveValue::Boolean(true)),
-                                        None,
-                                    ),
-                                    conflicts: Vec::new(),
-                                },
-                            ],
-                        },
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: true,
-                            can_undo: false,
-                            seq: Some(2),
-                            clock: Clock::empty().with(&actor1, 2),
-                            deps: Clock::empty().with(&actor1, 2),
-                            diffs: vec![Diff {
-                                action: DiffAction::RemoveMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                ),
-                                conflicts: Vec::new(),
-                            }],
-                        },
-                    ],
-                },
-                ApplyLocalChangeTestCase {
-                    name: "Should redo",
-                    change_requests: vec![
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 1,
-                            message: None,
-                            dependencies: Clock::empty(),
-                            undoable: None,
-                            request_type: ChangeRequestType::Change(vec![
-                                Operation::MakeMap {
-                                    object_id: birds.clone(),
-                                },
-                                Operation::Link {
-                                    object_id: ObjectID::Root,
-                                    key: Key("birds".to_string()),
-                                    value: birds.clone(),
-                                },
-                                Operation::Set {
-                                    object_id: birds.clone(),
-                                    key: Key("chaffinch".to_string()),
-                                    value: PrimitiveValue::Boolean(true),
-                                    datatype: None,
-                                },
-                            ]),
-                        },
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 2,
-                            message: None,
-                            undoable: None,
-                            dependencies: Clock::empty().with(&actor1, 1),
-                            request_type: ChangeRequestType::Undo,
-                        },
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 3,
-                            message: None,
-                            undoable: None,
-                            dependencies: Clock::empty().with(&actor1, 2),
-                            request_type: ChangeRequestType::Redo,
-                        },
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 4,
-                            message: None,
-                            undoable: None,
-                            dependencies: Clock::empty().with(&actor1, 3),
-                            request_type: ChangeRequestType::Undo,
-                        },
-                        ChangeRequest {
-                            actor_id: actor1.clone(),
-                            seq: 5,
-                            message: None,
-                            undoable: None,
-                            dependencies: Clock::empty().with(&actor1, 4),
-                            request_type: ChangeRequestType::Redo,
-                        },
-                    ],
-                    expected_patches: vec![
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: false,
-                            can_undo: true,
-                            seq: Some(1),
-                            clock: Clock::empty().with(&actor1, 1),
-                            deps: Clock::empty().with(&actor1, 1),
-                            diffs: vec![
-                                Diff {
-                                    action: DiffAction::CreateMap(birds.clone(), MapType::Map),
-                                    conflicts: Vec::new(),
-                                },
-                                Diff {
-                                    action: DiffAction::SetMapKey(
-                                        ObjectID::Root,
-                                        MapType::Map,
-                                        Key("birds".to_string()),
-                                        ElementValue::Link(birds.clone()),
-                                        None,
-                                    ),
-                                    conflicts: Vec::new(),
-                                },
-                                Diff {
-                                    action: DiffAction::SetMapKey(
-                                        birds.clone(),
-                                        MapType::Map,
-                                        Key("chaffinch".to_string()),
-                                        ElementValue::Primitive(PrimitiveValue::Boolean(true)),
-                                        None,
-                                    ),
-                                    conflicts: Vec::new(),
-                                },
-                            ],
-                        },
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: true,
-                            can_undo: false,
-                            seq: Some(2),
-                            clock: Clock::empty().with(&actor1, 2),
-                            deps: Clock::empty().with(&actor1, 2),
-                            diffs: vec![Diff {
-                                action: DiffAction::RemoveMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                ),
-                                conflicts: Vec::new(),
-                            }],
-                        },
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: false,
-                            can_undo: true,
-                            seq: Some(3),
-                            clock: Clock::empty().with(&actor1, 3),
-                            deps: Clock::empty().with(&actor1, 3),
-                            diffs: vec![Diff {
-                                action: DiffAction::SetMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                    ElementValue::Link(birds.clone()),
-                                    None,
-                                ),
-                                conflicts: Vec::new(),
-                            }],
-                        },
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: true,
-                            can_undo: false,
-                            seq: Some(4),
-                            clock: Clock::empty().with(&actor1, 4),
-                            deps: Clock::empty().with(&actor1, 4),
-                            diffs: vec![Diff {
-                                action: DiffAction::RemoveMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                ),
-                                conflicts: Vec::new(),
-                            }],
-                        },
-                        Patch {
-                            actor: Some(actor1.clone()),
-                            can_redo: false,
-                            can_undo: true,
-                            seq: Some(5),
-                            clock: Clock::empty().with(&actor1, 5),
-                            deps: Clock::empty().with(&actor1, 5),
-                            diffs: vec![Diff {
-                                action: DiffAction::SetMapKey(
-                                    ObjectID::Root,
-                                    MapType::Map,
-                                    Key("birds".to_string()),
-                                    ElementValue::Link(birds),
-                                    None,
-                                ),
-                                conflicts: Vec::new(),
-                            }],
-                        },
-                    ],
-                },
-            ];
-
-            for testcase in testcases {
-                let mut backend = Backend::init();
-                let patches = testcase
-                    .change_requests
-                    .into_iter()
-                    .map(|c| backend.apply_local_change(c).unwrap());
-                for (index, (patch, expected_patch)) in
-                    patches.zip(testcase.expected_patches).enumerate()
-                {
-                    assert_eq!(
-                        patch, expected_patch,
-                        "Pathes no equal for testcase: {}, patch: {}",
-                        testcase.name, index
-                    );
+            OpRequest::Set {
+                obj,
+                key,
+                value,
+                insert,
+            } => {
+                let opid = OpID::parse(&obj).unwrap_or_else(|| obj_alias.get(&obj).unwrap().clone());
+                let pred = op_set.get_ops(&opid, &key).unwrap_or_default();
+                Operation::Set {
+                    object_id: opid,
+                    key,
+                    value,
+                    insert,
+                    pred,
+                    datatype: None,
                 }
             }
         }
-
-        #[test]
-        fn test_get_patch() {
-            let mut backend = Backend::init();
-            let actor = ActorID::from_string("actor1".to_string());
-            let change1 = Change {
-                actor_id: actor.clone(),
-                seq: 1,
-                dependencies: Clock::empty(),
-                message: None,
-                operations: vec![Operation::Set {
-                    object_id: ObjectID::Root,
-                    key: Key("bird".to_string()),
-                    value: PrimitiveValue::Str("magpie".to_string()),
-                    datatype: None,
-                }],
-            };
-            let change2 = Change {
-                actor_id: actor.clone(),
-                seq: 2,
-                dependencies: Clock::empty(),
-                message: None,
-                operations: vec![Operation::Set {
-                    object_id: ObjectID::Root,
-                    key: Key("bird".to_string()),
-                    value: PrimitiveValue::Str("blackbird".to_string()),
-                    datatype: None,
-                }],
-            };
-            let _patch1 = backend.apply_changes(vec![change1, change2]).unwrap();
-            let patch2 = backend.get_patch();
-            let patch3 = Patch {
-                can_undo: false,
-                can_redo: false,
-                clock: Clock::empty().with(&actor, 2),
-                deps: Clock::empty().with(&actor, 2),
-                seq: None,
-                actor: None,
-                diffs: vec![Diff {
-                    action: DiffAction::SetMapKey(
-                        ObjectID::Root,
-                        MapType::Map,
-                        Key("bird".to_string()),
-                        ElementValue::Primitive(PrimitiveValue::Str("blackbird".to_string())),
-                        None,
-                    ),
-                    conflicts: Vec::new(),
-                }],
-            };
-            assert_eq!(patch2, patch3, "Patches not equal test_get_patch");
-        }
-
-        #[test]
-        fn test_get_missing_changes() {
-            let mut backend = Backend::init();
-            let actor = ActorID::from_string("actor1".to_string());
-            let change1 = Change {
-                actor_id: actor.clone(),
-                seq: 1,
-                dependencies: Clock::empty(),
-                message: None,
-                operations: vec![Operation::Set {
-                    object_id: ObjectID::Root,
-                    key: Key("bird".to_string()),
-                    value: PrimitiveValue::Str("magpie".to_string()),
-                    datatype: None,
-                }],
-            };
-            backend.apply_changes(vec![change1]).unwrap();
-            let tmp : Vec<&Change> = Vec::new();
-            assert_eq!(
-                backend.get_missing_changes(Clock::empty().with(&actor, 1)),
-                tmp
-            )
-        }
-
-        #[test]
-        fn test_get_patch_list_state() {
-            let birds = ObjectID::ID("birds".into());
-            let actor = ActorID("actor1".into());
-            let changes = vec![
-                Change {
-                    actor_id: actor.clone(),
-                    seq: 1,
-                    dependencies: Clock::empty(),
-                    message: None,
-                    operations: vec![
-                        Operation::MakeList {
-                            object_id: birds.clone(),
-                        },
-                        Operation::Insert {
-                            list_id: birds.clone(),
-                            key: ElementID::Head,
-                            elem: 1,
-                        },
-                        Operation::Set {
-                            object_id: birds.clone(),
-                            key: Key("actor1:1".into()),
-                            value: PrimitiveValue::Str("chaffinch".into()),
-                            datatype: None,
-                        },
-                        Operation::Insert {
-                            list_id: birds.clone(),
-                            key: ElementID::from_actor_and_elem(actor.clone(), 1),
-                            elem: 2,
-                        },
-                        Operation::Set {
-                            object_id: birds.clone(),
-                            key: Key("actor1:2".into()),
-                            value: PrimitiveValue::Str("goldfinch".into()),
-                            datatype: None,
-                        },
-                        Operation::Link {
-                            object_id: ObjectID::Root,
-                            key: Key("birds".into()),
-                            value: birds.clone(),
-                        },
-                    ],
-                },
-                Change {
-                    actor_id: actor.clone(),
-                    seq: 2,
-                    dependencies: Clock::empty(),
-                    message: None,
-                    operations: vec![
-                        Operation::Delete {
-                            object_id: birds.clone(),
-                            key: Key("actor1:1".into()),
-                        },
-                        Operation::Insert {
-                            list_id: birds.clone(),
-                            key: ElementID::from_actor_and_elem(actor.clone(), 1),
-                            elem: 3,
-                        },
-                        Operation::Set {
-                            object_id: birds.clone(),
-                            key: Key("actor1:3".into()),
-                            value: PrimitiveValue::Str("greenfinch".into()),
-                            datatype: None,
-                        },
-                        Operation::Set {
-                            object_id: birds.clone(),
-                            key: Key("actor1:2".into()),
-                            value: PrimitiveValue::Str("goldfinches!!".into()),
-                            datatype: None,
-                        },
-                    ],
-                },
-            ];
-            let expected_patch = Patch {
-                actor: None,
-                can_undo: false,
-                can_redo: false,
-                clock: Clock::empty().with(&actor, 2),
-                deps: Clock::empty().with(&actor, 2),
-                seq: None,
-                diffs: vec![
-                    Diff {
-                        action: DiffAction::CreateList(birds.clone(), SequenceType::List),
-                        conflicts: Vec::new(),
-                    },
-                    Diff {
-                        action: DiffAction::InsertSequenceElement(
-                            birds.clone(),
-                            SequenceType::List,
-                            0,
-                            ElementValue::Primitive(PrimitiveValue::Str("greenfinch".into())),
-                            None,
-                            ElementID::from_actor_and_elem(actor.clone(), 3),
-                        ),
-                        conflicts: Vec::new(),
-                    },
-                    Diff {
-                        action: DiffAction::InsertSequenceElement(
-                            birds.clone(),
-                            SequenceType::List,
-                            1,
-                            ElementValue::Primitive(PrimitiveValue::Str("goldfinches!!".into())),
-                            None,
-                            ElementID::from_actor_and_elem(actor.clone(), 2),
-                        ),
-                        conflicts: Vec::new(),
-                    },
-                    Diff {
-                        action: DiffAction::MaxElem(birds.clone(), 3, SequenceType::List),
-                        conflicts: Vec::new(),
-                    },
-                    Diff {
-                        action: DiffAction::SetMapKey(
-                            ObjectID::Root,
-                            MapType::Map,
-                            Key("birds".into()),
-                            ElementValue::Link(birds),
-                            None,
-                        ),
-                        conflicts: Vec::new(),
-                    },
-                ],
-            };
-            let mut backend = Backend::init();
-            backend.apply_changes(changes).unwrap();
-            assert_eq!(expected_patch, backend.get_patch());
-        }
-    */
-}
+    }

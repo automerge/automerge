@@ -362,6 +362,6 @@ pub struct Patch {
     pub can_redo: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub clock: Option<Clock>,
-    pub version: u32,
+    pub version: u64,
     pub diffs: Diff2,
 }
