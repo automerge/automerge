@@ -373,25 +373,25 @@ pub enum OpRequest {
     MakeMap {
         obj: String,
         key: RequestKey,
-        child: String,
+        child: Option<String>,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
         obj: String,
         key: RequestKey,
-        child: String,
+        child: Option<String>,
     },
     #[serde(rename = "makeText")]
     MakeText {
         obj: String,
         key: RequestKey,
-        child: String,
+        child: Option<String>,
     },
     #[serde(rename = "makeList")]
     MakeList {
         obj: String,
         key: RequestKey,
-        child: String,
+        child: Option<String>,
     },
     #[serde(rename = "set")]
     Set {
@@ -421,10 +421,12 @@ impl ObjAlias {
     pub fn insert_and_get(
         &mut self,
         this: &OpID,
-        child: &String,
+        child: &Option<String>,
         obj: &String,
     ) -> Result<OpID, AutomergeError> {
-        self.0.insert(child.clone(), this.clone());
+        if let Some(child) = child {
+            self.0.insert(child.clone(), this.clone());
+        }
         self.get(obj)
     }
 
