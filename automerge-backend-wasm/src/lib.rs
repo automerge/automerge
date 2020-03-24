@@ -43,6 +43,13 @@ impl State {
         rust_to_js(&patch)
     }
 
+    #[wasm_bindgen(js_name = loadChanges)]
+    pub fn load_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+        log!("load_changes {:?}", changes);
+        let c: Vec<Change> = js_to_rust(changes)?;
+        self.backend.load_changes(c).map_err(automerge_error_to_js)
+    }
+
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<JsValue, JsValue> {
         log!("apply_local_changes {:?}", change);

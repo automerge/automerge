@@ -1,17 +1,16 @@
+use crate::protocol::{ObjAlias, OpRequest};
 use crate::time;
 use crate::{
     ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, OpID, OpSet,
     Operation, Patch, PendingDiff, Version,
 };
-use crate::protocol::OpRequest;
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
     versions: Vec<Version>,
     op_set: OpSet,
-    obj_alias: HashMap<String, OpID>,
+    obj_alias: ObjAlias,
 }
 
 impl Backend {
@@ -25,7 +24,7 @@ impl Backend {
         Backend {
             versions,
             op_set: OpSet::init(),
-            obj_alias: HashMap::new(),
+            obj_alias: ObjAlias::new(),
         }
     }
 
@@ -37,11 +36,99 @@ impl Backend {
     ) -> Result<Change, AutomergeError> {
         let time = time::unix_timestamp();
         let actor_id = request.actor.clone();
-        let obj_alias = &mut self.obj_alias;
-        let operations = request.ops.as_ref().map(|ops| ops.iter().enumerate().map(|(n,rop)| {
-                let op_num = start_op + (n as u64);
-                rop_to_op(rop.clone(), op_num, &actor_id, op_set, obj_alias)
-           }).collect()).unwrap_or_default();
+        let mut operations = Vec::new();
+        let mut elemids: HashMap<OpID, Vec<OpID>> = HashMap::new();
+        if let Some(ops) = &request.ops {
+            for (n, rop) in ops.iter().enumerate() {
+                let index = start_op + (n as u64);
+                let id = OpID::ID(index, actor_id.0.clone());
+                let op = match rop {
+                    // FIXME - so much cut and paste :/
+                    OpRequest::MakeMap { obj, key, child } => {
+                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::MakeMap {
+                            object_id,
+                            key,
+                            pred,
+                        }
+                    }
+                    OpRequest::MakeTable { obj, key, child } => {
+                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::MakeTable {
+                            object_id,
+                            key,
+                            pred,
+                        }
+                    }
+                    OpRequest::MakeList { obj, key, child } => {
+                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::MakeList {
+                            object_id,
+                            key,
+                            pred,
+                        }
+                    }
+                    OpRequest::MakeText { obj, key, child } => {
+                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::MakeText {
+                            object_id,
+                            key,
+                            pred,
+                        }
+                    }
+                    OpRequest::Delete { obj, key } => {
+                        let object_id = self.obj_alias.get(&obj)?;
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, true)?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::Delete {
+                            object_id,
+                            key,
+                            pred,
+                        }
+                    }
+                    OpRequest::Increment { .. } => panic!("not implemented"),
+                    OpRequest::Set {
+                        obj,
+                        key,
+                        value,
+                        insert,
+                    } => {
+                        let object_id = self.obj_alias.get(&obj)?;
+                        let key = op_set.resolve_key(
+                            &id,
+                            &object_id,
+                            key,
+                            &mut elemids,
+                            insert.unwrap_or(false),
+                            false,
+                        )?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        Operation::Set {
+                            object_id,
+                            key,
+                            value: value.clone(),
+                            insert: *insert,
+                            pred,
+                            datatype: None,
+                        }
+                    }
+                };
+                operations.push(op);
+            }
+        }
         Ok(Change {
             start_op,
             message: request.message.clone(),
@@ -143,8 +230,9 @@ impl Backend {
         Ok(change)
     }
 
-    pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
-        self.apply(changes, None, false, false)
+    pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+        self.apply(changes, None, false, false)?;
+        Ok(())
     }
 
     pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Patch, AutomergeError> {
@@ -211,12 +299,14 @@ impl Backend {
 
         let start_op = self.op_set.max_op + 1;
         let change = match request.request_type {
-            ChangeRequestType::Change => self.process_request(&request, &version.op_set, start_op)?,
+            ChangeRequestType::Change => {
+                self.process_request(&request, &version.op_set, start_op)?
+            }
             ChangeRequestType::Undo => self.undo(&request, start_op)?,
             ChangeRequestType::Redo => self.redo(&request, start_op)?,
         };
 
-        let undoable = (request.request_type == ChangeRequestType::Change && request.undoable);
+        let undoable = request.request_type == ChangeRequestType::Change && request.undoable;
 
         let patch = self.apply(vec![change.clone()], Some(&request), undoable, true)?;
 
@@ -315,41 +405,3 @@ impl Backend {
         &self.op_set.clock
     }
 }
-
-fn rop_to_op(
-        rop: OpRequest,
-        seq_num: u64,
-        actor: &ActorID,
-        op_set: &OpSet,
-        obj_alias: &mut HashMap<String, OpID>,
-    ) -> Operation {
-        match rop {
-            OpRequest::MakeMap { obj, key, child } => {
-                let opid = OpID::parse(&obj).unwrap_or_else(|| obj_alias.get(&obj).unwrap().clone());
-                let this = OpID::ID(seq_num, actor.0.clone());
-                obj_alias.insert(child, this);
-                Operation::MakeMap {
-                    object_id: opid,
-                    key,
-                    pred: Vec::new(),
-                }
-            }
-            OpRequest::Set {
-                obj,
-                key,
-                value,
-                insert,
-            } => {
-                let opid = OpID::parse(&obj).unwrap_or_else(|| obj_alias.get(&obj).unwrap().clone());
-                let pred = op_set.get_ops(&opid, &key).unwrap_or_default();
-                Operation::Set {
-                    object_id: opid,
-                    key,
-                    value,
-                    insert,
-                    pred,
-                    datatype: None,
-                }
-            }
-        }
-    }

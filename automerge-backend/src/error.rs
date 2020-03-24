@@ -7,6 +7,7 @@ pub enum AutomergeError {
     DuplicateObjectError,
     MissingObjectError(OpID),
     InvalidObjectType(String),
+    IndexOutOfBounds(usize),
     InvalidOpID(String),
     InvalidChangeRequest,
     InvalidLinkTarget,
@@ -15,6 +16,7 @@ pub enum AutomergeError {
     NotImplemented(String),
     InvalidChange(String),
     DivergedState(String),
+    InvalidObject(String),
 }
 
 impl fmt::Display for AutomergeError {

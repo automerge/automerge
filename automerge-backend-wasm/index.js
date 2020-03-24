@@ -37,6 +37,12 @@ let applyChanges = (backend,changes) => {
   return mutate(backend, (b) => b.applyChanges(toJS(changes)));
 }
 
+let loadChanges = (backend,changes) => {
+  console.log("LOAD CHANGES",util.inspect(changes,{depth: null}))
+  let [newState,_] = mutate(backend, (b) => b.loadChanges(toJS(changes)));
+  return newState
+}
+
 let applyLocalChange = (backend,change) => {
   console.log("LOCAL CHANGE REQUEST",util.inspect(change,{depth:null}))
   return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
@@ -80,5 +86,5 @@ let getMissingDeps = (backend) => clean(backend).getMissingDeps()
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,
   getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock,
-  getHistory, getUndoStack, getRedoStack
+  getHistory, getUndoStack, getRedoStack, loadChanges
 }

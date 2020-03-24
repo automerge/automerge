@@ -10,8 +10,8 @@ use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, OpID, Operation};
-use crate::{ActorID, ChangeRequest, Diff2, Key, ObjType, PendingDiff};
+use crate::protocol::{Change, Clock, OpID, Operation, RequestKey};
+use crate::{ChangeRequest, Diff2, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -113,7 +113,7 @@ impl OpSet {
     fn apply_change(
         &mut self,
         change: Change,
-        local: bool,
+        _local: bool,
         undoable: bool,
         diffs: &mut Vec<PendingDiff>,
     ) -> Result<(), AutomergeError> {
@@ -298,7 +298,8 @@ impl OpSet {
     }
 
     pub fn get_ops(&self, object_id: &OpID, key: &Key) -> Option<Vec<OpID>> {
-        self.objs.get(object_id)
+        self.objs
+            .get(object_id)
             .and_then(|obj| obj.props.get(key))
             .map(|con_ops| con_ops.iter().map(|op| op.opid.clone()).collect())
     }
@@ -329,7 +330,6 @@ impl OpSet {
         !self.redo_stack.is_empty()
     }
 
-
     /// Get all the changes we have that are not in `since`
     pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
         self.states
@@ -340,6 +340,13 @@ impl OpSet {
             .collect()
     }
 
+    pub fn get_elem_ids(&self, object_id: &OpID) -> Vec<OpID> {
+        self.objs
+            .get(object_id)
+            .map(|obj| obj.ops_in_order().cloned().collect())
+            .unwrap_or_default()
+    }
+
     pub fn get_missing_deps(&self) -> Clock {
         // TODO: there's a lot of internal copying going on in here for something kinda simple
         self.queue.iter().fold(Clock::empty(), |clock, change| {
@@ -348,5 +355,45 @@ impl OpSet {
                 .with(&change.actor_id, change.seq - 1)
         })
     }
-}
 
+    // FIXME - omg - this function is so bad :(
+    pub fn resolve_key(
+        &self,
+        id: &OpID,
+        object_id: &OpID,
+        key: &RequestKey,
+        elemids: &mut HashMap<OpID, Vec<OpID>>,
+        insert: bool,
+        del: bool,
+    ) -> Result<Key, AutomergeError> {
+        match key {
+            RequestKey::Str(s) => Ok(Key(s.clone())),
+            RequestKey::Num(n) => {
+                let n: usize = *n as usize;
+                let ids = elemids
+                    .entry(object_id.clone())
+                    .or_insert_with(|| self.get_elem_ids(&object_id));
+                (if insert {
+                    if n == 0 {
+                        ids.insert(0, id.clone());
+                        Some(Key("_head".to_string()))
+                    } else {
+                        ids.insert(n, id.clone());
+                        ids.get(n - 1).map(|i| i.to_key())
+                    }
+                } else {
+                    if del {
+                        if n < ids.len() {
+                            Some(ids.remove(n).to_key())
+                        } else {
+                            None
+                        }
+                    } else {
+                        ids.get(n).map(|i| i.to_key())
+                    }
+                })
+                .ok_or(AutomergeError::IndexOutOfBounds(n))
+            }
+        }
+    }
+}

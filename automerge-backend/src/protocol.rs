@@ -17,6 +17,7 @@
 use crate::error::AutomergeError;
 use core::cmp::max;
 use serde::de;
+use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
@@ -311,59 +312,118 @@ pub enum DataType {
     Timestamp,
 }
 
+#[derive(Serialize, Debug, PartialEq, Clone)]
+pub enum RequestKey {
+    Str(String),
+    Num(u64),
+}
+
+impl RequestKey {
+    pub fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
+    pub fn to_key(&self) -> Key {
+        Key(format!("{:?}", self))
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct RequestKeyVisitor;
+        impl<'de> Visitor<'de> for RequestKeyVisitor {
+            type Value = RequestKey;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number or string")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<RequestKey, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequestKey::Num(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<RequestKey, E>
+            where
+                E: de::Error,
+            {
+                Ok(RequestKey::Str(value.to_string()))
+            }
+        }
+        deserializer.deserialize_any(RequestKeyVisitor)
+    }
+}
+
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 #[serde(tag = "action")]
 pub enum OpRequest {
     #[serde(rename = "makeMap")]
     MakeMap {
         obj: String,
-        key: Key,
+        key: RequestKey,
+        child: String,
+    },
+    #[serde(rename = "makeTable")]
+    MakeTable {
+        obj: String,
+        key: RequestKey,
+        child: String,
+    },
+    #[serde(rename = "makeText")]
+    MakeText {
+        obj: String,
+        key: RequestKey,
+        child: String,
+    },
+    #[serde(rename = "makeList")]
+    MakeList {
+        obj: String,
+        key: RequestKey,
         child: String,
     },
     #[serde(rename = "set")]
     Set {
         obj: String,
-        key: Key,
+        key: RequestKey,
         insert: Option<bool>,
         value: PrimitiveValue,
     },
+    #[serde(rename = "inc")]
+    Increment {
+        obj: String,
+        key: RequestKey,
+        value: PrimitiveValue,
+    },
+    #[serde(rename = "del")]
+    Delete { obj: String, key: RequestKey },
 }
 
-impl OpRequest {
-    pub fn into_op(
-        self,
-        seq_num: u64,
-        actor: &ActorID,
-        objmap: &mut HashMap<String, OpID>,
-    ) -> Operation {
-        match self {
-            OpRequest::MakeMap { obj, key, child } => {
-                let opid = OpID::parse(&obj).unwrap_or_else(|| objmap.get(&obj).unwrap().clone());
-                let this = OpID::ID(seq_num, actor.0.clone());
-                objmap.insert(child, this);
-                Operation::MakeMap {
-                    object_id: opid,
-                    key,
-                    pred: Vec::new(),
-                }
-            }
-            OpRequest::Set {
-                obj,
-                key,
-                value,
-                insert,
-            } => {
-                let opid = OpID::parse(&obj).unwrap_or_else(|| objmap.get(&obj).unwrap().clone());
-                Operation::Set {
-                    object_id: opid,
-                    key,
-                    value,
-                    insert,
-                    pred: Vec::new(),
-                    datatype: None,
-                }
-            }
-        }
+#[derive(PartialEq, Debug, Clone)]
+pub struct ObjAlias(HashMap<String, OpID>);
+
+impl ObjAlias {
+    pub fn new() -> ObjAlias {
+        ObjAlias(HashMap::new())
+    }
+
+    pub fn insert_and_get(
+        &mut self,
+        this: &OpID,
+        child: &String,
+        obj: &String,
+    ) -> Result<OpID, AutomergeError> {
+        self.0.insert(child.clone(), this.clone());
+        self.get(obj)
+    }
+
+    pub fn get(&self, obj: &String) -> Result<OpID, AutomergeError> {
+        OpID::parse(&obj)
+            .or_else(|| self.0.get(obj).map(|o| o.clone()))
+            .ok_or_else(|| AutomergeError::InvalidObject(obj.clone()))
     }
 }
 
@@ -398,15 +458,6 @@ pub enum Operation {
         key: Key,
         pred: Vec<OpID>,
     },
-    /*
-        #[serde(rename = "ins")]
-        Insert {
-            #[serde(rename = "obj")]
-            list_id: OpID,
-            key: ElementID,
-            elem: u32,
-        },
-    */
     #[serde(rename = "set")]
     Set {
         #[serde(rename = "obj")]
@@ -485,14 +536,6 @@ pub struct Change {
     pub deps: Clock,
 }
 
-/*
-#[derive(PartialEq, Debug, Clone)]
-pub struct Moment {
-  pub actor_id: ActorID,
-  pub seq: u32,
-}
-*/
-
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
@@ -521,182 +564,4 @@ pub enum ChangeRequestType {
     Change,
     Undo,
     Redo,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json;
-    use std::iter::FromIterator;
-
-    /*
-        #[test]
-        fn test_deserializing_operations() {
-            let json_str = r#"{
-                "ops": [
-                    {
-                        "action": "makeMap",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                    },
-                    {
-                        "action": "makeList",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                    },
-                    {
-                        "action": "makeText",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                    },
-                    {
-                        "action": "makeTable",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                    },
-                    {
-                        "action": "ins",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "someactorid:6",
-                        "elem": 5
-                    },
-                    {
-                        "action": "ins",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "_head",
-                        "elem": 6
-                    },
-                    {
-                        "action": "set",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "sometimestamp",
-                        "value": 123456,
-                        "datatype": "timestamp"
-                    },
-                    {
-                        "action": "set",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "somekeyid",
-                        "value": true
-                    },
-                    {
-                        "action": "set",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "somekeyid",
-                        "value": 123
-                    },
-                    {
-                        "action": "set",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "somekeyid",
-                        "value": null
-                    },
-                    {
-                        "action": "link",
-                        "obj": "00000000-0000-0000-0000-000000000000",
-                        "key": "cards",
-                        "value": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945"
-                    },
-                    {
-                        "action": "del",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "somekey"
-                    },
-                    {
-                        "action": "inc",
-                        "obj": "2ed3ffe8-0ff3-4671-9777-aa16c3e09945",
-                        "key": "somekey",
-                        "value": 123
-                    }
-                ],
-                "actor": "741e7221-11cc-4ef8-86ee-4279011569fd",
-                "seq": 1,
-                "deps": {
-                    "someid": 0
-                },
-                "message": "Initialization"
-            }"#;
-            let change: Change = serde_json::from_str(&json_str).unwrap();
-            assert_eq!(
-                change,
-                Change {
-                    actor_id: ActorID("741e7221-11cc-4ef8-86ee-4279011569fd".to_string()),
-                    operations: vec![
-                        Operation::MakeMap {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
-                        },
-                        Operation::MakeList {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
-                        },
-                        Operation::MakeText {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
-                        },
-                        Operation::MakeTable {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
-                        },
-                        Operation::Insert {
-                            list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: ElementID::SpecificElementID(ActorID("someactorid".to_string()), 6),
-                            elem: 5,
-                        },
-                        Operation::Insert {
-                            list_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: ElementID::Head,
-                            elem: 6,
-                        },
-                        Operation::Set {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("sometimestamp".to_string()),
-                            value: PrimitiveValue::Number(123_456.0),
-                            datatype: Some(DataType::Timestamp)
-                        },
-                        Operation::Set {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("somekeyid".to_string()),
-                            value: PrimitiveValue::Boolean(true),
-                            datatype: None
-                        },
-                        Operation::Set {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("somekeyid".to_string()),
-                            value: PrimitiveValue::Number(123.0),
-                            datatype: None,
-                        },
-                        Operation::Set {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("somekeyid".to_string()),
-                            value: PrimitiveValue::Null,
-                            datatype: None,
-                        },
-                        Operation::Link {
-                            object_id: ObjectID::Root,
-                            key: Key("cards".to_string()),
-                            value: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string())
-                        },
-                        Operation::Delete {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("somekey".to_string())
-                        },
-                        Operation::Increment {
-                            object_id: ObjectID::ID("2ed3ffe8-0ff3-4671-9777-aa16c3e09945".to_string()),
-                            key: Key("somekey".to_string()),
-                            value: 123.0,
-                        }
-                    ],
-                    seq: 1,
-                    message: Some("Initialization".to_string()),
-                    dependencies: Clock(HashMap::from_iter(vec![(ActorID("someid".to_string()), 0)]))
-                }
-            );
-        }
-
-        #[test]
-        fn test_deserialize_elementid() {
-            let json_str = "\"_head\"";
-            let elem: ElementID = serde_json::from_str(json_str).unwrap();
-            assert_eq!(elem, ElementID::Head);
-        }
-
-        #[test]
-        fn test_serialize_elementid() {
-            let result = serde_json::to_value(ElementID::Head).unwrap();
-            assert_eq!(result, serde_json::Value::String("_head".to_string()));
-        }
-    */
 }
