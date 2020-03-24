@@ -11,7 +11,7 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, OpID, Operation, RequestKey};
-use crate::{ChangeRequest, Diff2, Key, ObjType, PendingDiff};
+use crate::{ChangeRequest, DiffEdit, Diff2, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -196,7 +196,7 @@ impl OpSet {
         let undo_ops = Vec::new();
 
         let object_id = op.object_id();
-        let object = self.get_obj(&object_id)?;
+        let object = self.get_obj_mut(&object_id)?;
 
         if object.is_seq() {
             if op.is_insert() {
@@ -226,12 +226,12 @@ impl OpSet {
         overwritten: &[OperationWithMetadata],
     ) -> Result<(), AutomergeError> {
         if let Some(child) = op.child() {
-            self.get_obj(&child)?.inbound.insert(op.clone());
+            self.get_obj_mut(&child)?.inbound.insert(op.clone());
         }
 
         for old in overwritten.iter() {
             if let Some(child) = old.child() {
-                self.get_obj(&child)?.inbound.remove(&old);
+                self.get_obj_mut(&child)?.inbound.remove(&old);
             }
         }
         Ok(())
@@ -304,7 +304,15 @@ impl OpSet {
             .map(|con_ops| con_ops.iter().map(|op| op.opid.clone()).collect())
     }
 
-    fn get_obj(&mut self, object_id: &OpID) -> Result<&mut ObjState, AutomergeError> {
+    fn get_obj(&self, object_id: &OpID) -> Result<&ObjState, AutomergeError> {
+        let object = self
+            .objs
+            .get(&object_id)
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
+        Ok(object)
+    }
+
+    fn get_obj_mut(&mut self, object_id: &OpID) -> Result<&mut ObjState, AutomergeError> {
         let object = self
             .objs
             .get_mut(&object_id)
@@ -394,6 +402,73 @@ impl OpSet {
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }
+        }
+    }
+
+    pub fn construct_map(
+        &self,
+        object_id: &OpID,
+        object: &ObjState,
+    ) -> Result<Diff2, AutomergeError> {
+        let mut diff = Diff2 {
+            object_id: object_id.clone(),
+            edits: None,
+            props: Some(HashMap::new()),
+            obj_type: object.obj_type,
+        };
+        for (key, ops) in object.props.iter() {
+            for op in ops.iter() {
+                if let Some(child_id) = op.child() {
+                    diff.add_child(&key, &op.opid, self.construct_object(child_id)?);
+                } else {
+                    diff.add_value(&key, &op);
+                }
+            }
+        }
+        Ok(diff)
+    }
+
+    pub fn construct_list(
+        &self,
+        object_id: &OpID,
+        object: &ObjState,
+    ) -> Result<Diff2, AutomergeError> {
+        let mut diff = Diff2 {
+            object_id: object_id.clone(),
+            edits: Some(Vec::new()),
+            props: Some(HashMap::new()),
+            obj_type: object.obj_type,
+        };
+        //let elemid = ElementID::Head;
+        let mut index = 0;
+        let mut max_counter = 0;
+
+        for opid in object.ops_in_order() {
+            max_counter = max(max_counter, opid.counter());
+            if let Some(ops) = object.props.get(&opid.to_key()) {
+                if !ops.is_empty() {
+                    diff.edits.get_or_insert_with(Vec::new).push(DiffEdit::Insert { index });
+                    let key = Key(index.to_string());
+                    for op in ops.iter() {
+                        if let Some(child_id) = op.child() {
+                            diff.add_child(&key, &op.opid, self.construct_object(child_id)?);
+                        } else {
+                            diff.add_value(&key, &op);
+                        }
+                    }
+                    index += 1;
+                }
+            }
+        }
+        Ok(diff)
+    }
+
+    pub fn construct_object(&self, object_id: &OpID) -> Result<Diff2, AutomergeError> {
+        let object = self.get_obj(&object_id)?;
+        if object.is_seq() {
+            self.construct_list(object_id, object)
+        } else {
+            self.construct_map(object_id, object)
         }
     }
 }

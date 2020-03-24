@@ -64,13 +64,13 @@ pub enum PendingDiff {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff2 {
-    object_id: OpID,
+    pub object_id: OpID,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    edits: Option<Vec<DiffEdit>>,
+    pub edits: Option<Vec<DiffEdit>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
+    pub props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
     #[serde(rename = "type")]
-    obj_type: ObjType,
+    pub obj_type: ObjType,
 }
 
 impl Diff2 {
@@ -112,6 +112,15 @@ impl Diff2 {
         self
     }
 
+    pub fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff2) -> &mut Diff2 {
+        self.props
+            .get_or_insert_with(HashMap::new)
+            .entry(key.clone())
+            .or_insert_with(HashMap::new)
+            .insert(opid.clone(), DiffLink::Link(child));
+        self
+    }
+
     pub fn add_values(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
         match ops {
             [] => {
@@ -138,7 +147,7 @@ impl Diff2 {
     }
 
     //    pub fn add_values2(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
-    fn add_value(&mut self, key: &Key, op: &OperationWithMetadata) -> &mut Diff2 {
+    pub fn add_value(&mut self, key: &Key, op: &OperationWithMetadata) -> &mut Diff2 {
         match op.operation {
             Operation::Set {
                 ref value,

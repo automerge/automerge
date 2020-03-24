@@ -26,7 +26,7 @@ use std::str::FromStr;
 
 use crate::error;
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy)]
 #[serde(rename_all = "camelCase")]
 pub enum ObjType {
     Map,
@@ -72,6 +72,14 @@ impl OpID {
 
     pub fn to_key(&self) -> Key {
         Key(self.to_string())
+    }
+
+    // I think object_id and op_id need to be distinct so there's not a panic here
+    pub fn counter(&self) -> u64 {
+        match self {
+            OpID::ID(counter, _) => *counter,
+            _ => panic!("seeking counter on root obj id!"),
+        }
     }
 
     pub fn parse(s: &str) -> Option<OpID> {

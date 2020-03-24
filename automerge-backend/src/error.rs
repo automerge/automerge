@@ -8,6 +8,7 @@ pub enum AutomergeError {
     MissingObjectError(OpID),
     InvalidObjectType(String),
     IndexOutOfBounds(usize),
+    InvalidValue(OpID),
     InvalidOpID(String),
     InvalidChangeRequest,
     InvalidLinkTarget,

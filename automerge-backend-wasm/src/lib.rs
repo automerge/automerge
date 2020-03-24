@@ -64,7 +64,7 @@ impl State {
     #[wasm_bindgen(js_name = getPatch)]
     pub fn get_patch(&self) -> Result<JsValue, JsValue> {
         log!("get_patch");
-        let patch = self.backend.get_patch();
+        let patch = self.backend.get_patch().map_err(automerge_error_to_js)?;
         rust_to_js(&patch)
     }
 

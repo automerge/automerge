@@ -31,6 +31,6 @@ pub use object_store::ObjState;
 pub use op_set::{OpSet, Version};
 pub use operation_with_metadata::OperationWithMetadata;
 pub use patch::{
-    Conflict, Diff, Diff2, DiffAction, ElementValue, MapType, Patch, PendingDiff, SequenceType,
+    Conflict, Diff, DiffEdit, Diff2, DiffAction, ElementValue, MapType, Patch, PendingDiff, SequenceType,
 };
 pub use value::Value;

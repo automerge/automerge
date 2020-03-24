@@ -1,8 +1,8 @@
 use crate::protocol::{ObjAlias, OpRequest};
 use crate::time;
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, OpID, OpSet,
-    Operation, Patch, PendingDiff, Version,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
+    Operation, Patch, Version,
 };
 use std::collections::HashMap;
 
@@ -40,8 +40,8 @@ impl Backend {
         let mut elemids: HashMap<OpID, Vec<OpID>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for (n, rop) in ops.iter().enumerate() {
-                let index = start_op + (n as u64);
-                let id = OpID::ID(index, actor_id.0.clone());
+                let counter = start_op + (n as u64);
+                let id = OpID::ID(counter, actor_id.0.clone());
                 let op = match rop {
                     // FIXME - so much cut and paste :/
                     OpRequest::MakeMap { obj, key, child } => {
@@ -107,14 +107,9 @@ impl Backend {
                         insert,
                     } => {
                         let object_id = self.obj_alias.get(&obj)?;
-                        let key = op_set.resolve_key(
-                            &id,
-                            &object_id,
-                            key,
-                            &mut elemids,
-                            insert.unwrap_or(false),
-                            false,
-                        )?;
+                        let ins = insert.unwrap_or(false);
+                        let key =
+                            op_set.resolve_key(&id, &object_id, key, &mut elemids, ins, false)?;
                         let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
                         Operation::Set {
                             object_id,
@@ -145,12 +140,10 @@ impl Backend {
 
     fn make_patch(
         &self,
-        pending: Vec<PendingDiff>,
+        diffs: Diff2,
         request: Option<&ChangeRequest>,
         incremental: bool,
     ) -> Result<Patch, AutomergeError> {
-        let diffs = self.op_set.finalize_diffs(pending)?;
-
         Ok(Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
             can_undo: self.op_set.can_undo(),
@@ -254,14 +247,14 @@ impl Backend {
         undoable: bool,
         incremental: bool,
     ) -> Result<Patch, AutomergeError> {
-        let mut diffs = Vec::new();
+        let mut pending_diffs = Vec::new();
 
         for change in changes.drain(0..) {
             self.op_set
-                .add_change(change, request.is_some(), undoable, &mut diffs)?;
+                .add_change(change, request.is_some(), undoable, &mut pending_diffs)?;
         }
 
-        //        let diffs2 = self.op_set.finalize_diffs(diffs); // FIXME
+        //        let diffs2 = self.op_set.finalize_diffs(pending_diffs); // FIXME
 
         if incremental {
             let version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
@@ -280,6 +273,8 @@ impl Backend {
             self.versions.clear();
             self.versions.push(version_obj);
         }
+
+        let diffs = self.op_set.finalize_diffs(pending_diffs)?;
 
         self.make_patch(diffs, request, true)
     }
@@ -363,10 +358,9 @@ impl Backend {
             .collect()
     }
 
-    pub fn get_patch(&self) -> Patch {
-        panic!("not implemented");
-        //const diffs = OpSet.constructObject(state.get('opSet'), OpSet.ROOT_ID)
-        //return makePatch(state, diffs, null, false)
+    pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
+        let diffs = self.op_set.construct_object(&OpID::Root)?;
+        self.make_patch(diffs, None, false)
     }
 
     /// Get changes which are in `other` but not in this backend
