@@ -62,7 +62,7 @@ impl ActorStates {
             .and_then(|v| v.get((seq as usize) - 1))
     }
 
-    fn transitive_deps(&self, clock: &Clock) -> Clock {
+    pub fn transitive_deps(&self, clock: &Clock) -> Clock {
         let mut all_deps = clock.clone();
         clock
             .into_iter()
@@ -74,7 +74,11 @@ impl ActorStates {
     // if the change is new - return Ok(true)
     // if the change is a duplicate - dont insert and return Ok(false)
     // if the change has a dup actor:seq but is different error
-    pub(crate) fn add_change(&mut self, change: Change) -> Result<bool, AutomergeError> {
+    pub(crate) fn add_change(
+        &mut self,
+        change: Change,
+        all_deps: Clock,
+    ) -> Result<bool, AutomergeError> {
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
             if &change == c.as_ref() {
                 return Ok(false);
@@ -85,8 +89,6 @@ impl ActorStates {
             }
         }
 
-        let deps = change.deps.with(&change.actor_id, change.seq - 1);
-        let all_deps = self.transitive_deps(&deps);
         let actor_id = change.actor_id.clone();
 
         let rc = Rc::new(change);
@@ -108,9 +110,10 @@ impl ActorStates {
 
         actor_changes.push(rc);
 
-        let actor_deps = self.deps_by_actor.entry(actor_id).or_insert_with(Vec::new);
-
-        actor_deps.push(all_deps);
+        self.deps_by_actor
+            .entry(actor_id)
+            .or_insert_with(Vec::new)
+            .push(all_deps);
 
         Ok(true)
     }

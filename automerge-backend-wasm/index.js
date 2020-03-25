@@ -33,18 +33,18 @@ let mutate = (oldBackend,fn) => {
 }
 
 let applyChanges = (backend,changes) => {
-  console.log("APPLY CHANGES",util.inspect(changes,{depth: null}))
+//  console.log("APPLY CHANGES",util.inspect(changes,{depth: null}))
   return mutate(backend, (b) => b.applyChanges(toJS(changes)));
 }
 
 let loadChanges = (backend,changes) => {
-  console.log("LOAD CHANGES",util.inspect(changes,{depth: null}))
+//  console.log("LOAD CHANGES",util.inspect(changes,{depth: null}))
   let [newState,_] = mutate(backend, (b) => b.loadChanges(toJS(changes)));
   return newState
 }
 
 let applyLocalChange = (backend,change) => {
-  console.log("LOCAL CHANGE REQUEST",util.inspect(change,{depth:null}))
+//  console.log("LOCAL CHANGE REQUEST",util.inspect(change,{depth:null}))
   return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
 }
 

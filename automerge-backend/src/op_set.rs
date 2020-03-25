@@ -11,7 +11,7 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{Change, Clock, OpID, Operation, RequestKey};
-use crate::{ChangeRequest, DiffEdit, Diff2, Key, ObjType, PendingDiff};
+use crate::{ChangeRequest, Diff2, DiffEdit, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -132,8 +132,11 @@ impl OpSet {
         let start_op = change.start_op;
         let num_ops = change.operations.len() as u64;
         let operations = change.operations.clone(); // FIXME - shouldnt need this clone
+        let all_deps = self
+            .states
+            .transitive_deps(&change.deps.with(&change.actor_id, change.seq - 1));
 
-        if !self.states.add_change(change)? {
+        if !self.states.add_change(change, all_deps.clone())? {
             return Ok(());
         }
 
@@ -165,7 +168,11 @@ impl OpSet {
         }
 
         self.max_op = max(self.max_op, start_op + num_ops - 1);
-        self.clock = self.clock.with(&actor_id, seq);
+
+        self.clock.set(&actor_id, seq);
+
+        self.deps.subtract(&all_deps);
+        self.deps.set(&actor_id, seq);
 
         if undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
@@ -199,7 +206,7 @@ impl OpSet {
         let object = self.get_obj_mut(&object_id)?;
 
         if object.is_seq() {
-            if op.is_insert() {
+            if op.insert() {
                 object.insert_after(op.key().as_element_id()?, op.clone());
             }
 
@@ -264,11 +271,10 @@ impl OpSet {
                     let path = self.get_path(object_id)?;
                     let object = self.objs.get(object_id).unwrap();
                     let ops = object.props.get(&op.list_key()).unwrap();
-                    let is_insert = op.is_insert();
 
                     let node = diff2.expand_path(&path, self);
 
-                    if is_insert {
+                    if op.insert() {
                         node.add_insert(*index);
                     } else if ops.is_empty() {
                         node.add_remove(*index);
@@ -389,16 +395,14 @@ impl OpSet {
                         ids.insert(n, id.clone());
                         ids.get(n - 1).map(|i| i.to_key())
                     }
-                } else {
-                    if del {
-                        if n < ids.len() {
-                            Some(ids.remove(n).to_key())
-                        } else {
-                            None
-                        }
+                } else if del {
+                    if n < ids.len() {
+                        Some(ids.remove(n).to_key())
                     } else {
-                        ids.get(n).map(|i| i.to_key())
+                        None
                     }
+                } else {
+                    ids.get(n).map(|i| i.to_key())
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }
@@ -447,7 +451,9 @@ impl OpSet {
             max_counter = max(max_counter, opid.counter());
             if let Some(ops) = object.props.get(&opid.to_key()) {
                 if !ops.is_empty() {
-                    diff.edits.get_or_insert_with(Vec::new).push(DiffEdit::Insert { index });
+                    diff.edits
+                        .get_or_insert_with(Vec::new)
+                        .push(DiffEdit::Insert { index });
                     let key = Key(index.to_string());
                     for op in ops.iter() {
                         if let Some(child_id) = op.child() {

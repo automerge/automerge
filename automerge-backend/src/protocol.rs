@@ -15,6 +15,7 @@
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
 use crate::error::AutomergeError;
+use crate::helper;
 use core::cmp::max;
 use serde::de;
 use serde::de::Visitor;
@@ -186,6 +187,14 @@ impl Clock {
         });
     }
 
+    pub fn subtract(&mut self, other: &Clock) {
+        other.into_iter().for_each(|(actor_id, seq)| {
+            if self.get(actor_id) <= *seq {
+                self.0.remove(actor_id);
+            }
+        });
+    }
+
     pub fn union(&self, other: &Clock) -> Clock {
         let mut result = self.clone();
         result.merge(other);
@@ -327,9 +336,9 @@ pub enum RequestKey {
 }
 
 impl RequestKey {
-    pub fn to_string(&self) -> String {
-        format!("{:?}", self)
-    }
+    //    pub fn to_string(&self) -> String {
+    //        format!("{:?}", self)
+    //    }
     pub fn to_key(&self) -> Key {
         Key(format!("{:?}", self))
     }
@@ -374,37 +383,48 @@ pub enum OpRequest {
         obj: String,
         key: RequestKey,
         child: Option<String>,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
         obj: String,
         key: RequestKey,
         child: Option<String>,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "makeText")]
     MakeText {
         obj: String,
         key: RequestKey,
         child: Option<String>,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "makeList")]
     MakeList {
         obj: String,
         key: RequestKey,
         child: Option<String>,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "set")]
     Set {
         obj: String,
         key: RequestKey,
-        insert: Option<bool>,
         value: PrimitiveValue,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "inc")]
     Increment {
         obj: String,
         key: RequestKey,
-        value: PrimitiveValue,
+        value: f64,
+        #[serde(default = "helper::make_false")]
+        insert: bool,
     },
     #[serde(rename = "del")]
     Delete { obj: String, key: RequestKey },
@@ -422,7 +442,7 @@ impl ObjAlias {
         &mut self,
         this: &OpID,
         child: &Option<String>,
-        obj: &String,
+        obj: &str,
     ) -> Result<OpID, AutomergeError> {
         if let Some(child) = child {
             self.0.insert(child.clone(), this.clone());
@@ -430,10 +450,10 @@ impl ObjAlias {
         self.get(obj)
     }
 
-    pub fn get(&self, obj: &String) -> Result<OpID, AutomergeError> {
+    pub fn get(&self, obj: &str) -> Result<OpID, AutomergeError> {
         OpID::parse(&obj)
-            .or_else(|| self.0.get(obj).map(|o| o.clone()))
-            .ok_or_else(|| AutomergeError::InvalidObject(obj.clone()))
+            .or_else(|| self.0.get(obj).cloned())
+            .ok_or_else(|| AutomergeError::InvalidObject(obj.to_string()))
     }
 }
 
@@ -446,6 +466,8 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "makeList")]
     MakeList {
@@ -453,6 +475,8 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "makeText")]
     MakeText {
@@ -460,6 +484,8 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "makeTable")]
     MakeTable {
@@ -467,6 +493,8 @@ pub enum Operation {
         object_id: OpID,
         key: Key,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "set")]
     Set {
@@ -477,8 +505,8 @@ pub enum Operation {
         pred: Vec<OpID>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         datatype: Option<DataType>,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        insert: Option<bool>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "link")]
     Link {
@@ -487,6 +515,8 @@ pub enum Operation {
         key: Key,
         value: OpID,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
     #[serde(rename = "del")]
     Delete {
@@ -502,6 +532,8 @@ pub enum Operation {
         key: Key,
         value: f64,
         pred: Vec<OpID>,
+        #[serde(skip_serializing_if = "helper::is_false", default)]
+        insert: bool,
     },
 }
 
@@ -554,7 +586,7 @@ pub struct ChangeRequest {
     pub version: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(default = "_true")]
+    #[serde(default = "helper::make_true")]
     pub undoable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deps: Option<Clock>,
@@ -563,7 +595,6 @@ pub struct ChangeRequest {
     pub request_type: ChangeRequestType,
 }
 
-// :-/
 fn _true() -> bool {
     true
 }

@@ -1,6 +1,4 @@
-use crate::protocol::{
-    ActorID, DataType, ElementID, Key, ObjType, OpID, Operation, PrimitiveValue,
-};
+use crate::protocol::{ActorID, DataType, Key, ObjType, OpID, Operation, PrimitiveValue};
 use std::cmp::{Ordering, PartialOrd};
 use std::hash::{Hash, Hasher};
 
@@ -124,31 +122,35 @@ impl OperationWithMetadata {
     }
 
     pub fn list_key(&self) -> Key {
-        match self.operation {
-            Operation::Set {
-                insert: Some(true), ..
-            } => self.opid.to_key(),
-            Operation::MakeMap { ref key, .. }
-            | Operation::MakeList { ref key, .. }
-            | Operation::MakeText { ref key, .. }
-            | Operation::MakeTable { ref key, .. }
-            | Operation::Delete { ref key, .. }
-            | Operation::Increment { ref key, .. }
-            | Operation::Set { ref key, .. }
-            | Operation::Link { ref key, .. } => key.clone(),
+        if self.insert() {
+            self.opid.to_key()
+        } else {
+            self.key().clone()
         }
     }
 
-    pub fn insert(&self) -> Option<ElementID> {
+    pub fn insert(&self) -> bool {
         match self.operation {
-            Operation::Set {
-                ref key,
-                insert: Some(true),
-                ..
+            Operation::Delete { .. } => false,
+            Operation::MakeMap { insert, .. }
+            | Operation::MakeList { insert, .. }
+            | Operation::MakeText { insert, .. }
+            | Operation::MakeTable { insert, .. }
+            | Operation::Increment { insert, .. }
+            | Operation::Set { insert, .. }
+            | Operation::Link { insert, .. } => insert,
+        }
+    }
+    /*
+    pub fn insert(&self) -> Option<ElementID> {
+
+        match self.operation {
+            Operation::Set { ref key, insert: Some(true), ..
             } => key.as_element_id().ok(),
             _ => None,
         }
     }
+    */
 
     pub fn pred(&self) -> &[OpID] {
         match self.operation {
@@ -170,13 +172,6 @@ impl OperationWithMetadata {
             | Operation::MakeText { .. }
             | Operation::MakeTable { .. }
             | Operation::Link { .. } => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_insert(&self) -> bool {
-        match self.operation {
-            Operation::Set { insert, .. } => insert.unwrap_or(false),
             _ => false,
         }
     }

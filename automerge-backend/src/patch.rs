@@ -55,6 +55,7 @@ pub enum DiffAction {
     SetSequenceElement(OpID, SequenceType, u32, ElementValue, Option<DataType>),
 }
 
+#[derive(Debug)]
 pub enum PendingDiff {
     Seq(OperationWithMetadata, usize),
     Map(OperationWithMetadata),

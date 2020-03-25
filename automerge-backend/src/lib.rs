@@ -11,6 +11,7 @@ mod actor_states;
 mod backend;
 mod concurrent_operations;
 mod error;
+mod helper;
 mod object_store;
 mod op_set;
 mod operation_with_metadata;
@@ -31,6 +32,7 @@ pub use object_store::ObjState;
 pub use op_set::{OpSet, Version};
 pub use operation_with_metadata::OperationWithMetadata;
 pub use patch::{
-    Conflict, Diff, DiffEdit, Diff2, DiffAction, ElementValue, MapType, Patch, PendingDiff, SequenceType,
+    Conflict, Diff, Diff2, DiffAction, DiffEdit, ElementValue, MapType, Patch, PendingDiff,
+    SequenceType,
 };
 pub use value::Value;

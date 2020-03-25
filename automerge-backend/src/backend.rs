@@ -44,62 +44,145 @@ impl Backend {
                 let id = OpID::ID(counter, actor_id.0.clone());
                 let op = match rop {
                     // FIXME - so much cut and paste :/
-                    OpRequest::MakeMap { obj, key, child } => {
+                    OpRequest::MakeMap {
+                        obj,
+                        key,
+                        child,
+                        insert,
+                    } => {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::MakeMap {
                             object_id,
                             key,
                             pred,
+                            insert: *insert,
                         }
                     }
-                    OpRequest::MakeTable { obj, key, child } => {
+                    OpRequest::MakeTable {
+                        obj,
+                        key,
+                        child,
+                        insert,
+                    } => {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::MakeTable {
                             object_id,
                             key,
                             pred,
+                            insert: *insert,
                         }
                     }
-                    OpRequest::MakeList { obj, key, child } => {
+                    OpRequest::MakeList {
+                        obj,
+                        key,
+                        child,
+                        insert,
+                    } => {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::MakeList {
                             object_id,
                             key,
                             pred,
+                            insert: *insert,
                         }
                     }
-                    OpRequest::MakeText { obj, key, child } => {
+                    OpRequest::MakeText {
+                        obj,
+                        key,
+                        child,
+                        insert,
+                    } => {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::MakeText {
                             object_id,
                             key,
                             pred,
+                            insert: *insert,
                         }
                     }
                     OpRequest::Delete { obj, key } => {
                         let object_id = self.obj_alias.get(&obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, true)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::Delete {
                             object_id,
                             key,
                             pred,
                         }
                     }
-                    OpRequest::Increment { .. } => panic!("not implemented"),
+                    OpRequest::Increment {
+                        obj,
+                        key,
+                        value,
+                        insert,
+                    } => {
+                        let object_id = self.obj_alias.get(&obj)?;
+                        let key = op_set.resolve_key(
+                            &id,
+                            &object_id,
+                            key,
+                            &mut elemids,
+                            *insert,
+                            false,
+                        )?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
+                        Operation::Increment {
+                            object_id,
+                            key,
+                            value: *value,
+                            insert: *insert,
+                            pred,
+                        }
+                    }
                     OpRequest::Set {
                         obj,
                         key,
@@ -107,10 +190,21 @@ impl Backend {
                         insert,
                     } => {
                         let object_id = self.obj_alias.get(&obj)?;
-                        let ins = insert.unwrap_or(false);
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, ins, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_default();
+                        let key = op_set.resolve_key(
+                            &id,
+                            &object_id,
+                            key,
+                            &mut elemids,
+                            *insert,
+                            false,
+                        )?;
+                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
+                            if let Ok(opid) = key.to_opid() {
+                                vec![opid]
+                            } else {
+                                vec![]
+                            }
+                        });
                         Operation::Set {
                             object_id,
                             key,
@@ -180,14 +274,14 @@ impl Backend {
         let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            start_op: start_op,
+            start_op,
             deps: request
                 .deps
                 .clone()
                 .ok_or(AutomergeError::InvalidChangeRequest)?,
             message: request.message.clone(),
             time: time::unix_timestamp(),
-            operations: undo_ops.clone(),
+            operations: undo_ops,
         };
 
         self.op_set.undo_pos -= 1;
@@ -204,7 +298,7 @@ impl Backend {
         let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            start_op: start_op,
+            start_op,
             deps: request
                 .deps
                 .clone()
@@ -215,7 +309,7 @@ impl Backend {
                 .op_set
                 .redo_stack
                 .pop()
-                .ok_or(AutomergeError::InvalidChange("no redo ops".to_string()))?,
+                .ok_or_else(|| AutomergeError::InvalidChange("no redo ops".to_string()))?,
         };
 
         self.op_set.undo_pos += 1;
