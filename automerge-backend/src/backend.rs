@@ -38,6 +38,7 @@ impl Backend {
         let actor_id = request.actor.clone();
         let mut operations = Vec::new();
         let mut elemids: HashMap<OpID, Vec<OpID>> = HashMap::new();
+        let mut mash = HashMap<(OpID,Key),usize> = HashMap::new();
         if let Some(ops) = &request.ops {
             for (n, rop) in ops.iter().enumerate() {
                 let counter = start_op + (n as u64);
@@ -152,6 +153,7 @@ impl Backend {
                         key,
                         value,
                         insert,
+                        datatype,
                     } => {
                         let object_id = self.obj_alias.get(&obj)?;
                         let key = op_set.resolve_key(
@@ -169,11 +171,12 @@ impl Backend {
                             value: value.clone(),
                             insert: *insert,
                             pred,
-                            datatype: None,
+                            datatype: datatype.clone(),
                         }
                     }
                 };
                 operations.push(op);
+
             }
         }
         Ok(Change {

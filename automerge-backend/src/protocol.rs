@@ -415,6 +415,7 @@ pub enum OpRequest {
         obj: String,
         key: RequestKey,
         value: PrimitiveValue,
+        datatype: Option<DataType>,
         #[serde(default = "helper::make_false")]
         insert: bool,
     },
