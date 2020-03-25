@@ -82,9 +82,10 @@ let getChanges = (backend,other) => clean(backend).getChanges(clean(other))
 let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor)
 let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock)
 let getMissingDeps = (backend) => clean(backend).getMissingDeps()
+let _elemIds = (backend,obj_id) => clean(backend)._elemIds(obj_id)
 
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,
   getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock,
-  getHistory, getUndoStack, getRedoStack, loadChanges
+  getHistory, getUndoStack, getRedoStack, loadChanges, _elemIds
 }

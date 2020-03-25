@@ -53,13 +53,7 @@ impl Backend {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::MakeMap {
                             object_id,
                             key,
@@ -76,13 +70,7 @@ impl Backend {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::MakeTable {
                             object_id,
                             key,
@@ -99,13 +87,7 @@ impl Backend {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::MakeList {
                             object_id,
                             key,
@@ -122,13 +104,7 @@ impl Backend {
                         let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::MakeText {
                             object_id,
                             key,
@@ -140,13 +116,7 @@ impl Backend {
                         let object_id = self.obj_alias.get(&obj)?;
                         let key =
                             op_set.resolve_key(&id, &object_id, key, &mut elemids, false, true)?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, false);
                         Operation::Delete {
                             object_id,
                             key,
@@ -168,13 +138,7 @@ impl Backend {
                             *insert,
                             false,
                         )?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::Increment {
                             object_id,
                             key,
@@ -198,13 +162,7 @@ impl Backend {
                             *insert,
                             false,
                         )?;
-                        let pred = op_set.get_ops(&object_id, &key).unwrap_or_else(|| {
-                            if let Ok(opid) = key.to_opid() {
-                                vec![opid]
-                            } else {
-                                vec![]
-                            }
-                        });
+                        let pred = op_set.get_pred(&object_id, &key, *insert);
                         Operation::Set {
                             object_id,
                             key,
@@ -477,6 +435,10 @@ impl Backend {
 
     pub fn get_missing_deps(&self) -> Clock {
         self.op_set.get_missing_deps()
+    }
+
+    pub fn get_elem_ids(&self, object_id: &OpID) -> Vec<OpID> {
+        self.op_set.get_elem_ids(object_id)
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {

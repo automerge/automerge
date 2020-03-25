@@ -44,7 +44,7 @@ pub enum OpID {
 
 impl Ord for OpID {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
+        match (other, self) {
             (OpID::Root, OpID::Root) => Ordering::Equal,
             (_, OpID::Root) => Ordering::Greater,
             (OpID::Root, _) => Ordering::Less,

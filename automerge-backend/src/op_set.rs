@@ -370,6 +370,18 @@ impl OpSet {
         })
     }
 
+    pub fn get_pred(&self, object_id: &OpID, key: &Key, insert: bool) -> Vec<OpID> {
+        if insert {
+            Vec::new()
+        } else if let Some(ops) = self.get_ops(&object_id, &key) {
+            ops
+        } else if let Ok(opid) = key.to_opid() {
+            vec![opid]
+        } else {
+            Vec::new()
+        }
+    }
+
     // FIXME - omg - this function is so bad :(
     pub fn resolve_key(
         &self,
