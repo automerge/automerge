@@ -53,7 +53,7 @@ impl ObjState {
                 Some((last, oid))
             })
             .find_map(|(last, oid)| if oid == target { Some(last) } else { None })
-            .ok_or_else(|| AutomergeError::MissingObjectError(target.clone()))
+            .ok_or_else(|| AutomergeError::MissingObjectError(target.to_object_id()))
     }
 
     pub fn ops_in_order(&self) -> ElementIterator {
@@ -66,7 +66,7 @@ impl ObjState {
     pub fn insert_after(&mut self, elem: ElementID, op: OperationWithMetadata) {
         let following = self.following.entry(elem).or_default();
         following.push(op);
-        following.sort_unstable();
+        following.sort_unstable_by(|a, b| b.cmp(a));
     }
 }
 

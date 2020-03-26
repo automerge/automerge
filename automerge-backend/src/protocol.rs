@@ -37,17 +37,69 @@ pub enum ObjType {
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
+pub enum ObjectID {
+    ID(OpID),
+    Str(String),
+    Root,
+}
+
+impl ObjectID {
+    pub fn to_opid(&self) -> Result<&OpID, AutomergeError> {
+        match self {
+            ObjectID::ID(id) => Ok(id),
+            ObjectID::Str(_) => Err(AutomergeError::CantCastToOpID(self.clone())),
+            ObjectID::Root => Err(AutomergeError::CantCastToOpID(self.clone())),
+        }
+    }
+
+    pub fn parse(s: &str) -> ObjectID {
+        if s == "00000000-0000-0000-0000-000000000000" {
+            ObjectID::Root
+        } else if let Some(id) = OpID::parse(s) {
+            ObjectID::ID(id)
+        } else {
+            ObjectID::Str(s.to_string())
+        }
+    }
+}
+
+impl Serialize for ObjectID {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            ObjectID::ID(id) => id.serialize(serializer),
+            ObjectID::Str(str) => serializer.serialize_str(str.as_str()), // FIXME - can i str.serialize(ser)
+            ObjectID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ObjectID {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s == "00000000-0000-0000-0000-000000000000" {
+            Ok(ObjectID::Root)
+        } else if let Some(id) = OpID::parse(&s) {
+            Ok(ObjectID::ID(id))
+        } else {
+            Ok(ObjectID::Str(s))
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum OpID {
     ID(u64, String),
-    Root,
 }
 
 impl Ord for OpID {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (other, self) {
-            (OpID::Root, OpID::Root) => Ordering::Equal,
-            (_, OpID::Root) => Ordering::Greater,
-            (OpID::Root, _) => Ordering::Less,
+        match (self, other) {
             (OpID::ID(counter1, actor1), OpID::ID(counter2, actor2)) => {
                 // Lamport compare
                 if counter1 != counter2 {
@@ -71,6 +123,10 @@ impl OpID {
         OpID::ID(seq, actor.0.clone())
     }
 
+    pub fn to_object_id(&self) -> ObjectID {
+        ObjectID::ID(self.clone())
+    }
+
     pub fn to_key(&self) -> Key {
         Key(self.to_string())
     }
@@ -79,24 +135,23 @@ impl OpID {
     pub fn counter(&self) -> u64 {
         match self {
             OpID::ID(counter, _) => *counter,
-            _ => panic!("seeking counter on root obj id!"),
         }
     }
 
     pub fn parse(s: &str) -> Option<OpID> {
-        match s {
-            "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
-            _ => {
-                let mut i = s.split('@');
-                match (i.next(), i.next(), i.next()) {
-                    (Some(seq_str), Some(actor_str), None) => seq_str
-                        .parse()
-                        .ok()
-                        .map(|seq| OpID::ID(seq, actor_str.to_string())),
-                    _ => None,
-                }
-            }
+        //        match s {
+        //            "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
+        //            _ => {
+        let mut i = s.split('@');
+        match (i.next(), i.next(), i.next()) {
+            (Some(seq_str), Some(actor_str), None) => seq_str
+                .parse()
+                .ok()
+                .map(|seq| OpID::ID(seq, actor_str.to_string())),
+            _ => None,
         }
+        //            }
+        //        }
     }
 }
 
@@ -123,7 +178,7 @@ impl Serialize for OpID {
 impl fmt::Display for OpID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OpID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
+            //OpID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
             OpID::ID(seq, actor) => write!(f, "{}@{}", seq, actor),
         }
     }
@@ -387,22 +442,34 @@ pub enum OpType {
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 pub struct OpRequest {
-        pub action: OpType,
-        pub obj: String,
-        pub key: RequestKey,
-        pub child: Option<String>,
-        pub value: Option<PrimitiveValue>,
-        pub datatype: Option<DataType>,
-        #[serde(default = "helper::make_false")]
-        pub insert: bool,
+    pub action: OpType,
+    pub obj: String,
+    pub key: RequestKey,
+    pub child: Option<String>,
+    pub value: Option<PrimitiveValue>,
+    pub datatype: Option<DataType>,
+    #[serde(default = "helper::make_false")]
+    pub insert: bool,
 }
 
 impl OpRequest {
-    pub fn primitive_value(&self) -> Result<PrimitiveValue,AutomergeError> {
-        self.value.clone().ok_or(AutomergeError::MissingPrimitiveValue)
+    pub fn primitive_value(&self) -> Result<PrimitiveValue, AutomergeError> {
+        self.value
+            .clone()
+            .ok_or(AutomergeError::MissingPrimitiveValue)
     }
 
-    pub fn number_value(&self) -> Result<f64,AutomergeError> {
+    pub fn obj_type(&self) -> Option<ObjType> {
+        match self.action {
+            OpType::MakeMap => Some(ObjType::Map),
+            OpType::MakeTable => Some(ObjType::Table),
+            OpType::MakeList => Some(ObjType::List),
+            OpType::MakeText => Some(ObjType::Text),
+            _ => None,
+        }
+    }
+
+    pub fn number_value(&self) -> Result<f64, AutomergeError> {
         if let Some(PrimitiveValue::Number(f)) = self.value {
             Ok(f)
         } else {
@@ -419,18 +486,16 @@ impl ObjAlias {
         ObjAlias(HashMap::new())
     }
 
-    pub fn insert_and_get(
-        &mut self,
-        this: &OpID,
-        child: &Option<String>,
-        obj: &str,
-    ) -> Result<OpID, AutomergeError> {
-        if let Some(child) = child {
-            self.0.insert(child.clone(), this.clone());
+    pub fn insert(&mut self, alias: String, id: &OpID) {
+        self.0.insert(alias, id.clone());
+    }
+
+    pub fn get(&self, text: &str) -> ObjectID {
+        if let Some(id) = self.0.get(text) {
+            id.to_object_id()
+        } else {
+            ObjectID::parse(&text)
         }
-        OpID::parse(&obj)
-            .or_else(|| self.0.get(obj).cloned())
-            .ok_or_else(|| AutomergeError::InvalidObject(obj.to_string()))
     }
 }
 
@@ -440,16 +505,17 @@ pub enum Operation {
     #[serde(rename = "makeMap")]
     MakeMap {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
+        child: Option<String>,
         #[serde(skip_serializing_if = "helper::is_false", default)]
         insert: bool,
     },
     #[serde(rename = "makeList")]
     MakeList {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
         #[serde(skip_serializing_if = "helper::is_false", default)]
@@ -458,7 +524,7 @@ pub enum Operation {
     #[serde(rename = "makeText")]
     MakeText {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
         #[serde(skip_serializing_if = "helper::is_false", default)]
@@ -467,7 +533,7 @@ pub enum Operation {
     #[serde(rename = "makeTable")]
     MakeTable {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
         #[serde(skip_serializing_if = "helper::is_false", default)]
@@ -476,7 +542,7 @@ pub enum Operation {
     #[serde(rename = "set")]
     Set {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         value: PrimitiveValue,
         pred: Vec<OpID>,
@@ -488,7 +554,7 @@ pub enum Operation {
     #[serde(rename = "link")]
     Link {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         value: OpID,
         pred: Vec<OpID>,
@@ -498,14 +564,14 @@ pub enum Operation {
     #[serde(rename = "del")]
     Delete {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
     },
     #[serde(rename = "inc")]
     Increment {
         #[serde(rename = "obj")]
-        object_id: OpID,
+        object_id: ObjectID,
         key: Key,
         value: f64,
         pred: Vec<OpID>,
@@ -525,7 +591,29 @@ impl Operation {
         }
     }
 
-    pub fn obj(&self) -> &OpID {
+    pub fn child(&self, opid: &OpID) -> Option<ObjectID> {
+        match &self {
+            Operation::MakeMap { child: Some(c), .. } => Some(ObjectID::Str(c.clone())),
+            Operation::MakeMap { .. }
+            | Operation::MakeList { .. }
+            | Operation::MakeText { .. }
+            | Operation::MakeTable { .. } => Some(opid.clone().to_object_id()),
+            Operation::Link { .. } => panic!("not implemented"),
+            _ => None,
+        }
+    }
+
+    pub fn obj_type(&self) -> Option<ObjType> {
+        match self {
+            Operation::MakeMap { .. } => Some(ObjType::Map),
+            Operation::MakeTable { .. } => Some(ObjType::Table),
+            Operation::MakeList { .. } => Some(ObjType::List),
+            Operation::MakeText { .. } => Some(ObjType::Text),
+            _ => None,
+        }
+    }
+
+    pub fn obj(&self) -> &ObjectID {
         match self {
             Operation::MakeMap { object_id, .. }
             | Operation::MakeTable { object_id, .. }
@@ -569,6 +657,7 @@ pub struct ChangeRequest {
     pub deps: Option<Clock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ops: Option<Vec<OpRequest>>,
+    pub child: Option<String>,
     pub request_type: ChangeRequestType,
 }
 

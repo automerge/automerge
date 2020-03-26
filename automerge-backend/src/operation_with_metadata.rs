@@ -1,4 +1,4 @@
-use crate::protocol::{ActorID, DataType, Key, ObjType, OpID, Operation, PrimitiveValue};
+use crate::protocol::{ActorID, DataType, Key, ObjType, ObjectID, OpID, Operation, PrimitiveValue};
 use std::cmp::{Ordering, PartialOrd};
 use std::hash::{Hash, Hasher};
 
@@ -51,12 +51,13 @@ impl OperationWithMetadata {
         }
     }
 
-    pub fn child(&self) -> Option<&OpID> {
-        match self.operation {
+    pub fn child(&self) -> Option<ObjectID> {
+        match &self.operation {
+            Operation::MakeMap { child: Some(c), .. } => Some(ObjectID::Str(c.clone())),
             Operation::MakeMap { .. }
             | Operation::MakeList { .. }
             | Operation::MakeText { .. }
-            | Operation::MakeTable { .. } => Some(&self.opid),
+            | Operation::MakeTable { .. } => Some(self.opid.to_object_id()),
             Operation::Link { .. } => panic!("not implemented"),
             _ => None,
         }
@@ -95,7 +96,7 @@ impl OperationWithMetadata {
         }
     }
 
-    pub fn object_id(&self) -> &OpID {
+    pub fn object_id(&self) -> &ObjectID {
         match self.operation {
             Operation::MakeMap { ref object_id, .. }
             | Operation::MakeList { ref object_id, .. }

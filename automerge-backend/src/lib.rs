@@ -22,7 +22,7 @@ mod value;
 
 pub use crate::protocol::{
     ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, ObjType,
-    OpID, Operation, PrimitiveValue,
+    ObjectID, OpID, Operation, PrimitiveValue,
 };
 pub use actor_states::ActorStates;
 pub use backend::Backend;

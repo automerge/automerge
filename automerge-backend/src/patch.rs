@@ -1,3 +1,4 @@
+use crate::protocol::ObjectID;
 use crate::{
     ActorID, Clock, DataType, ElementID, Key, ObjType, OpID, OpSet, Operation,
     OperationWithMetadata, PrimitiveValue,
@@ -65,7 +66,7 @@ pub enum PendingDiff {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff2 {
-    pub object_id: OpID,
+    pub object_id: ObjectID,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub edits: Option<Vec<DiffEdit>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -78,7 +79,7 @@ impl Diff2 {
     pub fn new() -> Diff2 {
         Diff2 {
             obj_type: ObjType::Map,
-            object_id: OpID::Root,
+            object_id: ObjectID::Root,
             edits: None,
             props: None,
         }
@@ -198,11 +199,15 @@ impl Diff2 {
         }
     }
 
-    pub fn expand_path(&mut self, path: &[(OpID, &Key, OpID)], op_set: &OpSet) -> &mut Diff2 {
+    pub fn expand_path(
+        &mut self,
+        path: &[(ObjectID, &Key, ObjectID)],
+        op_set: &OpSet,
+    ) -> &mut Diff2 {
         match path {
             [] => self,
             [(obj, key, target), tail @ ..] => {
-                if !self.has_child(key, obj) {
+                if !self.has_child(key, target) {
                     op_set
                         .objs
                         .get(obj)
@@ -215,7 +220,7 @@ impl Diff2 {
         }
     }
 
-    fn has_child(&self, key: &Key, target: &OpID) -> bool {
+    fn has_child(&self, key: &Key, target: &ObjectID) -> bool {
         self.props
             .as_ref()
             .and_then(|p| {
@@ -238,7 +243,7 @@ impl Diff2 {
             .is_some()
     }
 
-    fn get_child(&mut self, key: &Key, target: &OpID) -> Option<&mut Diff2> {
+    fn get_child(&mut self, key: &Key, target: &ObjectID) -> Option<&mut Diff2> {
         self.props
             .get_or_insert_with(HashMap::new)
             .get_mut(key)
@@ -266,12 +271,12 @@ impl Diff2 {
             .get_or_insert_with(HashMap::new)
             .entry(key.clone())
             .or_insert_with(HashMap::new);
-        let opid = metaop.opid.clone();
+        let child = metaop.child().unwrap();
         let obj_type = metaop.make_type().unwrap();
-        let link = prop.entry(opid.clone()).or_insert_with(|| {
+        let link = prop.entry(metaop.opid.clone()).or_insert_with(|| {
             DiffLink::Link(Diff2 {
                 obj_type,
-                object_id: opid,
+                object_id: child.clone(),
                 edits: None,
                 props: None,
             })

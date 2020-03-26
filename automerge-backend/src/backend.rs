@@ -1,8 +1,9 @@
+use crate::protocol::ObjectID;
 use crate::protocol::{ObjAlias, OpType};
 use crate::time;
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
-    Operation, Patch, Version, PrimitiveValue
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, ObjType, OpID,
+    OpSet, Operation, Patch, Version,
 };
 use std::collections::HashMap;
 
@@ -36,31 +37,99 @@ impl Backend {
     ) -> Result<Change, AutomergeError> {
         let time = time::unix_timestamp();
         let actor_id = request.actor.clone();
-        let mut operations = Vec::new();
-        let mut elemids: HashMap<OpID, Vec<OpID>> = HashMap::new();
-//        let mut mash = HashMap<(OpID,Key),usize> = HashMap::new();
+        let mut operations: Vec<Operation> = Vec::new();
+        // this is a local cache of elemids that I can manipulate as i insert and edit so the
+        // index's stay consistent as I walk through the ops
+        let mut elemids: HashMap<ObjectID, Vec<OpID>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
-                let counter = start_op + (operations.len() as u64);
-                let id = OpID::ID(counter, actor_id.0.clone());
+                let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
-                let datatype = rop.datatype.clone();
-                let object_id = self.obj_alias.insert_and_get(&id, &rop.child, &rop.obj)?;
+                let object_id = self.obj_alias.get(&rop.obj);
+                let mut _child = rop.child.clone();
+
+                if let Some(child) = &rop.child {
+                    let obj_type =
+                        op_set
+                            .get_obj(&object_id)
+                            .map(|o| o.obj_type)
+                            .ok()
+                            .or_else(|| {
+                                operations.iter().find_map(|o| {
+                                    if o.child(&id).as_ref() == Some(&object_id) {
+                                        o.obj_type()
+                                    } else {
+                                        None
+                                    }
+                                })
+                            });
+                    if !(obj_type == Some(ObjType::Table) && rop.obj_type() == Some(ObjType::Map)) {
+                        self.obj_alias.insert(child.clone(), &id);
+                        _child = None;
+                    } else {
+                        // table-alias hack
+                    }
+                }
+
                 let delete = rop.action == OpType::Del;
-                let key = op_set.resolve_key(&id, &object_id, &rop.key, &mut elemids, insert, delete)?;
+                let key =
+                    op_set.resolve_key(&id, &object_id, &rop.key, &mut elemids, insert, delete)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let op = match rop.action {
-                    OpType::MakeMap => Operation::MakeMap { object_id, key, pred, insert },
-                    OpType::MakeTable => Operation::MakeTable { object_id, key, pred, insert },
-                    OpType::MakeList => Operation::MakeList { object_id, key, pred, insert },
-                    OpType::MakeText => Operation::MakeText { object_id, key, pred, insert },
-                    OpType::Del => Operation::Delete { object_id, key, pred },
-                    OpType::Link => Operation::Link { object_id, key, value: id, insert, pred }, // FIXME
-                    OpType::Inc => Operation::Increment { object_id, key, value: rop.number_value()?, insert, pred },
-                    OpType::Set => Operation::Set { object_id, key, value: rop.primitive_value()?, insert, pred, datatype },
+                    OpType::MakeMap => Operation::MakeMap {
+                        object_id,
+                        key,
+                        pred,
+                        insert,
+                        child: _child,
+                    },
+                    OpType::MakeTable => Operation::MakeTable {
+                        object_id,
+                        key,
+                        pred,
+                        insert,
+                    },
+                    OpType::MakeList => Operation::MakeList {
+                        object_id,
+                        key,
+                        pred,
+                        insert,
+                    },
+                    OpType::MakeText => Operation::MakeText {
+                        object_id,
+                        key,
+                        pred,
+                        insert,
+                    },
+                    OpType::Del => Operation::Delete {
+                        object_id,
+                        key,
+                        pred,
+                    },
+                    OpType::Link => Operation::Link {
+                        object_id,
+                        key,
+                        value: id,
+                        insert,
+                        pred,
+                    }, // FIXME
+                    OpType::Inc => Operation::Increment {
+                        object_id,
+                        key,
+                        value: rop.number_value()?,
+                        insert,
+                        pred,
+                    },
+                    OpType::Set => Operation::Set {
+                        object_id,
+                        key,
+                        value: rop.primitive_value()?,
+                        insert,
+                        pred,
+                        datatype: rop.datatype.clone(),
+                    },
                 };
                 operations.push(op);
-
             }
         }
         Ok(Change {
@@ -298,7 +367,7 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
-        let diffs = self.op_set.construct_object(&OpID::Root)?;
+        let diffs = self.op_set.construct_object(&ObjectID::Root)?;
         self.make_patch(diffs, None, false)
     }
 
@@ -324,7 +393,7 @@ impl Backend {
         self.op_set.get_missing_deps()
     }
 
-    pub fn get_elem_ids(&self, object_id: &OpID) -> Vec<OpID> {
+    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Vec<OpID> {
         self.op_set.get_elem_ids(object_id)
     }
 

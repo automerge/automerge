@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock, OpID};
+use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock, ObjectID};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -148,7 +148,7 @@ impl State {
     #[wasm_bindgen(js_name = _elemIds)]
     pub fn get_elem_ids(&self, _object_id: JsValue) -> Result<JsValue, JsValue> {
         log!("elemids");
-        let object_id: OpID = js_to_rust(_object_id)?;
+        let object_id: ObjectID = js_to_rust(_object_id)?;
         let elemids = self
             .backend.get_elem_ids(&object_id);
 //            .map_err(automerge_error_to_js);

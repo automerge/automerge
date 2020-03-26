@@ -10,7 +10,7 @@ use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, OpID, Operation, RequestKey};
+use crate::protocol::{Change, Clock, ObjectID, OpID, Operation, RequestKey};
 use crate::{ChangeRequest, Diff2, DiffEdit, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ pub struct Version {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct OpSet {
-    pub objs: HashMap<OpID, ObjState>,
+    pub objs: HashMap<ObjectID, ObjState>,
     queue: Vec<Change>,
     pub clock: Clock,
     pub deps: Clock,
@@ -53,7 +53,7 @@ pub struct OpSet {
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = HashMap::new();
-        objs.insert(OpID::Root, ObjState::new(ObjType::Map));
+        objs.insert(ObjectID::Root, ObjState::new(ObjType::Map));
 
         OpSet {
             objs,
@@ -141,7 +141,7 @@ impl OpSet {
         }
 
         let mut all_undo_ops = Vec::new();
-        let mut new_object_ids: HashSet<OpID> = HashSet::new();
+        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
 
         for (n, operation) in operations.iter().enumerate() {
             // Store newly created object IDs so we can decide whether we need
@@ -154,7 +154,7 @@ impl OpSet {
             };
 
             if metaop.is_make() {
-                new_object_ids.insert(metaop.opid.clone());
+                new_object_ids.insert(metaop.opid.to_object_id());
             }
 
             let (diff, undo_ops) = self.apply_op(metaop.clone())?;
@@ -196,8 +196,8 @@ impl OpSet {
         &mut self,
         op: OperationWithMetadata,
     ) -> Result<(PendingDiff, Vec<Operation>), AutomergeError> {
-        if let Some(obj_type) = op.make_type() {
-            self.objs.insert(op.opid.clone(), ObjState::new(obj_type));
+        if let (Some(child), Some(obj_type)) = (op.child(), op.make_type()) {
+            self.objs.insert(child, ObjState::new(obj_type));
         }
 
         let undo_ops = Vec::new();
@@ -244,17 +244,20 @@ impl OpSet {
         Ok(())
     }
 
-    fn get_path(&self, object_id: &OpID) -> Result<Vec<(OpID, &Key, OpID)>, AutomergeError> {
-        let mut oid = object_id;
+    fn get_path(
+        &self,
+        object_id: &ObjectID,
+    ) -> Result<Vec<(ObjectID, &Key, ObjectID)>, AutomergeError> {
+        let mut o = object_id;
         let mut path = Vec::new();
-        while let Some(inbound) = self.objs.get(oid).and_then(|o| o.inbound.iter().next()) {
-            oid = inbound.object_id();
+        while let Some(inbound) = self.objs.get(o).and_then(|o| o.inbound.iter().next()) {
+            o = inbound.object_id();
             path.insert(
                 0,
                 (
                     inbound.object_id().clone(),
                     inbound.key(),
-                    inbound.opid.clone(),
+                    inbound.child().unwrap(),
                 ),
             );
         }
@@ -303,27 +306,23 @@ impl OpSet {
         Ok(diff2)
     }
 
-    pub fn get_ops(&self, object_id: &OpID, key: &Key) -> Option<Vec<OpID>> {
+    pub fn get_ops(&self, object_id: &ObjectID, key: &Key) -> Option<Vec<OpID>> {
         self.objs
             .get(object_id)
             .and_then(|obj| obj.props.get(key))
             .map(|con_ops| con_ops.iter().map(|op| op.opid.clone()).collect())
     }
 
-    fn get_obj(&self, object_id: &OpID) -> Result<&ObjState, AutomergeError> {
-        let object = self
-            .objs
+    pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
+        self.objs
             .get(&object_id)
-            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-        Ok(object)
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
-    fn get_obj_mut(&mut self, object_id: &OpID) -> Result<&mut ObjState, AutomergeError> {
-        let object = self
-            .objs
+    fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
+        self.objs
             .get_mut(&object_id)
-            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))?;
-        Ok(object)
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
     pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
@@ -354,7 +353,7 @@ impl OpSet {
             .collect()
     }
 
-    pub fn get_elem_ids(&self, object_id: &OpID) -> Vec<OpID> {
+    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Vec<OpID> {
         self.objs
             .get(object_id)
             .map(|obj| obj.ops_in_order().cloned().collect())
@@ -370,7 +369,7 @@ impl OpSet {
         })
     }
 
-    pub fn get_pred(&self, object_id: &OpID, key: &Key, insert: bool) -> Vec<OpID> {
+    pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
         if insert {
             Vec::new()
         } else if let Some(ops) = self.get_ops(&object_id, &key) {
@@ -386,9 +385,9 @@ impl OpSet {
     pub fn resolve_key(
         &self,
         id: &OpID,
-        object_id: &OpID,
+        object_id: &ObjectID,
         key: &RequestKey,
-        elemids: &mut HashMap<OpID, Vec<OpID>>,
+        elemids: &mut HashMap<ObjectID, Vec<OpID>>,
         insert: bool,
         del: bool,
     ) -> Result<Key, AutomergeError> {
@@ -423,7 +422,7 @@ impl OpSet {
 
     pub fn construct_map(
         &self,
-        object_id: &OpID,
+        object_id: &ObjectID,
         object: &ObjState,
     ) -> Result<Diff2, AutomergeError> {
         let mut diff = Diff2 {
@@ -435,7 +434,7 @@ impl OpSet {
         for (key, ops) in object.props.iter() {
             for op in ops.iter() {
                 if let Some(child_id) = op.child() {
-                    diff.add_child(&key, &op.opid, self.construct_object(child_id)?);
+                    diff.add_child(&key, &op.opid, self.construct_object(&child_id)?);
                 } else {
                     diff.add_value(&key, &op);
                 }
@@ -446,7 +445,7 @@ impl OpSet {
 
     pub fn construct_list(
         &self,
-        object_id: &OpID,
+        object_id: &ObjectID,
         object: &ObjState,
     ) -> Result<Diff2, AutomergeError> {
         let mut diff = Diff2 {
@@ -469,7 +468,7 @@ impl OpSet {
                     let key = Key(index.to_string());
                     for op in ops.iter() {
                         if let Some(child_id) = op.child() {
-                            diff.add_child(&key, &op.opid, self.construct_object(child_id)?);
+                            diff.add_child(&key, &op.opid, self.construct_object(&child_id)?);
                         } else {
                             diff.add_value(&key, &op);
                         }
@@ -481,7 +480,7 @@ impl OpSet {
         Ok(diff)
     }
 
-    pub fn construct_object(&self, object_id: &OpID) -> Result<Diff2, AutomergeError> {
+    pub fn construct_object(&self, object_id: &ObjectID) -> Result<Diff2, AutomergeError> {
         let object = self.get_obj(&object_id)?;
         if object.is_seq() {
             self.construct_list(object_id, object)
