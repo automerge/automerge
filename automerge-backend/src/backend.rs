@@ -1,8 +1,8 @@
-use crate::protocol::{ObjAlias, OpRequest};
+use crate::protocol::{ObjAlias, OpType};
 use crate::time;
 use crate::{
     ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
-    Operation, Patch, Version,
+    Operation, Patch, Version, PrimitiveValue
 };
 use std::collections::HashMap;
 
@@ -38,142 +38,26 @@ impl Backend {
         let actor_id = request.actor.clone();
         let mut operations = Vec::new();
         let mut elemids: HashMap<OpID, Vec<OpID>> = HashMap::new();
-        let mut mash = HashMap<(OpID,Key),usize> = HashMap::new();
+//        let mut mash = HashMap<(OpID,Key),usize> = HashMap::new();
         if let Some(ops) = &request.ops {
-            for (n, rop) in ops.iter().enumerate() {
-                let counter = start_op + (n as u64);
+            for rop in ops.iter() {
+                let counter = start_op + (operations.len() as u64);
                 let id = OpID::ID(counter, actor_id.0.clone());
-                let op = match rop {
-                    // FIXME - so much cut and paste :/
-                    OpRequest::MakeMap {
-                        obj,
-                        key,
-                        child,
-                        insert,
-                    } => {
-                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::MakeMap {
-                            object_id,
-                            key,
-                            pred,
-                            insert: *insert,
-                        }
-                    }
-                    OpRequest::MakeTable {
-                        obj,
-                        key,
-                        child,
-                        insert,
-                    } => {
-                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::MakeTable {
-                            object_id,
-                            key,
-                            pred,
-                            insert: *insert,
-                        }
-                    }
-                    OpRequest::MakeList {
-                        obj,
-                        key,
-                        child,
-                        insert,
-                    } => {
-                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::MakeList {
-                            object_id,
-                            key,
-                            pred,
-                            insert: *insert,
-                        }
-                    }
-                    OpRequest::MakeText {
-                        obj,
-                        key,
-                        child,
-                        insert,
-                    } => {
-                        let object_id = self.obj_alias.insert_and_get(&id, &child, &obj)?;
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, false)?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::MakeText {
-                            object_id,
-                            key,
-                            pred,
-                            insert: *insert,
-                        }
-                    }
-                    OpRequest::Delete { obj, key } => {
-                        let object_id = self.obj_alias.get(&obj)?;
-                        let key =
-                            op_set.resolve_key(&id, &object_id, key, &mut elemids, false, true)?;
-                        let pred = op_set.get_pred(&object_id, &key, false);
-                        Operation::Delete {
-                            object_id,
-                            key,
-                            pred,
-                        }
-                    }
-                    OpRequest::Increment {
-                        obj,
-                        key,
-                        value,
-                        insert,
-                    } => {
-                        let object_id = self.obj_alias.get(&obj)?;
-                        let key = op_set.resolve_key(
-                            &id,
-                            &object_id,
-                            key,
-                            &mut elemids,
-                            *insert,
-                            false,
-                        )?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::Increment {
-                            object_id,
-                            key,
-                            value: *value,
-                            insert: *insert,
-                            pred,
-                        }
-                    }
-                    OpRequest::Set {
-                        obj,
-                        key,
-                        value,
-                        insert,
-                        datatype,
-                    } => {
-                        let object_id = self.obj_alias.get(&obj)?;
-                        let key = op_set.resolve_key(
-                            &id,
-                            &object_id,
-                            key,
-                            &mut elemids,
-                            *insert,
-                            false,
-                        )?;
-                        let pred = op_set.get_pred(&object_id, &key, *insert);
-                        Operation::Set {
-                            object_id,
-                            key,
-                            value: value.clone(),
-                            insert: *insert,
-                            pred,
-                            datatype: datatype.clone(),
-                        }
-                    }
+                let insert = rop.insert;
+                let datatype = rop.datatype.clone();
+                let object_id = self.obj_alias.insert_and_get(&id, &rop.child, &rop.obj)?;
+                let delete = rop.action == OpType::Del;
+                let key = op_set.resolve_key(&id, &object_id, &rop.key, &mut elemids, insert, delete)?;
+                let pred = op_set.get_pred(&object_id, &key, insert);
+                let op = match rop.action {
+                    OpType::MakeMap => Operation::MakeMap { object_id, key, pred, insert },
+                    OpType::MakeTable => Operation::MakeTable { object_id, key, pred, insert },
+                    OpType::MakeList => Operation::MakeList { object_id, key, pred, insert },
+                    OpType::MakeText => Operation::MakeText { object_id, key, pred, insert },
+                    OpType::Del => Operation::Delete { object_id, key, pred },
+                    OpType::Link => Operation::Link { object_id, key, value: id, insert, pred }, // FIXME
+                    OpType::Inc => Operation::Increment { object_id, key, value: rop.number_value()?, insert, pred },
+                    OpType::Set => Operation::Set { object_id, key, value: rop.primitive_value()?, insert, pred, datatype },
                 };
                 operations.push(op);
 

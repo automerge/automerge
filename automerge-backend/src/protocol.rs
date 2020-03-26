@@ -336,9 +336,6 @@ pub enum RequestKey {
 }
 
 impl RequestKey {
-    //    pub fn to_string(&self) -> String {
-    //        format!("{:?}", self)
-    //    }
     pub fn to_key(&self) -> Key {
         Key(format!("{:?}", self))
     }
@@ -375,60 +372,43 @@ impl<'de> Deserialize<'de> for RequestKey {
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-#[serde(tag = "action")]
-pub enum OpRequest {
-    #[serde(rename = "makeMap")]
-    MakeMap {
-        obj: String,
-        key: RequestKey,
-        child: Option<String>,
+#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub enum OpType {
+    MakeMap,
+    MakeTable,
+    MakeList,
+    MakeText,
+    Del,
+    Link,
+    Inc,
+    Set,
+}
+
+#[derive(Deserialize, PartialEq, Debug, Clone)]
+pub struct OpRequest {
+        pub action: OpType,
+        pub obj: String,
+        pub key: RequestKey,
+        pub child: Option<String>,
+        pub value: Option<PrimitiveValue>,
+        pub datatype: Option<DataType>,
         #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "makeTable")]
-    MakeTable {
-        obj: String,
-        key: RequestKey,
-        child: Option<String>,
-        #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "makeText")]
-    MakeText {
-        obj: String,
-        key: RequestKey,
-        child: Option<String>,
-        #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "makeList")]
-    MakeList {
-        obj: String,
-        key: RequestKey,
-        child: Option<String>,
-        #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "set")]
-    Set {
-        obj: String,
-        key: RequestKey,
-        value: PrimitiveValue,
-        datatype: Option<DataType>,
-        #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "inc")]
-    Increment {
-        obj: String,
-        key: RequestKey,
-        value: f64,
-        #[serde(default = "helper::make_false")]
-        insert: bool,
-    },
-    #[serde(rename = "del")]
-    Delete { obj: String, key: RequestKey },
+        pub insert: bool,
+}
+
+impl OpRequest {
+    pub fn primitive_value(&self) -> Result<PrimitiveValue,AutomergeError> {
+        self.value.clone().ok_or(AutomergeError::MissingPrimitiveValue)
+    }
+
+    pub fn number_value(&self) -> Result<f64,AutomergeError> {
+        if let Some(PrimitiveValue::Number(f)) = self.value {
+            Ok(f)
+        } else {
+            Err(AutomergeError::MissingNumberValue)
+        }
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -448,10 +428,6 @@ impl ObjAlias {
         if let Some(child) = child {
             self.0.insert(child.clone(), this.clone());
         }
-        self.get(obj)
-    }
-
-    pub fn get(&self, obj: &str) -> Result<OpID, AutomergeError> {
         OpID::parse(&obj)
             .or_else(|| self.0.get(obj).cloned())
             .ok_or_else(|| AutomergeError::InvalidObject(obj.to_string()))

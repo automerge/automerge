@@ -11,6 +11,8 @@ pub enum AutomergeError {
     InvalidValue(OpID),
     InvalidOpID(String),
     InvalidChangeRequest,
+    MissingPrimitiveValue,
+    MissingNumberValue,
     InvalidLinkTarget,
     UnknownVersion(u64),
     DuplicateChange(String),
