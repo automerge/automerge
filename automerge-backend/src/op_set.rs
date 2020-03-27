@@ -247,19 +247,35 @@ impl OpSet {
     fn get_path(
         &self,
         object_id: &ObjectID,
-    ) -> Result<Vec<(ObjectID, &Key, ObjectID)>, AutomergeError> {
+    ) -> Result<Vec<(ObjectID, Key, Key, ObjectID)>, AutomergeError> {
         let mut o = object_id;
         let mut path = Vec::new();
         while let Some(inbound) = self.objs.get(o).and_then(|o| o.inbound.iter().next()) {
             o = inbound.object_id();
-            path.insert(
-                0,
-                (
-                    inbound.object_id().clone(),
-                    inbound.key(),
-                    inbound.child().unwrap(),
-                ),
-            );
+            let object = self.objs.get(o).unwrap();
+            if object.is_seq() {
+                let index = object.get_index_for(&inbound.list_key().to_opid()?)?;
+                let key = Key(index.to_string());
+                path.insert(
+                    0,
+                    (
+                        inbound.object_id().clone(),
+                        key,
+                        inbound.list_key().clone(),
+                        inbound.child().unwrap(),
+                    ),
+                );
+            } else {
+                path.insert(
+                    0,
+                    (
+                        inbound.object_id().clone(),
+                        inbound.key().clone(),
+                        inbound.key().clone(),
+                        inbound.child().unwrap(),
+                    ),
+                );
+            }
         }
         Ok(path)
     }

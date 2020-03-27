@@ -2,6 +2,19 @@ let Backend = require("./pkg")
 let { fromJS, List } = require('immutable')
 let util = require('util')
 
+const { encodeChange, decodeChange } = require('./columnar')
+
+function decodeChanges(binaryChanges) {
+  let decoded = []
+  for (let binaryChange of binaryChanges) {
+    if (!(binaryChange instanceof Uint8Array)) {
+      throw new RangeError(`Unexpected type of change: ${binaryChange}`)
+    }
+    for (let change of decodeChange(binaryChange)) decoded.push(change)
+  }
+  return fromJS(decoded)
+}
+
 
 function toJS(obj) {
   if (List.isList(obj)) {
@@ -33,27 +46,19 @@ let mutate = (oldBackend,fn) => {
 }
 
 let applyChanges = (backend,changes) => {
-//  console.log("APPLY CHANGES",util.inspect(changes,{depth: null}))
-  return mutate(backend, (b) => b.applyChanges(toJS(changes)));
+  return mutate(backend, (b) => b.applyChanges(decodeChanges(changes)));
 }
 
 let loadChanges = (backend,changes) => {
-//  console.log("LOAD CHANGES",util.inspect(changes,{depth: null}))
-  let [newState,_] = mutate(backend, (b) => b.loadChanges(toJS(changes)));
+  let [newState,_] = mutate(backend, (b) => b.loadChanges(decodeChanges(changes)));
   return newState
 }
 
 let applyLocalChange = (backend,change) => {
-  //console.log("LOCAL CHANGE REQUEST",util.inspect(change,{depth:null}))
   return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
 }
 
 let merge = (backend1,backend2) => {
-  //console.log("MERGE");
-//  let changes = backend2.getMissingChanges(backend1.clock)
-//  backend1.applyChanges(changes)
-//  let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
-//  self.apply_changes(missing_changes)
   return mutate(backend1, (b) => b.merge(clean(backend2)));
 }
 
@@ -78,9 +83,9 @@ let getRedoStack = (backend) => {
 }
 
 let getPatch = (backend) => clean(backend).getPatch()
-let getChanges = (backend,other) => clean(backend).getChanges(clean(other))
-let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor)
-let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock)
+let getChanges = (backend,other) => clean(backend).getChanges(clean(other)).map(encodeChange)
+let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor).map(encodeChange)
+let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock).map(encodeChange)
 let getMissingDeps = (backend) => clean(backend).getMissingDeps()
 let _elemIds = (backend,obj_id) => clean(backend)._elemIds(obj_id)
 

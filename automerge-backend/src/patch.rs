@@ -66,13 +66,13 @@ pub enum PendingDiff {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff2 {
-    pub object_id: ObjectID,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub edits: Option<Vec<DiffEdit>>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
+    pub object_id: ObjectID,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
 }
 
 impl Diff2 {
@@ -143,7 +143,7 @@ impl Diff2 {
             }
             [head, tail @ ..] => {
                 self.add_value(key, head);
-                self.add_values(key, tail) // tail recursion?
+                self.add_values(key, tail) // easy to rewrite wo recurion
             }
         }
     }
@@ -172,46 +172,27 @@ impl Diff2 {
             Operation::MakeMap { .. }
             | Operation::MakeTable { .. }
             | Operation::MakeList { .. }
-            | Operation::MakeText { .. } => self.expand(op),
+            | Operation::MakeText { .. } => {
+                self.expand(key,op)
+            },
             _ => panic!("not implemented"),
             //_ => {}
         }
     }
 
-    pub fn op(
-        &mut self,
-        key: &Key,
-        path: &[OperationWithMetadata],
-        insert: Option<usize>,
-        concurrent_ops: &[OperationWithMetadata],
-    ) {
-        match path {
-            [] => {
-                if let Some(index) = insert {
-                    self.add_insert(index);
-                }
-                self.add_values(key, concurrent_ops);
-            }
-            [head, tail @ ..] => {
-                let d = self.expand(head);
-                d.op(key, tail, insert, concurrent_ops)
-            }
-        }
-    }
-
     pub fn expand_path(
         &mut self,
-        path: &[(ObjectID, &Key, ObjectID)],
+        path: &[(ObjectID, Key, Key, ObjectID)],
         op_set: &OpSet,
     ) -> &mut Diff2 {
         match path {
             [] => self,
-            [(obj, key, target), tail @ ..] => {
+            [(obj, key, prop, target), tail @ ..] => {
                 if !self.has_child(key, target) {
                     op_set
                         .objs
                         .get(obj)
-                        .and_then(|obj| obj.props.get(key))
+                        .and_then(|obj| obj.props.get(prop))
                         .map(|ops| self.add_values(key, &ops));
                 }
                 let child = self.get_child(key, target).unwrap();
@@ -264,8 +245,8 @@ impl Diff2 {
             })
     }
 
-    fn expand(&mut self, metaop: &OperationWithMetadata) -> &mut Diff2 {
-        let key = metaop.key();
+    fn expand(&mut self, key: &Key, metaop: &OperationWithMetadata) -> &mut Diff2 {
+//        let key = metaop.key();
         let prop = self
             .props
             .get_or_insert_with(HashMap::new)
