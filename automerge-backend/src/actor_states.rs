@@ -1,5 +1,4 @@
 use crate::error::AutomergeError;
-use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -32,12 +31,6 @@ impl ActorStates {
         }
     }
 
-    pub fn is_concurrent(&self, op1: &OperationWithMetadata, op2: &OperationWithMetadata) -> bool {
-        let clock1 = self.get_deps(&op1.actor_id, op1.seq);
-        let clock2 = self.get_deps(&op2.actor_id, op2.seq);
-        clock1.get(&op2.actor_id) < op2.seq && clock2.get(&op1.actor_id) < op1.seq
-    }
-
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
         self.change_by_actor
             .get(actor_id)
@@ -49,11 +42,6 @@ impl ActorStates {
         self.change_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
-    }
-
-    fn get_deps(&self, actor_id: &ActorID, seq: u32) -> &Clock {
-        self.get_deps_option(actor_id, seq)
-            .unwrap_or(&self.empty_clock)
     }
 
     fn get_deps_option(&self, actor_id: &ActorID, seq: u32) -> Option<&Clock> {
@@ -76,11 +64,11 @@ impl ActorStates {
     // if the change has a dup actor:seq but is different error
     pub(crate) fn add_change(
         &mut self,
-        change: Change,
+        change: &Rc<Change>,
         all_deps: Clock,
     ) -> Result<bool, AutomergeError> {
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
-            if &change == c.as_ref() {
+            if change.as_ref() == c.as_ref() {
                 return Ok(false);
             } else {
                 return Err(AutomergeError::InvalidChange(
@@ -91,24 +79,23 @@ impl ActorStates {
 
         let actor_id = change.actor_id.clone();
 
-        let rc = Rc::new(change);
-        self.history.push(rc.clone());
+        self.history.push(change.clone());
 
         let actor_changes = self
             .change_by_actor
             .entry(actor_id.clone())
             .or_insert_with(Vec::new);
 
-        if (rc.seq as usize) - 1 != actor_changes.len() {
+        if (change.seq as usize) - 1 != actor_changes.len() {
             panic!(
                 "cant push c={:?}:{:?} at ${:?}",
-                rc.actor_id,
-                rc.seq,
+                change.actor_id,
+                change.seq,
                 actor_changes.len()
             );
         }
 
-        actor_changes.push(rc);
+        actor_changes.push(change.clone());
 
         self.deps_by_actor
             .entry(actor_id)

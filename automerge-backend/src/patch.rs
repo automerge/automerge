@@ -1,9 +1,9 @@
 use crate::protocol::ObjectID;
 use crate::{
-    ActorID, Clock, DataType, ElementID, Key, ObjType, OpID, OpSet, Operation,
-    OperationWithMetadata, PrimitiveValue,
+    ActorID, Clock, DataType, ElementID, Key, ObjType, OpHandle, OpID, OpSet, OpType,
+    PrimitiveValue,
 };
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -58,12 +58,12 @@ pub enum DiffAction {
 
 #[derive(Debug)]
 pub enum PendingDiff {
-    Seq(OperationWithMetadata, usize),
-    Map(OperationWithMetadata),
+    Seq(OpHandle, usize),
+    Map(OpHandle),
     NoOp,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff2 {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -123,7 +123,7 @@ impl Diff2 {
         self
     }
 
-    pub fn add_values(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
+    pub fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff2 {
         match ops {
             [] => {
                 if self.is_seq() {
@@ -148,33 +148,24 @@ impl Diff2 {
         }
     }
 
-    //    pub fn add_values2(&mut self, key: &Key, ops: &[OperationWithMetadata]) -> &mut Diff2 {
-    pub fn add_value(&mut self, key: &Key, op: &OperationWithMetadata) -> &mut Diff2 {
-        match op.operation {
-            Operation::Set {
-                ref value,
-                ref datatype,
-                ..
-            } => {
+    //    pub fn add_values2(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff2 {
+    pub fn add_value(&mut self, key: &Key, op: &OpHandle) -> &mut Diff2 {
+        match &op.action {
+            OpType::Set(_, ref datatype) => {
                 let prop = self
                     .props
                     .get_or_insert_with(HashMap::new)
                     .entry(key.clone())
                     .or_insert_with(HashMap::new);
-                let key = op.opid.clone();
+                let key = op.id.clone();
                 let val = DiffValue {
-                    value: value.clone(),
+                    value: op.adjusted_value(),
                     datatype: datatype.clone(),
                 };
                 prop.insert(key, DiffLink::Val(val));
                 self
             }
-            Operation::MakeMap { .. }
-            | Operation::MakeTable { .. }
-            | Operation::MakeList { .. }
-            | Operation::MakeText { .. } => {
-                self.expand(key,op)
-            },
+            OpType::Make(_) => self.expand(key, op),
             _ => panic!("not implemented"),
             //_ => {}
         }
@@ -195,7 +186,8 @@ impl Diff2 {
                         .and_then(|obj| obj.props.get(prop))
                         .map(|ops| self.add_values(key, &ops));
                 }
-                let child = self.get_child(key, target).unwrap();
+                let child = self.get_child(key, target);
+                let child = child.unwrap();
                 child.expand_path(tail, op_set)
             }
         }
@@ -245,16 +237,16 @@ impl Diff2 {
             })
     }
 
-    fn expand(&mut self, key: &Key, metaop: &OperationWithMetadata) -> &mut Diff2 {
-//        let key = metaop.key();
+    fn expand(&mut self, key: &Key, metaop: &OpHandle) -> &mut Diff2 {
+        //        let key = metaop.key();
         let prop = self
             .props
             .get_or_insert_with(HashMap::new)
             .entry(key.clone())
             .or_insert_with(HashMap::new);
         let child = metaop.child().unwrap();
-        let obj_type = metaop.make_type().unwrap();
-        let link = prop.entry(metaop.opid.clone()).or_insert_with(|| {
+        let obj_type = metaop.obj_type().unwrap();
+        let link = prop.entry(metaop.id.clone()).or_insert_with(|| {
             DiffLink::Link(Diff2 {
                 obj_type,
                 object_id: child.clone(),
@@ -275,22 +267,22 @@ impl Default for Diff2 {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
     Insert { index: usize },
     Remove { index: usize },
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffValue {
     value: PrimitiveValue,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    datatype: Option<DataType>,
+    #[serde(skip_serializing_if = "DataType::is_undefined")]
+    datatype: DataType,
 }
 
-#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum DiffLink {
     Link(Diff2),
     Val(DiffValue),

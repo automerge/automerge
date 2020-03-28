@@ -1,9 +1,9 @@
 use crate::protocol::ObjectID;
-use crate::protocol::{ObjAlias, OpType};
+use crate::protocol::{DataType, ObjAlias, ObjType, OpType, Operation, ReqOpType};
 use crate::time;
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID,
-    OpSet, Operation, Patch, Version,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
+    Patch, Version,
 };
 use std::collections::HashMap;
 
@@ -46,69 +46,36 @@ impl Backend {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
                 let object_id = self.obj_alias.get(&rop.obj);
+                let child = object_id.clone(); // FIXME
 
                 if let Some(child) = &rop.child {
                     self.obj_alias.insert(child.clone(), &id);
                 }
 
-                let delete = rop.action == OpType::Del;
+                let delete = rop.action == ReqOpType::Del;
                 let key =
                     op_set.resolve_key(&id, &object_id, &rop.key, &mut elemids, insert, delete)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
-                let op = match rop.action {
-                    OpType::MakeMap => Operation::MakeMap {
-                        object_id,
-                        key,
-                        pred,
-                        insert,
-                    },
-                    OpType::MakeTable => Operation::MakeTable {
-                        object_id,
-                        key,
-                        pred,
-                        insert,
-                    },
-                    OpType::MakeList => Operation::MakeList {
-                        object_id,
-                        key,
-                        pred,
-                        insert,
-                    },
-                    OpType::MakeText => Operation::MakeText {
-                        object_id,
-                        key,
-                        pred,
-                        insert,
-                    },
-                    OpType::Del => Operation::Delete {
-                        object_id,
-                        key,
-                        pred,
-                    },
-                    OpType::Link => Operation::Link {
-                        object_id,
-                        key,
-                        value: id,
-                        insert,
-                        pred,
-                    }, // FIXME
-                    OpType::Inc => Operation::Increment {
-                        object_id,
-                        key,
-                        value: rop.number_value()?,
-                        insert,
-                        pred,
-                    },
-                    OpType::Set => Operation::Set {
-                        object_id,
-                        key,
-                        value: rop.primitive_value()?,
-                        insert,
-                        pred,
-                        datatype: rop.datatype.clone(),
-                    },
+                let action = match rop.action {
+                    ReqOpType::MakeMap => OpType::Make(ObjType::Map),
+                    ReqOpType::MakeTable => OpType::Make(ObjType::Table),
+                    ReqOpType::MakeList => OpType::Make(ObjType::List),
+                    ReqOpType::MakeText => OpType::Make(ObjType::Text),
+                    ReqOpType::Del => OpType::Del,
+                    ReqOpType::Link => OpType::Link(child),
+                    ReqOpType::Inc => OpType::Inc(rop.number_value()?),
+                    ReqOpType::Set => OpType::Set(
+                        rop.primitive_value()?,
+                        rop.datatype.clone().unwrap_or(DataType::Undefined),
+                    ),
                 };
-                operations.push(op);
+                operations.push(Operation {
+                    action,
+                    obj: object_id.clone(),
+                    key: key.clone(),
+                    pred: pred.clone(),
+                    insert,
+                });
             }
         }
         Ok(Change {

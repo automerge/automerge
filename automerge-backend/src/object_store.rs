@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::{ConcurrentOperations, ElementID, Key, ObjType, OpID};
+//use crate::operation_with_metadata::OperationWithMetadata;
+use crate::{ConcurrentOperations, ElementID, Key, ObjType, OpHandle, OpID};
 use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
 
@@ -15,9 +15,9 @@ pub struct ObjState {
     pub props: HashMap<Key, ConcurrentOperations>, //Vec<OperationWithMetadata>>,
     pub obj_type: ObjType,
     //    pub op_id: OpID,
-    pub inbound: HashSet<OperationWithMetadata>,
+    pub inbound: HashSet<OpHandle>,
     //    pub creator: Option<OperationWithMetadata>,
-    pub following: HashMap<ElementID, Vec<OperationWithMetadata>>,
+    pub following: HashMap<ElementID, Vec<OpHandle>>,
     //    pub insertion: HashMap<ElementID, OperationWithMetadata>,
 }
 
@@ -63,7 +63,7 @@ impl ObjState {
         }
     }
 
-    pub fn insert_after(&mut self, elem: ElementID, op: OperationWithMetadata) {
+    pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
         let following = self.following.entry(elem).or_default();
         following.push(op);
         following.sort_unstable_by(|a, b| b.cmp(a));
@@ -71,8 +71,8 @@ impl ObjState {
 }
 
 pub struct ElementIterator<'a> {
-    pub following: &'a HashMap<ElementID, Vec<OperationWithMetadata>>,
-    pub stack: Vec<Iter<'a, OperationWithMetadata>>,
+    pub following: &'a HashMap<ElementID, Vec<OpHandle>>,
+    pub stack: Vec<Iter<'a, OpHandle>>,
 }
 
 impl<'a> Iterator for ElementIterator<'a> {
@@ -84,10 +84,10 @@ impl<'a> Iterator for ElementIterator<'a> {
         if let Some(mut last) = self.stack.pop() {
             if let Some(next) = last.next() {
                 self.stack.push(last);
-                if let Some(more) = self.following.get(&ElementID::ID(next.opid.clone())) {
+                if let Some(more) = self.following.get(&ElementID::ID(next.id.clone())) {
                     self.stack.push(more.iter());
                 }
-                Some(&next.opid)
+                Some(&next.id)
             } else {
                 self.stack.pop();
                 None

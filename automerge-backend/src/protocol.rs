@@ -15,19 +15,23 @@
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
 use core::cmp::max;
+use serde::de;
+use serde::de::{Error, MapAccess, Unexpected, Visitor};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+use std::rc::Rc;
 use std::str::FromStr;
-use serde::de;
-use serde::de::Visitor;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
-use crate::error;
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum ObjType {
     Map,
@@ -382,6 +386,17 @@ pub enum DataType {
     Counter,
     #[serde(rename = "timestamp")]
     Timestamp,
+    #[serde(rename = "undefined")]
+    Undefined,
+}
+
+impl DataType {
+    pub fn is_undefined(d: &DataType) -> bool {
+        match d {
+            DataType::Undefined => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -429,7 +444,7 @@ impl<'de> Deserialize<'de> for RequestKey {
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub enum OpType {
+pub enum ReqOpType {
     MakeMap,
     MakeTable,
     MakeList,
@@ -442,7 +457,7 @@ pub enum OpType {
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 pub struct OpRequest {
-    pub action: OpType,
+    pub action: ReqOpType,
     pub obj: String,
     pub key: RequestKey,
     pub child: Option<String>,
@@ -461,10 +476,10 @@ impl OpRequest {
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            OpType::MakeMap => Some(ObjType::Map),
-            OpType::MakeTable => Some(ObjType::Table),
-            OpType::MakeList => Some(ObjType::List),
-            OpType::MakeText => Some(ObjType::Text),
+            ReqOpType::MakeMap => Some(ObjType::Map),
+            ReqOpType::MakeTable => Some(ObjType::Table),
+            ReqOpType::MakeList => Some(ObjType::List),
+            ReqOpType::MakeText => Some(ObjType::Text),
             _ => None,
         }
     }
@@ -499,130 +514,314 @@ impl ObjAlias {
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-#[serde(tag = "action")]
-pub enum Operation {
-    #[serde(rename = "makeMap")]
-    MakeMap {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "makeList")]
-    MakeList {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "makeText")]
-    MakeText {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "makeTable")]
-    MakeTable {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "set")]
-    Set {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        value: PrimitiveValue,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        datatype: Option<DataType>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "link")]
-    Link {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        value: OpID,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
-    #[serde(rename = "del")]
-    Delete {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        pred: Vec<OpID>,
-    },
-    #[serde(rename = "inc")]
-    Increment {
-        #[serde(rename = "obj")]
-        object_id: ObjectID,
-        key: Key,
-        value: f64,
-        pred: Vec<OpID>,
-        #[serde(skip_serializing_if = "helper::is_false", default)]
-        insert: bool,
-    },
+#[derive(Clone)]
+pub struct OpHandle {
+    pub id: OpID,
+    change: Rc<Change>,
+    index: usize,
+    delta: f64,
+}
+
+impl OpHandle {
+    pub fn extract(change: &Rc<Change>) -> Vec<OpHandle> {
+        change
+            .operations
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let id = OpID::ID(change.start_op + (index as u64), change.actor_id.0.clone());
+                OpHandle {
+                    id,
+                    change: change.clone(),
+                    index,
+                    delta: 0.0,
+                }
+            })
+            .collect()
+    }
+
+    pub fn adjusted_value(&self) -> PrimitiveValue {
+        match &self.action {
+            OpType::Set(PrimitiveValue::Number(a),DataType::Counter) => PrimitiveValue::Number(a + self.delta),
+            OpType::Set(val,_) => val.clone(),
+            _ => PrimitiveValue::Null,
+        }
+    }
+
+    pub fn child(&self) -> Option<ObjectID> {
+        match &self.action {
+            OpType::Make(_) => Some(self.id.to_object_id()),
+            OpType::Link(obj) => Some(obj.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn operation_key(&self) -> Key {
+        if self.insert {
+            self.id.to_key()
+        } else {
+            self.key.clone()
+        }
+    }
+
+    pub fn maybe_increment(&mut self, inc: &OpHandle) {
+        if let OpType::Inc(amount) = inc.action {
+            if inc.pred.contains(&self.id) {
+                match self.action {
+                    OpType::Set(PrimitiveValue::Number(_), DataType::Counter) => {
+                        self.delta += amount;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn actor_id(&self) -> &ActorID {
+        &self.change.actor_id
+    }
+
+    pub fn counter(&self) -> u64 {
+        self.change.start_op + (self.index as u64)
+    }
+}
+
+impl fmt::Debug for OpHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpHandle")
+            .field("id", &self.id.to_string())
+            .field("action", &self.action)
+            .field("obj", &self.obj)
+            .field("key", &self.key)
+            .finish()
+    }
+}
+
+impl Ord for OpHandle {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.id.cmp(&other.id)
+    }
+}
+
+impl Hash for OpHandle {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialOrd for OpHandle {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for OpHandle {
+    // FIXME - what about delta?  this could cause an issue
+    fn eq(&self, other: &Self) -> bool {
+        self.id.eq(&other.id)
+    }
+}
+
+impl Eq for OpHandle {}
+
+impl Deref for OpHandle {
+    type Target = Operation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.change.operations[self.index]
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum OpType {
+    Make(ObjType),
+    Del,
+    Link(ObjectID),
+    Inc(f64),
+    Set(PrimitiveValue, DataType),
+}
+
+impl OpType {
+    pub fn to_str(&self) -> &str {
+        match self {
+            OpType::Make(ObjType::Map) => "makeMap",
+            OpType::Make(ObjType::Table) => "makeTable",
+            OpType::Make(ObjType::List) => "makeList",
+            OpType::Make(ObjType::Text) => "makeText",
+            OpType::Del => "del",
+            OpType::Link(_) => "link",
+            OpType::Inc(_) => "inc",
+            OpType::Set(_, _) => "set",
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct Operation {
+    pub action: OpType,
+    pub obj: ObjectID,
+    pub key: Key,
+    pub pred: Vec<OpID>,
+    pub insert: bool,
 }
 
 impl Operation {
     pub fn is_make(&self) -> bool {
-        match self {
-            Operation::MakeMap { .. }
-            | Operation::MakeList { .. }
-            | Operation::MakeText { .. }
-            | Operation::MakeTable { .. } => true,
+        self.obj_type().is_some()
+    }
+
+    pub fn is_inc(&self) -> bool {
+        match self.action {
+            OpType::Inc(_) => true,
             _ => false,
         }
     }
 
-    pub fn child(&self, opid: &OpID) -> Option<ObjectID> {
-        match &self {
-            Operation::MakeMap { .. }
-            | Operation::MakeList { .. }
-            | Operation::MakeText { .. }
-            | Operation::MakeTable { .. } => Some(opid.clone().to_object_id()),
-            Operation::Link { .. } => panic!("not implemented"),
-            _ => None,
-        }
-    }
-
     pub fn obj_type(&self) -> Option<ObjType> {
-        match self {
-            Operation::MakeMap { .. } => Some(ObjType::Map),
-            Operation::MakeTable { .. } => Some(ObjType::Table),
-            Operation::MakeList { .. } => Some(ObjType::List),
-            Operation::MakeText { .. } => Some(ObjType::Text),
+        match self.action {
+            OpType::Make(t) => Some(t),
             _ => None,
         }
     }
+}
 
-    pub fn obj(&self) -> &ObjectID {
-        match self {
-            Operation::MakeMap { object_id, .. }
-            | Operation::MakeTable { object_id, .. }
-            | Operation::MakeList { object_id, .. }
-            | Operation::MakeText { object_id, .. }
-//            | Operation::Insert { list_id: object_id, ..  }
-            | Operation::Set { object_id, .. }
-            | Operation::Link { object_id, .. }
-            | Operation::Delete { object_id, .. }
-            | Operation::Increment { object_id, .. } => object_id,
+impl Serialize for Operation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut fields = 4;
+
+        if self.insert {
+            fields += 1
         }
+
+        match &self.action {
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
+            OpType::Set(_, _) => fields += 2,
+            _ => {}
+        }
+
+        let mut op = serializer.serialize_struct("Operation", fields)?;
+        op.serialize_field("action", &self.action.to_str())?;
+        op.serialize_field("obj", &self.obj)?;
+        op.serialize_field("key", &self.key)?;
+        if self.insert {
+            op.serialize_field("insert", &self.insert)?;
+        }
+        match &self.action {
+            OpType::Link(child) => op.serialize_field("child", &child)?,
+            OpType::Inc(n) => op.serialize_field("value", &n)?,
+            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
+            OpType::Set(value, datatype) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &datatype)?;
+            }
+            _ => {}
+        }
+        op.serialize_field("pred", &self.pred)?;
+        op.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Operation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &["ops", "deps", "message", "seq", "actor", "requestType"];
+        struct OperationVisitor;
+        impl<'de> Visitor<'de> for OperationVisitor {
+            type Value = Operation;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("An operation object")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Operation, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                fn read_field<'de, T, M>(
+                    name: &'static str,
+                    data: &mut Option<T>,
+                    map: &mut M,
+                ) -> Result<(), M::Error>
+                where
+                    M: MapAccess<'de>,
+                    T: Deserialize<'de>,
+                {
+                    if data.is_some() {
+                        Err(Error::duplicate_field(name))
+                    } else {
+                        data.replace(map.next_value()?);
+                        Ok(())
+                    }
+                }
+
+                let mut action: Option<ReqOpType> = None;
+                let mut obj: Option<ObjectID> = None;
+                let mut key: Option<Key> = None;
+                let mut pred: Option<Vec<OpID>> = None;
+                let mut insert: Option<bool> = None;
+                let mut datatype: Option<DataType> = None;
+                let mut value: Option<PrimitiveValue> = None;
+                let mut child: Option<ObjectID> = None;
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_ref() {
+                        "action" => read_field("action", &mut action, &mut map)?,
+                        "obj" => read_field("obj", &mut obj, &mut map)?,
+                        "key" => read_field("key", &mut key, &mut map)?,
+                        "pred" => read_field("pred", &mut pred, &mut map)?,
+                        "insert" => read_field("insert", &mut insert, &mut map)?,
+                        "datatype" => read_field("datatype", &mut datatype, &mut map)?,
+                        "value" => read_field("value", &mut value, &mut map)?,
+                        "child" => read_field("child", &mut child, &mut map)?,
+                        _ => return Err(Error::unknown_field(&field, FIELDS)),
+                    }
+                }
+                let action = action.ok_or_else(|| Error::missing_field("action"))?;
+                let obj = obj.ok_or_else(|| Error::missing_field("obj"))?;
+                let key = key.ok_or_else(|| Error::missing_field("key"))?;
+                let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
+                let insert = insert.unwrap_or(false);
+                let action = match action {
+                    ReqOpType::MakeMap => OpType::Make(ObjType::Map),
+                    ReqOpType::MakeTable => OpType::Make(ObjType::Table),
+                    ReqOpType::MakeList => OpType::Make(ObjType::List),
+                    ReqOpType::MakeText => OpType::Make(ObjType::Text),
+                    ReqOpType::Del => OpType::Del,
+                    ReqOpType::Link => {
+                        OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
+                    }
+                    ReqOpType::Set => OpType::Set(
+                        value.ok_or_else(|| Error::missing_field("value"))?,
+                        datatype.unwrap_or(DataType::Undefined),
+                    ),
+                    ReqOpType::Inc => match value {
+                        Some(PrimitiveValue::Number(f)) => Ok(OpType::Inc(f)),
+                        Some(PrimitiveValue::Str(s)) => {
+                            Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
+                        }
+                        Some(PrimitiveValue::Boolean(b)) => {
+                            Err(Error::invalid_value(Unexpected::Bool(b), &"a number"))
+                        }
+                        Some(PrimitiveValue::Null) => {
+                            Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
+                        }
+                        None => Err(Error::missing_field("value")),
+                    }?,
+                };
+                Ok(Operation {
+                    action,
+                    obj,
+                    key,
+                    insert,
+                    pred,
+                })
+            }
+        }
+        deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
     }
 }
 

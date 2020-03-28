@@ -1,17 +1,16 @@
 use crate::error::AutomergeError;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::Operation;
+use crate::{OpHandle, OpType};
 use std::ops::Deref;
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConcurrentOperations {
-    pub ops: Vec<OperationWithMetadata>,
+    pub ops: Vec<OpHandle>,
 }
 
 impl Deref for ConcurrentOperations {
-    type Target = Vec<OperationWithMetadata>;
+    type Target = Vec<OpHandle>;
 
     fn deref(&self) -> &Self::Target {
         &self.ops
@@ -73,8 +72,8 @@ impl ConcurrentOperations {
 
     pub(crate) fn incorporate_new_op(
         &mut self,
-        new_op: &OperationWithMetadata,
-    ) -> Result<Vec<OperationWithMetadata>, AutomergeError> {
+        new_op: &OpHandle,
+    ) -> Result<Vec<OpHandle>, AutomergeError> {
         let mut overwritten_ops = Vec::new();
         if new_op.is_inc() {
             self.ops
@@ -83,7 +82,7 @@ impl ConcurrentOperations {
         } else {
             let mut i = 0;
             while i != self.ops.len() {
-                if new_op.pred().contains(&self.ops[i].opid.clone()) {
+                if new_op.pred.contains(&self.ops[i].id) {
                     overwritten_ops.push(self.ops.swap_remove(i));
                 } else {
                     i += 1;
@@ -91,12 +90,8 @@ impl ConcurrentOperations {
             }
         }
 
-        match new_op.operation {
-            Operation::Set { .. }
-            | Operation::MakeTable { .. }
-            | Operation::MakeMap { .. }
-            | Operation::MakeText { .. }
-            | Operation::MakeList { .. } => {
+        match new_op.action {
+            OpType::Set(_, _) | OpType::Link(_) | OpType::Make(_) => {
                 self.ops.push(new_op.clone());
             }
             _ => {}

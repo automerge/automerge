@@ -9,12 +9,13 @@
 use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ObjectID, OpID, Operation, RequestKey};
+//use crate::operation_with_metadata::OperationWithMetadata;
+use crate::protocol::{Change, Clock, ObjectID, OpHandle, OpID, Operation, RequestKey};
 use crate::{ChangeRequest, Diff2, DiffEdit, Key, ObjType, PendingDiff};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::rc::Rc;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -110,34 +111,24 @@ impl OpSet {
         None
     }
 
-    fn apply_ops(&mut self, change: &Change, undoable: bool, diffs: &mut Vec<PendingDiff>) -> Result<Vec<Operation>, AutomergeError> {
+    fn apply_ops(
+        &mut self,
+        change: &Rc<Change>,
+        undoable: bool,
+        diffs: &mut Vec<PendingDiff>,
+    ) -> Result<Vec<Operation>, AutomergeError> {
         let mut all_undo_ops = Vec::new();
-        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
-        let start_op = change.start_op;
-        let actor_id = change.actor_id.clone();
-        let seq = change.seq;
-        //let num_ops = change.operations.len() as u64;
-        let operations = change.operations.clone(); // FIXME - shouldnt need this clone
-        for (n, operation) in operations.iter().enumerate() {
-            // Store newly created object IDs so we can decide whether we need
-            // undo ops later
-            let metaop = OperationWithMetadata {
-                opid: OpID::ID(start_op + (n as u64), actor_id.0.clone()),
-                seq,
-                actor_id: actor_id.clone(),
-                operation: operation.clone(),
-            };
-
-            if metaop.is_make() {
-                new_object_ids.insert(metaop.opid.to_object_id());
+        let mut new_objects: HashSet<OpID> = HashSet::new();
+        for op in OpHandle::extract(change).iter() {
+            if op.is_make() {
+                new_objects.insert(op.id.clone());
             }
 
-            let (diff, undo_ops) = self.apply_op(metaop.clone())?;
+            let (diff, undo_ops) = self.apply_op(op)?;
 
-            // FIXME - this should be Option<Vec<..>> but I couldnt get it to work
             diffs.push(diff);
 
-            if undoable && !(new_object_ids.contains(metaop.object_id())) {
+            if undoable && !(new_objects.contains(&op.id)) {
                 all_undo_ops.extend(undo_ops);
             }
         }
@@ -161,6 +152,7 @@ impl OpSet {
         // need the undo operation for the creation of the list to achieve
         // the undo), so we track newly created objects and only store undo
         // operations which don't operate on them.
+        let change = Rc::new(change);
         let actor_id = change.actor_id.clone();
         let start_op = change.start_op;
         let seq = change.seq;
@@ -169,18 +161,17 @@ impl OpSet {
             .states
             .transitive_deps(&change.deps.with(&change.actor_id, change.seq - 1));
 
-        if !self.states.add_change(change.clone(), all_deps.clone())? { // FIXME - why so many clones
+        self.clock.set(&actor_id, seq);
+        self.deps.subtract(&all_deps);
+        self.deps.set(&actor_id, seq);
+
+        if !self.states.add_change(&change, all_deps)? {
             return Ok(());
         }
 
         let all_undo_ops = self.apply_ops(&change, undoable, diffs)?;
 
         self.max_op = max(self.max_op, start_op + num_ops - 1);
-
-        self.clock.set(&actor_id, seq);
-
-        self.deps.subtract(&all_deps);
-        self.deps.set(&actor_id, seq);
 
         if undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
@@ -202,32 +193,32 @@ impl OpSet {
     /// later.
     pub fn apply_op(
         &mut self,
-        op: OperationWithMetadata,
+        op: &OpHandle,
     ) -> Result<(PendingDiff, Vec<Operation>), AutomergeError> {
-        if let (Some(child), Some(obj_type)) = (op.child(), op.make_type()) {
+        if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             self.objs.insert(child, ObjState::new(obj_type));
         }
 
         let undo_ops = Vec::new();
 
-        let object_id = op.object_id();
+        let object_id = &op.obj;
         let object = self.get_obj_mut(&object_id)?;
 
         if object.is_seq() {
-            if op.insert() {
-                object.insert_after(op.key().as_element_id()?, op.clone());
+            if op.insert {
+                object.insert_after(op.key.as_element_id()?, op.clone());
             }
 
-            let ops = object.props.entry(op.list_key()).or_default();
+            let ops = object.props.entry(op.operation_key()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
 
-            let index = object.get_index_for(&op.list_key().to_opid()?)?;
+            let index = object.get_index_for(&op.operation_key().to_opid()?)?;
 
             self.unlink(&op, &overwritten_ops)?;
 
             Ok((PendingDiff::Seq(op.clone(), index), undo_ops))
         } else {
-            let ops = object.props.entry(op.key().clone()).or_default();
+            let ops = object.props.entry(op.key.clone()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
             self.unlink(&op, &overwritten_ops)?;
 
@@ -235,11 +226,7 @@ impl OpSet {
         }
     }
 
-    fn unlink(
-        &mut self,
-        op: &OperationWithMetadata,
-        overwritten: &[OperationWithMetadata],
-    ) -> Result<(), AutomergeError> {
+    fn unlink(&mut self, op: &OpHandle, overwritten: &[OpHandle]) -> Result<(), AutomergeError> {
         if let Some(child) = op.child() {
             self.get_obj_mut(&child)?.inbound.insert(op.clone());
         }
@@ -252,15 +239,19 @@ impl OpSet {
         Ok(())
     }
 
-    fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OperationWithMetadata>,AutomergeError> {
+    fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
         let mut object_id = _object_id;
         let mut path = Vec::new();
         while *object_id != ObjectID::Root {
-            if let Some(inbound) = self.objs.get(object_id).and_then(|obj| obj.inbound.iter().next()) {
+            if let Some(inbound) = self
+                .objs
+                .get(object_id)
+                .and_then(|obj| obj.inbound.iter().next())
+            {
                 path.insert(0, inbound);
-                object_id = inbound.object_id();
+                object_id = &inbound.obj;
             } else {
-                return Err(AutomergeError::NoPathToObject(object_id.clone()))
+                return Err(AutomergeError::NoPathToObject(object_id.clone()));
             }
         }
         Ok(path)
@@ -273,17 +264,17 @@ impl OpSet {
         let mut o = object_id;
         let mut path = Vec::new();
         while let Some(inbound) = self.objs.get(o).and_then(|o| o.inbound.iter().next()) {
-            o = inbound.object_id();
+            o = &inbound.obj;
             let object = self.objs.get(o).unwrap();
             if object.is_seq() {
-                let index = object.get_index_for(&inbound.list_key().to_opid()?)?;
+                let index = object.get_index_for(&inbound.operation_key().to_opid()?)?;
                 let key = Key(index.to_string());
                 path.insert(
                     0,
                     (
-                        inbound.object_id().clone(),
+                        inbound.obj.clone(),
                         key,
-                        inbound.list_key().clone(),
+                        inbound.operation_key().clone(),
                         inbound.child().unwrap(),
                     ),
                 );
@@ -291,9 +282,9 @@ impl OpSet {
                 path.insert(
                     0,
                     (
-                        inbound.object_id().clone(),
-                        inbound.key().clone(),
-                        inbound.key().clone(),
+                        inbound.obj.clone(),
+                        inbound.key.clone(),
+                        inbound.key.clone(),
                         inbound.child().unwrap(),
                     ),
                 );
@@ -308,21 +299,21 @@ impl OpSet {
         for diff in pending.iter() {
             match diff {
                 PendingDiff::Seq(op, index) => {
-                    let object_id = op.object_id();
+                    let object_id = &op.obj;
                     let path = self.get_path(object_id)?;
                     let object = self.objs.get(object_id).unwrap();
-                    let ops = object.props.get(&op.list_key()).unwrap();
+                    let ops = object.props.get(&op.operation_key()).unwrap();
 
                     let node = diff2.expand_path(&path, self);
 
-                    if op.insert() {
+                    if op.insert {
                         node.add_insert(*index);
                     } else if ops.is_empty() {
                         node.add_remove(*index);
                     }
 
                     if !ops.is_empty() {
-                        let final_index = object.get_index_for(&op.list_key().to_opid()?)?;
+                        let final_index = object.get_index_for(&op.operation_key().to_opid()?)?;
                         let key = Key(final_index.to_string());
                         node.add_values(&key, &ops);
                     } else {
@@ -330,12 +321,12 @@ impl OpSet {
                     }
                 }
                 PendingDiff::Map(op) => {
-                    let object_id = op.object_id();
+                    let object_id = &op.obj;
                     let path = self.get_path(object_id)?;
                     let object = self.objs.get(object_id).unwrap();
-                    let key = op.key();
-                    let ops = object.props.get(&key).unwrap();
-                    diff2.expand_path(&path, self).add_values(&key, &ops);
+                    let key = &op.key;
+                    let ops = object.props.get(key).unwrap();
+                    diff2.expand_path(&path, self).add_values(key, &ops);
                 }
                 PendingDiff::NoOp => {}
             }
@@ -348,7 +339,7 @@ impl OpSet {
         self.objs
             .get(object_id)
             .and_then(|obj| obj.props.get(key))
-            .map(|con_ops| con_ops.iter().map(|op| op.opid.clone()).collect())
+            .map(|con_ops| con_ops.iter().map(|op| op.id.clone()).collect())
     }
 
     pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
@@ -472,7 +463,7 @@ impl OpSet {
         for (key, ops) in object.props.iter() {
             for op in ops.iter() {
                 if let Some(child_id) = op.child() {
-                    diff.add_child(&key, &op.opid, self.construct_object(&child_id)?);
+                    diff.add_child(&key, &op.id, self.construct_object(&child_id)?);
                 } else {
                     diff.add_value(&key, &op);
                 }
@@ -506,7 +497,7 @@ impl OpSet {
                     let key = Key(index.to_string());
                     for op in ops.iter() {
                         if let Some(child_id) = op.child() {
-                            diff.add_child(&key, &op.opid, self.construct_object(&child_id)?);
+                            diff.add_child(&key, &op.id, self.construct_object(&child_id)?);
                         } else {
                             diff.add_value(&key, &op);
                         }
