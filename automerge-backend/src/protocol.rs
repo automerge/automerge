@@ -542,8 +542,10 @@ impl OpHandle {
 
     pub fn adjusted_value(&self) -> PrimitiveValue {
         match &self.action {
-            OpType::Set(PrimitiveValue::Number(a),DataType::Counter) => PrimitiveValue::Number(a + self.delta),
-            OpType::Set(val,_) => val.clone(),
+            OpType::Set(PrimitiveValue::Number(a), DataType::Counter) => {
+                PrimitiveValue::Number(a + self.delta)
+            }
+            OpType::Set(val, _) => val.clone(),
             _ => PrimitiveValue::Null,
         }
     }
@@ -668,6 +670,32 @@ pub struct Operation {
 impl Operation {
     pub fn is_make(&self) -> bool {
         self.obj_type().is_some()
+    }
+
+    pub fn is_basic_assign(&self) -> bool {
+        !self.insert
+            && match self.action {
+                OpType::Del | OpType::Set(_, _) | OpType::Inc(_) | OpType::Link(_) => true,
+                _ => false,
+            }
+    }
+
+    pub(crate) fn merge(&mut self, other: Operation) {
+        if let OpType::Inc(delta) = other.action {
+            match self.action {
+                OpType::Set(PrimitiveValue::Number(number), DataType::Counter) => {
+                    self.action =
+                        OpType::Set(PrimitiveValue::Number(number + delta), DataType::Counter)
+                }
+                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
+                _ => {}
+            } // error?
+        } else {
+            match other.action {
+                OpType::Set(_, _) | OpType::Link(_) | OpType::Del => self.action = other.action,
+                _ => {}
+            }
+        }
     }
 
     pub fn is_inc(&self) -> bool {

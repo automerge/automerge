@@ -69,13 +69,27 @@ impl Backend {
                         rop.datatype.clone().unwrap_or(DataType::Undefined),
                     ),
                 };
-                operations.push(Operation {
+
+                let op = Operation {
                     action,
                     obj: object_id.clone(),
                     key: key.clone(),
                     pred: pred.clone(),
                     insert,
-                });
+                };
+
+                if op.is_basic_assign() {
+                    if let Some(ref mut old_op) = operations
+                        .iter_mut()
+                        .find(|old| old.obj == op.obj && old.key == op.key)
+                    {
+                        old_op.merge(op);
+                    } else {
+                        operations.push(op);
+                    }
+                } else {
+                    operations.push(op);
+                }
             }
         }
         Ok(Change {
