@@ -110,39 +110,14 @@ impl OpSet {
         None
     }
 
-    fn apply_change(
-        &mut self,
-        change: Change,
-        _local: bool,
-        undoable: bool,
-        diffs: &mut Vec<PendingDiff>,
-    ) -> Result<(), AutomergeError> {
-        // This method is a little more complicated than it intuitively should
-        // be due to the bookkeeping required for undo. If we're asked to make
-        // this operation undoable we have to store the undo operations for
-        // each operation and then add them to the undo stack at the end of the
-        // method. However, it's unnecessary to store undo operations for
-        // objects which are created by this change (e.g if there's an insert
-        // operation for a list which was created in this operation we only
-        // need the undo operation for the creation of the list to achieve
-        // the undo), so we track newly created objects and only store undo
-        // operations which don't operate on them.
-        let actor_id = change.actor_id.clone();
-        let seq = change.seq;
-        let start_op = change.start_op;
-        let num_ops = change.operations.len() as u64;
-        let operations = change.operations.clone(); // FIXME - shouldnt need this clone
-        let all_deps = self
-            .states
-            .transitive_deps(&change.deps.with(&change.actor_id, change.seq - 1));
-
-        if !self.states.add_change(change, all_deps.clone())? {
-            return Ok(());
-        }
-
+    fn apply_ops(&mut self, change: &Change, undoable: bool, diffs: &mut Vec<PendingDiff>) -> Result<Vec<Operation>, AutomergeError> {
         let mut all_undo_ops = Vec::new();
         let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
-
+        let start_op = change.start_op;
+        let actor_id = change.actor_id.clone();
+        let seq = change.seq;
+        //let num_ops = change.operations.len() as u64;
+        let operations = change.operations.clone(); // FIXME - shouldnt need this clone
         for (n, operation) in operations.iter().enumerate() {
             // Store newly created object IDs so we can decide whether we need
             // undo ops later
@@ -166,6 +141,39 @@ impl OpSet {
                 all_undo_ops.extend(undo_ops);
             }
         }
+        Ok(all_undo_ops)
+    }
+
+    fn apply_change(
+        &mut self,
+        change: Change,
+        _local: bool,
+        undoable: bool,
+        diffs: &mut Vec<PendingDiff>,
+    ) -> Result<(), AutomergeError> {
+        // This method is a little more complicated than it intuitively should
+        // be due to the bookkeeping required for undo. If we're asked to make
+        // this operation undoable we have to store the undo operations for
+        // each operation and then add them to the undo stack at the end of the
+        // method. However, it's unnecessary to store undo operations for
+        // objects which are created by this change (e.g if there's an insert
+        // operation for a list which was created in this operation we only
+        // need the undo operation for the creation of the list to achieve
+        // the undo), so we track newly created objects and only store undo
+        // operations which don't operate on them.
+        let actor_id = change.actor_id.clone();
+        let start_op = change.start_op;
+        let seq = change.seq;
+        let num_ops = change.operations.len() as u64;
+        let all_deps = self
+            .states
+            .transitive_deps(&change.deps.with(&change.actor_id, change.seq - 1));
+
+        if !self.states.add_change(change.clone(), all_deps.clone())? { // FIXME - why so many clones
+            return Ok(());
+        }
+
+        let all_undo_ops = self.apply_ops(&change, undoable, diffs)?;
 
         self.max_op = max(self.max_op, start_op + num_ops - 1);
 
@@ -242,6 +250,20 @@ impl OpSet {
             }
         }
         Ok(())
+    }
+
+    fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OperationWithMetadata>,AutomergeError> {
+        let mut object_id = _object_id;
+        let mut path = Vec::new();
+        while *object_id != ObjectID::Root {
+            if let Some(inbound) = self.objs.get(object_id).and_then(|obj| obj.inbound.iter().next()) {
+                path.insert(0, inbound);
+                object_id = inbound.object_id();
+            } else {
+                return Err(AutomergeError::NoPathToObject(object_id.clone()))
+            }
+        }
+        Ok(path)
     }
 
     fn get_path(

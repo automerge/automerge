@@ -2,7 +2,7 @@ use crate::protocol::ObjectID;
 use crate::protocol::{ObjAlias, OpType};
 use crate::time;
 use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, ObjType, OpID,
+    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID,
     OpSet, Operation, Patch, Version,
 };
 use std::collections::HashMap;
@@ -46,29 +46,9 @@ impl Backend {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
                 let object_id = self.obj_alias.get(&rop.obj);
-                let mut _child = rop.child.clone();
 
                 if let Some(child) = &rop.child {
-                    let obj_type =
-                        op_set
-                            .get_obj(&object_id)
-                            .map(|o| o.obj_type)
-                            .ok()
-                            .or_else(|| {
-                                operations.iter().find_map(|o| {
-                                    if o.child(&id).as_ref() == Some(&object_id) {
-                                        o.obj_type()
-                                    } else {
-                                        None
-                                    }
-                                })
-                            });
-                    if !(obj_type == Some(ObjType::Table) && rop.obj_type() == Some(ObjType::Map)) {
-                        self.obj_alias.insert(child.clone(), &id);
-                        _child = None;
-                    } else {
-                        // table-alias hack
-                    }
+                    self.obj_alias.insert(child.clone(), &id);
                 }
 
                 let delete = rop.action == OpType::Del;
@@ -81,7 +61,6 @@ impl Backend {
                         key,
                         pred,
                         insert,
-                        child: _child,
                     },
                     OpType::MakeTable => Operation::MakeTable {
                         object_id,

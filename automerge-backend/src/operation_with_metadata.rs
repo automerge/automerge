@@ -53,7 +53,6 @@ impl OperationWithMetadata {
 
     pub fn child(&self) -> Option<ObjectID> {
         match &self.operation {
-            Operation::MakeMap { child: Some(c), .. } => Some(ObjectID::Str(c.clone())),
             Operation::MakeMap { .. }
             | Operation::MakeList { .. }
             | Operation::MakeText { .. }

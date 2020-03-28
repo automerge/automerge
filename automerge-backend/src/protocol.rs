@@ -14,17 +14,17 @@
 //! let changes_str = "<paste the contents of the output here>";
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
-use crate::error::AutomergeError;
-use crate::helper;
 use core::cmp::max;
-use serde::de;
-use serde::de::Visitor;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use serde::de;
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::error::AutomergeError;
+use crate::helper;
 use crate::error;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy)]
@@ -508,7 +508,6 @@ pub enum Operation {
         object_id: ObjectID,
         key: Key,
         pred: Vec<OpID>,
-        child: Option<String>,
         #[serde(skip_serializing_if = "helper::is_false", default)]
         insert: bool,
     },
@@ -593,7 +592,6 @@ impl Operation {
 
     pub fn child(&self, opid: &OpID) -> Option<ObjectID> {
         match &self {
-            Operation::MakeMap { child: Some(c), .. } => Some(ObjectID::Str(c.clone())),
             Operation::MakeMap { .. }
             | Operation::MakeList { .. }
             | Operation::MakeText { .. }

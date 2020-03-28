@@ -6,6 +6,7 @@ use std::fmt;
 pub enum AutomergeError {
     DuplicateObjectError,
     MissingObjectError(ObjectID),
+    NoPathToObject(ObjectID),
     InvalidObjectType(String),
     IndexOutOfBounds(usize),
     InvalidValue(OpID),
