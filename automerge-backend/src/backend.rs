@@ -1,10 +1,8 @@
-use crate::protocol::ObjectID;
-use crate::protocol::{DataType, ObjAlias, ObjType, OpType, Operation, ReqOpType};
+use crate::op_set::{OpSet, Version};
+use crate::patch::{Diff, Patch};
+use crate::protocol::{DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType};
 use crate::time;
-use crate::{
-    ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, Diff2, OpID, OpSet,
-    Patch, Version,
-};
+use crate::{ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -108,7 +106,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Diff2,
+        diffs: Diff,
         request: Option<&ChangeRequest>,
         incremental: bool,
     ) -> Result<Patch, AutomergeError> {

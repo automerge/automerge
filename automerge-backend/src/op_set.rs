@@ -9,9 +9,10 @@
 use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
-//use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ObjectID, OpHandle, OpID, Operation, RequestKey};
-use crate::{ChangeRequest, Diff2, DiffEdit, Key, ObjType, PendingDiff};
+use crate::patch::{Diff, DiffEdit, PendingDiff};
+use crate::protocol::{
+    Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpHandle, OpID, Operation, RequestKey,
+};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -239,23 +240,25 @@ impl OpSet {
         Ok(())
     }
 
-    fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
-        let mut object_id = _object_id;
-        let mut path = Vec::new();
-        while *object_id != ObjectID::Root {
-            if let Some(inbound) = self
-                .objs
-                .get(object_id)
-                .and_then(|obj| obj.inbound.iter().next())
-            {
-                path.insert(0, inbound);
-                object_id = &inbound.obj;
-            } else {
-                return Err(AutomergeError::NoPathToObject(object_id.clone()));
+    /*
+        fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
+            let mut object_id = _object_id;
+            let mut path = Vec::new();
+            while *object_id != ObjectID::Root {
+                if let Some(inbound) = self
+                    .objs
+                    .get(object_id)
+                    .and_then(|obj| obj.inbound.iter().next())
+                {
+                    path.insert(0, inbound);
+                    object_id = &inbound.obj;
+                } else {
+                    return Err(AutomergeError::NoPathToObject(object_id.clone()));
+                }
             }
+            Ok(path)
         }
-        Ok(path)
-    }
+    */
 
     fn get_path(
         &self,
@@ -293,8 +296,8 @@ impl OpSet {
         Ok(path)
     }
 
-    pub fn finalize_diffs(&self, pending: Vec<PendingDiff>) -> Result<Diff2, AutomergeError> {
-        let mut diff2 = Diff2::new();
+    pub fn finalize_diffs(&self, pending: Vec<PendingDiff>) -> Result<Diff, AutomergeError> {
+        let mut diff2 = Diff::new();
 
         for diff in pending.iter() {
             match diff {
@@ -453,8 +456,8 @@ impl OpSet {
         &self,
         object_id: &ObjectID,
         object: &ObjState,
-    ) -> Result<Diff2, AutomergeError> {
-        let mut diff = Diff2 {
+    ) -> Result<Diff, AutomergeError> {
+        let mut diff = Diff {
             object_id: object_id.clone(),
             edits: None,
             props: Some(HashMap::new()),
@@ -476,8 +479,8 @@ impl OpSet {
         &self,
         object_id: &ObjectID,
         object: &ObjState,
-    ) -> Result<Diff2, AutomergeError> {
-        let mut diff = Diff2 {
+    ) -> Result<Diff, AutomergeError> {
+        let mut diff = Diff {
             object_id: object_id.clone(),
             edits: Some(Vec::new()),
             props: Some(HashMap::new()),
@@ -509,7 +512,7 @@ impl OpSet {
         Ok(diff)
     }
 
-    pub fn construct_object(&self, object_id: &ObjectID) -> Result<Diff2, AutomergeError> {
+    pub fn construct_object(&self, object_id: &ObjectID) -> Result<Diff, AutomergeError> {
         let object = self.get_obj(&object_id)?;
         if object.is_seq() {
             self.construct_list(object_id, object)

@@ -569,11 +569,8 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let OpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                match self.action {
-                    OpType::Set(PrimitiveValue::Number(_), DataType::Counter) => {
-                        self.delta += amount;
-                    }
-                    _ => {}
+                if let OpType::Set(PrimitiveValue::Number(_), DataType::Counter) = self.action {
+                    self.delta += amount;
                 }
             }
         }

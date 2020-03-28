@@ -1,6 +1,6 @@
+use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-//use crate::operation_with_metadata::OperationWithMetadata;
-use crate::{ConcurrentOperations, ElementID, Key, ObjType, OpHandle, OpID};
+use crate::protocol::{ElementID, Key, ObjType, OpHandle, OpID};
 use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
 
