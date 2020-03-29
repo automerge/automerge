@@ -554,6 +554,10 @@ impl Operation {
             }
     }
 
+    pub fn can_merge(&self, other: &Operation) -> bool {
+        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
+    }
+
     pub(crate) fn merge(&mut self, other: Operation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {

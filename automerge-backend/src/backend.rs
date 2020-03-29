@@ -78,7 +78,7 @@ impl Backend {
                 };
 
                 if op.is_basic_assign() {
-                    if let Some(index) = operations.iter().position(|old| !old.insert && old.obj == op.obj && old.key == op.key) {
+                    if let Some(index) = operations.iter().position(|old| op.can_merge(old)) {
                         operations[index].merge(op);
                         continue
                     }
