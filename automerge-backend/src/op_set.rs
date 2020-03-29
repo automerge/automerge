@@ -7,6 +7,7 @@
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
 use crate::actor_states::ActorStates;
+use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
@@ -240,25 +241,23 @@ impl OpSet {
         Ok(())
     }
 
-    /*
-        fn get_path3(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
-            let mut object_id = _object_id;
-            let mut path = Vec::new();
-            while *object_id != ObjectID::Root {
-                if let Some(inbound) = self
-                    .objs
-                    .get(object_id)
-                    .and_then(|obj| obj.inbound.iter().next())
-                {
-                    path.insert(0, inbound);
-                    object_id = &inbound.obj;
-                } else {
-                    return Err(AutomergeError::NoPathToObject(object_id.clone()));
-                }
+    fn get_path2(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
+        let mut object_id = _object_id;
+        let mut path = Vec::new();
+        while *object_id != ObjectID::Root {
+            if let Some(inbound) = self
+                .objs
+                .get(object_id)
+                .and_then(|obj| obj.inbound.iter().next())
+            {
+                path.insert(0, inbound);
+                object_id = &inbound.obj;
+            } else {
+                return Err(AutomergeError::NoPathToObject(object_id.clone()));
             }
-            Ok(path)
         }
-    */
+        Ok(path)
+    }
 
     fn get_path(
         &self,
@@ -338,10 +337,12 @@ impl OpSet {
         Ok(diff2)
     }
 
-    pub fn get_ops(&self, object_id: &ObjectID, key: &Key) -> Option<Vec<OpID>> {
-        self.objs
-            .get(object_id)
-            .and_then(|obj| obj.props.get(key))
+    pub fn get_field_ops(&self, object_id: &ObjectID, key: &Key) -> Option<&ConcurrentOperations> {
+        self.objs.get(object_id).and_then(|obj| obj.props.get(key))
+    }
+
+    pub fn get_field_opids(&self, object_id: &ObjectID, key: &Key) -> Option<Vec<OpID>> {
+        self.get_field_ops(object_id, key)
             .map(|con_ops| con_ops.iter().map(|op| op.id.clone()).collect())
     }
 
@@ -404,7 +405,7 @@ impl OpSet {
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
         if insert {
             Vec::new()
-        } else if let Some(ops) = self.get_ops(&object_id, &key) {
+        } else if let Some(ops) = self.get_field_opids(&object_id, &key) {
             ops
         } else if let Ok(opid) = key.to_opid() {
             vec![opid]

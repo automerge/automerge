@@ -82,12 +82,10 @@ impl Backend {
                         .find(|old| old.obj == op.obj && old.key == op.key)
                     {
                         old_op.merge(op);
-                    } else {
-                        operations.push(op);
+                        continue;
                     }
-                } else {
-                    operations.push(op);
                 }
+                operations.push(op);
             }
         }
         Ok(Change {

@@ -96,7 +96,7 @@ impl<'de> Deserialize<'de> for ObjectID {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Hash, Clone)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 pub enum OpID {
     ID(u64, String),
 }
@@ -113,6 +113,12 @@ impl Ord for OpID {
                 }
             }
         }
+    }
+}
+
+impl fmt::Debug for OpID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.to_string().as_str())
     }
 }
 
@@ -148,10 +154,9 @@ impl OpID {
         //            _ => {
         let mut i = s.split('@');
         match (i.next(), i.next(), i.next()) {
-            (Some(seq_str), Some(actor_str), None) => seq_str
-                .parse()
-                .ok()
-                .map(|seq| OpID::ID(seq, actor_str.to_string())),
+            (Some(seq_str), Some(actor_str), None) => seq_str.parse().ok().map(|seq| {
+                OpID::ID(seq, actor_str.to_string())
+            }),
             _ => None,
         }
         //            }

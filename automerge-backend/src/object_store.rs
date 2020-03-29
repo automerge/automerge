@@ -81,19 +81,15 @@ impl<'a> Iterator for ElementIterator<'a> {
     // I feel like I could be clever here and use iter.chain()
     // FIXME
     fn next(&mut self) -> Option<&'a OpID> {
-        if let Some(mut last) = self.stack.pop() {
+        while let Some(mut last) = self.stack.pop() {
             if let Some(next) = last.next() {
                 self.stack.push(last);
                 if let Some(more) = self.following.get(&ElementID::ID(next.id.clone())) {
                     self.stack.push(more.iter());
                 }
-                Some(&next.id)
-            } else {
-                self.stack.pop();
-                None
+                return Some(&next.id);
             }
-        } else {
-            None
         }
+        None
     }
 }
