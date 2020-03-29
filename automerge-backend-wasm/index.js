@@ -12,7 +12,7 @@ function decodeChanges(binaryChanges) {
     }
     for (let change of decodeChange(binaryChange)) decoded.push(change)
   }
-  console.log("CHANGES",decoded);
+  //console.log("CHANGES",decoded);
   return fromJS(decoded)
 }
 
@@ -56,8 +56,11 @@ let loadChanges = (backend,changes) => {
 }
 
 let applyLocalChange = (backend,request) => {
-  console.log("LOCAL REQUEST",request)
+  //console.log("LOCAL REQUEST",request)
+//  let [state,patch] =  mutate(backend, (b) => b.applyLocalChange(toJS(request)));
   return mutate(backend, (b) => b.applyLocalChange(toJS(request)));
+  //console.log("PATCH",util.inspect(patch, {showHidden: false, depth: null}));
+//  return [state,patch]
 }
 
 let merge = (backend1,backend2) => {

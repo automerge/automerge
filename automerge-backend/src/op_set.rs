@@ -305,7 +305,9 @@ impl OpSet {
                     let node = diff2.expand_path(&path, self);
 
                     if op.insert {
-                        node.add_insert(*index);
+                        if !ops.is_empty() {
+                            node.add_insert(*index);
+                        }
                     } else if ops.is_empty() {
                         node.add_remove(*index);
                     }
