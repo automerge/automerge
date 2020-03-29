@@ -12,7 +12,7 @@ function decodeChanges(binaryChanges) {
     }
     for (let change of decodeChange(binaryChange)) decoded.push(change)
   }
-  //console.log("CHANGES",decoded);
+  //console.log("CHANGES",util.inspect(decoded, {showHidden: false, depth: null}))
   return fromJS(decoded)
 }
 
@@ -57,7 +57,7 @@ let loadChanges = (backend,changes) => {
 }
 
 let applyLocalChange = (backend,request) => {
-  //console.log("LOCAL REQUEST",request)
+  //console.log("LOCAL REQUEST",util.inspect(request, {showHidden: false, depth: null}))
   return mutate(backend, (b) => b.applyLocalChange(toJS(request)));
 }
 

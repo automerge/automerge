@@ -341,10 +341,16 @@ impl OpSet {
     }
 
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Vec<OpID> {
-        self.objs
-            .get(object_id)
-            .map(|obj| obj.ops_in_order().cloned().collect())
-            .unwrap_or_default()
+        if let Some(obj) = self.objs.get(object_id) {
+            // FIXME - converting each id to a key to do this?  Seems like
+            // id want to be indexing by id here and not by key
+            obj.ops_in_order()
+                .filter(|id| !obj.props.get(&id.to_key()).unwrap().is_empty())
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     pub fn get_missing_deps(&self) -> Clock {
