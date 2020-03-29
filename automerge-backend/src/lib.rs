@@ -14,13 +14,14 @@ mod error;
 mod helper;
 mod object_store;
 mod op_set;
+mod op_handle;
 mod patch;
 mod protocol;
 mod time;
 
 pub use crate::protocol::{
     ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, Key, ObjType, ObjectID,
-    OpHandle, OpID, OpType, Operation, PrimitiveValue,
+    OpID, OpType, Operation, PrimitiveValue,
 };
 pub use backend::Backend;
 pub use error::AutomergeError;

@@ -1,7 +1,8 @@
 use crate::op_set::OpSet;
 use crate::protocol::{
-    ActorID, Clock, DataType, Key, ObjType, ObjectID, OpHandle, OpID, OpType, PrimitiveValue,
+    ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
+use crate::op_handle::OpHandle;
 use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 

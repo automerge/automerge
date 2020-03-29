@@ -38,7 +38,7 @@ impl ActorStates {
             .unwrap_or_default()
     }
 
-    pub fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
+    fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
         self.change_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))

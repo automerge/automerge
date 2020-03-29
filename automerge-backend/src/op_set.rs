@@ -12,8 +12,9 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
 use crate::protocol::{
-    Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpHandle, OpID, Operation, RequestKey,
+    Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpID, Operation, RequestKey,
 };
+use crate::op_handle::OpHandle;
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
