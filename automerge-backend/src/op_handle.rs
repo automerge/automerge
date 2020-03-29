@@ -4,10 +4,12 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::protocol::{PrimitiveValue, OpType, Operation, Change, OpID, Key, DataType, ObjectID};
+use crate::protocol::{
+    Change, DataType, Key, ObjectID, OpID, OpType, Operation, PrimitiveValue, UndoOperation,
+};
 
 #[derive(Clone)]
-pub (crate) struct OpHandle {
+pub(crate) struct OpHandle {
     pub id: OpID,
     change: Rc<Change>,
     index: usize,
@@ -30,6 +32,46 @@ impl OpHandle {
                 }
             })
             .collect()
+    }
+
+    pub fn generate_undos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
+        let key = self.operation_key();
+
+        if let OpType::Inc(value) = self.action {
+            vec![UndoOperation {
+                action: OpType::Inc(-value),
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else if overwritten.is_empty() {
+            vec![UndoOperation {
+                action: OpType::Del,
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else {
+            overwritten.iter().map(|o| o.invert(&key)).collect()
+        }
+    }
+
+    pub fn invert(&self, field_key: &Key) -> UndoOperation {
+        let base_op = &self.change.operations[self.index];
+        let mut action = base_op.action.clone();
+        let mut key = &base_op.key;
+        if self.insert {
+            key = field_key
+        }
+        if let OpType::Make(_) = base_op.action {
+            action = OpType::Link(self.id.to_object_id());
+        }
+        if let OpType::Set(_, DataType::Counter) = base_op.action {
+            action = OpType::Set(self.adjusted_value(), DataType::Counter);
+        }
+        UndoOperation {
+            action,
+            obj: base_op.obj.clone(),
+            key: key.clone(),
+        }
     }
 
     pub fn adjusted_value(&self) -> PrimitiveValue {
@@ -99,7 +141,6 @@ impl PartialOrd for OpHandle {
 }
 
 impl PartialEq for OpHandle {
-    // FIXME - what about delta?  this could cause an issue
     fn eq(&self, other: &Self) -> bool {
         self.id.eq(&other.id)
     }
@@ -114,4 +155,3 @@ impl Deref for OpHandle {
         &self.change.operations[self.index]
     }
 }
-

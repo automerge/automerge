@@ -28,6 +28,7 @@ use std::str::FromStr;
 use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
+use crate::op_handle::OpHandle;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -64,7 +65,7 @@ impl Serialize for ObjectID {
     {
         match self {
             ObjectID::ID(id) => id.serialize(serializer),
-            ObjectID::Str(str) => serializer.serialize_str(str.as_str()), // FIXME - can i str.serialize(ser)
+            ObjectID::Str(s) => s.serialize(serializer),
             ObjectID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
         }
     }
@@ -468,6 +469,36 @@ impl OpRequest {
         self.value.clone().unwrap_or(PrimitiveValue::Null)
     }
 
+    pub fn resolve_key(&self, id: &OpID, ids: &mut Vec<OpID>) -> Result<Key, AutomergeError> {
+        let key = &self.key;
+        let insert = self.insert;
+        let del = self.action == ReqOpType::Del;
+        match key {
+            RequestKey::Str(s) => Ok(Key(s.clone())),
+            RequestKey::Num(n) => {
+                let n: usize = *n as usize;
+                (if insert {
+                    if n == 0 {
+                        ids.insert(0, id.clone());
+                        Some(Key("_head".to_string()))
+                    } else {
+                        ids.insert(n, id.clone());
+                        ids.get(n - 1).map(|i| i.to_key())
+                    }
+                } else if del {
+                    if n < ids.len() {
+                        Some(ids.remove(n).to_key())
+                    } else {
+                        None
+                    }
+                } else {
+                    ids.get(n).map(|i| i.to_key())
+                })
+                .ok_or(AutomergeError::IndexOutOfBounds(n))
+            }
+        }
+    }
+
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
             ReqOpType::MakeMap => Some(ObjType::Map),
@@ -517,6 +548,7 @@ pub enum OpType {
     Set(PrimitiveValue, DataType),
 }
 
+/*
 impl OpType {
     pub fn to_str(&self) -> &str {
         match self {
@@ -528,6 +560,45 @@ impl OpType {
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",
             OpType::Set(_, _) => "set",
+        }
+    }
+}
+*/
+
+impl Serialize for OpType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = match self {
+            OpType::Make(ObjType::Map) => "makeMap",
+            OpType::Make(ObjType::Table) => "makeTable",
+            OpType::Make(ObjType::List) => "makeList",
+            OpType::Make(ObjType::Text) => "makeText",
+            OpType::Del => "del",
+            OpType::Link(_) => "link",
+            OpType::Inc(_) => "inc",
+            OpType::Set(_, _) => "set",
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct UndoOperation {
+    pub action: OpType,
+    pub obj: ObjectID,
+    pub key: Key,
+}
+
+impl UndoOperation {
+    pub fn into_operation(self, pred: Vec<OpID>) -> Operation {
+        Operation {
+            action: self.action,
+            obj: self.obj,
+            key: self.key,
+            insert: false,
+            pred,
         }
     }
 }
@@ -544,6 +615,26 @@ pub struct Operation {
 impl Operation {
     pub fn is_make(&self) -> bool {
         self.obj_type().is_some()
+    }
+
+    pub(crate) fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
+        let key = self.key.clone();
+
+        if let OpType::Inc(value) = self.action {
+            vec![UndoOperation {
+                action: OpType::Inc(-value),
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else if overwritten.is_empty() {
+            vec![UndoOperation {
+                action: OpType::Del,
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else {
+            overwritten.iter().map(|o| o.invert(&key)).collect()
+        }
     }
 
     pub fn is_basic_assign(&self) -> bool {
@@ -591,6 +682,37 @@ impl Operation {
     }
 }
 
+impl Serialize for UndoOperation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut fields = 3;
+
+        match &self.action {
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
+            OpType::Set(_, _) => fields += 2,
+            _ => {}
+        }
+
+        let mut op = serializer.serialize_struct("UndoOperation", fields)?;
+        op.serialize_field("action", &self.action)?;
+        op.serialize_field("obj", &self.obj)?;
+        op.serialize_field("key", &self.key)?;
+        match &self.action {
+            OpType::Link(child) => op.serialize_field("child", &child)?,
+            OpType::Inc(n) => op.serialize_field("value", &n)?,
+            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
+            OpType::Set(value, datatype) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &datatype)?;
+            }
+            _ => {}
+        }
+        op.end()
+    }
+}
+
 impl Serialize for Operation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -609,7 +731,7 @@ impl Serialize for Operation {
         }
 
         let mut op = serializer.serialize_struct("Operation", fields)?;
-        op.serialize_field("action", &self.action.to_str())?;
+        op.serialize_field("action", &self.action)?;
         op.serialize_field("obj", &self.obj)?;
         op.serialize_field("key", &self.key)?;
         if self.insert {
@@ -744,6 +866,12 @@ pub struct Change {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub deps: Clock,
+}
+
+impl Change {
+    pub fn max_op(&self) -> u64 {
+        self.start_op + (self.operations.len() as u64) - 1
+    }
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]

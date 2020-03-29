@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
-use crate::protocol::OpType;
 use crate::op_handle::OpHandle;
+use crate::protocol::OpType;
 use std::ops::Deref;
 
 /// Represents a set of operations which are relevant to either an element ID

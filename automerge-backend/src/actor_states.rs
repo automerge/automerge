@@ -50,7 +50,8 @@ impl ActorStates {
             .and_then(|v| v.get((seq as usize) - 1))
     }
 
-    pub fn transitive_deps(&self, clock: &Clock) -> Clock {
+    fn transitive_deps(&self, change: &Change) -> Clock {
+        let clock = change.deps.with(&change.actor_id, change.seq - 1);
         let mut all_deps = clock.clone();
         clock
             .into_iter()
@@ -62,14 +63,10 @@ impl ActorStates {
     // if the change is new - return Ok(true)
     // if the change is a duplicate - dont insert and return Ok(false)
     // if the change has a dup actor:seq but is different error
-    pub fn add_change(
-        &mut self,
-        change: &Rc<Change>,
-        all_deps: Clock,
-    ) -> Result<bool, AutomergeError> {
+    pub fn add_change(&mut self, change: &Rc<Change>) -> Result<Option<Clock>, AutomergeError> {
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
             if change.as_ref() == c.as_ref() {
-                return Ok(false);
+                return Ok(None);
             } else {
                 return Err(AutomergeError::InvalidChange(
                     "Invalid reuse of sequence number for actor".to_string(),
@@ -97,11 +94,13 @@ impl ActorStates {
 
         actor_changes.push(change.clone());
 
+        let all_deps = self.transitive_deps(change);
+
         self.deps_by_actor
             .entry(actor_id)
             .or_insert_with(Vec::new)
-            .push(all_deps);
+            .push(all_deps.clone());
 
-        Ok(true)
+        Ok(Some(all_deps))
     }
 }

@@ -1,7 +1,7 @@
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::protocol::{ElementID, Key, ObjType, OpID};
 use crate::op_handle::OpHandle;
+use crate::protocol::{ElementID, Key, ObjType, OpID};
 use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
 
@@ -76,8 +76,6 @@ pub(crate) struct ElementIterator<'a> {
 impl<'a> Iterator for ElementIterator<'a> {
     type Item = &'a OpID;
 
-    // I feel like I could be clever here and use iter.chain()
-    // FIXME
     fn next(&mut self) -> Option<&'a OpID> {
         while let Some(mut last) = self.stack.pop() {
             if let Some(next) = last.next() {

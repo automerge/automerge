@@ -10,11 +10,9 @@ use crate::actor_states::ActorStates;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
-use crate::patch::{Diff, DiffEdit, PendingDiff};
-use crate::protocol::{
-    Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpID, Operation, RequestKey,
-};
 use crate::op_handle::OpHandle;
+use crate::patch::{Diff, DiffEdit, PendingDiff};
+use crate::protocol::{Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -48,8 +46,8 @@ pub(crate) struct OpSet {
     pub clock: Clock,
     pub deps: Clock,
     pub undo_pos: usize,
-    pub undo_stack: Vec<Vec<Operation>>,
-    pub redo_stack: Vec<Vec<Operation>>,
+    pub undo_stack: Vec<Vec<UndoOperation>>,
+    pub redo_stack: Vec<Vec<UndoOperation>>,
     pub states: ActorStates,
     pub max_op: u64,
 }
@@ -94,6 +92,7 @@ impl OpSet {
     }
 
     fn apply_queued_ops(&mut self, diffs: &mut Vec<PendingDiff>) -> Result<(), AutomergeError> {
+        // TODO: drain_filter
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, false, false, diffs)?;
         }
@@ -118,7 +117,7 @@ impl OpSet {
         change: &Rc<Change>,
         undoable: bool,
         diffs: &mut Vec<PendingDiff>,
-    ) -> Result<Vec<Operation>, AutomergeError> {
+    ) -> Result<Vec<UndoOperation>, AutomergeError> {
         let mut all_undo_ops = Vec::new();
         let mut new_objects: HashSet<OpID> = HashSet::new();
         for op in OpHandle::extract(change).iter() {
@@ -144,40 +143,24 @@ impl OpSet {
         undoable: bool,
         diffs: &mut Vec<PendingDiff>,
     ) -> Result<(), AutomergeError> {
-        // This method is a little more complicated than it intuitively should
-        // be due to the bookkeeping required for undo. If we're asked to make
-        // this operation undoable we have to store the undo operations for
-        // each operation and then add them to the undo stack at the end of the
-        // method. However, it's unnecessary to store undo operations for
-        // objects which are created by this change (e.g if there's an insert
-        // operation for a list which was created in this operation we only
-        // need the undo operation for the creation of the list to achieve
-        // the undo), so we track newly created objects and only store undo
-        // operations which don't operate on them.
         let change = Rc::new(change);
-        let actor_id = change.actor_id.clone();
-        let start_op = change.start_op;
-        let seq = change.seq;
-        let num_ops = change.operations.len() as u64;
-        let all_deps = self
-            .states
-            .transitive_deps(&change.deps.with(&change.actor_id, change.seq - 1));
 
-        self.clock.set(&actor_id, seq);
-        self.deps.subtract(&all_deps);
-        self.deps.set(&actor_id, seq);
-
-        if !self.states.add_change(&change, all_deps)? {
+        if let Some(all_deps) = self.states.add_change(&change)? {
+            self.clock.set(&change.actor_id, change.seq);
+            self.deps.subtract(&all_deps);
+            self.deps.set(&change.actor_id, change.seq);
+        } else {
+            // duplicate change - ignore
             return Ok(());
         }
 
         let all_undo_ops = self.apply_ops(&change, undoable, diffs)?;
 
-        self.max_op = max(self.max_op, start_op + num_ops - 1);
+        self.max_op = max(self.max_op, change.max_op());
 
         if undoable {
             let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-            let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
+            let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
             new_undo_stack.push(all_undo_ops);
             self.undo_stack = new_undo_stack;
             self.undo_pos += 1;
@@ -193,12 +176,13 @@ impl OpSet {
     /// The return value is a tuple of a diff to send to the frontend, and
     /// a (possibly empty) vector of operations which will undo the operation
     /// later.
-    fn apply_op(&mut self, op: &OpHandle) -> Result<(PendingDiff, Vec<Operation>), AutomergeError> {
+    fn apply_op(
+        &mut self,
+        op: &OpHandle,
+    ) -> Result<(PendingDiff, Vec<UndoOperation>), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             self.objs.insert(child, ObjState::new(obj_type));
         }
-
-        let undo_ops = Vec::new();
 
         let object_id = &op.obj;
         let object = self.get_obj_mut(&object_id)?;
@@ -211,6 +195,8 @@ impl OpSet {
             let ops = object.props.entry(op.operation_key()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
 
+            let undo_ops = op.generate_undos(&overwritten_ops);
+
             let index = object.get_index_for(&op.operation_key().to_opid()?)?;
 
             self.unlink(&op, &overwritten_ops)?;
@@ -219,6 +205,7 @@ impl OpSet {
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let undo_ops = op.generate_undos(&overwritten_ops);
             self.unlink(&op, &overwritten_ops)?;
 
             Ok((PendingDiff::Map(op.clone()), undo_ops))
@@ -238,6 +225,7 @@ impl OpSet {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn get_path2(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
         let mut object_id = _object_id;
         let mut path = Vec::new();
@@ -392,12 +380,11 @@ impl OpSet {
     }
 
     pub fn get_missing_deps(&self) -> Clock {
-        // TODO: there's a lot of internal copying going on in here for something kinda simple
-        self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock
-                .union(&change.deps)
-                .with(&change.actor_id, change.seq - 1)
-        })
+        let mut clock = Clock::empty();
+        for change in self.queue.iter() {
+            clock.merge(&change.deps.with(&change.actor_id, change.seq - 1))
+        }
+        clock
     }
 
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
@@ -409,45 +396,6 @@ impl OpSet {
             vec![opid]
         } else {
             Vec::new()
-        }
-    }
-
-    // FIXME - omg - this function is so bad :(
-    pub fn resolve_key(
-        &self,
-        id: &OpID,
-        object_id: &ObjectID,
-        key: &RequestKey,
-        elemids: &mut HashMap<ObjectID, Vec<OpID>>,
-        insert: bool,
-        del: bool,
-    ) -> Result<Key, AutomergeError> {
-        match key {
-            RequestKey::Str(s) => Ok(Key(s.clone())),
-            RequestKey::Num(n) => {
-                let n: usize = *n as usize;
-                let ids = elemids
-                    .entry(object_id.clone())
-                    .or_insert_with(|| self.get_elem_ids(&object_id));
-                (if insert {
-                    if n == 0 {
-                        ids.insert(0, id.clone());
-                        Some(Key("_head".to_string()))
-                    } else {
-                        ids.insert(n, id.clone());
-                        ids.get(n - 1).map(|i| i.to_key())
-                    }
-                } else if del {
-                    if n < ids.len() {
-                        Some(ids.remove(n).to_key())
-                    } else {
-                        None
-                    }
-                } else {
-                    ids.get(n).map(|i| i.to_key())
-                })
-                .ok_or(AutomergeError::IndexOutOfBounds(n))
-            }
         }
     }
 
@@ -485,7 +433,6 @@ impl OpSet {
             props: Some(HashMap::new()),
             obj_type: object.obj_type,
         };
-        //let elemid = ElementID::Head;
         let mut index = 0;
         let mut max_counter = 0;
 

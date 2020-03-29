@@ -1,7 +1,9 @@
 use crate::error::AutomergeError;
 use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch};
-use crate::protocol::{DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType};
+use crate::protocol::{
+    DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation,
+};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::collections::HashMap;
@@ -39,7 +41,7 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        let mut elemids: HashMap<ObjectID, Vec<OpID>> = HashMap::new();
+        let mut elemid_cache: HashMap<ObjectID, Vec<OpID>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
@@ -51,9 +53,11 @@ impl Backend {
                     self.obj_alias.insert(child.clone(), &id);
                 }
 
-                let delete = rop.action == ReqOpType::Del;
-                let key =
-                    op_set.resolve_key(&id, &object_id, &rop.key, &mut elemids, insert, delete)?;
+                let mut elemids = elemid_cache
+                    .entry(object_id.clone())
+                    .or_insert_with(|| op_set.get_elem_ids(&object_id));
+
+                let key = rop.resolve_key(&id, &mut elemids)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -80,7 +84,7 @@ impl Backend {
                 if op.is_basic_assign() {
                     if let Some(index) = operations.iter().position(|old| op.can_merge(old)) {
                         operations[index].merge(op);
-                        continue
+                        continue;
                     }
                 }
                 operations.push(op);
@@ -127,10 +131,24 @@ impl Backend {
             ));
         }
 
-        let undo_ops = self.op_set.undo_stack.remove(undo_pos - 1);
+        let mut undo_ops = self.op_set.undo_stack.remove(undo_pos - 1);
+        let mut redo_ops = Vec::new();
 
-        let redo_ops = Vec::new();
-        // FIXME TODO - translate undo ops into redo ops
+        let operations = undo_ops
+            .drain(0..)
+            .map(|undo_op| {
+                if let Some(field_ops) = self.op_set.get_field_ops(&undo_op.obj, &undo_op.key) {
+                    let pred = field_ops.iter().map(|op| op.id.clone()).collect();
+                    let op = undo_op.into_operation(pred);
+                    redo_ops.extend(op.generate_redos(&field_ops));
+                    op
+                } else {
+                    let op = undo_op.into_operation(Vec::new());
+                    redo_ops.extend(op.generate_redos(&Vec::new()));
+                    op
+                }
+            })
+            .collect();
 
         let change = Change {
             actor_id: request.actor.clone(),
@@ -139,7 +157,7 @@ impl Backend {
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
-            operations: undo_ops,
+            operations,
         };
 
         self.op_set.undo_pos -= 1;
@@ -149,6 +167,23 @@ impl Backend {
     }
 
     fn redo(&mut self, request: &ChangeRequest, start_op: u64) -> Result<Change, AutomergeError> {
+        let mut redo_ops = self
+            .op_set
+            .redo_stack
+            .pop()
+            .ok_or_else(|| AutomergeError::InvalidChange("no redo ops".to_string()))?;
+
+        let operations = redo_ops
+            .drain(0..)
+            .map(|redo_op| {
+                if let Some(field_ops) = self.op_set.get_field_ops(&redo_op.obj, &redo_op.key) {
+                    redo_op.into_operation(field_ops.iter().map(|op| op.id.clone()).collect())
+                } else {
+                    redo_op.into_operation(Vec::new())
+                }
+            })
+            .collect();
+
         let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
@@ -156,11 +191,7 @@ impl Backend {
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
-            operations: self
-                .op_set
-                .redo_stack
-                .pop()
-                .ok_or_else(|| AutomergeError::InvalidChange("no redo ops".to_string()))?,
+            operations,
         };
 
         self.op_set.undo_pos += 1;
@@ -198,8 +229,6 @@ impl Backend {
             self.op_set
                 .add_change(change, request.is_some(), undoable, &mut pending_diffs)?;
         }
-
-        //        let diffs2 = self.op_set.finalize_diffs(pending_diffs); // FIXME
 
         if incremental {
             let version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
@@ -286,11 +315,11 @@ impl Backend {
         Ok(())
     }
 
-    pub fn undo_stack(&self) -> &Vec<Vec<Operation>> {
+    pub fn undo_stack(&self) -> &Vec<Vec<UndoOperation>> {
         &self.op_set.undo_stack
     }
 
-    pub fn redo_stack(&self) -> &Vec<Vec<Operation>> {
+    pub fn redo_stack(&self) -> &Vec<Vec<UndoOperation>> {
         &self.op_set.redo_stack
     }
 
