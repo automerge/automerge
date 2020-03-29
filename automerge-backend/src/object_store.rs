@@ -11,14 +11,11 @@ use std::slice::Iter;
 
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
-pub struct ObjState {
-    pub props: HashMap<Key, ConcurrentOperations>, //Vec<OperationWithMetadata>>,
+pub(crate) struct ObjState {
+    pub props: HashMap<Key, ConcurrentOperations>,
     pub obj_type: ObjType,
-    //    pub op_id: OpID,
     pub inbound: HashSet<OpHandle>,
-    //    pub creator: Option<OperationWithMetadata>,
     pub following: HashMap<ElementID, Vec<OpHandle>>,
-    //    pub insertion: HashMap<ElementID, OperationWithMetadata>,
 }
 
 impl ObjState {
@@ -70,7 +67,7 @@ impl ObjState {
     }
 }
 
-pub struct ElementIterator<'a> {
+pub(crate) struct ElementIterator<'a> {
     pub following: &'a HashMap<ElementID, Vec<OpHandle>>,
     pub stack: Vec<Iter<'a, OpHandle>>,
 }

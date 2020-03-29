@@ -6,10 +6,9 @@ use serde::{Serialize, Serializer};
 use std::collections::HashMap;
 
 #[derive(Debug)]
-pub enum PendingDiff {
+pub(crate) enum PendingDiff {
     Seq(OpHandle, usize),
     Map(OpHandle),
-    NoOp,
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -25,7 +24,7 @@ pub struct Diff {
 }
 
 impl Diff {
-    pub fn new() -> Diff {
+    pub(crate) fn new() -> Diff {
         Diff {
             obj_type: ObjType::Map,
             object_id: ObjectID::Root,
@@ -34,28 +33,28 @@ impl Diff {
         }
     }
 
-    pub fn add_insert(&mut self, index: usize) -> &mut Diff {
+    pub(crate) fn add_insert(&mut self, index: usize) -> &mut Diff {
         self.edits
             .get_or_insert_with(Vec::new)
             .push(DiffEdit::Insert { index });
         self
     }
 
-    pub fn add_remove(&mut self, index: usize) -> &mut Diff {
+    pub(crate) fn add_remove(&mut self, index: usize) -> &mut Diff {
         self.edits
             .get_or_insert_with(Vec::new)
             .push(DiffEdit::Remove { index });
         self
     }
 
-    pub fn is_seq(&self) -> bool {
+    pub(crate) fn is_seq(&self) -> bool {
         match self.obj_type {
             ObjType::Map | ObjType::Table => false,
             ObjType::Text | ObjType::List => true,
         }
     }
 
-    pub fn touch(&mut self) -> &mut Diff {
+    pub(crate) fn touch(&mut self) -> &mut Diff {
         if self.is_seq() {
             self.edits.get_or_insert_with(Vec::new);
         }
@@ -63,7 +62,7 @@ impl Diff {
         self
     }
 
-    pub fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff) -> &mut Diff {
+    pub(crate) fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff) -> &mut Diff {
         self.props
             .get_or_insert_with(HashMap::new)
             .entry(key.clone())
@@ -72,7 +71,7 @@ impl Diff {
         self
     }
 
-    pub fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
+    pub(crate) fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
         match ops {
             [] => {
                 if self.is_seq() {
@@ -98,7 +97,7 @@ impl Diff {
     }
 
     //    pub fn add_values2(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
-    pub fn add_value(&mut self, key: &Key, op: &OpHandle) -> &mut Diff {
+    pub(crate) fn add_value(&mut self, key: &Key, op: &OpHandle) -> &mut Diff {
         match &op.action {
             OpType::Set(_, ref datatype) => {
                 let prop = self
@@ -120,7 +119,7 @@ impl Diff {
         }
     }
 
-    pub fn expand_path(
+    pub(crate) fn expand_path(
         &mut self,
         path: &[(ObjectID, Key, Key, ObjectID)],
         op_set: &OpSet,

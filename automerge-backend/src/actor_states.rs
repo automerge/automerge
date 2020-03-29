@@ -11,7 +11,7 @@ use std::rc::Rc;
 // historic changes
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct ActorStates {
+pub(crate) struct ActorStates {
     pub history: Vec<Rc<Change>>,
     change_by_actor: HashMap<ActorID, Vec<Rc<Change>>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
@@ -22,7 +22,7 @@ pub struct ActorStates {
 }
 
 impl ActorStates {
-    pub(crate) fn new() -> ActorStates {
+    pub fn new() -> ActorStates {
         ActorStates {
             change_by_actor: HashMap::new(),
             deps_by_actor: HashMap::new(),
@@ -62,7 +62,7 @@ impl ActorStates {
     // if the change is new - return Ok(true)
     // if the change is a duplicate - dont insert and return Ok(false)
     // if the change has a dup actor:seq but is different error
-    pub(crate) fn add_change(
+    pub fn add_change(
         &mut self,
         change: &Rc<Change>,
         all_deps: Clock,

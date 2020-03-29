@@ -5,7 +5,7 @@ use std::ops::Deref;
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConcurrentOperations {
+pub(crate) struct ConcurrentOperations {
     pub ops: Vec<OpHandle>,
 }
 
@@ -24,7 +24,7 @@ impl Default for ConcurrentOperations {
 }
 
 impl ConcurrentOperations {
-    pub(crate) fn new() -> ConcurrentOperations {
+    pub fn new() -> ConcurrentOperations {
         ConcurrentOperations { ops: Vec::new() }
     }
 
@@ -32,45 +32,12 @@ impl ConcurrentOperations {
         self.ops.is_empty()
     }
 
-    /*
-        pub fn active_op(&self) -> Option<&OperationWithMetadata> {
-            // operations are sorted in incorporate_new_op, so the first op is the
-            // active one
-            self.operations.first()
-        }
-
-        pub fn conflicts(&self) -> Vec<Conflict> {
-            self.operations
-                .split_first()
-                .map(|(_, tail)| {
-                    tail.iter()
-                        .map(|op| match &op.operation {
-                            Operation::Set {
-                                value, datatype, ..
-                            } => Conflict {
-                                actor: op.actor_id.clone(),
-                                value: ElementValue::Primitive(value.clone()),
-                                datatype: datatype.clone(),
-                            },
-                            Operation::Link { value, .. } => Conflict {
-                                actor: op.actor_id.clone(),
-                                value: ElementValue::Link(value.clone()),
-                                datatype: None,
-                            },
-                            _ => panic!("Invalid operation in concurrent ops"),
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        }
-
-    */
     /// Updates this set of operations based on a new operation.
     ///
     /// Returns the previous operations that this op
     /// replaces
 
-    pub(crate) fn incorporate_new_op(
+    pub fn incorporate_new_op(
         &mut self,
         new_op: &OpHandle,
     ) -> Result<Vec<OpHandle>, AutomergeError> {

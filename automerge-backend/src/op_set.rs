@@ -34,14 +34,14 @@ use std::rc::Rc;
 /// that node.
 ///
 #[derive(Debug, PartialEq, Clone)]
-pub struct Version {
+pub(crate) struct Version {
     pub version: u64,
     pub local_only: bool,
     pub op_set: OpSet,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct OpSet {
+pub(crate) struct OpSet {
     pub objs: HashMap<ObjectID, ObjState>,
     queue: Vec<Change>,
     pub clock: Clock,
@@ -76,9 +76,8 @@ impl OpSet {
     ///
     /// If `make_undoable` is true, the op set will store a set of operations
     /// which can be used to undo this change.
-    ///
 
-    pub fn add_change(
+    pub(crate) fn add_change(
         &mut self,
         change: Change,
         local: bool,
@@ -193,10 +192,7 @@ impl OpSet {
     /// The return value is a tuple of a diff to send to the frontend, and
     /// a (possibly empty) vector of operations which will undo the operation
     /// later.
-    pub fn apply_op(
-        &mut self,
-        op: &OpHandle,
-    ) -> Result<(PendingDiff, Vec<Operation>), AutomergeError> {
+    fn apply_op(&mut self, op: &OpHandle) -> Result<(PendingDiff, Vec<Operation>), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             self.objs.insert(child, ObjState::new(obj_type));
         }
@@ -330,7 +326,6 @@ impl OpSet {
                     let ops = object.props.get(key).unwrap();
                     diff2.expand_path(&path, self).add_values(key, &ops);
                 }
-                PendingDiff::NoOp => {}
             }
         }
 

@@ -48,14 +48,6 @@ pub enum ObjectID {
 }
 
 impl ObjectID {
-    pub fn to_opid(&self) -> Result<&OpID, AutomergeError> {
-        match self {
-            ObjectID::ID(id) => Ok(id),
-            ObjectID::Str(_) => Err(AutomergeError::CantCastToOpID(self.clone())),
-            ObjectID::Root => Err(AutomergeError::CantCastToOpID(self.clone())),
-        }
-    }
-
     pub fn parse(s: &str) -> ObjectID {
         if s == "00000000-0000-0000-0000-000000000000" {
             ObjectID::Root
@@ -492,7 +484,7 @@ impl OpRequest {
         if let Some(PrimitiveValue::Number(f)) = self.value {
             Ok(f)
         } else {
-            Err(AutomergeError::MissingNumberValue)
+            Err(AutomergeError::MissingNumberValue(self.clone()))
         }
     }
 }

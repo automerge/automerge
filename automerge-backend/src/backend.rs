@@ -1,8 +1,9 @@
+use crate::error::AutomergeError;
 use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch};
 use crate::protocol::{DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType};
 use crate::time;
-use crate::{ActorID, AutomergeError, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
+use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -93,10 +94,7 @@ impl Backend {
             message: request.message.clone(),
             actor_id: request.actor.clone(),
             seq: request.seq,
-            deps: request
-                .deps
-                .clone()
-                .ok_or(AutomergeError::InvalidChangeRequest)?,
+            deps: request.deps.clone().unwrap_or_default(),
             time,
             operations,
         })
@@ -123,11 +121,7 @@ impl Backend {
         })
     }
 
-    pub fn undo(
-        &mut self,
-        request: &ChangeRequest,
-        start_op: u64,
-    ) -> Result<Change, AutomergeError> {
+    fn undo(&mut self, request: &ChangeRequest, start_op: u64) -> Result<Change, AutomergeError> {
         let undo_pos = self.op_set.undo_pos;
 
         if undo_pos < 1 || self.op_set.undo_stack.len() < undo_pos {
@@ -145,10 +139,7 @@ impl Backend {
             actor_id: request.actor.clone(),
             seq: request.seq,
             start_op,
-            deps: request
-                .deps
-                .clone()
-                .ok_or(AutomergeError::InvalidChangeRequest)?,
+            deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations: undo_ops,
@@ -160,19 +151,12 @@ impl Backend {
         Ok(change)
     }
 
-    pub fn redo(
-        &mut self,
-        request: &ChangeRequest,
-        start_op: u64,
-    ) -> Result<Change, AutomergeError> {
+    fn redo(&mut self, request: &ChangeRequest, start_op: u64) -> Result<Change, AutomergeError> {
         let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
             start_op,
-            deps: request
-                .deps
-                .clone()
-                .ok_or(AutomergeError::InvalidChangeRequest)?,
+            deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations: self
@@ -197,7 +181,7 @@ impl Backend {
         self.apply(changes, None, false, true)
     }
 
-    pub fn get_version(&self, version: u64) -> Result<&Version, AutomergeError> {
+    fn get_version(&self, version: u64) -> Result<&Version, AutomergeError> {
         self.versions
             .iter()
             .find(|v| v.version == version)

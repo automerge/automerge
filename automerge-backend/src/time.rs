@@ -1,10 +1,10 @@
 #![allow(dead_code, unused_imports)]
 
-pub use std::time::*;
+use std::time::*;
 use wasm_bindgen::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn unix_timestamp() -> u128 {
+pub(crate) fn unix_timestamp() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -18,6 +18,6 @@ extern "C" {
     fn date_now() -> f64;
 }
 #[cfg(target_arch = "wasm32")]
-pub fn unix_timestamp() -> u128 {
+pub(crate) fn unix_timestamp() -> u128 {
     date_now() as u128
 }
