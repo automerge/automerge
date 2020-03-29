@@ -43,6 +43,7 @@ let mutate = (oldBackend,fn) => {
   let result = fn(state)
   oldBackend.frozen = true
   let newBackend = { state, clock: state.getClock(), frozen: false };
+  //console.log("PATCH",util.inspect(result, {showHidden: false, depth: null}));
   return [ newBackend, result ]
 }
 
@@ -57,10 +58,7 @@ let loadChanges = (backend,changes) => {
 
 let applyLocalChange = (backend,request) => {
   //console.log("LOCAL REQUEST",request)
-//  let [state,patch] =  mutate(backend, (b) => b.applyLocalChange(toJS(request)));
   return mutate(backend, (b) => b.applyLocalChange(toJS(request)));
-  //console.log("PATCH",util.inspect(patch, {showHidden: false, depth: null}));
-//  return [state,patch]
 }
 
 let merge = (backend1,backend2) => {
@@ -72,7 +70,6 @@ let getClock = (backend) => {
 }
 
 let getHistory = (backend) => {
-  // TODO: I cant fromJS here b/c transit screws it up
   let history = clean(backend).getHistory();
   return history
 }

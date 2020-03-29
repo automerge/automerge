@@ -588,7 +588,6 @@ impl fmt::Debug for OpHandle {
             .field("action", &self.action)
             .field("obj", &self.obj)
             .field("key", &self.key)
-            .field("insert", &self.insert)
             .finish()
     }
 }
