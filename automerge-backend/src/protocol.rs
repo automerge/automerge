@@ -154,9 +154,10 @@ impl OpID {
         //            _ => {
         let mut i = s.split('@');
         match (i.next(), i.next(), i.next()) {
-            (Some(seq_str), Some(actor_str), None) => seq_str.parse().ok().map(|seq| {
-                OpID::ID(seq, actor_str.to_string())
-            }),
+            (Some(seq_str), Some(actor_str), None) => seq_str
+                .parse()
+                .ok()
+                .map(|seq| OpID::ID(seq, actor_str.to_string())),
             _ => None,
         }
         //            }
@@ -473,10 +474,8 @@ pub struct OpRequest {
 }
 
 impl OpRequest {
-    pub fn primitive_value(&self) -> Result<PrimitiveValue, AutomergeError> {
-        self.value
-            .clone()
-            .ok_or(AutomergeError::MissingPrimitiveValue)
+    pub fn primitive_value(&self) -> PrimitiveValue {
+        self.value.clone().unwrap_or(PrimitiveValue::Null)
     }
 
     pub fn obj_type(&self) -> Option<ObjType> {

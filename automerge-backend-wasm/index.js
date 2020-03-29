@@ -56,7 +56,7 @@ let loadChanges = (backend,changes) => {
 }
 
 let applyLocalChange = (backend,request) => {
-  //console.log("LOCAL REQUEST",request) 
+  //console.log("LOCAL REQUEST",request)
   return mutate(backend, (b) => b.applyLocalChange(toJS(request)));
 }
 

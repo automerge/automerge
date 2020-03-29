@@ -63,7 +63,7 @@ impl Backend {
                     ReqOpType::Link => OpType::Link(child),
                     ReqOpType::Inc => OpType::Inc(rop.number_value()?),
                     ReqOpType::Set => OpType::Set(
-                        rop.primitive_value()?,
+                        rop.primitive_value(),
                         rop.datatype.clone().unwrap_or(DataType::Undefined),
                     ),
                 };
