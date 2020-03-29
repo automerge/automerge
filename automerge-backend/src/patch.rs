@@ -1,3 +1,4 @@
+use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::protocol::{
@@ -14,6 +15,31 @@ pub(crate) enum PendingDiff {
     Map(OpHandle),
 }
 
+// The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
+// Diff {
+//  object_id: 123,
+//  obj_type: map,
+//  edits: None,
+//  props: {
+//      "key1": {
+//          "10@abc123":
+//              DiffLink::Link(Diff {
+//                  object_id: 444,
+//                  obj_type: list,
+//                  edits: [ DiffEdit { ... } ],
+//                  props: { ... },
+//              })
+//          }
+//      "key2": {
+//          "11@abc123":
+//              DiffLink::Val(DiffValue {
+//                  value: 10,
+//                  datatype: "counter"
+//              }
+//          }
+//      }
+// }
+
 #[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff {
@@ -28,9 +54,13 @@ pub struct Diff {
 
 impl Diff {
     pub(crate) fn new() -> Diff {
+        Diff::init(ObjectID::Root, ObjType::Map)
+    }
+
+    pub(crate) fn init(object_id: ObjectID, obj_type: ObjType) -> Diff {
         Diff {
-            obj_type: ObjType::Map,
-            object_id: ObjectID::Root,
+            obj_type,
+            object_id,
             edits: None,
             props: None,
         }
@@ -57,14 +87,7 @@ impl Diff {
         }
     }
 
-    pub(crate) fn touch(&mut self) -> &mut Diff {
-        if self.is_seq() {
-            self.edits.get_or_insert_with(Vec::new);
-        }
-        self.props.get_or_insert_with(HashMap::new);
-        self
-    }
-
+    // use in construct diff path
     pub(crate) fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff) -> &mut Diff {
         self.props
             .get_or_insert_with(HashMap::new)
@@ -74,142 +97,121 @@ impl Diff {
         self
     }
 
-    pub(crate) fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
-        match ops {
-            [] => {
-                if self.is_seq() {
-                    self.edits.get_or_insert_with(Vec::new);
-                }
-                self.props
-                    .get_or_insert_with(HashMap::new)
-                    .entry(key.clone())
-                    .or_insert_with(HashMap::new);
-                self
-            }
-            [head] => {
-                if self.is_seq() {
-                    self.edits.get_or_insert_with(Vec::new);
-                }
-                self.add_value(key, head)
-            }
-            [head, tail @ ..] => {
-                self.add_value(key, head);
-                self.add_values(key, tail) // easy to rewrite wo recurion
-            }
+    fn touch(&mut self, key: &Key) {
+        if self.is_seq() {
+            self.props.get_or_insert_with(HashMap::new);
+            self.edits.get_or_insert_with(Vec::new);
+        } else {
+            self.props
+                .get_or_insert_with(HashMap::new)
+                .entry(key.clone())
+                .or_insert_with(HashMap::new);
         }
     }
 
-    //    pub fn add_values2(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
+    pub(crate) fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
+        self.touch(key);
+
+        for op in ops.iter() {
+            self.add_value(key, &op);
+        }
+
+        self
+    }
+
+    fn prop_key(&mut self, key: &Key) -> &mut HashMap<OpID, DiffLink> {
+        self.props
+            .get_or_insert_with(HashMap::new)
+            .entry(key.clone())
+            .or_insert_with(HashMap::new)
+    }
+
     pub(crate) fn add_value(&mut self, key: &Key, op: &OpHandle) -> &mut Diff {
         match &op.action {
             OpType::Set(_, ref datatype) => {
-                let prop = self
-                    .props
-                    .get_or_insert_with(HashMap::new)
-                    .entry(key.clone())
-                    .or_insert_with(HashMap::new);
-                let key = op.id.clone();
-                let val = DiffValue {
-                    value: op.adjusted_value(),
-                    datatype: datatype.clone(),
-                };
-                prop.insert(key, DiffLink::Val(val));
+                let id = op.id.clone();
+                self.prop_key(key).insert(
+                    id,
+                    DiffLink::Val(DiffValue {
+                        value: op.adjusted_value(),
+                        datatype: datatype.clone(),
+                    }),
+                );
                 self
             }
-            OpType::Make(_) => self.expand(key, op),
+            OpType::Make(obj_type) => {
+                let id = op.id.clone();
+                let object_id = op.id.to_object_id(); // op.child()
+                let entry = self.prop_key(key).entry(id);
+                let link =
+                    entry.or_insert_with(|| DiffLink::Link(Diff::init(object_id, *obj_type)));
+                link.get_ref()
+            }
             _ => panic!("not implemented"),
-            //_ => {}
         }
     }
 
-    pub(crate) fn expand_path(&mut self, path: &[&OpHandle], op_set: &OpSet) -> &mut Diff {
+    pub(crate) fn expand_path(
+        &mut self,
+        path: &[&OpHandle],
+        op_set: &OpSet,
+    ) -> Result<&mut Diff, AutomergeError> {
         match path {
-            [] => self,
-            [pathop, tail @ ..] => {
-                let obj = &pathop.obj.clone();
-                let key = &pathop.operation_key();
-                let target = &pathop.child().unwrap();
+            [] => Ok(self),
+            [op, tail @ ..] => {
+                let key = &op.operation_key();
 
-                if !self.has_child(key, target) {
-                    op_set
-                        .objs
-                        .get(obj)
-                        .and_then(|obj| obj.props.get(key))
-                        .map(|ops| self.add_values(key, &ops));
+                if self.prop_key(key).is_empty() {
+                    if let Some(ops) = op_set.get_field_ops(&op.obj, &key) {
+                        for i in ops.iter() {
+                            self.add_value(key, &i);
+                        }
+                    }
                 }
 
-                let child = self.get_child(key, target);
-                let child = child.unwrap();
-                child.expand_path(tail, op_set)
+                self.get_child(key, op)?.expand_path(tail, op_set)
             }
         }
     }
 
-    fn has_child(&self, key: &Key, target: &ObjectID) -> bool {
-        self.props
-            .as_ref()
-            .and_then(|p| {
-                p.get(key).and_then(|values| {
-                    values
-                        .iter()
-                        .filter_map(|(_, link)| match link {
-                            DiffLink::Link(ref diff) => {
-                                if diff.object_id == *target {
-                                    Some(diff)
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        })
-                        .next()
-                })
-            })
-            .is_some()
-    }
-
-    fn get_child(&mut self, key: &Key, target: &ObjectID) -> Option<&mut Diff> {
-        self.props
-            .get_or_insert_with(HashMap::new)
-            .get_mut(key)
-            .and_then(|values| {
-                values
-                    .iter_mut()
-                    .filter_map(|(_, link)| match link {
-                        DiffLink::Link(ref mut diff) => {
-                            if diff.object_id == *target {
-                                Some(diff)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    })
-                    .next()
-            })
-    }
-
-    fn expand(&mut self, key: &Key, metaop: &OpHandle) -> &mut Diff {
-        //        let key = metaop.key();
-        let prop = self
-            .props
-            .get_or_insert_with(HashMap::new)
-            .entry(key.clone())
-            .or_insert_with(HashMap::new);
-        let child = metaop.child().unwrap();
-        let obj_type = metaop.obj_type().unwrap();
-        let link = prop.entry(metaop.id.clone()).or_insert_with(|| {
-            DiffLink::Link(Diff {
-                obj_type,
-                object_id: child.clone(),
-                edits: None,
-                props: None,
-            })
-        });
-        if let DiffLink::Link(ref mut diff) = link {
-            return diff;
+    fn get_child(&mut self, key: &Key, op: &OpHandle) -> Result<&mut Diff, AutomergeError> {
+        let target = &op.child().unwrap();
+        for (_, link) in self.prop_key(&key).iter_mut() {
+            if let DiffLink::Link(ref mut diff) = link {
+                if &diff.object_id == target {
+                    return Ok(diff);
+                }
+            }
         }
-        panic!("Tried to expand into a value {:?}", metaop);
+        Err(AutomergeError::GetChildFailed(target.clone(), key.clone()))
+    }
+
+    pub(crate) fn remap_list_keys(&mut self, op_set: &OpSet) -> Result<(), AutomergeError> {
+        if self.is_seq() && self.props.is_some() {
+            let mut oldprops = self.props.take().unwrap_or_default();
+            let mut newprops = HashMap::new();
+            let elemids = op_set.get_elem_ids(&self.object_id);
+            for (key, keymap) in oldprops.drain() {
+                let key_op = key.to_opid()?;
+                let index = elemids.iter().position(|id| id == &key_op).ok_or_else(|| {
+                    AutomergeError::MissingElement(self.object_id.clone(), key_op.clone())
+                })?;
+                let new_key = Key(index.to_string());
+                newprops.insert(new_key, keymap);
+            }
+            self.props = Some(newprops);
+        }
+        if let Some(ref mut props) = self.props {
+            for (_, keymap) in props.iter_mut() {
+                for (_, link) in keymap.iter_mut() {
+                    match link {
+                        DiffLink::Val(_) => {}
+                        DiffLink::Link(d) => d.remap_list_keys(op_set)?,
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -238,6 +240,15 @@ pub struct DiffValue {
 pub enum DiffLink {
     Link(Diff),
     Val(DiffValue),
+}
+
+impl DiffLink {
+    fn get_ref(&mut self) -> &mut Diff {
+        match self {
+            DiffLink::Link(ref mut diff) => diff,
+            DiffLink::Val(_) => panic!("DiffLink not a link()"),
+        }
+    }
 }
 
 impl Serialize for DiffLink {
@@ -269,6 +280,9 @@ pub struct Patch {
 }
 
 impl Patch {
+    // the default behavior is to return {} for an empty patch
+    // this patch implementation comes with ObjectID::Root baked in so this covered
+    // the top level scope where not even Root is referenced
     pub(crate) fn top_level_serialize<S>(
         maybe_diff: &Option<Diff>,
         serializer: S,

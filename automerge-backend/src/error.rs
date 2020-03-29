@@ -1,4 +1,4 @@
-use crate::protocol::{ObjectID, OpRequest};
+use crate::protocol::{Key, ObjectID, OpID, OpRequest};
 use std::error::Error;
 use std::fmt;
 
@@ -6,6 +6,9 @@ use std::fmt;
 pub enum AutomergeError {
     MissingObjectError(ObjectID),
     NoPathToObject(ObjectID),
+    CantExtractObject(ObjectID),
+    MissingElement(ObjectID, OpID),
+    GetChildFailed(ObjectID, Key),
     IndexOutOfBounds(usize),
     InvalidOpID(String),
     MissingPrimitiveValue,
