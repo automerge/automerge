@@ -225,11 +225,10 @@ impl OpSet {
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn get_path2(&self, _object_id: &ObjectID) -> Result<Vec<&OpHandle>, AutomergeError> {
         let mut object_id = _object_id;
         let mut path = Vec::new();
-        while *object_id != ObjectID::Root {
+        while object_id != &ObjectID::Root {
             if let Some(inbound) = self
                 .objs
                 .get(object_id)
@@ -280,47 +279,54 @@ impl OpSet {
         Ok(path)
     }
 
-    pub fn finalize_diffs(&self, pending: Vec<PendingDiff>) -> Result<Diff, AutomergeError> {
-        let mut diff2 = Diff::new();
+    pub fn finalize_diffs(
+        &self,
+        pending: Vec<PendingDiff>,
+    ) -> Result<Option<Diff>, AutomergeError> {
+        if pending.is_empty() {
+            Ok(None)
+        } else {
+            let mut diff2 = Diff::new();
+            for diff in pending.iter() {
+                match diff {
+                    PendingDiff::Seq(op, index) => {
+                        let object_id = &op.obj;
+                        let path = self.get_path2(object_id)?;
+                        let object = self.objs.get(object_id).unwrap();
+                        let ops = object.props.get(&op.operation_key()).unwrap();
 
-        for diff in pending.iter() {
-            match diff {
-                PendingDiff::Seq(op, index) => {
-                    let object_id = &op.obj;
-                    let path = self.get_path(object_id)?;
-                    let object = self.objs.get(object_id).unwrap();
-                    let ops = object.props.get(&op.operation_key()).unwrap();
+                        let node = diff2.expand_path(&path, self);
 
-                    let node = diff2.expand_path(&path, self);
-
-                    if op.insert {
-                        if !ops.is_empty() {
-                            node.add_insert(*index);
+                        if op.insert {
+                            if !ops.is_empty() {
+                                node.add_insert(*index);
+                            }
+                        } else if ops.is_empty() {
+                            node.add_remove(*index);
                         }
-                    } else if ops.is_empty() {
-                        node.add_remove(*index);
-                    }
 
-                    if !ops.is_empty() {
-                        let final_index = object.get_index_for(&op.operation_key().to_opid()?)?;
-                        let key = Key(final_index.to_string());
-                        node.add_values(&key, &ops);
-                    } else {
-                        node.touch();
+                        if !ops.is_empty() {
+                            let final_index =
+                                object.get_index_for(&op.operation_key().to_opid()?)?;
+                            let key = Key(final_index.to_string());
+                            node.add_values(&key, &ops);
+                        } else {
+                            node.touch();
+                        }
                     }
-                }
-                PendingDiff::Map(op) => {
-                    let object_id = &op.obj;
-                    let path = self.get_path(object_id)?;
-                    let object = self.objs.get(object_id).unwrap();
-                    let key = &op.key;
-                    let ops = object.props.get(key).unwrap();
-                    diff2.expand_path(&path, self).add_values(key, &ops);
+                    PendingDiff::Map(op) => {
+                        let object_id = &op.obj;
+                        let path = self.get_path2(object_id)?;
+                        let object = self.objs.get(object_id).unwrap();
+                        let key = &op.key;
+                        let ops = object.props.get(key).unwrap();
+                        diff2.expand_path(&path, self).add_values(key, &ops);
+                    }
                 }
             }
-        }
 
-        Ok(diff2)
+            Ok(Some(diff2))
+        }
     }
 
     pub fn get_field_ops(&self, object_id: &ObjectID, key: &Key) -> Option<&ConcurrentOperations> {
@@ -429,9 +435,9 @@ impl OpSet {
     ) -> Result<Diff, AutomergeError> {
         let mut diff = Diff {
             object_id: object_id.clone(),
+            obj_type: object.obj_type,
             edits: Some(Vec::new()),
             props: Some(HashMap::new()),
-            obj_type: object.obj_type,
         };
         let mut index = 0;
         let mut max_counter = 0;

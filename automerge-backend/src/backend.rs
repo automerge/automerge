@@ -103,7 +103,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Diff,
+        diffs: Option<Diff>,
         request: Option<&ChangeRequest>,
         incremental: bool,
     ) -> Result<Patch, AutomergeError> {
@@ -334,7 +334,7 @@ impl Backend {
 
     pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
         let diffs = self.op_set.construct_object(&ObjectID::Root)?;
-        self.make_patch(diffs, None, false)
+        self.make_patch(Some(diffs), None, false)
     }
 
     /// Get changes which are in `other` but not in this backend

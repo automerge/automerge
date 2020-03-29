@@ -3,7 +3,9 @@ use crate::op_set::OpSet;
 use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
+use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
+
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -120,21 +122,22 @@ impl Diff {
         }
     }
 
-    pub(crate) fn expand_path(
-        &mut self,
-        path: &[(ObjectID, Key, Key, ObjectID)],
-        op_set: &OpSet,
-    ) -> &mut Diff {
+    pub(crate) fn expand_path(&mut self, path: &[&OpHandle], op_set: &OpSet) -> &mut Diff {
         match path {
             [] => self,
-            [(obj, key, prop, target), tail @ ..] => {
+            [pathop, tail @ ..] => {
+                let obj = &pathop.obj.clone();
+                let key = &pathop.operation_key();
+                let target = &pathop.child().unwrap();
+
                 if !self.has_child(key, target) {
                     op_set
                         .objs
                         .get(obj)
-                        .and_then(|obj| obj.props.get(prop))
+                        .and_then(|obj| obj.props.get(key))
                         .map(|ops| self.add_values(key, &ops));
                 }
+
                 let child = self.get_child(key, target);
                 let child = child.unwrap();
                 child.expand_path(tail, op_set)
@@ -261,5 +264,23 @@ pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub clock: Option<Clock>,
     pub version: u64,
-    pub diffs: Diff,
+    #[serde(serialize_with = "Patch::top_level_serialize")]
+    pub diffs: Option<Diff>,
+}
+
+impl Patch {
+    pub(crate) fn top_level_serialize<S>(
+        maybe_diff: &Option<Diff>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(diff) = maybe_diff {
+            diff.serialize(serializer)
+        } else {
+            let map = serializer.serialize_map(Some(0))?;
+            map.end()
+        }
+    }
 }
