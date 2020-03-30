@@ -274,7 +274,7 @@ impl Backend {
         &mut self,
         mut request: ChangeRequest,
     ) -> Result<Patch, AutomergeError> {
-        self.op_set.check_for_duplicate(&request)?; // Change has already been applied
+        self.check_for_duplicate(&request)?; // Change has already been applied
 
         let version = self.get_version(request.version)?.clone();
 
@@ -301,6 +301,16 @@ impl Backend {
         Ok(patch)
 
         //        Ok(self.make_patch(diffs.unwrap(), Some(&tmp_request), true)?)
+    }
+
+    pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
+        if self.op_set.clock.get(&request.actor) >= request.seq {
+            return Err(AutomergeError::DuplicateChange(format!(
+                "Change request has already been applied {}:{}",
+                request.actor.0, request.seq
+            )));
+        }
+        Ok(())
     }
 
     fn add_change(

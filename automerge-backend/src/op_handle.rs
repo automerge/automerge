@@ -17,7 +17,7 @@ pub(crate) struct OpHandle {
 }
 
 impl OpHandle {
-    pub fn extract(change: &Rc<Change>) -> Vec<OpHandle> {
+    pub fn extract(change: Rc<Change>) -> Vec<OpHandle> {
         change
             .operations
             .iter()

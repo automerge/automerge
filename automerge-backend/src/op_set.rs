@@ -11,7 +11,7 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
-use crate::protocol::{Change, ChangeRequest, Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
+use crate::protocol::{Change, Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -40,44 +40,40 @@ pub(crate) struct Version {
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: HashMap<ObjectID, ObjState>,
-    //queue: Vec<Change>,
+    pub objs: HashMap<ObjectID, Rc<ObjState>>,
     pub clock: Clock,
     pub deps: Clock,
     pub undo_pos: usize,
     pub undo_stack: Vec<Vec<UndoOperation>>,
     pub redo_stack: Vec<Vec<UndoOperation>>,
-    //pub states: ActorStates,
     pub max_op: u64,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = HashMap::new();
-        objs.insert(ObjectID::Root, ObjState::new(ObjType::Map));
+        objs.insert(ObjectID::Root, Rc::new(ObjState::new(ObjType::Map)));
 
         OpSet {
             objs,
-            //queue: Vec::new(),
             clock: Clock::empty(),
             deps: Clock::empty(),
             undo_pos: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            //states: ActorStates::new(),
             max_op: 0,
         }
     }
 
     fn apply_ops(
         &mut self,
-        change: &Rc<Change>,
+        mut ops: Vec<OpHandle>,
         undoable: bool,
     ) -> Result<(Vec<UndoOperation>, Vec<PendingDiff>), AutomergeError> {
         let mut all_undo_ops = Vec::new();
         let mut new_objects: HashSet<ObjectID> = HashSet::new();
         let mut diffs = Vec::new();
-        for op in OpHandle::extract(change).drain(0..) {
+        for op in ops.drain(0..) {
             if op.is_make() {
                 new_objects.insert(op.id.to_object_id());
             }
@@ -100,9 +96,12 @@ impl OpSet {
         _local: bool,
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
-        let (undo_ops, diffs) = self.apply_ops(&change, undoable)?;
 
         self.max_op = max(self.max_op, change.max_op());
+
+        let ops = OpHandle::extract(change);
+
+        let (undo_ops, diffs) = self.apply_ops(ops, undoable)?;
 
         if undoable {
             self.push_undo_ops(undo_ops);
@@ -131,7 +130,7 @@ impl OpSet {
         op: OpHandle,
     ) -> Result<(PendingDiff, Vec<UndoOperation>), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
-            self.objs.insert(child, ObjState::new(obj_type));
+            self.objs.insert(child, Rc::new(ObjState::new(obj_type)));
         }
 
         let object_id = &op.obj;
@@ -293,24 +292,14 @@ impl OpSet {
 
     pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
         self.objs
-            .get(&object_id)
+            .get(&object_id).map(|o| o.as_ref())
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
         self.objs
-            .get_mut(&object_id)
+            .get_mut(&object_id).map(|rc| Rc::make_mut(rc))
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
-    }
-
-    pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
-        if self.clock.get(&request.actor) >= request.seq {
-            return Err(AutomergeError::DuplicateChange(format!(
-                "Change request has already been applied {}:{}",
-                request.actor.0, request.seq
-            )));
-        }
-        Ok(())
     }
 
     pub fn can_undo(&self) -> bool {
