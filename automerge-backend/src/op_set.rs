@@ -96,7 +96,6 @@ impl OpSet {
         _local: bool,
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
-
         self.max_op = max(self.max_op, change.max_op());
 
         let ops = OpHandle::extract(change);
@@ -292,13 +291,15 @@ impl OpSet {
 
     pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
         self.objs
-            .get(&object_id).map(|o| o.as_ref())
+            .get(&object_id)
+            .map(|o| o.as_ref())
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
         self.objs
-            .get_mut(&object_id).map(|rc| Rc::make_mut(rc))
+            .get_mut(&object_id)
+            .map(|rc| Rc::make_mut(rc))
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 

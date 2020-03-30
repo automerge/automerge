@@ -276,18 +276,16 @@ impl Backend {
     ) -> Result<Patch, AutomergeError> {
         self.check_for_duplicate(&request)?; // Change has already been applied
 
-        let version = self.get_version(request.version)?.clone();
+        let ver = self.get_version(request.version)?.clone();
 
         let actor = request.actor.clone();
         request
             .deps
-            .get_or_insert_with(|| version.op_set.deps.without(&actor));
+            .get_or_insert_with(|| ver.op_set.deps.without(&actor));
 
         let start_op = self.op_set.max_op + 1;
         let change = match request.request_type {
-            ChangeRequestType::Change => {
-                self.process_request(&request, &version.op_set, start_op)?
-            }
+            ChangeRequestType::Change => self.process_request(&request, &ver.op_set, start_op)?,
             ChangeRequestType::Undo => self.undo(&request, start_op)?,
             ChangeRequestType::Redo => self.redo(&request, start_op)?,
         };
@@ -299,8 +297,6 @@ impl Backend {
         self.finalize_version(request.version, change)?;
 
         Ok(patch)
-
-        //        Ok(self.make_patch(diffs.unwrap(), Some(&tmp_request), true)?)
     }
 
     pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
@@ -343,7 +339,7 @@ impl Backend {
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
         if let Some(all_deps) = self.states.add_change(&change)? {
-            // FIXME - move these to backend?
+            // maybe - move these out of op_set?
             self.op_set.clock.set(&change.actor_id, change.seq);
             self.op_set.deps.subtract(&all_deps);
             self.op_set.deps.set(&change.actor_id, change.seq);
@@ -372,7 +368,6 @@ impl Backend {
         change: Rc<Change>,
     ) -> Result<(), AutomergeError> {
         // remove all versions older than this one
-        // i wish i had drain filter
         let mut i = 0;
         while i != self.versions.len() {
             if self.versions[i].version < request_version {
