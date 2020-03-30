@@ -17,6 +17,7 @@ pub(crate) struct ObjState {
     pub obj_type: ObjType,
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<OpHandle>>,
+    pub seq: Vec<OpID>,
 }
 
 impl ObjState {
@@ -28,6 +29,7 @@ impl ObjState {
             following,
             obj_type,
             inbound: HashSet::new(),
+            seq: Vec::new(),
         }
     }
 
@@ -39,22 +41,20 @@ impl ObjState {
     }
 
     pub fn get_index_for(&self, target: &OpID) -> Result<usize, AutomergeError> {
-        self.ops_in_order()
-            .scan(0, |n, oid| {
-                let last = *n;
-                let key = oid.to_key();
-                if let Some(ops) = self.props.get(&key) {
-                    if !ops.is_empty() {
-                        *n += 1;
-                    }
-                }
-                Some((last, oid))
-            })
-            .find_map(|(last, oid)| if oid == target { Some(last) } else { None })
-            .ok_or_else(|| AutomergeError::MissingObjectError(target.to_object_id()))
+        let mut n = 0;
+        for a in self.ops_in_order() {
+            if a == target {
+                return Ok(n);
+            }
+
+            if Some(a) == self.seq.get(n) {
+                n += 1;
+            }
+        }
+        Err(AutomergeError::MissingIndex(target.clone()))
     }
 
-    pub fn ops_in_order(&self) -> ElementIterator {
+    fn ops_in_order(&self) -> ElementIterator {
         ElementIterator {
             following: &self.following,
             stack: vec![self.following.get(&ElementID::Head).unwrap().iter()],

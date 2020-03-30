@@ -225,7 +225,7 @@ impl Diff {
         if self.is_seq() && self.props.is_some() {
             let mut oldprops = self.props.take().unwrap_or_default();
             let mut newprops = HashMap::new();
-            let elemids = op_set.get_elem_ids(&self.object_id);
+            let elemids = op_set.get_elem_ids(&self.object_id)?;
             for (key, keymap) in oldprops.drain() {
                 let key_op = key.to_opid()?;
                 let index = elemids.iter().position(|id| id == &key_op).ok_or_else(|| {

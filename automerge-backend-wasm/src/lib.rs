@@ -150,8 +150,8 @@ impl State {
         log!("elemids");
         let object_id: ObjectID = js_to_rust(_object_id)?;
         let elemids = self
-            .backend.get_elem_ids(&object_id);
-//            .map_err(automerge_error_to_js);
+            .backend.get_elem_ids(&object_id)
+            .map_err(automerge_error_to_js)?;
         rust_to_js(&elemids)
     }
 

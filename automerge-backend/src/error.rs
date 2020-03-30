@@ -2,9 +2,10 @@ use crate::protocol::{Key, ObjectID, OpID, OpRequest};
 use std::error::Error;
 use std::fmt;
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq)]
 pub enum AutomergeError {
     MissingObjectError(ObjectID),
+    MissingIndex(OpID),
     NoPathToObject(ObjectID),
     CantExtractObject(ObjectID),
     MissingElement(ObjectID, OpID),

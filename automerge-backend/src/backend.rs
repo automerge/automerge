@@ -53,9 +53,14 @@ impl Backend {
                     self.obj_alias.insert(child.clone(), &id);
                 }
 
-                let mut elemids = elemid_cache
-                    .entry(object_id.clone())
-                    .or_insert_with(|| op_set.get_elem_ids(&object_id));
+                let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
+                    op_set
+                        .get_elem_ids(&object_id)
+                        .unwrap_or_default()
+                        .iter()
+                        .cloned()
+                        .collect()
+                });
 
                 let key = rop.resolve_key(&id, &mut elemids)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
@@ -360,7 +365,7 @@ impl Backend {
         self.op_set.get_missing_deps()
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Vec<OpID> {
+    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&[OpID], AutomergeError> {
         self.op_set.get_elem_ids(object_id)
     }
 

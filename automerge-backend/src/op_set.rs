@@ -202,16 +202,24 @@ impl OpSet {
 
             let undo_ops = op.generate_undos(&overwritten_ops);
 
-            let index = object.get_index_for(&op.operation_key().to_opid()?)?; // speed up - dont need to calculalte this on set
-
-            self.unlink(&op, &overwritten_ops)?;
-
             let diff = match (before, after) {
-                (true, true) => PendingDiff::SeqSet(op),
-                (true, false) => PendingDiff::SeqRemove(op, index),
-                (false, true) => PendingDiff::SeqInsert(op, index),
+                (true, true) => PendingDiff::SeqSet(op.clone()),
+                (true, false) => {
+                    let opid = op.operation_key().to_opid()?;
+                    let index = object.seq.iter().position(|o| o == &opid).unwrap();
+                    object.seq.remove(index);
+                    PendingDiff::SeqRemove(op.clone(), index)
+                }
+                (false, true) => {
+                    let id = op.operation_key().to_opid()?;
+                    let index = object.get_index_for(&id)?;
+                    object.seq.insert(index, id.clone());
+                    PendingDiff::SeqInsert(op.clone(), index)
+                }
                 (false, false) => PendingDiff::Noop,
             };
+
+            self.unlink(&op, &overwritten_ops)?;
 
             Ok((diff, undo_ops))
         } else {
@@ -376,17 +384,8 @@ impl OpSet {
             .collect()
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Vec<OpID> {
-        if let Some(obj) = self.objs.get(object_id) {
-            // FIXME - converting each id to a key to do this?  Seems like
-            // id want to be indexing by id here and not by key
-            obj.ops_in_order()
-                .filter(|id| !obj.props.get(&id.to_key()).unwrap().is_empty())
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        }
+    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&[OpID], AutomergeError> {
+        self.get_obj(object_id).map(|o| o.seq.as_slice())
     }
 
     pub fn get_missing_deps(&self) -> Clock {
@@ -446,7 +445,7 @@ impl OpSet {
         let mut index = 0;
         let mut max_counter = 0;
 
-        for opid in object.ops_in_order() {
+        for opid in object.seq.iter() {
             max_counter = max(max_counter, opid.counter());
             if let Some(ops) = object.props.get(&opid.to_key()) {
                 if !ops.is_empty() {
