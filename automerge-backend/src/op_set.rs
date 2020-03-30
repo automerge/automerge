@@ -195,7 +195,9 @@ impl OpSet {
             }
 
             let ops = object.props.entry(op.operation_key()).or_default();
+            let start_no = ops.len();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let end_no = ops.len();
 
             let undo_ops = op.generate_undos(&overwritten_ops);
 
@@ -203,7 +205,11 @@ impl OpSet {
 
             self.unlink(&op, &overwritten_ops)?;
 
-            Ok((PendingDiff::Seq(op.clone(), index), undo_ops))
+            if start_no == 0 && end_no == 0 {
+                Ok((PendingDiff::Noop, undo_ops))
+            } else {
+                Ok((PendingDiff::Seq(op.clone(), index), undo_ops))
+            }
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
@@ -282,12 +288,15 @@ impl OpSet {
 
                             node.add_values(&op.operation_key(), &ops, self)?;
                         }
-                    }
+                    },
                     PendingDiff::Map(op) => {
                         if let Some((path, ops)) = self.extract(&op)? {
                             diff.expand_path(&path, self)?
                                 .add_values(&op.key, &ops, self)?;
                         }
+                    },
+                    PendingDiff::Noop => {
+                        // nope
                     }
                 }
             }

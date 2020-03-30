@@ -13,6 +13,7 @@ use std::collections::HashMap;
 pub(crate) enum PendingDiff {
     Seq(OpHandle, usize),
     Map(OpHandle),
+    Noop,
 }
 
 // The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
