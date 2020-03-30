@@ -6,7 +6,6 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::actor_states::ActorStates;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
@@ -42,13 +41,13 @@ pub(crate) struct Version {
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
     pub objs: HashMap<ObjectID, ObjState>,
-    queue: Vec<Change>,
+    //queue: Vec<Change>,
     pub clock: Clock,
     pub deps: Clock,
     pub undo_pos: usize,
     pub undo_stack: Vec<Vec<UndoOperation>>,
     pub redo_stack: Vec<Vec<UndoOperation>>,
-    pub states: ActorStates,
+    //pub states: ActorStates,
     pub max_op: u64,
 }
 
@@ -59,57 +58,15 @@ impl OpSet {
 
         OpSet {
             objs,
-            queue: Vec::new(),
+            //queue: Vec::new(),
             clock: Clock::empty(),
             deps: Clock::empty(),
             undo_pos: 0,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            states: ActorStates::new(),
+            //states: ActorStates::new(),
             max_op: 0,
         }
-    }
-
-    /// Adds a change to the internal queue of operations, then iteratively
-    /// applies all causally ready changes until there are none remaining
-    ///
-    /// If `make_undoable` is true, the op set will store a set of operations
-    /// which can be used to undo this change.
-
-    pub(crate) fn add_change(
-        &mut self,
-        change: Change,
-        local: bool,
-        undoable: bool,
-    ) -> Result<Vec<PendingDiff>, AutomergeError> {
-        if local {
-            self.apply_change(change, local, undoable)
-        } else {
-            self.queue.push(change);
-            self.apply_queued_ops()
-        }
-    }
-
-    fn apply_queued_ops(&mut self) -> Result<Vec<PendingDiff>, AutomergeError> {
-        let mut all_diffs = Vec::new();
-        while let Some(next_change) = self.pop_next_causally_ready_change() {
-            let diffs = self.apply_change(next_change, false, false)?;
-            all_diffs.extend(diffs)
-        }
-        Ok(all_diffs)
-    }
-
-    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            let change = self.queue.get(index).unwrap();
-            let deps = change.deps.with(&change.actor_id, change.seq - 1);
-            if deps <= self.clock {
-                return Some(self.queue.remove(index));
-            }
-            index += 1
-        }
-        None
     }
 
     fn apply_ops(
@@ -137,22 +94,12 @@ impl OpSet {
         Ok((all_undo_ops, diffs))
     }
 
-    fn apply_change(
+    pub(crate) fn apply_change(
         &mut self,
-        change: Change,
+        change: Rc<Change>,
         _local: bool,
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
-        let change = Rc::new(change);
-
-        if let Some(all_deps) = self.states.add_change(&change)? {
-            self.clock.set(&change.actor_id, change.seq);
-            self.deps.subtract(&all_deps);
-            self.deps.set(&change.actor_id, change.seq);
-        } else {
-            return Ok(Vec::new());
-        }
-
         let (undo_ops, diffs) = self.apply_ops(&change, undoable)?;
 
         self.max_op = max(self.max_op, change.max_op());
@@ -213,7 +160,7 @@ impl OpSet {
                 (false, true) => {
                     let id = op.operation_key().to_opid()?;
                     let index = object.get_index_for(&id)?;
-                    object.seq.insert(index, id.clone());
+                    object.seq.insert(index, id);
                     PendingDiff::SeqInsert(op.clone(), index)
                 }
                 (false, false) => PendingDiff::Noop,
@@ -374,26 +321,8 @@ impl OpSet {
         !self.redo_stack.is_empty()
     }
 
-    /// Get all the changes we have that are not in `since`
-    pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
-        self.states
-            .history
-            .iter()
-            .map(|rc| rc.as_ref())
-            .filter(|change| change.seq > since.get(&change.actor_id))
-            .collect()
-    }
-
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&[OpID], AutomergeError> {
         self.get_obj(object_id).map(|o| o.seq.as_slice())
-    }
-
-    pub fn get_missing_deps(&self) -> Clock {
-        let mut clock = Clock::empty();
-        for change in self.queue.iter() {
-            clock.merge(&change.deps.with(&change.actor_id, change.seq - 1))
-        }
-        clock
     }
 
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {

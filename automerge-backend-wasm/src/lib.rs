@@ -90,7 +90,7 @@ impl State {
     pub fn get_missing_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
         log!("get_missing_changes");
         let c: Clock = js_to_rust(clock)?;
-        let changes = self.backend.get_missing_changes(c);
+        let changes = self.backend.get_missing_changes(&c);
         rust_to_js(&changes)
     }
 
