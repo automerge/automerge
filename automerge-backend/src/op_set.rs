@@ -35,7 +35,7 @@ use std::rc::Rc;
 pub(crate) struct Version {
     pub version: u64,
     pub local_only: bool,
-    pub op_set: OpSet,
+    pub op_set: Rc<OpSet>,
 }
 
 #[derive(Debug, PartialEq, Clone)]

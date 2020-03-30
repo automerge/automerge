@@ -26,7 +26,7 @@ impl Backend {
         versions.push(Version {
             version: 0,
             local_only: true,
-            op_set: OpSet::init(),
+            op_set: Rc::new(OpSet::init()),
         });
         Backend {
             versions,
@@ -252,14 +252,14 @@ impl Backend {
             let version_obj = Version {
                 version,
                 local_only: true,
-                op_set: self.op_set.clone(),
+                op_set: Rc::new(self.op_set.clone()),
             };
             self.versions.push(version_obj);
         } else {
             let version_obj = Version {
                 version: 0,
                 local_only: true,
-                op_set: self.op_set.clone(),
+                op_set: Rc::new(self.op_set.clone()),
             };
             self.versions.clear();
             self.versions.push(version_obj);
@@ -374,10 +374,9 @@ impl Backend {
 
         for v in self.versions.iter_mut() {
             if v.local_only {
-                v.op_set = self.op_set.clone()
+                v.op_set = Rc::new(self.op_set.clone())
             } else {
-                v.op_set = self.op_set.clone();
-                v.op_set.apply_change(change.clone(), true, false)?;
+                Rc::make_mut(&mut v.op_set).apply_change(change.clone(), true, false)?;
             }
         }
 
