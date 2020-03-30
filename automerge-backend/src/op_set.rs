@@ -225,10 +225,13 @@ impl OpSet {
         Ok(())
     }
 
+    // it is possible for this to find no valid path
+    // if an object was modified and then unlinked - this is ok
+    // return None
     fn extract(
         &self,
         op: &OpHandle,
-    ) -> Result<(Vec<&OpHandle>, &ConcurrentOperations), AutomergeError> {
+    ) -> Result<Option<(Vec<&OpHandle>, &ConcurrentOperations)>, AutomergeError> {
         let mut object_id = &op.obj;
         let mut path = Vec::new();
         let object = self
@@ -249,10 +252,10 @@ impl OpSet {
                 path.insert(0, inbound);
                 object_id = &inbound.obj;
             } else {
-                return Err(AutomergeError::NoPathToObject(object_id.clone()));
+                return Ok(None);
             }
         }
-        Ok((path, ops))
+        Ok(Some((path, ops)))
     }
 
     pub fn finalize_diffs(
@@ -266,22 +269,23 @@ impl OpSet {
             for action in pending.iter() {
                 match action {
                     PendingDiff::Seq(op, index) => {
-                        let (path, ops) = self.extract(&op)?;
+                        if let Some((path, ops)) = self.extract(&op)? {
+                            let node = diff.expand_path(&path, self)?;
 
-                        let node = diff.expand_path(&path, self)?;
+                            if op.insert {
+                                node.add_insert(*index);
+                            } else if ops.is_empty() {
+                                node.add_remove(*index);
+                            }
 
-                        if op.insert {
-                            node.add_insert(*index);
-                        } else if ops.is_empty() {
-                            node.add_remove(*index);
+                            node.add_values(&op.operation_key(), &ops, self)?;
                         }
-
-                        node.add_values(&op.operation_key(), &ops, self)?;
                     }
                     PendingDiff::Map(op) => {
-                        let (path, ops) = self.extract(&op)?;
-                        diff.expand_path(&path, self)?
-                            .add_values(&op.key, &ops, self)?;
+                        if let Some((path, ops)) = self.extract(&op)? {
+                            diff.expand_path(&path, self)?
+                                .add_values(&op.key, &ops, self)?;
+                        }
                     }
                 }
             }
