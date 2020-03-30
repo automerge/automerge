@@ -87,14 +87,10 @@ impl Diff {
         }
     }
 
-    // use in construct diff path
     pub(crate) fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff) -> &mut Diff {
-        self.props
-            .get_or_insert_with(HashMap::new)
-            .entry(key.clone())
-            .or_insert_with(HashMap::new)
+        self.prop_key(key)
             .insert(opid.clone(), DiffLink::Link(child));
-        self
+        self.prop_key(key).get_mut(&opid).unwrap().get_ref()
     }
 
     fn touch(&mut self, key: &Key) {
@@ -109,14 +105,19 @@ impl Diff {
         }
     }
 
-    pub(crate) fn add_values(&mut self, key: &Key, ops: &[OpHandle]) -> &mut Diff {
+    pub(crate) fn add_values(
+        &mut self,
+        key: &Key,
+        ops: &[OpHandle],
+        op_set: &OpSet,
+    ) -> Result<&mut Diff, AutomergeError> {
         self.touch(key);
 
         for op in ops.iter() {
-            self.add_value(key, &op);
+            self.add_value(key, &op, op_set)?;
         }
 
-        self
+        Ok(self)
     }
 
     fn prop_key(&mut self, key: &Key) -> &mut HashMap<OpID, DiffLink> {
@@ -126,29 +127,47 @@ impl Diff {
             .or_insert_with(HashMap::new)
     }
 
-    pub(crate) fn add_value(&mut self, key: &Key, op: &OpHandle) -> &mut Diff {
-        match &op.action {
+    pub(crate) fn add_value(
+        &mut self,
+        key: &Key,
+        op: &OpHandle,
+        op_set: &OpSet,
+    ) -> Result<&mut Diff, AutomergeError> {
+        Ok(match &op.action {
+            OpType::Link(child_id) => {
+                self.add_child(&key, &op.id, op_set.construct_object(child_id)?);
+                self
+            }
+            _ => self.add_shallow_value(key, op, op_set)?,
+        })
+    }
+
+    pub(crate) fn add_shallow_value(
+        &mut self,
+        key: &Key,
+        op: &OpHandle,
+        op_set: &OpSet,
+    ) -> Result<&mut Diff, AutomergeError> {
+        Ok(match &op.action {
             OpType::Set(_, ref datatype) => {
                 let id = op.id.clone();
-                self.prop_key(key).insert(
-                    id,
-                    DiffLink::Val(DiffValue {
-                        value: op.adjusted_value(),
-                        datatype: datatype.clone(),
-                    }),
-                );
+                let value = DiffLink::Val(DiffValue {
+                    value: op.adjusted_value(),
+                    datatype: *datatype,
+                });
+                self.prop_key(key).insert(id, value);
                 self
             }
             OpType::Make(obj_type) => {
-                let id = op.id.clone();
                 let object_id = op.id.to_object_id(); // op.child()
-                let entry = self.prop_key(key).entry(id);
-                let link =
-                    entry.or_insert_with(|| DiffLink::Link(Diff::init(object_id, *obj_type)));
-                link.get_ref()
+                self.add_child(&key, &op.id, Diff::init(object_id, *obj_type))
             }
-            _ => panic!("not implemented"),
-        }
+            OpType::Link(ref object_id) => {
+                let obj_type = op_set.get_obj(&object_id)?.obj_type;
+                self.add_child(&key, &op.id, Diff::init(object_id.clone(), obj_type))
+            }
+            _ => panic!("Inc and Del should never get here"),
+        })
     }
 
     pub(crate) fn expand_path(
@@ -164,7 +183,7 @@ impl Diff {
                 if self.prop_key(key).is_empty() {
                     if let Some(ops) = op_set.get_field_ops(&op.obj, &key) {
                         for i in ops.iter() {
-                            self.add_value(key, &i);
+                            self.add_shallow_value(key, &i, op_set)?;
                         }
                     }
                 }

@@ -276,11 +276,12 @@ impl OpSet {
                             node.add_remove(*index);
                         }
 
-                        node.add_values(&op.operation_key(), &ops);
+                        node.add_values(&op.operation_key(), &ops, self)?;
                     }
                     PendingDiff::Map(op) => {
                         let (path, ops) = self.extract(&op)?;
-                        diff.expand_path(&path, self)?.add_values(&op.key, &ops);
+                        diff.expand_path(&path, self)?
+                            .add_values(&op.key, &ops, self)?;
                     }
                 }
             }
@@ -389,7 +390,7 @@ impl OpSet {
                 if let Some(child_id) = op.child() {
                     diff.add_child(&key, &op.id, self.construct_object(&child_id)?);
                 } else {
-                    diff.add_value(&key, &op);
+                    diff.add_value(&key, &op, self)?;
                 }
             }
         }
@@ -422,7 +423,7 @@ impl OpSet {
                         if let Some(child_id) = op.child() {
                             diff.add_child(&key, &op.id, self.construct_object(&child_id)?);
                         } else {
-                            diff.add_value(&key, &op);
+                            diff.add_value(&key, &op, self)?;
                         }
                     }
                     index += 1;

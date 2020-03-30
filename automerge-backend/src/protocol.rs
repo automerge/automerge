@@ -377,7 +377,7 @@ impl Ord for ElementID {
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
 pub enum DataType {
     #[serde(rename = "counter")]
     Counter,
@@ -388,6 +388,7 @@ pub enum DataType {
 }
 
 impl DataType {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn is_undefined(d: &DataType) -> bool {
         match d {
             DataType::Undefined => true,
