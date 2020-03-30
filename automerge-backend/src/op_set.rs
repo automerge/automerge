@@ -81,22 +81,22 @@ impl OpSet {
         change: Change,
         local: bool,
         undoable: bool,
-        diffs: &mut Vec<PendingDiff>,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<PendingDiff>, AutomergeError> {
         if local {
-            self.apply_change(change, local, undoable, diffs)
+            self.apply_change(change, local, undoable)
         } else {
             self.queue.push(change);
-            self.apply_queued_ops(diffs)
+            self.apply_queued_ops()
         }
     }
 
-    fn apply_queued_ops(&mut self, diffs: &mut Vec<PendingDiff>) -> Result<(), AutomergeError> {
-        // TODO: drain_filter
+    fn apply_queued_ops(&mut self) -> Result<Vec<PendingDiff>, AutomergeError> {
+        let mut all_diffs = Vec::new();
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            self.apply_change(next_change, false, false, diffs)?;
+            let diffs = self.apply_change(next_change, false, false)?;
+            all_diffs.extend(diffs)
         }
-        Ok(())
+        Ok(all_diffs)
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -116,10 +116,10 @@ impl OpSet {
         &mut self,
         change: &Rc<Change>,
         undoable: bool,
-        diffs: &mut Vec<PendingDiff>,
-    ) -> Result<Vec<UndoOperation>, AutomergeError> {
+    ) -> Result<(Vec<UndoOperation>, Vec<PendingDiff>), AutomergeError> {
         let mut all_undo_ops = Vec::new();
         let mut new_objects: HashSet<OpID> = HashSet::new();
+        let mut diffs = Vec::new();
         for op in OpHandle::extract(change).iter() {
             if op.is_make() {
                 new_objects.insert(op.id.clone());
@@ -133,7 +133,7 @@ impl OpSet {
                 all_undo_ops.extend(undo_ops);
             }
         }
-        Ok(all_undo_ops)
+        Ok((all_undo_ops, diffs))
     }
 
     fn apply_change(
@@ -141,8 +141,7 @@ impl OpSet {
         change: Change,
         _local: bool,
         undoable: bool,
-        diffs: &mut Vec<PendingDiff>,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<PendingDiff>, AutomergeError> {
         let change = Rc::new(change);
 
         if let Some(all_deps) = self.states.add_change(&change)? {
@@ -150,23 +149,26 @@ impl OpSet {
             self.deps.subtract(&all_deps);
             self.deps.set(&change.actor_id, change.seq);
         } else {
-            // duplicate change - ignore
-            return Ok(());
+            return Ok(Vec::new());
         }
 
-        let all_undo_ops = self.apply_ops(&change, undoable, diffs)?;
+        let (undo_ops, diffs) = self.apply_ops(&change, undoable)?;
 
         self.max_op = max(self.max_op, change.max_op());
 
         if undoable {
-            let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-            let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
-            new_undo_stack.push(all_undo_ops);
-            self.undo_stack = new_undo_stack;
-            self.undo_pos += 1;
+            self.push_undo_ops(undo_ops);
         };
 
-        Ok(())
+        Ok(diffs)
+    }
+
+    fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
+        let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
+        let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
+        new_undo_stack.push(undo_ops);
+        self.undo_stack = new_undo_stack;
+        self.undo_pos += 1;
     }
 
     /// Incorporates a new operation into the object store. The caller is

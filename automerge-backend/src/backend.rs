@@ -226,8 +226,10 @@ impl Backend {
         let mut pending_diffs = Vec::new();
 
         for change in changes.drain(0..) {
-            self.op_set
-                .add_change(change, request.is_some(), undoable, &mut pending_diffs)?;
+            let diffs = self
+                .op_set
+                .add_change(change, request.is_some(), undoable)?;
+            pending_diffs.extend(diffs);
         }
 
         if incremental {
@@ -307,8 +309,7 @@ impl Backend {
                 v.op_set = self.op_set.clone()
             } else {
                 v.op_set = self.op_set.clone();
-                v.op_set
-                    .add_change(change.clone(), true, false, &mut Vec::new())?; // FIXME - should be passing None for diffs
+                v.op_set.add_change(change.clone(), true, false)?;
             }
         }
 
