@@ -118,18 +118,19 @@ impl OpSet {
         undoable: bool,
     ) -> Result<(Vec<UndoOperation>, Vec<PendingDiff>), AutomergeError> {
         let mut all_undo_ops = Vec::new();
-        let mut new_objects: HashSet<OpID> = HashSet::new();
+        let mut new_objects: HashSet<ObjectID> = HashSet::new();
         let mut diffs = Vec::new();
-        for op in OpHandle::extract(change).iter() {
+        for op in OpHandle::extract(change).drain(0..) {
             if op.is_make() {
-                new_objects.insert(op.id.clone());
+                new_objects.insert(op.id.to_object_id());
             }
+            let use_undo = undoable && !(new_objects.contains(&op.obj));
 
             let (diff, undo_ops) = self.apply_op(op)?;
 
             diffs.push(diff);
 
-            if undoable && !(new_objects.contains(&op.id)) {
+            if use_undo {
                 all_undo_ops.extend(undo_ops);
             }
         }
@@ -180,7 +181,7 @@ impl OpSet {
     /// later.
     fn apply_op(
         &mut self,
-        op: &OpHandle,
+        op: OpHandle,
     ) -> Result<(PendingDiff, Vec<UndoOperation>), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             self.objs.insert(child, ObjState::new(obj_type));
@@ -195,28 +196,37 @@ impl OpSet {
             }
 
             let ops = object.props.entry(op.operation_key()).or_default();
-            let start_no = ops.len();
+            let before = !ops.is_empty();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
-            let end_no = ops.len();
+            let after = !ops.is_empty();
 
             let undo_ops = op.generate_undos(&overwritten_ops);
 
-            let index = object.get_index_for(&op.operation_key().to_opid()?)?;
+            let index = object.get_index_for(&op.operation_key().to_opid()?)?; // speed up - dont need to calculalte this on set
 
             self.unlink(&op, &overwritten_ops)?;
 
-            if start_no == 0 && end_no == 0 {
-                Ok((PendingDiff::Noop, undo_ops))
-            } else {
-                Ok((PendingDiff::Seq(op.clone(), index), undo_ops))
-            }
+            let diff = match (before, after) {
+                (true, true) => PendingDiff::SeqSet(op),
+                (true, false) => PendingDiff::SeqRemove(op, index),
+                (false, true) => PendingDiff::SeqInsert(op, index),
+                (false, false) => PendingDiff::Noop,
+            };
+
+            Ok((diff, undo_ops))
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
+            let before = !ops.is_empty();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let after = !ops.is_empty();
             let undo_ops = op.generate_undos(&overwritten_ops);
             self.unlink(&op, &overwritten_ops)?;
 
-            Ok((PendingDiff::Map(op.clone()), undo_ops))
+            if before || after {
+                Ok((PendingDiff::Map(op), undo_ops))
+            } else {
+                Ok((PendingDiff::Noop, undo_ops))
+            }
         }
     }
 
@@ -276,16 +286,26 @@ impl OpSet {
             let mut diff = Diff::new();
             for action in pending.iter() {
                 match action {
-                    PendingDiff::Seq(op, index) => {
+                    PendingDiff::SeqSet(op) => {
+                        if let Some((path, ops)) = self.extract(&op)? {
+                            diff.expand_path(&path, self)?.add_values(
+                                &op.operation_key(),
+                                &ops,
+                                self,
+                            )?;
+                        }
+                    }
+                    PendingDiff::SeqInsert(op, index) => {
                         if let Some((path, ops)) = self.extract(&op)? {
                             let node = diff.expand_path(&path, self)?;
-
-                            if op.insert {
-                                node.add_insert(*index);
-                            } else if ops.is_empty() {
-                                node.add_remove(*index);
-                            }
-
+                            node.add_insert(*index);
+                            node.add_values(&op.operation_key(), &ops, self)?;
+                        }
+                    }
+                    PendingDiff::SeqRemove(op, index) => {
+                        if let Some((path, ops)) = self.extract(&op)? {
+                            let node = diff.expand_path(&path, self)?;
+                            node.add_remove(*index);
                             node.add_values(&op.operation_key(), &ops, self)?;
                         }
                     }

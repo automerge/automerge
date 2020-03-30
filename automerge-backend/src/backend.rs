@@ -131,7 +131,7 @@ impl Backend {
             ));
         }
 
-        let mut undo_ops = self.op_set.undo_stack.remove(undo_pos - 1);
+        let mut undo_ops = self.op_set.undo_stack.get(undo_pos - 1).unwrap().clone();
         let mut redo_ops = Vec::new();
 
         let operations = undo_ops

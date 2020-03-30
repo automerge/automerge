@@ -11,7 +11,9 @@ use std::collections::HashMap;
 
 #[derive(Debug)]
 pub(crate) enum PendingDiff {
-    Seq(OpHandle, usize),
+    SeqSet(OpHandle),
+    SeqInsert(OpHandle, usize),
+    SeqRemove(OpHandle, usize),
     Map(OpHandle),
     Noop,
 }
