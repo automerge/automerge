@@ -288,13 +288,13 @@ impl OpSet {
 
                             node.add_values(&op.operation_key(), &ops, self)?;
                         }
-                    },
+                    }
                     PendingDiff::Map(op) => {
                         if let Some((path, ops)) = self.extract(&op)? {
                             diff.expand_path(&path, self)?
                                 .add_values(&op.key, &ops, self)?;
                         }
-                    },
+                    }
                     PendingDiff::Noop => {
                         // nope
                     }

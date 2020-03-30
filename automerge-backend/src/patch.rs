@@ -206,7 +206,20 @@ impl Diff {
         Err(AutomergeError::GetChildFailed(target.clone(), key.clone()))
     }
 
+    // constructed diffs are already remapped
+    pub(crate) fn already_remapped(&mut self) -> bool {
+        if let Some(p) = &self.props {
+            if let Some(key) = p.keys().next() {
+                return key.0.parse::<usize>().is_ok();
+            }
+        }
+        false
+    }
+
     pub(crate) fn remap_list_keys(&mut self, op_set: &OpSet) -> Result<(), AutomergeError> {
+        if self.already_remapped() {
+            return Ok(());
+        }
         if self.is_seq() && self.props.is_some() {
             let mut oldprops = self.props.take().unwrap_or_default();
             let mut newprops = HashMap::new();
