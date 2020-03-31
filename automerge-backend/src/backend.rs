@@ -1,13 +1,14 @@
 use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
+use crate::op_handle::OpHandle;
 use crate::op_set::{OpSet, Version};
-use crate::patch::PendingDiff;
-use crate::patch::{Diff, Patch};
+use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{
     DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation,
 };
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
+use std::cmp::max;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -18,6 +19,11 @@ pub struct Backend {
     op_set: OpSet,
     states: ActorStates,
     obj_alias: ObjAlias,
+    max_op: u64,
+    undo_pos: usize,
+    pub clock: Clock,
+    pub undo_stack: Vec<Vec<UndoOperation>>,
+    pub redo_stack: Vec<Vec<UndoOperation>>,
 }
 
 impl Backend {
@@ -34,6 +40,11 @@ impl Backend {
             queue: Vec::new(),
             obj_alias: ObjAlias::new(),
             states: ActorStates::new(),
+            clock: Clock::empty(),
+            max_op: 0,
+            undo_stack: Vec::new(),
+            undo_pos: 0,
+            redo_stack: Vec::new(),
         }
     }
 
@@ -116,13 +127,13 @@ impl Backend {
     ) -> Result<Patch, AutomergeError> {
         Ok(Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
-            can_undo: self.op_set.can_undo(),
-            can_redo: self.op_set.can_redo(),
+            can_undo: self.can_undo(),
+            can_redo: self.can_redo(),
             diffs,
             clock: if incremental {
                 None
             } else {
-                Some(self.op_set.clock.clone())
+                Some(self.clock.clone())
             },
             actor: request.map(|r| r.actor.clone()),
             seq: request.map(|r| r.seq),
@@ -134,15 +145,15 @@ impl Backend {
         request: &ChangeRequest,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
-        let undo_pos = self.op_set.undo_pos;
+        let undo_pos = self.undo_pos;
 
-        if undo_pos < 1 || self.op_set.undo_stack.len() < undo_pos {
+        if undo_pos < 1 || self.undo_stack.len() < undo_pos {
             return Err(AutomergeError::InvalidChange(
                 "Cannot undo: there is nothing to be undone".to_string(),
             ));
         }
 
-        let mut undo_ops = self.op_set.undo_stack.get(undo_pos - 1).unwrap().clone();
+        let mut undo_ops = self.undo_stack.get(undo_pos - 1).unwrap().clone();
         let mut redo_ops = Vec::new();
 
         let operations = undo_ops
@@ -171,8 +182,8 @@ impl Backend {
             operations,
         });
 
-        self.op_set.undo_pos -= 1;
-        self.op_set.redo_stack.push(redo_ops);
+        self.undo_pos -= 1;
+        self.redo_stack.push(redo_ops);
 
         Ok(change)
     }
@@ -183,7 +194,6 @@ impl Backend {
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
         let mut redo_ops = self
-            .op_set
             .redo_stack
             .pop()
             .ok_or_else(|| AutomergeError::InvalidChange("no redo ops".to_string()))?;
@@ -209,7 +219,7 @@ impl Backend {
             operations,
         });
 
-        self.op_set.undo_pos += 1;
+        self.undo_pos += 1;
 
         Ok(change)
     }
@@ -283,7 +293,7 @@ impl Backend {
             .deps
             .get_or_insert_with(|| ver.op_set.deps.without(&actor));
 
-        let start_op = self.op_set.max_op + 1;
+        let start_op = self.max_op + 1;
         let change = match request.request_type {
             ChangeRequestType::Change => self.process_request(&request, &ver.op_set, start_op)?,
             ChangeRequestType::Undo => self.undo(&request, start_op)?,
@@ -300,7 +310,7 @@ impl Backend {
     }
 
     pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
-        if self.op_set.clock.get(&request.actor) >= request.seq {
+        if self.clock.get(&request.actor) >= request.seq {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {}:{}",
                 request.actor.0, request.seq
@@ -335,18 +345,25 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Rc<Change>,
-        local: bool,
+        _local: bool,
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
         if let Some(all_deps) = self.states.add_change(&change)? {
-            // maybe - move these out of op_set?
-            self.op_set.clock.set(&change.actor_id, change.seq);
+            self.clock.set(&change.actor_id, change.seq);
             self.op_set.deps.subtract(&all_deps);
             self.op_set.deps.set(&change.actor_id, change.seq);
         } else {
             return Ok(Vec::new());
         }
-        self.op_set.apply_change(change, local, undoable)
+        self.max_op = max(self.max_op, change.max_op());
+
+        let (undo_ops, diffs) = self.op_set.apply_ops(OpHandle::extract(change), undoable)?;
+
+        if undoable {
+            self.push_undo_ops(undo_ops);
+        };
+
+        Ok(diffs)
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Rc<Change>> {
@@ -354,7 +371,7 @@ impl Backend {
         while index < self.queue.len() {
             let change = self.queue.get(index).unwrap();
             let deps = change.deps.with(&change.actor_id, change.seq - 1);
-            if deps <= self.op_set.clock {
+            if deps <= self.clock {
                 return Some(self.queue.remove(index));
             }
             index += 1
@@ -379,21 +396,13 @@ impl Backend {
 
         for v in self.versions.iter_mut() {
             if v.local_only {
-                v.op_set = Rc::new(self.op_set.clone())
+                v.op_set = Rc::new(self.op_set.clone());
             } else {
-                Rc::make_mut(&mut v.op_set).apply_change(change.clone(), true, false)?;
+                Rc::make_mut(&mut v.op_set).apply_ops(OpHandle::extract(change.clone()), false)?;
             }
         }
 
         Ok(())
-    }
-
-    pub fn undo_stack(&self) -> &Vec<Vec<UndoOperation>> {
-        &self.op_set.undo_stack
-    }
-
-    pub fn redo_stack(&self) -> &Vec<Vec<UndoOperation>> {
-        &self.op_set.redo_stack
     }
 
     pub fn history(&self) -> Vec<&Change> {
@@ -406,12 +415,12 @@ impl Backend {
     }
 
     pub fn get_changes<'a>(&self, other: &'a Backend) -> Result<Vec<&'a Change>, AutomergeError> {
-        if self.clock().divergent(&other.clock()) {
+        if self.clock.divergent(&other.clock) {
             return Err(AutomergeError::DivergedState(
                 "Cannot diff two states that have diverged".to_string(),
             ));
         }
-        Ok(other.get_missing_changes(&self.op_set.clock))
+        Ok(other.get_missing_changes(&self.clock))
     }
 
     pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<&Change> {
@@ -425,6 +434,14 @@ impl Backend {
             .map(|rc| rc.as_ref())
             .filter(|change| change.seq > since.get(&change.actor_id))
             .collect()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.undo_pos > 0
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
     }
 
     pub fn get_missing_deps(&self) -> Clock {
@@ -441,7 +458,7 @@ impl Backend {
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
         let missing_changes = remote
-            .get_missing_changes(&self.op_set.clock)
+            .get_missing_changes(&self.clock)
             .iter()
             .cloned()
             .cloned()
@@ -449,7 +466,11 @@ impl Backend {
         self.apply_changes(missing_changes)
     }
 
-    pub fn clock(&self) -> &Clock {
-        &self.op_set.clock
+    fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
+        let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
+        let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
+        new_undo_stack.push(undo_ops);
+        self.undo_stack = new_undo_stack;
+        self.undo_pos += 1;
     }
 }

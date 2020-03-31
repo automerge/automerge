@@ -104,8 +104,7 @@ impl State {
     #[wasm_bindgen(js_name = getClock)]
     pub fn get_clock(&self) -> Result<JsValue, JsValue> {
         log!("get_clock");
-        let clock = self.backend.clock();
-        rust_to_js(&clock)
+        rust_to_js(&self.backend.clock)
     }
 
     #[wasm_bindgen(js_name = getHistory)]
@@ -118,15 +117,13 @@ impl State {
     #[wasm_bindgen(js_name = getUndoStack)]
     pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
         log!("get_undo_stack");
-        let stack = self.backend.undo_stack();
-        rust_to_js(&stack)
+        rust_to_js(&self.backend.undo_stack)
     }
 
     #[wasm_bindgen(js_name = getRedoStack)]
     pub fn get_redo_stack(&self) -> Result<JsValue, JsValue> {
         log!("get_redo_stack");
-        let stack = self.backend.redo_stack();
-        rust_to_js(&stack)
+        rust_to_js(&self.backend.redo_stack)
     }
 
     #[wasm_bindgen]

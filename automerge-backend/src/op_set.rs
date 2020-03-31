@@ -11,7 +11,7 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
-use crate::protocol::{Change, Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
+use crate::protocol::{Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -41,12 +41,7 @@ pub(crate) struct Version {
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
     pub objs: HashMap<ObjectID, Rc<ObjState>>,
-    pub clock: Clock,
     pub deps: Clock,
-    pub undo_pos: usize,
-    pub undo_stack: Vec<Vec<UndoOperation>>,
-    pub redo_stack: Vec<Vec<UndoOperation>>,
-    pub max_op: u64,
 }
 
 impl OpSet {
@@ -56,16 +51,11 @@ impl OpSet {
 
         OpSet {
             objs,
-            clock: Clock::empty(),
             deps: Clock::empty(),
-            undo_pos: 0,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            max_op: 0,
         }
     }
 
-    fn apply_ops(
+    pub(crate) fn apply_ops(
         &mut self,
         mut ops: Vec<OpHandle>,
         undoable: bool,
@@ -90,40 +80,6 @@ impl OpSet {
         Ok((all_undo_ops, diffs))
     }
 
-    pub(crate) fn apply_change(
-        &mut self,
-        change: Rc<Change>,
-        _local: bool,
-        undoable: bool,
-    ) -> Result<Vec<PendingDiff>, AutomergeError> {
-        self.max_op = max(self.max_op, change.max_op());
-
-        let ops = OpHandle::extract(change);
-
-        let (undo_ops, diffs) = self.apply_ops(ops, undoable)?;
-
-        if undoable {
-            self.push_undo_ops(undo_ops);
-        };
-
-        Ok(diffs)
-    }
-
-    fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
-        let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-        let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
-        new_undo_stack.push(undo_ops);
-        self.undo_stack = new_undo_stack;
-        self.undo_pos += 1;
-    }
-
-    /// Incorporates a new operation into the object store. The caller is
-    /// responsible for ensuring that all causal dependencies of the new
-    /// operation have already been applied.
-    ///
-    /// The return value is a tuple of a diff to send to the frontend, and
-    /// a (possibly empty) vector of operations which will undo the operation
-    /// later.
     fn apply_op(
         &mut self,
         op: OpHandle,
@@ -301,14 +257,6 @@ impl OpSet {
             .get_mut(&object_id)
             .map(|rc| Rc::make_mut(rc))
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
-    }
-
-    pub fn can_undo(&self) -> bool {
-        self.undo_pos > 0
-    }
-
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
     }
 
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&[OpID], AutomergeError> {

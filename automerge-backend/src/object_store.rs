@@ -40,6 +40,10 @@ impl ObjState {
         }
     }
 
+    // self.seq is the materialized list of active elements
+    // self.ops_in_order() is an iterator across all elements
+    // by walking both lists at the same time we can determine the index of
+    // an element even if it was just deleted
     pub fn get_index_for(&self, target: &OpID) -> Result<usize, AutomergeError> {
         let mut n = 0;
         for a in self.ops_in_order() {
