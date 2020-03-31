@@ -16,6 +16,7 @@ use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
+use im;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -40,13 +41,13 @@ pub(crate) struct Version {
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: HashMap<ObjectID, Rc<ObjState>>,
+    pub objs: im::HashMap<ObjectID, Rc<ObjState>>,
     pub deps: Clock,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
-        let mut objs = HashMap::new();
+        let mut objs = im::HashMap::new();
         objs.insert(ObjectID::Root, Rc::new(ObjState::new(ObjType::Map)));
 
         OpSet {

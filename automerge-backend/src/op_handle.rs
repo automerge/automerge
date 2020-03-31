@@ -155,3 +155,4 @@ impl Deref for OpHandle {
         &self.change.operations[self.index]
     }
 }
+

@@ -2,8 +2,9 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashSet};
 use std::slice::Iter;
+use im;
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -13,19 +14,19 @@ use std::slice::Iter;
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjState {
-    pub props: HashMap<Key, ConcurrentOperations>,
+    pub props: im::HashMap<Key, ConcurrentOperations>,
     pub obj_type: ObjType,
     pub inbound: HashSet<OpHandle>,
-    pub following: HashMap<ElementID, Vec<OpHandle>>,
+    pub following: im::HashMap<ElementID, Vec<ElementID>>,
     pub seq: Vec<OpID>,
 }
 
 impl ObjState {
     pub fn new(obj_type: ObjType) -> ObjState {
-        let mut following = HashMap::new();
+        let mut following = im::HashMap::new();
         following.insert(ElementID::Head, Vec::new());
         ObjState {
-            props: HashMap::new(),
+            props: im::HashMap::new(),
             following,
             obj_type,
             inbound: HashSet::new(),
@@ -45,13 +46,14 @@ impl ObjState {
     // by walking both lists at the same time we can determine the index of
     // an element even if it was just deleted
     pub fn get_index_for(&self, target: &OpID) -> Result<usize, AutomergeError> {
+        let _target = ElementID::ID(target.clone());
         let mut n = 0;
         for a in self.ops_in_order() {
-            if a == target {
+            if a == &_target {
                 return Ok(n);
             }
 
-            if Some(a) == self.seq.get(n) {
+            if a.as_opid() == self.seq.get(n) {
                 n += 1;
             }
         }
@@ -67,27 +69,27 @@ impl ObjState {
 
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
         let following = self.following.entry(elem).or_default();
-        following.push(op);
+        following.push(ElementID::ID(op.id.clone()));
         following.sort_unstable_by(|a, b| b.cmp(a));
     }
 }
 
 pub(crate) struct ElementIterator<'a> {
-    pub following: &'a HashMap<ElementID, Vec<OpHandle>>,
-    pub stack: Vec<Iter<'a, OpHandle>>,
+    pub following: &'a im::HashMap<ElementID, Vec<ElementID>>,
+    pub stack: Vec<Iter<'a, ElementID>>,
 }
 
 impl<'a> Iterator for ElementIterator<'a> {
-    type Item = &'a OpID;
+    type Item = &'a ElementID;
 
-    fn next(&mut self) -> Option<&'a OpID> {
+    fn next(&mut self) -> Option<&'a ElementID> {
         while let Some(mut last) = self.stack.pop() {
             if let Some(next) = last.next() {
                 self.stack.push(last);
-                if let Some(more) = self.following.get(&ElementID::ID(next.id.clone())) {
+                if let Some(more) = self.following.get(next) {
                     self.stack.push(more.iter());
                 }
-                return Some(&next.id);
+                return Some(next);
             }
         }
         None

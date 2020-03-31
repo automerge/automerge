@@ -317,6 +317,14 @@ pub enum ElementID {
 }
 
 impl ElementID {
+
+    pub fn as_opid(&self) -> Option<&OpID> {
+        match self {
+            ElementID::Head => None,
+            ElementID::ID(opid) => Some(opid),
+        }
+    }
+
     pub fn as_key(&self) -> Key {
         match self {
             ElementID::Head => Key("_head".to_string()),

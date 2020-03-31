@@ -1,4 +1,5 @@
 extern crate web_sys;
+extern crate im;
 
 #[allow(unused_macros)]
 macro_rules! log {

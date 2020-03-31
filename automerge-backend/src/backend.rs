@@ -467,10 +467,8 @@ impl Backend {
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
-        let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-        let mut new_undo_stack: Vec<Vec<UndoOperation>> = new_undo_stack_slice.to_vec();
-        new_undo_stack.push(undo_ops);
-        self.undo_stack = new_undo_stack;
+        self.undo_stack.truncate(self.undo_pos);
+        self.undo_stack.push(undo_ops);
         self.undo_pos += 1;
     }
 }
