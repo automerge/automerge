@@ -16,7 +16,6 @@ use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
-use im;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -41,13 +40,13 @@ pub(crate) struct Version {
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: im::HashMap<ObjectID, Rc<ObjState>>,
+    pub objs: im_rc::HashMap<ObjectID, Rc<ObjState>>,
     pub deps: Clock,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
-        let mut objs = im::HashMap::new();
+        let mut objs = im_rc::HashMap::new();
         objs.insert(ObjectID::Root, Rc::new(ObjState::new(ObjType::Map)));
 
         OpSet {
@@ -260,8 +259,8 @@ impl OpSet {
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&[OpID], AutomergeError> {
-        self.get_obj(object_id).map(|o| o.seq.as_slice())
+    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&Vec<OpID>, AutomergeError> {
+        self.get_obj(object_id).map(|o| &o.seq)
     }
 
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {

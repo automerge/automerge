@@ -286,18 +286,6 @@ impl DiffLink {
     }
 }
 
-impl Serialize for DiffLink {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            DiffLink::Link(diff) => diff.serialize(serializer),
-            DiffLink::Val(val) => val.serialize(serializer),
-        }
-    }
-}
-
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {

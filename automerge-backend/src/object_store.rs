@@ -2,9 +2,8 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
-use std::collections::{HashSet};
 use std::slice::Iter;
-use im;
+use im_rc::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -14,19 +13,19 @@ use im;
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjState {
-    pub props: im::HashMap<Key, ConcurrentOperations>,
+    pub props: HashMap<Key, ConcurrentOperations>,
     pub obj_type: ObjType,
     pub inbound: HashSet<OpHandle>,
-    pub following: im::HashMap<ElementID, Vec<ElementID>>,
+    pub following: HashMap<ElementID, Vec<ElementID>>,
     pub seq: Vec<OpID>,
 }
 
 impl ObjState {
     pub fn new(obj_type: ObjType) -> ObjState {
-        let mut following = im::HashMap::new();
+        let mut following = HashMap::new();
         following.insert(ElementID::Head, Vec::new());
         ObjState {
-            props: im::HashMap::new(),
+            props: HashMap::new(),
             following,
             obj_type,
             inbound: HashSet::new(),
@@ -75,7 +74,7 @@ impl ObjState {
 }
 
 pub(crate) struct ElementIterator<'a> {
-    pub following: &'a im::HashMap<ElementID, Vec<ElementID>>,
+    pub following: &'a HashMap<ElementID, Vec<ElementID>>,
     pub stack: Vec<Iter<'a, ElementID>>,
 }
 

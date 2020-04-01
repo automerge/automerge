@@ -1,5 +1,5 @@
 extern crate web_sys;
-extern crate im;
+extern crate im_rc;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -18,6 +18,7 @@ mod op_handle;
 mod op_set;
 mod patch;
 mod protocol;
+mod serialize;
 mod time;
 
 pub use crate::protocol::{
