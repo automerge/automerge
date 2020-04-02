@@ -121,7 +121,6 @@ impl Backend {
         &self,
         diffs: Option<Diff>,
         request: Option<&ChangeRequest>,
-        _incremental: bool,
     ) -> Result<Patch, AutomergeError> {
         Ok(Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
@@ -271,7 +270,7 @@ impl Backend {
 
         let diffs = self.op_set.finalize_diffs(pending_diffs)?;
 
-        self.make_patch(diffs, request, true)
+        self.make_patch(diffs, request)
     }
 
     pub fn apply_local_change(
@@ -405,7 +404,7 @@ impl Backend {
 
     pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
         let diffs = self.op_set.construct_object(&ObjectID::Root)?;
-        self.make_patch(Some(diffs), None, false)
+        self.make_patch(Some(diffs), None)
     }
 
     pub fn get_changes<'a>(&self, other: &'a Backend) -> Result<Vec<&'a Change>, AutomergeError> {
