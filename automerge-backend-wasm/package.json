@@ -17,9 +17,9 @@
   ],
   "main": "./pkg.js",
   "scripts": {
-    "build": "rimraf pkg && wasm-pack build --target nodejs --dev --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
-    "release": "rimraf pkg && wasm-pack build --target nodejs --release --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
-    "profiling": "rimraf pkg && wasm-pack build --target nodejs --profiling --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
+    "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
+    "release": "rm -rf pkg && wasm-pack build --target nodejs --release --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
+    "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
     "mocha": "yarn build && mocha --bail --full-trace",
     "test": "cargo test && wasm-pack test --node"
   },
