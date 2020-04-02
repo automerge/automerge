@@ -1,18 +1,10 @@
-let Backend = require("./automerge_backend_wasm")
+let Backend = require('./pkg')
+let encodeChange, decodeChanges // initialized by initCodecFunctions
 
-const { encodeChange, decodeChange } = require('automerge/backend/columnar')
-
-function decodeChanges(binaryChanges) {
-  let decoded = []
-  for (let binaryChange of binaryChanges) {
-    if (!(binaryChange instanceof Uint8Array)) {
-      throw new RangeError(`Unexpected type of change: ${binaryChange}`)
-    }
-    for (let change of decodeChange(binaryChange)) decoded.push(change)
-  }
-  return decoded
+function initCodecFunctions(functions) {
+  encodeChange = functions.encodeChange
+  decodeChanges = functions.decodeChanges
 }
-
 
 function init() {
   return { state: Backend.State.new(), frozen: false }
@@ -86,6 +78,7 @@ function getRedoStack(backend) {
 }
 
 module.exports = {
+  initCodecFunctions,
   init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
   getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack
 }

@@ -23,8 +23,6 @@
     "mocha": "yarn build && mocha --bail --full-trace",
     "test": "cargo test && wasm-pack test --node"
   },
-  "dependencies": {
-    "automerge": "automerge/automerge#performance"
-  },
+  "dependencies": { },
   "devDependencies": { }
 }
