@@ -13,12 +13,8 @@
     "test": "cargo test && wasm-pack test --node"
   },
   "dependencies": {
-    "fast-sha256": "^1.3.0",
-    "immutable": "^3.8.2"
+    "automerge": "automerge/automerge#performance",
+    "fast-sha256": "^1.3.0"
   },
-  "devDependencies": {
-    "automerge": "^0.12.1",
-    "mocha": "^6.2.0",
-    "rimraf": "^2.6.3"
-  }
+  "devDependencies": { }
 }

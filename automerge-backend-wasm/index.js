@@ -1,7 +1,6 @@
 let Backend = require("./pkg")
-let util = require('util')
 
-const { encodeChange, decodeChange } = require('./columnar')
+const { encodeChange, decodeChange } = require('automerge/backend/columnar')
 
 function decodeChanges(binaryChanges) {
   let decoded = []
@@ -11,7 +10,6 @@ function decodeChanges(binaryChanges) {
     }
     for (let change of decodeChange(binaryChange)) decoded.push(change)
   }
-  //console.log("CHANGES",util.inspect(decoded, {showHidden: false, depth: null}))
   return decoded
 }
 
@@ -36,7 +34,6 @@ let mutate = (oldBackend,fn) => {
   let result = fn(state)
   oldBackend.frozen = true
   let newBackend = { state, clock: state.getClock(), frozen: false };
-  //console.log("PATCH",util.inspect(result, {showHidden: false, depth: null}));
   return [ newBackend, result ]
 }
 
@@ -50,7 +47,6 @@ let loadChanges = (backend,changes) => {
 }
 
 let applyLocalChange = (backend,request) => {
-  //console.log("LOCAL REQUEST",util.inspect(request, {showHidden: false, depth: null}))
   return mutate(backend, (b) => b.applyLocalChange(request));
 }
 

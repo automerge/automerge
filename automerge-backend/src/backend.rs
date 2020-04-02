@@ -121,18 +121,14 @@ impl Backend {
         &self,
         diffs: Option<Diff>,
         request: Option<&ChangeRequest>,
-        incremental: bool,
+        _incremental: bool,
     ) -> Result<Patch, AutomergeError> {
         Ok(Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
             can_undo: self.can_undo(),
             can_redo: self.can_redo(),
             diffs,
-            clock: if incremental {
-                None
-            } else {
-                Some(self.clock.clone())
-            },
+            clock: self.clock.clone(),
             actor: request.map(|r| r.actor.clone()),
             seq: request.map(|r| r.seq),
         })

@@ -293,10 +293,9 @@ pub struct Patch {
     pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u32>,
+    pub clock: Clock,
     pub can_undo: bool,
     pub can_redo: bool,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub clock: Option<Clock>,
     pub version: u64,
     #[serde(serialize_with = "Patch::top_level_serialize")]
     pub diffs: Option<Diff>,
