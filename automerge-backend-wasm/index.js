@@ -67,13 +67,12 @@ let getRedoStack = (backend) => {
 }
 
 let getPatch = (backend) => clean(backend).getPatch()
-let getChanges = (backend,other) => clean(backend).getChanges(clean(other)).map(encodeChange)
+let getChanges = (backend,clock) => clean(backend).getChanges(clock).map(encodeChange)
 let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor).map(encodeChange)
-let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock).map(encodeChange)
 let getMissingDeps = (backend) => clean(backend).getMissingDeps()
 
 module.exports = {
   init, applyChanges, applyLocalChange, getPatch,
-  getChanges, getChangesForActor, getMissingChanges, getMissingDeps,
+  getChanges, getChangesForActor, getMissingDeps,
   getClock, getUndoStack, getRedoStack, loadChanges
 }
