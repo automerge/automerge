@@ -1,20 +1,30 @@
 {
-  "author": "Orion Henry <orion@inkandswitch.com>",
+  "collaborators": [
+    "Orion Henry <orion@inkandswitch.com>",
+    "Alex Good <alex@memoryandthought.me>"
+  ],
   "name": "automerge-backend-wasm",
   "description": "wasm-bindgen bindings to the automerge-backend rust implementation",
   "version": "0.1.0",
   "license": "MIT",
+  "files": [
+    "README.md",
+    "index.js",
+    "LICENSE",
+    "package.json",
+    "automerge_backend_wasm_bg.wasm",
+    "automerge_backend_wasm.js"
+  ],
   "main": "./index.js",
   "scripts": {
-    "build": "rimraf pkg && wasm-pack build --target nodejs --out-name index --dev",
-    "release": "rimraf pkg && wasm-pack build --target nodejs --out-name index --release",
-    "profiling": "rimraf pkg && wasm-pack build --target nodejs --out-name index --profiling",
+    "build": "rimraf pkg && wasm-pack build --target nodejs --dev --no-typescript && cp package.json pkg && cp pkg.js pkg/index.js",
+    "release": "rimraf pkg && wasm-pack build --target nodejs --release --no-typescript && cp package.json pkg && cp pkg.js pkg/index.js",
+    "profiling": "rimraf pkg && wasm-pack build --target nodejs --profiling --no-typescript && cp package.json pkg && cp pkg.js pkg/index.js",
     "mocha": "yarn build && mocha --bail --full-trace",
     "test": "cargo test && wasm-pack test --node"
   },
   "dependencies": {
-    "automerge": "automerge/automerge#performance",
-    "fast-sha256": "^1.3.0"
+    "automerge": "automerge/automerge#performance"
   },
   "devDependencies": { }
 }

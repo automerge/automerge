@@ -1,12 +1,14 @@
 # You must change these to your own details.
 [package]
 name = "automerge-backend-wasm"
-description = ""
+description = "An js/wasm wrapper for the rust implementation of automerge-backend"
+repository = "https://github.com/automerge/automerge-rs"
 version = "0.1.0"
 authors = ["Alex Good <alex@memoryandthought.me>","Orion Henry <orion@inkandswitch.com>", "Martin Kleppmann"]
 categories = ["wasm"]
 readme = "README.md"
 edition = "2018"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib","rlib"]
