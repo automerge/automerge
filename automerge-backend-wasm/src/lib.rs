@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock, ObjectID};
+use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -69,12 +69,10 @@ impl State {
     }
 
     #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&self, state: &State) -> Result<JsValue, JsValue> {
+    pub fn get_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
         log!("get_changes");
-        let changes = self
-            .backend
-            .get_changes(&state.backend)
-            .map_err(automerge_error_to_js)?;
+        let c: Clock = js_to_rust(clock)?;
+        let changes = self.backend.get_missing_changes(&c);
         rust_to_js(&changes)
     }
 
@@ -83,14 +81,6 @@ impl State {
         log!("get_changes_for_actorid");
         let a: ActorID = js_to_rust(actorid)?;
         let changes = self.backend.get_changes_for_actor_id(&a);
-        rust_to_js(&changes)
-    }
-
-    #[wasm_bindgen(js_name = getMissingChanges)]
-    pub fn get_missing_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
-        log!("get_missing_changes");
-        let c: Clock = js_to_rust(clock)?;
-        let changes = self.backend.get_missing_changes(&c);
         rust_to_js(&changes)
     }
 
@@ -107,13 +97,6 @@ impl State {
         rust_to_js(&self.backend.clock)
     }
 
-    #[wasm_bindgen(js_name = getHistory)]
-    pub fn get_history(&self) -> Result<JsValue, JsValue> {
-        log!("get_history");
-        let history = self.backend.history();
-        rust_to_js(&history)
-    }
-
     #[wasm_bindgen(js_name = getUndoStack)]
     pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
         log!("get_undo_stack");
@@ -127,29 +110,9 @@ impl State {
     }
 
     #[wasm_bindgen]
-    pub fn merge(&mut self, remote: &State) -> Result<JsValue, JsValue> {
-        log!("merge");
-        let patch = self
-            .backend
-            .merge(&remote.backend)
-            .map_err(automerge_error_to_js)?;
-        rust_to_js(&patch)
-    }
-
-    #[wasm_bindgen]
     pub fn fork(&self) -> State {
         log!("fork");
         self.clone()
-    }
-
-    #[wasm_bindgen(js_name = _elemIds)]
-    pub fn get_elem_ids(&self, _object_id: JsValue) -> Result<JsValue, JsValue> {
-        log!("elemids");
-        let object_id: ObjectID = js_to_rust(_object_id)?;
-        let elemids = self
-            .backend.get_elem_ids(&object_id)
-            .map_err(automerge_error_to_js)?;
-        rust_to_js(&elemids)
     }
 
     #[wasm_bindgen(js_name = forkAt)]
