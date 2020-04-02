@@ -14,61 +14,78 @@ function decodeChanges(binaryChanges) {
 }
 
 
-let init = () => {
-  return { state: Backend.State.new(), clock: {}, frozen: false };
+function init() {
+  return { state: Backend.State.new(), frozen: false }
 }
 
-let clean = (backend) => {
+function backendState(backend) {
   if (backend.frozen) {
-    //throw new Error('do not fork')
-    let state = backend.state.forkAt(backend.clock)
-    backend.state = state
-    backend.clock = state.getClock()
-    backend.frozen = false
+    throw new Error(
+      'Attempting to use an outdated Automerge document that has already been updated. ' +
+      'Please use the latest document state, or call Automerge.clone() if you really ' +
+      'need to use this old document state.'
+    )
   }
   return backend.state
 }
 
-let mutate = (oldBackend,fn) => {
-  let state = clean(oldBackend)
-  let result = fn(state)
-  oldBackend.frozen = true
-  let newBackend = { state, clock: state.getClock(), frozen: false };
-  return [ newBackend, result ]
+function clone(backend) {
+  const state = backend.state.forkAt(backend.state.getClock())
+  return { state, frozen: false }
 }
 
-let applyChanges = (backend,changes) => {
-  return mutate(backend, (b) => b.applyChanges(decodeChanges(changes)));
+function free(backend) {
+  backend.state.free()
+  backend.state = null
+  backend.frozen = true
 }
 
-let loadChanges = (backend,changes) => {
-  let [newState,_] = mutate(backend, (b) => b.loadChanges(decodeChanges(changes)));
-  return newState
+function applyChanges(backend, changes) {
+  const state = backendState(backend)
+  const patch = state.applyChanges(decodeChanges(changes))
+  backend.frozen = true
+  return [{ state, frozen: false }, patch]
 }
 
-let applyLocalChange = (backend,request) => {
-  return mutate(backend, (b) => b.applyLocalChange(request));
+function applyLocalChange(backend, request) {
+  const state = backendState(backend)
+  const patch = state.applyLocalChange(request)
+  backend.frozen = true
+  return [{ state, frozen: false }, patch]
 }
 
-let getClock = (backend) => {
-  return backend.clock;
+function loadChanges(backend, changes) {
+  const state = backendState(backend)
+  state.loadChanges(decodeChanges(changes))
+  backend.frozen = true
+  return { state, frozen: false }
 }
 
-let getUndoStack = (backend) => {
-  return clean(backend).getUndoStack();
+function getPatch(backend) {
+  return backendState(backend).getPatch()
 }
 
-let getRedoStack = (backend) => {
-  return clean(backend).getRedoStack();
+function getChanges(backend, clock) {
+  return backendState(backend).getChanges(clock).map(encodeChange)
 }
 
-let getPatch = (backend) => clean(backend).getPatch()
-let getChanges = (backend,clock) => clean(backend).getChanges(clock).map(encodeChange)
-let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor).map(encodeChange)
-let getMissingDeps = (backend) => clean(backend).getMissingDeps()
+function getChangesForActor(backend, actor) {
+  return backendState(backend).getChangesForActor(actor).map(encodeChange)
+}
+
+function getMissingDeps(backend) {
+  return backendState(backend).getMissingDeps()
+}
+
+function getUndoStack(backend) {
+  return backendState(backend).getUndoStack()
+}
+
+function getRedoStack(backend) {
+  return backendState(backend).getRedoStack()
+}
 
 module.exports = {
-  init, applyChanges, applyLocalChange, getPatch,
-  getChanges, getChangesForActor, getMissingDeps,
-  getClock, getUndoStack, getRedoStack, loadChanges
+  init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
+  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack
 }
