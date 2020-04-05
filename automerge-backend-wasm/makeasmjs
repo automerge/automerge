@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -e 
+
+rm -rf pkg dist
+wasm-pack build --target bundler --out-name index --release
+wasm2js pkg/index_bg.wasm -o pkg/index_bg.js
+sed -i 's/import . as wasm from ...index_bg.wasm./var wasm = null/' pkg/index.js
+echo "export const _setwasm = (w) => { wasm = w };" >> pkg/index.js
+echo "import * as wasm from './index_bg.js';" > pkg/bond.js
+echo "import { _setwasm } from './index.js';" >> pkg/bond.js
+echo "_setwasm(wasm);" >> pkg/bond.js
+echo "export * from './index.js';" >> pkg/bond.js
+cp index.js pkg/entry.js
+sed -i 's/pkg/bond/' pkg/entry.js
+$(npm bin)/webpack
+cp package.json README.md LICENSE dist
+sed -i 's/automerge-backend-wasm/automerge-backend-asmjs/' dist/package.json
+rm -rf pkg
