@@ -6,15 +6,17 @@
   "license": "MIT",
   "main": "./index.js",
   "scripts": {
-    "build": "rm -rf pkg && wasm-pack build --target bundler --out-name index",
+    "build": "rm -rf pkg && wasm-pack build --target nodejs --out-name index --dev",
     "release": "rm -rf pkg && wasm-pack build --target nodejs --out-name index --release",
     "mocha": "yarn build && mocha --bail --full-trace",
+    "webpack": "webpack",
     "test": "cargo test && wasm-pack test --node"
   },
   "dependencies": {
     "immutable": "^3.8.2"
   },
   "devDependencies": {
+    "atob": "^2.1.2",
     "mocha": "^6.2.0",
     "webpack": "^4.42.1",
     "webpack-cli": "^3.3.11"

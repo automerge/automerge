@@ -1,0 +1,15 @@
+{
+  "name": "automerge-backend-wasm-sync",
+  "collaborators": [
+    "Orion Henry <orion@inkandswitch.com>",
+    "Alex Good <alex@memoryandthought.me>"
+  ],
+  "description": "",
+  "version": "0.1.0",
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "index.js"
+}

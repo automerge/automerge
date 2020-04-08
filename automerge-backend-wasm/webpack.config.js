@@ -1,7 +1,8 @@
 var path = require('path');
+var webpack = require('webpack');
   
 module.exports  = {
-  entry: './pkg/entry.js',
+  entry: './build/entry.js',
   mode: 'development',
   output: {
     filename: 'index.js',
@@ -10,8 +11,10 @@ module.exports  = {
     path: path.resolve(__dirname, 'dist'),
     globalObject: 'this'
   },
-  module: {
-    rules: [
-    ]
-  }
+  plugins: [
+         new webpack.optimize.LimitChunkCountPlugin({
+            maxChunks: 1,
+          })
+  ],
+  module: { }
 }
