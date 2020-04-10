@@ -301,8 +301,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
 #[test]
 fn test_transform_list_indexes_into_element_ids() {
-    let actor1 = ActorID::from_str("8f389df8-fecb-4ddc-9891-02321af3578e".into()).unwrap();
-    let actor2 = ActorID::from_str("9ba21574-dc44-411b-8ce3-7bc6037a9687".into()).unwrap();
+    let actor1 = ActorID::from_str("8f389df8-fecb-4ddc-9891-02321af3578e").unwrap();
+    let actor2 = ActorID::from_str("9ba21574-dc44-411b-8ce3-7bc6037a9687").unwrap();
     let remote1: Change = serde_json::from_str(
         r#"
         {
