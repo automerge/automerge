@@ -5,7 +5,7 @@ use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
 use serde::ser::SerializeMap;
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Deserialize, Serializer};
 
 use std::collections::HashMap;
 
@@ -43,7 +43,7 @@ pub(crate) enum PendingDiff {
 //      }
 // }
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -256,22 +256,23 @@ impl Default for Diff {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
     Insert { index: usize },
     Remove { index: usize },
 }
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffValue {
-    value: PrimitiveValue,
+    pub(crate) value: PrimitiveValue,
     #[serde(skip_serializing_if = "DataType::is_undefined")]
-    datatype: DataType,
+    pub(crate) datatype: DataType,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
+#[serde(untagged)]
 pub enum DiffLink {
     Link(Diff),
     Val(DiffValue),
@@ -286,7 +287,7 @@ impl DiffLink {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]

@@ -1,12 +1,4 @@
-extern crate web_sys;
 extern crate im_rc;
-
-#[allow(unused_macros)]
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
-}
 
 mod actor_states;
 mod backend;
@@ -25,5 +17,6 @@ pub use crate::protocol::{
     ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, Key, ObjType, ObjectID,
     OpID, OpType, Operation, PrimitiveValue,
 };
+pub use crate::patch::{Diff, Patch, DiffLink, DiffEdit, DiffValue};
 pub use backend::Backend;
 pub use error::AutomergeError;

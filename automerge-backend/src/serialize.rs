@@ -3,9 +3,14 @@ use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
+use std::fmt;
+use std::collections::HashMap;
 
-use crate::protocol::{ObjectID, OpType, OpID, Key, PrimitiveValue, UndoOperation, Operation, ObjType, ReqOpType, DataType, ElementID, RequestKey};
-use crate::patch::{DiffLink};
+use crate::protocol::{
+    DataType, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, PrimitiveValue,
+    ReqOpType, RequestKey, UndoOperation
+};
+use crate::patch::{DiffLink, DiffEdit, Diff, DiffValue};
 
 impl Serialize for ObjectID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -204,23 +209,6 @@ impl<'de> Deserialize<'de> for Operation {
             where
                 V: MapAccess<'de>,
             {
-                fn read_field<'de, T, M>(
-                    name: &'static str,
-                    data: &mut Option<T>,
-                    map: &mut M,
-                ) -> Result<(), M::Error>
-                where
-                    M: MapAccess<'de>,
-                    T: Deserialize<'de>,
-                {
-                    if data.is_some() {
-                        Err(Error::duplicate_field(name))
-                    } else {
-                        data.replace(map.next_value()?);
-                        Ok(())
-                    }
-                }
-
                 let mut action: Option<ReqOpType> = None;
                 let mut obj: Option<ObjectID> = None;
                 let mut key: Option<Key> = None;
@@ -287,15 +275,100 @@ impl<'de> Deserialize<'de> for Operation {
     }
 }
 
-impl Serialize for DiffLink {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl<'de> Deserialize<'de> for DiffLink {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        S: Serializer,
+        D: Deserializer<'de>,
     {
-        match self {
-            DiffLink::Link(diff) => diff.serialize(serializer),
-            DiffLink::Val(val) => val.serialize(serializer),
+        struct DiffLinkVisitor;
+        const FIELDS: &[&str] = &["edits", "objType", "objectId", "props", "value", "datatype"];
+
+        impl<'de> de::Visitor<'de> for DiffLinkVisitor {
+            type Value = DiffLink;
+            
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("A difflink")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut edits: Option<Vec<DiffEdit>> = None;
+                let mut object_id: Option<ObjectID> = None;
+                let mut obj_type: Option<ObjType> = None;
+                let mut props: Option<HashMap<Key, HashMap<OpID, DiffLink>>> = None;
+                let mut value: Option<PrimitiveValue> = None;
+                let mut datatype: Option<DataType> = None;
+
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_ref() {
+                        "edits" => read_field("edits", &mut edits, &mut map)?,
+                        "objectId" => read_field("objectId", &mut object_id, &mut map)?,
+                        "type" => read_field("type", &mut obj_type, &mut map)?,
+                        "props" => read_field("props", &mut props, &mut map)?,
+                        "value" => read_field("value", &mut value, &mut map)?,
+                        "datatype" => read_field("datatype", &mut datatype, &mut map)?,
+                        _ => return Err(Error::unknown_field(&field, FIELDS)),
+                    }
+                };
+                if value.is_some() || datatype.is_some() {
+                    let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                    let datatype = datatype.unwrap_or(DataType::Undefined);
+                    Ok(DiffLink::Val(DiffValue{value, datatype}))
+                } else {
+                    let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
+                    let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
+                    Ok(DiffLink::Link(Diff{
+                        object_id,
+                        obj_type,
+                        edits,
+                        props,
+                    }))
+                }
+            }
         }
+        deserializer.deserialize_struct("DiffLink", &FIELDS, DiffLinkVisitor)
+    }
+}
+
+fn read_field<'de, T, M>(
+    name: &'static str,
+    data: &mut Option<T>,
+    map: &mut M,
+) -> Result<(), M::Error>
+where
+    M: MapAccess<'de>,
+    T: Deserialize<'de>,
+{
+    if data.is_some() {
+        Err(Error::duplicate_field(name))
+    } else {
+        data.replace(map.next_value()?);
+        Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::{Diff, DiffLink, DiffEdit, ObjectID, ObjType, DiffValue, PrimitiveValue, DataType, Key, OpID};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_difflink_round_trip() {
+        let difflink = DiffLink::Link(Diff{
+            edits: Some(vec![DiffEdit::Insert{index: 1}, DiffEdit::Remove{index: 2}]),
+            object_id: ObjectID::Root,
+            obj_type: ObjType::Map,
+            props: Some(vec![(Key("somekey".into()), vec![(OpID::parse("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(), DiffLink::Val(DiffValue{
+                value: PrimitiveValue::Boolean(false),
+                datatype: DataType::Undefined,
+            }))].into_iter().collect::<HashMap<OpID, DiffLink>>())].into_iter().collect()),
+        });
+        let json = serde_json::to_value(difflink.clone()).unwrap();
+        let deserialized_difflink: DiffLink = serde_json::from_value(json).unwrap();
+        assert_eq!(difflink, deserialized_difflink);
     }
 }
 

@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
+use std::convert::Infallible;
 
 use crate::error;
 use crate::error::AutomergeError;
@@ -153,9 +154,13 @@ impl ActorID {
     pub fn random() -> ActorID {
         ActorID(uuid::Uuid::new_v4().to_string())
     }
+}
 
-    pub fn from_string(raw: String) -> ActorID {
-        ActorID(raw)
+impl FromStr for ActorID {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(ActorID(s.into()))
     }
 }
 
