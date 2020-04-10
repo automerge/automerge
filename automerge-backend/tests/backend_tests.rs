@@ -1,7 +1,7 @@
 extern crate automerge_backend;
-use automerge_backend::{Change, Backend, Patch};
+use automerge_backend::{Backend, Change, Patch};
 
-/// 
+///
 /// it('should assign to a key in a map', () => {
 ///   const actor = uuid()
 ///   const change1 = {actor, seq: 1, startOp: 1, time: 0, deps: {}, ops: [
@@ -18,8 +18,9 @@ use automerge_backend::{Change, Backend, Patch};
 /// })
 ///
 #[test]
-fn test_incremental_diffs_in_a_map(){
-    let change: Change = serde_json::from_str(r#"{
+fn test_incremental_diffs_in_a_map() {
+    let change: Change = serde_json::from_str(
+        r#"{
         "actor": "7b7723af-d9e6-4803-97a4-d467b7693156", 
         "seq": 1, 
         "startOp": 1, 
@@ -34,10 +35,13 @@ fn test_incremental_diffs_in_a_map(){
                 "pred": []
             }
         ]
-    }"#).unwrap();
+    }"#,
+    )
+    .unwrap();
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
-    let expected_patch: Patch = serde_json::from_str(r#"{
+    let expected_patch: Patch = serde_json::from_str(
+        r#"{
         "version": 1,
         "clock": {
             "7b7723af-d9e6-4803-97a4-d467b7693156": 1
@@ -53,6 +57,8 @@ fn test_incremental_diffs_in_a_map(){
                 }
             }
         }
-    }"#).unwrap();
+    }"#,
+    )
+    .unwrap();
     assert_eq!(patch, expected_patch)
 }

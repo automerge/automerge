@@ -71,7 +71,12 @@ impl Backend {
                     self.obj_alias.insert(child.clone(), &id);
                 }
 
-                let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| op_set.get_elem_ids(&object_id).map(|c| c.clone()).unwrap_or(Vec::new()));
+                let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
+                    op_set
+                        .get_elem_ids(&object_id)
+                        .map(|c| c.clone())
+                        .unwrap_or(Vec::new())
+                });
 
                 let key = rop.resolve_key(&id, &mut elemids)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
@@ -446,7 +451,12 @@ impl Backend {
     }
 
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<Vec<OpID>, AutomergeError> {
-        Ok(self.op_set.get_elem_ids(object_id)?.iter().cloned().collect())
+        Ok(self
+            .op_set
+            .get_elem_ids(object_id)?
+            .iter()
+            .cloned()
+            .collect())
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {

@@ -5,7 +5,7 @@ use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
 use serde::ser::SerializeMap;
-use serde::{Serialize, Deserialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 use std::collections::HashMap;
 

@@ -2,15 +2,15 @@ use serde::de;
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::str::FromStr;
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
+use std::str::FromStr;
 
+use crate::patch::{Diff, DiffEdit, DiffLink, DiffValue};
 use crate::protocol::{
     DataType, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, PrimitiveValue,
-    ReqOpType, RequestKey, UndoOperation
+    ReqOpType, RequestKey, UndoOperation,
 };
-use crate::patch::{DiffLink, DiffEdit, Diff, DiffValue};
 
 impl Serialize for ObjectID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -285,7 +285,7 @@ impl<'de> Deserialize<'de> for DiffLink {
 
         impl<'de> de::Visitor<'de> for DiffLinkVisitor {
             type Value = DiffLink;
-            
+
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str("A difflink")
             }
@@ -311,15 +311,15 @@ impl<'de> Deserialize<'de> for DiffLink {
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
-                };
+                }
                 if value.is_some() || datatype.is_some() {
                     let value = value.ok_or_else(|| Error::missing_field("value"))?;
                     let datatype = datatype.unwrap_or(DataType::Undefined);
-                    Ok(DiffLink::Val(DiffValue{value, datatype}))
+                    Ok(DiffLink::Val(DiffValue { value, datatype }))
                 } else {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
                     let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
-                    Ok(DiffLink::Link(Diff{
+                    Ok(DiffLink::Link(Diff {
                         object_id,
                         obj_type,
                         edits,
@@ -349,26 +349,41 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use crate::{Diff, DiffLink, DiffEdit, ObjectID, ObjType, DiffValue, PrimitiveValue, DataType, Key, OpID};
+    use crate::{
+        DataType, Diff, DiffEdit, DiffLink, DiffValue, Key, ObjType, ObjectID, OpID, PrimitiveValue,
+    };
     use std::collections::HashMap;
 
     #[test]
     fn test_difflink_round_trip() {
-        let difflink = DiffLink::Link(Diff{
-            edits: Some(vec![DiffEdit::Insert{index: 1}, DiffEdit::Remove{index: 2}]),
+        let difflink = DiffLink::Link(Diff {
+            edits: Some(vec![
+                DiffEdit::Insert { index: 1 },
+                DiffEdit::Remove { index: 2 },
+            ]),
             object_id: ObjectID::Root,
             obj_type: ObjType::Map,
-            props: Some(vec![(Key("somekey".into()), vec![(OpID::parse("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(), DiffLink::Val(DiffValue{
-                value: PrimitiveValue::Boolean(false),
-                datatype: DataType::Undefined,
-            }))].into_iter().collect::<HashMap<OpID, DiffLink>>())].into_iter().collect()),
+            props: Some(
+                vec![(
+                    Key("somekey".into()),
+                    vec![(
+                        OpID::parse("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(),
+                        DiffLink::Val(DiffValue {
+                            value: PrimitiveValue::Boolean(false),
+                            datatype: DataType::Undefined,
+                        }),
+                    )]
+                    .into_iter()
+                    .collect::<HashMap<OpID, DiffLink>>(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
         });
         let json = serde_json::to_value(difflink.clone()).unwrap();
         let deserialized_difflink: DiffLink = serde_json::from_value(json).unwrap();
         assert_eq!(difflink, deserialized_difflink);
     }
 }
-

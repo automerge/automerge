@@ -15,13 +15,13 @@
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
 use core::cmp::max;
-use serde::{Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
-use std::convert::Infallible;
 
 use crate::error;
 use crate::error::AutomergeError;
@@ -270,7 +270,6 @@ pub enum ElementID {
 }
 
 impl ElementID {
-
     pub fn as_opid(&self) -> Option<&OpID> {
         match self {
             ElementID::Head => None,
