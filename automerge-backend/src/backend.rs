@@ -75,7 +75,7 @@ impl Backend {
                     op_set
                         .get_elem_ids(&object_id)
                         .map(|c| c.clone())
-                        .unwrap_or(Vec::new())
+                        .unwrap_or_default()
                 });
 
                 let key = rop.resolve_key(&id, &mut elemids)?;
@@ -454,9 +454,7 @@ impl Backend {
         Ok(self
             .op_set
             .get_elem_ids(object_id)?
-            .iter()
-            .cloned()
-            .collect())
+            .to_vec())
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {

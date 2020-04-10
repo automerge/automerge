@@ -68,7 +68,7 @@ impl ObjState {
 
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
         let following = self.following.entry(elem).or_default();
-        following.push(ElementID::ID(op.id.clone()));
+        following.push(ElementID::ID(op.id));
         following.sort_unstable_by(|a, b| b.cmp(a));
     }
 }
