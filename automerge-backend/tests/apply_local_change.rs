@@ -278,13 +278,17 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
     let change12 = changes2.get(0).unwrap();
 
     backend.apply_local_change(local2).unwrap();
-    let changes3 = backend.get_missing_changes(&Clock::empty().with(
-        &ActorID::from_str("cb55260e-9d7e-4578-86a4-fc73fd949202").unwrap(),
-        1
-    ).with(
-        &ActorID::from_str("6d48a013-1864-4eed-9045-5d2cb68ac657").unwrap(),
-        1
-    ));
+    let changes3 = backend.get_missing_changes(
+        &Clock::empty()
+            .with(
+                &ActorID::from_str("cb55260e-9d7e-4578-86a4-fc73fd949202").unwrap(),
+                1,
+            )
+            .with(
+                &ActorID::from_str("6d48a013-1864-4eed-9045-5d2cb68ac657").unwrap(),
+                1,
+            ),
+    );
     let change23 = changes3.get(0).unwrap();
     expected_change1.time = change01.time;
     expected_change2.time = change12.time;
@@ -296,12 +300,13 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 }
 
 #[test]
-fn test_transform_list_indexes_into_element_ids(){
+fn test_transform_list_indexes_into_element_ids() {
     let actor1 = ActorID::from_str("8f389df8-fecb-4ddc-9891-02321af3578e".into()).unwrap();
-    let actor2 = ActorID::from_str("2ba21574-dc44-411b-8ce3-7bc6037a9687".into()).unwrap();
-    let remote1: Change = serde_json::from_str(r#"
+    let actor2 = ActorID::from_str("9ba21574-dc44-411b-8ce3-7bc6037a9687".into()).unwrap();
+    let remote1: Change = serde_json::from_str(
+        r#"
         {
-            "actor": "2ba21574-dc44-411b-8ce3-7bc6037a9687",
+            "actor": "9ba21574-dc44-411b-8ce3-7bc6037a9687",
             "seq": 1,
             "startOp": 1,
             "time": 0,
@@ -315,17 +320,20 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let remote2: Change = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let remote2: Change = serde_json::from_str(
+        r#"
         {
-            "actor": "2ba21574-dc44-411b-8ce3-7bc6037a9687",
+            "actor": "9ba21574-dc44-411b-8ce3-7bc6037a9687",
             "seq": 2,
             "startOp": 2,
             "time": 0,
             "deps": {},
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": "_head",
                     "insert": true,
@@ -334,8 +342,11 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let local1: ChangeRequest = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let local1: ChangeRequest = serde_json::from_str(
+        r#"
         {
             "requestType": "change",
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
@@ -343,7 +354,7 @@ fn test_transform_list_indexes_into_element_ids(){
             "version": 1,
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": 0,
                     "insert": true,
@@ -351,8 +362,11 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let local2: ChangeRequest = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let local2: ChangeRequest = serde_json::from_str(
+        r#"
         {
             "requestType": "change",
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
@@ -360,7 +374,7 @@ fn test_transform_list_indexes_into_element_ids(){
             "version": 1,
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": 1,
                     "insert": true,
@@ -368,8 +382,11 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let local3: ChangeRequest = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let local3: ChangeRequest = serde_json::from_str(
+        r#"
         {
             "requestType": "change",
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
@@ -377,21 +394,24 @@ fn test_transform_list_indexes_into_element_ids(){
             "version": 4,
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": 0,
                     "value": "Magpie"
                 },
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": 1,
                     "value": "Goldfinch"
                 }
             ]
         }
-    "#).unwrap();
-    let mut expected_change1: Change = serde_json::from_str(r#" 
+    "#,
+    )
+    .unwrap();
+    let mut expected_change1: Change = serde_json::from_str(
+        r#" 
         {
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
             "seq": 1,
@@ -399,11 +419,11 @@ fn test_transform_list_indexes_into_element_ids(){
             "time": 1586533839882,
             "message": null,
             "deps": {
-                "2ba21574-dc44-411b-8ce3-7bc6037a9687": 1
+                "9ba21574-dc44-411b-8ce3-7bc6037a9687": 1
             },
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": "_head",
                     "insert": true,
@@ -412,8 +432,11 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let mut expected_change2: Change = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let mut expected_change2: Change = serde_json::from_str(
+        r#"
         {
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
             "seq": 2,
@@ -423,7 +446,7 @@ fn test_transform_list_indexes_into_element_ids(){
             "deps": {},
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": "2@8f389df8-fecb-4ddc-9891-02321af3578e",
                     "insert": true,
@@ -432,8 +455,11 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
-    let mut expected_change3: Change = serde_json::from_str(r#"
+    "#,
+    )
+    .unwrap();
+    let mut expected_change3: Change = serde_json::from_str(
+        r#"
         {
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
             "seq": 3,
@@ -441,20 +467,20 @@ fn test_transform_list_indexes_into_element_ids(){
             "time": 1586533839887,
             "message": null,
             "deps": {
-                "2ba21574-dc44-411b-8ce3-7bc6037a9687": 2
+                "9ba21574-dc44-411b-8ce3-7bc6037a9687": 2
             },
             "ops": [
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
-                    "key": "2@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "key": "2@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "value": "Magpie",
                     "pred": [
-                        "2@2ba21574-dc44-411b-8ce3-7bc6037a9687"
+                        "2@9ba21574-dc44-411b-8ce3-7bc6037a9687"
                     ]
                 },
                 {
-                    "obj": "1@2ba21574-dc44-411b-8ce3-7bc6037a9687",
+                    "obj": "1@9ba21574-dc44-411b-8ce3-7bc6037a9687",
                     "action": "set",
                     "key": "2@8f389df8-fecb-4ddc-9891-02321af3578e",
                     "value": "Goldfinch",
@@ -464,33 +490,26 @@ fn test_transform_list_indexes_into_element_ids(){
                 }
             ]
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![remote1]).unwrap();
     backend.apply_local_change(local1).unwrap();
     let backend_after_first = backend.clone();
-    let changes1 = backend_after_first.get_missing_changes(&Clock::empty().with(
-        &actor2, 1
-    ));
+    let changes1 = backend_after_first.get_missing_changes(&Clock::empty().with(&actor2, 1));
     let change12 = changes1.get(0).unwrap();
 
     backend.apply_changes(vec![remote2]).unwrap();
     backend.apply_local_change(local2).unwrap();
     let backend_after_second = backend.clone();
-    let changes2 = backend_after_second.get_missing_changes(&Clock::empty().with(
-        &actor1, 1
-    ).with(
-        &actor2, 2
-    ));
+    let changes2 =
+        backend_after_second.get_missing_changes(&Clock::empty().with(&actor1, 1).with(&actor2, 2));
     let change23 = changes2.get(0).unwrap();
 
     backend.apply_local_change(local3).unwrap();
-    let changes3 = backend.get_missing_changes(&Clock::empty().with(
-        &actor1, 2
-    ).with(
-        &actor2, 2
-    ));
+    let changes3 = backend.get_missing_changes(&Clock::empty().with(&actor1, 2).with(&actor2, 2));
     let change34 = changes3.get(0).unwrap();
 
     expected_change1.time = change12.time;
@@ -500,5 +519,136 @@ fn test_transform_list_indexes_into_element_ids(){
     assert_eq!(change12, &&expected_change1);
     assert_eq!(change23, &&expected_change2);
     assert_eq!(change34, &&expected_change3);
+}
 
+#[test]
+fn test_handle_list_insertion_and_deletion_in_same_change() {
+    let local1: ChangeRequest = serde_json::from_str(
+        r#"
+        {
+            "requestType": "change",
+            "actor": "0723d2a1-9407-4486-8ffd-6b294ada813f",
+            "seq": 1,
+            "startOp": 1,
+            "version": 0,
+            "ops": [
+                {
+                    "obj": "00000000-0000-0000-0000-000000000000",
+                    "action": "makeList",
+                    "key": "birds"
+                }
+            ]
+        }
+    "#,
+    )
+    .unwrap();
+    let local2: ChangeRequest = serde_json::from_str(
+        r#"
+        {
+            "requestType": "change",
+            "actor": "0723d2a1-9407-4486-8ffd-6b294ada813f",
+            "seq": 2,
+            "startOp": 2,
+            "version": 0,
+            "ops": [
+                {
+                    "obj": "1@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                    "action": "set",
+                    "key": 0,
+                    "insert": true,
+                    "value": "magpie"
+                },
+                {
+                    "obj": "1@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                    "action": "del",
+                    "key": 0
+                }
+            ]
+        }
+    "#,
+    )
+    .unwrap();
+    let expected_patch: Patch = serde_json::from_str(
+        r#"
+        {
+            "actor": "0723d2a1-9407-4486-8ffd-6b294ada813f",
+            "seq": 2,
+            "version": 2,
+            "clock": {
+                "0723d2a1-9407-4486-8ffd-6b294ada813f": 2
+            },
+            "canUndo": true,
+            "canRedo": false,
+            "diffs": {
+                "objectId": "00000000-0000-0000-0000-000000000000",
+                "type": "map",
+                "props": {
+                    "birds": {
+                        "1@0723d2a1-9407-4486-8ffd-6b294ada813f": {
+                            "objectId": "1@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                            "type": "list",
+                            "edits": [
+                                {
+                                    "action": "insert",
+                                    "index": 0
+                                },
+                                {
+                                    "action": "remove",
+                                    "index": 0
+                                }
+                            ],
+                            "props": {}
+                        }
+                    }
+                }
+            }
+        }
+    "#,
+    )
+    .unwrap();
+    let mut expected_change: Change = serde_json::from_str(
+        r#"
+        {
+            "actor": "0723d2a1-9407-4486-8ffd-6b294ada813f",
+            "seq": 2,
+            "startOp": 2,
+            "time": 1586540158974,
+            "message": null,
+            "deps": {},
+            "ops": [
+                {
+                    "obj": "1@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                    "action": "set",
+                    "key": "_head",
+                    "insert": true,
+                    "value": "magpie",
+                    "pred": []
+                },
+                {
+                    "obj": "1@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                    "action": "del",
+                    "key": "2@0723d2a1-9407-4486-8ffd-6b294ada813f",
+                    "pred": [
+                        "2@0723d2a1-9407-4486-8ffd-6b294ada813f"
+                    ]
+                }
+            ]
+        }
+    "#,
+    )
+    .unwrap();
+
+    let mut backend = Backend::init();
+    backend.apply_local_change(local1).unwrap();
+    let patch = backend.apply_local_change(local2).unwrap();
+    assert_eq!(patch, expected_patch);
+
+    let changes = backend.get_missing_changes(&Clock::empty().with(
+        &ActorID::from_str("0723d2a1-9407-4486-8ffd-6b294ada813f").unwrap(),
+        1,
+    ));
+    let change = changes.get(0).unwrap();
+    expected_change.time = change.time;
+
+    assert_eq!(change, &&expected_change);
 }

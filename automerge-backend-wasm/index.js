@@ -1,4 +1,4 @@
-let Backend = require('./pkg')
+let Backend = require('./automerge_backend_wasm')
 let encodeChange, decodeChanges // initialized by initCodecFunctions
 
 function initCodecFunctions(functions) {
