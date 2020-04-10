@@ -451,10 +451,7 @@ impl Backend {
     }
 
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<Vec<OpID>, AutomergeError> {
-        Ok(self
-            .op_set
-            .get_elem_ids(object_id)?
-            .to_vec())
+        Ok(self.op_set.get_elem_ids(object_id)?.to_vec())
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
