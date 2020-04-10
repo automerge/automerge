@@ -20,7 +20,7 @@ applications which use the CRDT:
 - A very low latency process, usually running on some kind of UI thread, which
   records changes made by the user and reflects them in the UI
 - A slower process which executes the complex logic of merging changes received
-  from the UI and over the network and sends
+  from the UI and over the network and send diffs to the frontend to apply
 
 This is the "frontend" and "backend" we're talking about. The different
 responsibilities of the two components are outlined in detail 
