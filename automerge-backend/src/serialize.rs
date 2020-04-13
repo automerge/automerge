@@ -19,7 +19,6 @@ impl Serialize for ObjectID {
     {
         match self {
             ObjectID::ID(id) => id.serialize(serializer),
-            ObjectID::Str(s) => s.serialize(serializer),
             ObjectID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
         }
     }
@@ -36,7 +35,10 @@ impl<'de> Deserialize<'de> for ObjectID {
         } else if let Some(id) = OpID::from_str(&s).ok() {
             Ok(ObjectID::ID(id))
         } else {
-            Ok(ObjectID::Str(s))
+            Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"A valid ObjectID",
+            ))
         }
     }
 }

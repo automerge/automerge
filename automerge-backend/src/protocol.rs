@@ -40,18 +40,19 @@ pub enum ObjType {
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum ObjectID {
     ID(OpID),
-    Str(String),
     Root,
 }
 
-impl From<&str> for ObjectID {
-    fn from(s: &str) -> ObjectID {
+impl FromStr for ObjectID {
+    type Err = AutomergeError;
+
+    fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
         if s == "00000000-0000-0000-0000-000000000000" {
-            ObjectID::Root
+            Ok(ObjectID::Root)
         } else if let Some(id) = OpID::from_str(s).ok() {
-            ObjectID::ID(id)
+            Ok(ObjectID::ID(id))
         } else {
-            ObjectID::Str(s.to_string())
+            Err(AutomergeError::InvalidObjectID(s.to_string()))
         }
     }
 }
@@ -60,7 +61,6 @@ impl From<&ObjectID> for String {
     fn from(o: &ObjectID) -> String {
         match o {
             ObjectID::ID(OpID::ID(seq, actor)) => format!("{}@{}", seq, actor),
-            ObjectID::Str(s) => s.clone(),
             ObjectID::Root => "00000000-0000-0000-0000-000000000000".into()  
         }
     }
@@ -433,27 +433,6 @@ impl OpRequest {
             Ok(f)
         } else {
             Err(AutomergeError::MissingNumberValue(self.clone()))
-        }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub struct ObjAlias(HashMap<String, OpID>);
-
-impl ObjAlias {
-    pub fn new() -> ObjAlias {
-        ObjAlias(HashMap::new())
-    }
-
-    pub fn insert(&mut self, alias: String, id: &OpID) {
-        self.0.insert(alias, id.clone());
-    }
-
-    pub fn get(&self, text: &str) -> ObjectID {
-        if let Some(id) = self.0.get(text) {
-            id.to_object_id()
-        } else {
-            ObjectID::from(text)
         }
     }
 }
