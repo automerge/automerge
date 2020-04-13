@@ -118,16 +118,20 @@ fn value_to_op_requests(parent_object: ObjectID, key: PathElement, v: &Value, in
             let make_action = match seq_type {
                 SequenceType::List => ReqOpType::MakeList,
                 SequenceType::Text => ReqOpType::MakeText,
-            }
+            };
+            let list_id = ObjectID::from(new_object_id());
             let make_op = OpRequest{
                 action: make_action,
                 obj: String::from(&parent_object),
                 key: key.to_request_key(),
-                child: Some(new_object_id()),
+                child: Some((&list_id).into()),
                 value: None,
                 datatype: None,
                 insert: false,
             };
+            let child_requests = vs.iter().enumerate().map(|index, v| {
+                value_to_op_requests(
+            }).collect();
             Vec::new()
         }
         Value::Map(kvs, map_type) => {
@@ -152,6 +156,6 @@ fn create_prim(object_id: ObjectID, key: Key, value: &Value) -> Operation {
     }
 }
 
-fn new_object_id() -> String {
-    uuid::Uuid::new_v4().to_string()
+fn new_object_id() -> ObjectID {
+    ObjectID::Str(uuid::Uuid::new_v4().to_string())
 }
