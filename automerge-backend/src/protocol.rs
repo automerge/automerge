@@ -61,7 +61,7 @@ impl From<&ObjectID> for String {
     fn from(o: &ObjectID) -> String {
         match o {
             ObjectID::ID(OpID::ID(seq, actor)) => format!("{}@{}", seq, actor),
-            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into()  
+            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
         }
     }
 }
@@ -99,21 +99,6 @@ impl PartialOrd for OpID {
     }
 }
 
-impl FromStr for OpID {
-    type Err = AutomergeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut i = s.split('@');
-        match (i.next(), i.next(), i.next()) {
-            (Some(seq_str), Some(actor_str), None) => seq_str
-                .parse()
-                .map(|seq| OpID::ID(seq, actor_str.to_string()))
-                .map_err(|_| AutomergeError::InvalidOpID(s.into())),
-            _ => Err(AutomergeError::InvalidOpID(s.into())),
-        }
-    }
-}
-
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
         OpID::ID(seq, actor.0.clone())
@@ -133,7 +118,21 @@ impl OpID {
             OpID::ID(counter, _) => *counter,
         }
     }
+}
 
+impl FromStr for OpID {
+    type Err = AutomergeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut i = s.split('@');
+        match (i.next(), i.next(), i.next()) {
+            (Some(seq_str), Some(actor_str), None) => seq_str
+                .parse()
+                .map(|seq| OpID::ID(seq, actor_str.to_string()))
+                .map_err(|_| AutomergeError::InvalidOpID(s.to_string())),
+            _ => Err(AutomergeError::InvalidOpID(s.to_string())),
+        }
+    }
 }
 
 impl fmt::Display for OpID {

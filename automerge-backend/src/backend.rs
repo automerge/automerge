@@ -72,7 +72,8 @@ impl Backend {
                 let child = object_id.clone(); // FIXME
 
                 if let Some(child) = &rop.child {
-                    self.obj_alias.insert(child.clone(), ObjectID::ID(id.clone()));
+                    self.obj_alias
+                        .insert(child.clone(), ObjectID::ID(id.clone()));
                 }
 
                 let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
