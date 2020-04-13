@@ -19,7 +19,6 @@ impl Serialize for ObjectID {
     {
         match self {
             ObjectID::ID(id) => id.serialize(serializer),
-            ObjectID::Str(s) => s.serialize(serializer),
             ObjectID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
         }
     }
@@ -33,10 +32,13 @@ impl<'de> Deserialize<'de> for ObjectID {
         let s = String::deserialize(deserializer)?;
         if s == "00000000-0000-0000-0000-000000000000" {
             Ok(ObjectID::Root)
-        } else if let Some(id) = OpID::parse(&s) {
+        } else if let Some(id) = OpID::from_str(&s).ok() {
             Ok(ObjectID::ID(id))
         } else {
-            Ok(ObjectID::Str(s))
+            Err(de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"A valid ObjectID",
+            ))
         }
     }
 }
@@ -47,8 +49,8 @@ impl<'de> Deserialize<'de> for OpID {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        OpID::parse(&s)
-            .ok_or_else(|| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid OpID"))
+        OpID::from_str(&s)
+            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid OpID"))
     }
 }
 
@@ -355,6 +357,7 @@ mod tests {
         DataType, Diff, DiffEdit, DiffLink, DiffValue, Key, ObjType, ObjectID, OpID, PrimitiveValue,
     };
     use std::collections::HashMap;
+    use std::str::FromStr;
 
     #[test]
     fn test_difflink_round_trip() {
@@ -369,7 +372,7 @@ mod tests {
                 vec![(
                     Key("somekey".into()),
                     vec![(
-                        OpID::parse("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(),
+                        OpID::from_str("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(),
                         DiffLink::Val(DiffValue {
                             value: PrimitiveValue::Boolean(false),
                             datatype: DataType::Undefined,
