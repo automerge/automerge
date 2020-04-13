@@ -40,18 +40,28 @@ pub enum ObjType {
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum ObjectID {
     ID(OpID),
-    Str(String),
     Root,
 }
 
-impl ObjectID {
-    pub fn parse(s: &str) -> ObjectID {
+impl FromStr for ObjectID {
+    type Err = AutomergeError;
+
+    fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
         if s == "00000000-0000-0000-0000-000000000000" {
-            ObjectID::Root
-        } else if let Some(id) = OpID::parse(s) {
-            ObjectID::ID(id)
+            Ok(ObjectID::Root)
+        } else if let Ok(id) = OpID::from_str(s) {
+            Ok(ObjectID::ID(id))
         } else {
-            ObjectID::Str(s.to_string())
+            Err(AutomergeError::InvalidObjectID(s.to_string()))
+        }
+    }
+}
+
+impl From<&ObjectID> for String {
+    fn from(o: &ObjectID) -> String {
+        match o {
+            ObjectID::ID(OpID::ID(seq, actor)) => format!("{}@{}", seq, actor),
+            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
         }
     }
 }
@@ -107,21 +117,20 @@ impl OpID {
             OpID::ID(counter, _) => *counter,
         }
     }
+}
 
-    pub fn parse(s: &str) -> Option<OpID> {
-        //        match s {
-        //            "00000000-0000-0000-0000-000000000000" => Some(OpID::Root),
-        //            _ => {
+impl FromStr for OpID {
+    type Err = AutomergeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split('@');
         match (i.next(), i.next(), i.next()) {
             (Some(seq_str), Some(actor_str), None) => seq_str
                 .parse()
-                .ok()
-                .map(|seq| OpID::ID(seq, actor_str.to_string())),
-            _ => None,
+                .map(|seq| OpID::ID(seq, actor_str.to_string()))
+                .map_err(|_| AutomergeError::InvalidOpID(s.to_string())),
+            _ => Err(AutomergeError::InvalidOpID(s.to_string())),
         }
-        //            }
-        //        }
     }
 }
 
@@ -143,7 +152,7 @@ impl Key {
     }
 
     pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
-        OpID::parse(&self.0).ok_or_else(|| AutomergeError::InvalidOpID(self.0.clone()))
+        OpID::from_str(&self.0)
     }
 }
 
@@ -292,7 +301,7 @@ impl FromStr for ElementID {
         match s {
             "_head" => Ok(ElementID::Head),
             id => Ok(ElementID::ID(
-                OpID::parse(id).ok_or_else(|| error::InvalidElementID(id.to_string()))?,
+                OpID::from_str(id).map_err(|_| error::InvalidElementID(id.to_string()))?,
             )),
         }
     }
@@ -422,27 +431,6 @@ impl OpRequest {
             Ok(f)
         } else {
             Err(AutomergeError::MissingNumberValue(self.clone()))
-        }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub struct ObjAlias(HashMap<String, OpID>);
-
-impl ObjAlias {
-    pub fn new() -> ObjAlias {
-        ObjAlias(HashMap::new())
-    }
-
-    pub fn insert(&mut self, alias: String, id: &OpID) {
-        self.0.insert(alias, id.clone());
-    }
-
-    pub fn get(&self, text: &str) -> ObjectID {
-        if let Some(id) = self.0.get(text) {
-            id.to_object_id()
-        } else {
-            ObjectID::parse(&text)
         }
     }
 }

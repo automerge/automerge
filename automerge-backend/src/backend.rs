@@ -3,14 +3,13 @@ use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{
-    DataType, ObjAlias, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation,
-};
+use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::cmp::max;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::str::FromStr;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -18,7 +17,7 @@ pub struct Backend {
     queue: Vec<Rc<Change>>,
     op_set: OpSet,
     states: ActorStates,
-    obj_alias: ObjAlias,
+    obj_alias: HashMap<String, ObjectID>,
     max_op: u64,
     undo_pos: usize,
     pub clock: Clock,
@@ -38,7 +37,7 @@ impl Backend {
             versions,
             op_set: OpSet::init(),
             queue: Vec::new(),
-            obj_alias: ObjAlias::new(),
+            obj_alias: HashMap::new(),
             states: ActorStates::new(),
             clock: Clock::empty(),
             max_op: 0,
@@ -64,11 +63,17 @@ impl Backend {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
-                let object_id = self.obj_alias.get(&rop.obj);
+                let object_id: ObjectID = ObjectID::from_str(&rop.obj).or_else(|_| {
+                    self.obj_alias
+                        .get(&rop.obj)
+                        .cloned()
+                        .ok_or_else(|| AutomergeError::MissingChildID(rop.obj.clone()))
+                })?;
                 let child = object_id.clone(); // FIXME
 
                 if let Some(child) = &rop.child {
-                    self.obj_alias.insert(child.clone(), &id);
+                    self.obj_alias
+                        .insert(child.clone(), ObjectID::ID(id.clone()));
                 }
 
                 let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
