@@ -2,8 +2,8 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
-use std::slice::Iter;
 use im_rc::{HashMap, HashSet};
+use std::slice::Iter;
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -68,7 +68,7 @@ impl ObjState {
 
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
         let following = self.following.entry(elem).or_default();
-        following.push(ElementID::ID(op.id.clone()));
+        following.push(ElementID::ID(op.id));
         following.sort_unstable_by(|a, b| b.cmp(a));
     }
 }

@@ -15,9 +15,10 @@
 //! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
 //! ```
 use core::cmp::max;
-use serde::{Deserialize, Serialize };
+use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -153,9 +154,13 @@ impl ActorID {
     pub fn random() -> ActorID {
         ActorID(uuid::Uuid::new_v4().to_string())
     }
+}
 
-    pub fn from_string(raw: String) -> ActorID {
-        ActorID(raw)
+impl FromStr for ActorID {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(ActorID(s.into()))
     }
 }
 
@@ -265,7 +270,6 @@ pub enum ElementID {
 }
 
 impl ElementID {
-
     pub fn as_opid(&self) -> Option<&OpID> {
         match self {
             ElementID::Head => None,
