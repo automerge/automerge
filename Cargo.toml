@@ -4,6 +4,7 @@ members = [
     "automerge",
     "automerge-backend",
     "automerge-backend-wasm",
+    "automerge-frontend",
 ]
 
 [profile.release]
