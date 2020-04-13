@@ -49,7 +49,7 @@ impl FromStr for ObjectID {
     fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
         if s == "00000000-0000-0000-0000-000000000000" {
             Ok(ObjectID::Root)
-        } else if let Some(id) = OpID::from_str(s).ok() {
+        } else if let Ok(id) = OpID::from_str(s) {
             Ok(ObjectID::ID(id))
         } else {
             Err(AutomergeError::InvalidObjectID(s.to_string()))

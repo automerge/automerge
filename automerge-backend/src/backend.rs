@@ -66,7 +66,7 @@ impl Backend {
                 let object_id: ObjectID = ObjectID::from_str(&rop.obj).or_else(|_| {
                     self.obj_alias
                         .get(&rop.obj)
-                        .map(|o| o.clone())
+                        .cloned()
                         .ok_or_else(|| AutomergeError::MissingChildID(rop.obj.clone()))
                 })?;
                 let child = object_id.clone(); // FIXME
