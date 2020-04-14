@@ -47,6 +47,15 @@ impl Backend {
         }
     }
 
+    fn str_to_object(&self, name: &String) -> Result<ObjectID,AutomergeError> {
+        ObjectID::from_str(name).or_else(|_| {
+                    self.obj_alias
+                        .get(name)
+                        .cloned()
+                        .ok_or_else(|| AutomergeError::MissingChildID(name.clone()))
+        })
+    }
+
     fn process_request(
         &mut self,
         request: &ChangeRequest,
@@ -63,18 +72,15 @@ impl Backend {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
-                let object_id: ObjectID = ObjectID::from_str(&rop.obj).or_else(|_| {
-                    self.obj_alias
-                        .get(&rop.obj)
-                        .cloned()
-                        .ok_or_else(|| AutomergeError::MissingChildID(rop.obj.clone()))
-                })?;
-                let child = object_id.clone(); // FIXME
+                let object_id = self.str_to_object(&rop.obj)?;
 
-                if let Some(child) = &rop.child {
-                    self.obj_alias
-                        .insert(child.clone(), ObjectID::ID(id.clone()));
-                }
+                let child = match &rop.child  {
+                    Some(child) => {
+                        self.obj_alias.insert(child.clone(), ObjectID::ID(id.clone()));
+                        Some(self.str_to_object(&child)?)
+                    },
+                    None => None,
+                };
 
                 let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
                     op_set
@@ -91,7 +97,7 @@ impl Backend {
                     ReqOpType::MakeList => OpType::Make(ObjType::List),
                     ReqOpType::MakeText => OpType::Make(ObjType::Text),
                     ReqOpType::Del => OpType::Del,
-                    ReqOpType::Link => OpType::Link(child),
+                    ReqOpType::Link => OpType::Link(child.ok_or(AutomergeError::LinkMissingChild(id.clone()))?),
                     ReqOpType::Inc => OpType::Inc(rop.number_value()?),
                     ReqOpType::Set => OpType::Set(
                         rop.primitive_value(),

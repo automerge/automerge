@@ -10,6 +10,8 @@ pub enum AutomergeError {
     NoPathToObject(ObjectID),
     CantExtractObject(ObjectID),
     MissingElement(ObjectID, OpID),
+    LinkMissingChild(OpID),
+    SkipListError(String),
     GetChildFailed(ObjectID, Key),
     IndexOutOfBounds(usize),
     InvalidOpID(String),

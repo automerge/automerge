@@ -1,5 +1,6 @@
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
+use crate::skip_list::SkipList;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
@@ -18,6 +19,7 @@ pub(crate) struct ObjState {
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub seq: Vec<OpID>,
+    skip_list: SkipList<OpID,bool>,
 }
 
 impl ObjState {
@@ -30,6 +32,7 @@ impl ObjState {
             obj_type,
             inbound: HashSet::new(),
             seq: Vec::new(),
+            skip_list: SkipList::new(),
         }
     }
 

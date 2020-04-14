@@ -1,3 +1,5 @@
+extern crate web_sys;
+extern crate rand;
 extern crate im_rc;
 
 mod actor_states;
@@ -11,6 +13,7 @@ mod op_set;
 mod patch;
 mod protocol;
 mod serialize;
+mod skip_list;
 mod time;
 
 pub use crate::patch::{Diff, DiffEdit, DiffLink, DiffValue, Patch};

@@ -292,6 +292,13 @@ impl ElementID {
             ElementID::ID(opid) => Key(opid.to_string()),
         }
     }
+
+    pub fn not_head(&self) -> bool {
+        match self {
+            ElementID::Head => false,
+            ElementID::ID(_) => true,
+        }
+    }
 }
 
 impl FromStr for ElementID {
@@ -569,13 +576,10 @@ pub struct ChangeRequest {
     pub actor: ActorID,
     pub seq: u32,
     pub version: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default = "helper::make_true")]
     pub undoable: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub deps: Option<Clock>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ops: Option<Vec<OpRequest>>,
     pub child: Option<String>,
     pub request_type: ChangeRequestType,
