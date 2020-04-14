@@ -47,12 +47,12 @@ impl Backend {
         }
     }
 
-    fn str_to_object(&self, name: &String) -> Result<ObjectID,AutomergeError> {
+    fn str_to_object(&self, name: &str) -> Result<ObjectID, AutomergeError> {
         ObjectID::from_str(name).or_else(|_| {
-                    self.obj_alias
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| AutomergeError::MissingChildID(name.clone()))
+            self.obj_alias
+                .get(name)
+                .cloned()
+                .ok_or_else(|| AutomergeError::MissingChildID(name.to_string()))
         })
     }
 
@@ -74,11 +74,12 @@ impl Backend {
                 let insert = rop.insert;
                 let object_id = self.str_to_object(&rop.obj)?;
 
-                let child = match &rop.child  {
+                let child = match &rop.child {
                     Some(child) => {
-                        self.obj_alias.insert(child.clone(), ObjectID::ID(id.clone()));
+                        self.obj_alias
+                            .insert(child.clone(), ObjectID::ID(id.clone()));
                         Some(self.str_to_object(&child)?)
-                    },
+                    }
                     None => None,
                 };
 
@@ -97,7 +98,9 @@ impl Backend {
                     ReqOpType::MakeList => OpType::Make(ObjType::List),
                     ReqOpType::MakeText => OpType::Make(ObjType::Text),
                     ReqOpType::Del => OpType::Del,
-                    ReqOpType::Link => OpType::Link(child.ok_or(AutomergeError::LinkMissingChild(id.clone()))?),
+                    ReqOpType::Link => {
+                        OpType::Link(child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?)
+                    }
                     ReqOpType::Inc => OpType::Inc(rop.number_value()?),
                     ReqOpType::Set => OpType::Set(
                         rop.primitive_value(),

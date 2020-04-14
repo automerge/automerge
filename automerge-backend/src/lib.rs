@@ -1,6 +1,6 @@
-extern crate web_sys;
-extern crate rand;
 extern crate im_rc;
+extern crate rand;
+extern crate web_sys;
 
 mod actor_states;
 mod backend;

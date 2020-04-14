@@ -1,8 +1,8 @@
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::skip_list::SkipList;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
+use crate::skip_list::SkipList;
 use im_rc::{HashMap, HashSet};
 use std::slice::Iter;
 
@@ -19,7 +19,7 @@ pub(crate) struct ObjState {
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub seq: Vec<OpID>,
-    skip_list: SkipList<OpID,bool>,
+    skip_list: SkipList<OpID, bool>,
 }
 
 impl ObjState {
