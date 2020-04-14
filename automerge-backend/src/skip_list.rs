@@ -196,17 +196,17 @@ where
         if index == 0 {
             self.insert_head(key, value)
         } else {
-            let suc = self.key_of(index - 1).ok_or_else(|| AutomergeError::SkipListError(
-                "Insert index out of bounds".to_string(),
-            ))?;
+            let suc = self.key_of(index - 1).ok_or_else(|| {
+                AutomergeError::SkipListError("Insert index out of bounds".to_string())
+            })?;
             self.insert_after(&suc, key, value)
         }
     }
 
     pub fn remove_index(&mut self, index: isize) -> Result<(), AutomergeError> {
-        let key = self.key_of(index).ok_or_else(|| AutomergeError::SkipListError(
-            "Remove index out of bounds".to_string(),
-        ))?;
+        let key = self.key_of(index).ok_or_else(|| {
+            AutomergeError::SkipListError("Remove index out of bounds".to_string())
+        })?;
         self.remove_key(&key)
     }
 
@@ -214,9 +214,7 @@ where
         let mut node = self
             .nodes
             .get_mut(&key)
-            .ok_or_else(|| AutomergeError::SkipListError(
-                "Set index out of bounds".to_string(),
-            ))?;
+            .ok_or_else(|| AutomergeError::SkipListError("Set index out of bounds".to_string()))?;
         node.value = value;
         Ok(())
     }
@@ -313,9 +311,11 @@ where
     }
 
     pub fn remove_key(&mut self, key: &K) -> Result<(), AutomergeError> {
-        let removed = self.nodes.remove(key).ok_or_else(|| AutomergeError::SkipListError(
-            "The given key cannot be removed because it does not exist".to_string(),
-        ))?;
+        let removed = self.nodes.remove(key).ok_or_else(|| {
+            AutomergeError::SkipListError(
+                "The given key cannot be removed because it does not exist".to_string(),
+            )
+        })?;
         let max_level = self.head.level;
         let mut pre = self.predecessors(&removed.tower.prev[0].key, max_level)?;
         let mut suc = self.successors(&removed.tower.next[0].key, max_level)?;
@@ -707,6 +707,31 @@ mod tests {
 
         // should raise an error if the given index is out of bounds
         assert_eq!(s.remove_index(100).is_err(), true);
+        Ok(())
+    }
+
+    #[test]
+    fn test_remove_key_big() -> Result<(), AutomergeError> {
+        let mut s = SkipList::<String, u32>::new();
+        for i in 0..10000 {
+            let j = 9999 - i;
+            s.insert_head(format!("a{}", j), j)?;
+        }
+
+        assert_eq!(s.index_of(&"a20".to_string()), Some(20));
+        assert_eq!(s.index_of(&"a500".to_string()), Some(500));
+        assert_eq!(s.index_of(&"a1000".to_string()), Some(1000));
+
+        for i in 0..5000 {
+            let j = (4999 - i) * 2 + 1;
+            s.remove_index(j)?;
+        }
+
+        assert_eq!(s.index_of(&"a4000".to_string()), Some(2000));
+        assert_eq!(s.index_of(&"a1000".to_string()), Some(500));
+        assert_eq!(s.index_of(&"a500".to_string()), Some(250));
+        assert_eq!(s.index_of(&"a20".to_string()), Some(10));
+
         Ok(())
     }
 

@@ -98,9 +98,9 @@ impl Backend {
                     ReqOpType::MakeList => OpType::Make(ObjType::List),
                     ReqOpType::MakeText => OpType::Make(ObjType::Text),
                     ReqOpType::Del => OpType::Del,
-                    ReqOpType::Link => {
-                        OpType::Link(child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?)
-                    }
+                    ReqOpType::Link => OpType::Link(
+                        child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
+                    ),
                     ReqOpType::Inc => OpType::Inc(rop.number_value()?),
                     ReqOpType::Set => OpType::Set(
                         rop.primitive_value(),
