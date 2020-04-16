@@ -7,6 +7,7 @@ use rand::Rng;
 use std::cmp::{max, min};
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::iter::Iterator;
 use std::ops::AddAssign;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +66,6 @@ where
     }
 
     fn remove_after(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
-        //for level in from_level..self.level {
         for (level, item) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
                 self.next[level] = item.clone();
@@ -76,7 +76,6 @@ where
     }
 
     fn remove_before(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
-        //for level in from_level..self.level {
         for (level, item) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
                 self.prev[level] = item.clone();
@@ -147,6 +146,220 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct VecOrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    keys: Vec<K>,
+    values: HashMap<K, V>,
+}
+
+impl<K, V> VecOrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    pub fn new() -> VecOrderedMap<K, V> {
+        VecOrderedMap {
+            keys: Vec::new(),
+            values: HashMap::new(),
+        }
+    }
+}
+
+pub trait OrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    fn index_of(&self, key: &K) -> Option<usize>;
+    fn remove_key(&mut self, key: &K) -> Option<usize>;
+    fn insert_index(&mut self, index: usize, key: K, val: V) -> Option<&K>;
+    fn remove_index(&mut self, index: usize) -> Option<(K, V)>;
+    fn key_of(&self, index: usize) -> Option<&K>;
+    fn to_vec(&self) -> Vec<K>;
+}
+
+impl<K, V> OrderedMap<K, V> for SkipList<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    fn remove_index(&mut self, index: usize) -> Option<(K, V)> {
+        if let Some(key) = self.key_of(index).cloned() {
+            let value = self._remove_key(&key).unwrap();
+            Some((key, value))
+        } else {
+            None
+        }
+    }
+
+    fn remove_key(&mut self, key: &K) -> Option<usize> {
+        let index = self.index_of(key);
+        if index.is_some() {
+            self._remove_key(key).unwrap();
+        }
+        index
+    }
+
+    fn to_vec(&self) -> Vec<K> {
+        self.iter().map(|(k, _)| k).cloned().collect()
+    }
+
+    fn key_of(&self, index: usize) -> Option<&K> {
+        if index >= self.len {
+            return None;
+        }
+        let target = index + 1;
+        let mut node = &self.head;
+        let mut level = node.level - 1;
+        let mut count = 0;
+        loop {
+            while count + node.next[level].count > target {
+                level -= 1
+            }
+            count += node.next[level].count;
+            let k: &Option<K> = &node.next[level].key;
+            if count == target {
+                return k.as_ref();
+            }
+            node = self.get_tower(k).unwrap(); // panic is correct
+        }
+    }
+
+    fn index_of(&self, key: &K) -> Option<usize> {
+        if !self.nodes.contains_key(&key) {
+            return None;
+        }
+
+        let mut count = 0;
+        let mut k = key.clone();
+        loop {
+            if let Some(node) = self.nodes.get(&k) {
+                let link = &node.tower.prev[node.tower.level - 1];
+                count += link.count;
+                if let Some(key) = &link.key {
+                    k = key.clone();
+                } else {
+                    break;
+                }
+            } else {
+                return None;
+            }
+        }
+        Some(count - 1)
+    }
+
+    fn insert_index(&mut self, index: usize, key: K, value: V) -> Option<&K> {
+        if index == 0 {
+            self.insert_head(key, value).unwrap();
+            None
+        } else {
+            let suc = self.key_of(index - 1).unwrap().clone();
+            self.insert_after(&suc, key, value).unwrap();
+            self.key_of(index - 1) // FIXME
+        }
+    }
+}
+
+impl<K, V> OrderedMap<K, V> for VecOrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    fn remove_index(&mut self, index: usize) -> Option<(K, V)> {
+        if self.keys.len() > index {
+            let k = self.keys.remove(index);
+            let v = self.values.remove(&k).unwrap();
+            Some((k, v))
+        } else {
+            None
+        }
+    }
+
+    fn to_vec(&self) -> Vec<K> {
+        self.keys.clone()
+    }
+
+    fn key_of(&self, index: usize) -> Option<&K> {
+        self.keys.get(index)
+    }
+
+    fn index_of(&self, key: &K) -> Option<usize> {
+        self.keys.iter().position(|o| o == key)
+    }
+
+    fn insert_index(&mut self, index: usize, key: K, value: V) -> Option<&K> {
+        self.keys.insert(index, key.clone());
+        self.values.insert(key, value);
+        if index == 0 {
+            None
+        } else {
+            self.keys.get(index - 1)
+        }
+    }
+
+    fn remove_key(&mut self, key: &K) -> Option<usize> {
+        if let Some(index) = self.keys.iter().position(|o| o == key) {
+            self.keys.remove(index);
+            Some(index)
+        } else {
+            None
+        }
+    }
+}
+
+impl<K, V> Default for SkipList<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<K, V> Default for VecOrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a VecOrderedMap<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    type Item = &'a K;
+    type IntoIter = std::slice::Iter<'a, K>;
+
+    fn into_iter(self) -> std::slice::Iter<'a, K> {
+        self.keys.as_slice().iter()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a SkipList<K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    type Item = &'a K;
+    type IntoIter = SkipKeyIterator<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        SkipKeyIterator {
+            id: self.head.successor(),
+            nodes: &self.nodes,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SkipList<K, V>
 where
@@ -192,22 +405,51 @@ where
         }
     }
 
-    pub fn insert_index(&mut self, index: isize, key: K, value: V) -> Result<(), AutomergeError> {
-        if index == 0 {
-            self.insert_head(key, value)
-        } else {
-            let suc = self.key_of(index - 1).ok_or_else(|| {
-                AutomergeError::SkipListError("Insert index out of bounds".to_string())
-            })?;
-            self.insert_after(&suc, key, value)
-        }
-    }
-
-    pub fn remove_index(&mut self, index: isize) -> Result<(), AutomergeError> {
-        let key = self.key_of(index).ok_or_else(|| {
-            AutomergeError::SkipListError("Remove index out of bounds".to_string())
+    fn _remove_key(&mut self, key: &K) -> Result<V, AutomergeError> {
+        let removed = self.nodes.remove(key).ok_or_else(|| {
+            AutomergeError::SkipListError(
+                "The given key cannot be removed because it does not exist".to_string(),
+            )
         })?;
-        self.remove_key(&key)
+        let max_level = self.head.level;
+        let mut pre = self.predecessors(&removed.tower.prev[0].key, max_level)?;
+        let mut suc = self.successors(&removed.tower.next[0].key, max_level)?;
+
+        for i in 0..max_level {
+            let distance = pre[i].count + suc[i].count - 1;
+            pre[i].count = distance;
+            suc[i].count = distance;
+        }
+
+        self.len -= 1;
+        let mut pre_level = 0;
+        let mut suc_level = 0;
+
+        for level in 1..(max_level + 1) {
+            let update_level = min(level, removed.tower.level);
+            if level == max_level
+                || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
+            {
+                self.get_tower_mut(&pre[pre_level].key)?.remove_after(
+                    pre_level,
+                    update_level,
+                    &suc,
+                );
+                pre_level = level;
+            }
+            if suc[suc_level].key.is_some()
+                && (level == max_level
+                    || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
+            {
+                self.get_tower_mut(&suc[suc_level].key)?.remove_before(
+                    suc_level,
+                    update_level,
+                    &pre,
+                );
+                suc_level = level;
+            }
+        }
+        Ok(removed.value)
     }
 
     fn set(&mut self, key: &K, value: V) -> Result<(), AutomergeError> {
@@ -303,93 +545,11 @@ where
         Ok(suc)
     }
 
-    pub fn iter(&self) -> SkipIterator<K, V> {
-        SkipIterator {
+    pub fn iter(&self) -> SkipKeyValIterator<K, V> {
+        SkipKeyValIterator {
             id: self.head.successor(),
             nodes: &self.nodes,
         }
-    }
-
-    pub fn remove_key(&mut self, key: &K) -> Result<(), AutomergeError> {
-        let removed = self.nodes.remove(key).ok_or_else(|| {
-            AutomergeError::SkipListError(
-                "The given key cannot be removed because it does not exist".to_string(),
-            )
-        })?;
-        let max_level = self.head.level;
-        let mut pre = self.predecessors(&removed.tower.prev[0].key, max_level)?;
-        let mut suc = self.successors(&removed.tower.next[0].key, max_level)?;
-
-        for i in 0..max_level {
-            let distance = pre[i].count + suc[i].count - 1;
-            pre[i].count = distance;
-            suc[i].count = distance;
-        }
-
-        self.len -= 1;
-        let mut pre_level = 0;
-        let mut suc_level = 0;
-
-        for level in 1..(max_level + 1) {
-            let update_level = min(level, removed.tower.level);
-            if level == max_level
-                || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
-            {
-                self.get_tower_mut(&pre[pre_level].key)?.remove_after(
-                    pre_level,
-                    update_level,
-                    &suc,
-                );
-                pre_level = level;
-            }
-            if suc[suc_level].key.is_some()
-                && (level == max_level
-                    || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
-            {
-                self.get_tower_mut(&suc[suc_level].key)?.remove_before(
-                    suc_level,
-                    update_level,
-                    &pre,
-                );
-                suc_level = level;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn key_of(&self, mut index: isize) -> Option<K> {
-        if index < 0 {
-            index += self.len as isize;
-        }
-        if index < 0 || index >= (self.len as isize) {
-            return None;
-        }
-        let index = index as usize;
-        let mut tower = &self.head;
-        let mut key = None;
-        let mut level = tower.level - 1;
-        let mut count = 0;
-        loop {
-            if count == index + 1 {
-                break;
-            } else if count + tower.next[level].count > index + 1 {
-                level -= 1
-            } else {
-                count += tower.next[level].count;
-                match &tower.next[level].key {
-                    Some(ref k) => {
-                        let node = &self.nodes.get(k).unwrap();
-                        tower = &node.tower;
-                        key = Some(node.key.clone());
-                    }
-                    None => {
-                        tower = &self.head;
-                        key = None;
-                    }
-                }
-            }
-        }
-        key
     }
 
     pub fn insert_head(&mut self, key: K, value: V) -> Result<(), AutomergeError> {
@@ -470,29 +630,6 @@ where
         Ok(())
     }
 
-    pub fn index_of(&self, key: &K) -> Option<usize> {
-        if !self.nodes.contains_key(&key) {
-            return None;
-        }
-
-        let mut count = 0;
-        let mut k = key.clone();
-        loop {
-            if let Some(node) = self.nodes.get(&k) {
-                let link = &node.tower.prev[node.tower.level - 1];
-                count += link.count;
-                if let Some(key) = &link.key {
-                    k = key.clone();
-                } else {
-                    break;
-                }
-            } else {
-                return None;
-            }
-        }
-        Some(count - 1)
-    }
-
     // Returns a random number from the geometric distribution with p = 0.75.
     // That is, returns k with probability p * (1 - p)^(k - 1).
     // For example, returns 1 with probability 3/4, returns 2 with probability 3/16,
@@ -508,14 +645,9 @@ where
         }
         level
     }
-
-    #[cfg(test)]
-    fn to_vec(&self) -> Vec<V> {
-        self.iter().cloned().collect()
-    }
 }
 
-pub(crate) struct SkipIterator<'a, K, V>
+pub(crate) struct SkipKeyValIterator<'a, K, V>
 where
     K: Debug + Clone + PartialEq,
     V: Debug + Clone + PartialEq,
@@ -524,20 +656,51 @@ where
     nodes: &'a HashMap<K, Node<K, V>>,
 }
 
-impl<'a, K, V> Iterator for SkipIterator<'a, K, V>
+pub(crate) struct SkipKeyIterator<'a, K, V>
+where
+    K: Debug + Clone + PartialEq,
+    V: Debug + Clone + PartialEq,
+{
+    id: &'a Option<K>,
+    nodes: &'a HashMap<K, Node<K, V>>,
+}
+
+impl<'a, K, V> Iterator for SkipKeyValIterator<'a, K, V>
 where
     K: Debug + Clone + Hash + PartialEq + Eq,
     V: Debug + Clone + PartialEq,
 {
-    type Item = &'a V;
+    type Item = (&'a K, &'a V);
 
-    fn next(&mut self) -> Option<&'a V> {
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
         match &self.id {
             None => None,
             Some(ref key) => {
                 if let Some(ref node) = &self.nodes.get(key) {
                     self.id = node.tower.successor();
-                    Some(&node.value)
+                    Some((key, &node.value))
+                } else {
+                    panic!("iter::next hit a dead end")
+                }
+            }
+        }
+    }
+}
+
+impl<'a, K, V> Iterator for SkipKeyIterator<'a, K, V>
+where
+    K: Debug + Clone + Hash + PartialEq + Eq,
+    V: Debug + Clone + PartialEq,
+{
+    type Item = &'a K;
+
+    fn next(&mut self) -> Option<&'a K> {
+        match &self.id {
+            None => None,
+            Some(ref key) => {
+                if let Some(ref node) = &self.nodes.get(key) {
+                    self.id = node.tower.successor();
+                    Some(key)
                 } else {
                     panic!("iter::next hit a dead end")
                 }
@@ -578,10 +741,10 @@ mod tests {
         assert_eq!(s.index_of(&"baz"), Some(s.len - 1));
 
         // should adjust based on removed elements
-        s.remove_key(&"foo")?;
+        s.remove_key(&"foo");
         assert_eq!(s.index_of(&"bar"), Some(0));
         assert_eq!(s.index_of(&"baz"), Some(1));
-        s.remove_key(&"bar")?;
+        s.remove_key(&"bar");
         assert_eq!(s.index_of(&"baz"), Some(0));
         Ok(())
     }
@@ -600,7 +763,7 @@ mod tests {
         assert_eq!(s.len, 3);
 
         //should decrease by 1 for every removal
-        s.remove_key(&"a2")?;
+        s.remove_key(&"a2");
         assert_eq!(s.len, 2);
         Ok(())
     }
@@ -619,18 +782,18 @@ mod tests {
         assert_eq!(s.key_of(10), None);
 
         // should return the first key for index 0
-        assert_eq!(s.key_of(0), Some("a1"));
+        assert_eq!(s.key_of(0), Some(&"a1"));
 
         // should return the last key for index -1
-        assert_eq!(s.key_of(-1), Some("a3"));
+        // assert_eq!(s.key_of(-1), Some("a3"));
 
         // should return the last key for index length-1
-        assert_eq!(s.key_of(s.len as isize - 1), Some("a3"));
+        assert_eq!(s.key_of(s.len - 1), Some(&"a3"));
 
         // should not count removed elements
-        s.remove_key(&"a1")?;
-        s.remove_key(&"a3")?;
-        assert_eq!(s.key_of(0), Some("a2"));
+        s.remove_key(&"a1");
+        s.remove_key(&"a3");
+        assert_eq!(s.key_of(0), Some(&"a2"));
 
         Ok(())
     }
@@ -681,14 +844,14 @@ mod tests {
         // should insert the new key-value pair at the given index
         s.insert_head("aaa", "AAA")?;
         s.insert_after(&"aaa", "ccc", "CCC")?;
-        s.insert_index(1, "bbb", "BBB")?;
+        s.insert_index(1, "bbb", "BBB");
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), Some(1));
         assert_eq!(s.index_of(&"ccc"), Some(2));
 
         // should insert at the head if the index is zero
-        s.insert_index(0, "a", "aa")?;
-        assert_eq!(s.key_of(0), Some("a"));
+        s.insert_index(0, "a", "aa");
+        assert_eq!(s.key_of(0), Some(&"a"));
         Ok(())
     }
 
@@ -700,13 +863,13 @@ mod tests {
         s.insert_head("ccc", "CCC")?;
         s.insert_head("bbb", "BBB")?;
         s.insert_head("aaa", "AAA")?;
-        s.remove_index(1)?;
+        s.remove_index(1);
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), None);
         assert_eq!(s.index_of(&"ccc"), Some(1));
 
         // should raise an error if the given index is out of bounds
-        assert_eq!(s.remove_index(100).is_err(), true);
+        assert_eq!(s.remove_index(100), None);
         Ok(())
     }
 
@@ -724,7 +887,7 @@ mod tests {
 
         for i in 0..5000 {
             let j = (4999 - i) * 2 + 1;
-            s.remove_index(j)?;
+            s.remove_index(j);
         }
 
         assert_eq!(s.index_of(&"a4000".to_string()), Some(2000));
@@ -762,16 +925,16 @@ mod tests {
 
         assert_eq!(s.index_of(&"a20"), Some(20));
 
-        s.remove_key(&"a1")?;
-        s.remove_key(&"a3")?;
-        s.remove_key(&"a5")?;
-        s.remove_key(&"a7")?;
-        s.remove_key(&"a9")?;
-        s.remove_key(&"a11")?;
-        s.remove_key(&"a13")?;
-        s.remove_key(&"a15")?;
-        s.remove_key(&"a17")?;
-        s.remove_key(&"a19")?;
+        s.remove_key(&"a1");
+        s.remove_key(&"a3");
+        s.remove_key(&"a5");
+        s.remove_key(&"a7");
+        s.remove_key(&"a9");
+        s.remove_key(&"a11");
+        s.remove_key(&"a13");
+        s.remove_key(&"a15");
+        s.remove_key(&"a17");
+        s.remove_key(&"a19");
 
         assert_eq!(s.index_of(&"a20"), Some(10));
         assert_eq!(s.index_of(&"a10"), Some(5));
@@ -779,17 +942,18 @@ mod tests {
     }
 
     #[test]
-    fn test_iter1() {
+    fn test_iter1() -> Result<(), AutomergeError> {
         let mut s = SkipList::<String, u32>::new();
         assert_eq!(s.len, 0);
         let e1 = "10@actor1".to_string();
         let e2 = "11@actor1".to_string();
         let e3 = "12@actor2".to_string();
-        s.insert_head(e1.clone(), 10).unwrap();
-        assert_eq!(s.to_vec(), vec![10]);
+        s.insert_head(e1.clone(), 10)?;
+        assert_eq!(s.to_vec(), vec![e1.clone()]);
         s.insert_after(&e1, e2.clone(), 20).unwrap();
-        assert_eq!(s.to_vec(), vec![10, 20]);
+        assert_eq!(s.to_vec(), vec![e1.clone(), e2.clone()]);
         s.insert_after(&e1, e3.clone(), 15).unwrap();
-        assert_eq!(s.to_vec(), vec![10, 15, 20]);
+        assert_eq!(s.to_vec(), vec![e1.clone(), e3.clone(), e2.clone()]);
+        Ok(())
     }
 }

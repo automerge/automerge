@@ -12,6 +12,7 @@ use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
 use crate::protocol::{Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
+use crate::skip_list::OrderedMap;
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -107,14 +108,17 @@ impl OpSet {
                 (true, true) => PendingDiff::SeqSet(op.clone()),
                 (true, false) => {
                     let opid = op.operation_key().to_opid()?;
-                    let index = object.seq.iter().position(|o| o == &opid).unwrap();
-                    object.seq.remove(index);
+                    let index = object.seq1.remove_key(&opid).unwrap();
+                    //                    let index = object.seq1.iter().position(|o| o == &opid).unwrap();
+                    //                    object.seq1.remove(index);
+                    //                    object.seq2.remove_index(index)?;
                     PendingDiff::SeqRemove(op.clone(), index)
                 }
                 (false, true) => {
                     let id = op.operation_key().to_opid()?;
-                    let index = object.get_index_for(&id)?;
-                    object.seq.insert(index, id);
+                    //                    let index = object.index_of1(&id)?;
+                    let index = object.index_of2(&id)?;
+                    object.seq1.insert_index(index, id, true);
                     PendingDiff::SeqInsert(op.clone(), index)
                 }
                 (false, false) => PendingDiff::Noop,
@@ -259,10 +263,6 @@ impl OpSet {
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&Vec<OpID>, AutomergeError> {
-        self.get_obj(object_id).map(|o| &o.seq)
-    }
-
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
         if insert {
             Vec::new()
@@ -312,7 +312,7 @@ impl OpSet {
         let mut index = 0;
         let mut max_counter = 0;
 
-        for opid in object.seq.iter() {
+        for opid in object.seq1.into_iter() {
             max_counter = max(max_counter, opid.counter());
             if let Some(ops) = object.props.get(&opid.to_key()) {
                 if !ops.is_empty() {

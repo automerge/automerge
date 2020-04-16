@@ -27,6 +27,7 @@ use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
+use crate::skip_list::OrderedMap;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -393,7 +394,11 @@ impl OpRequest {
         self.value.clone().unwrap_or(PrimitiveValue::Null)
     }
 
-    pub fn resolve_key(&self, id: &OpID, ids: &mut Vec<OpID>) -> Result<Key, AutomergeError> {
+    pub(crate) fn resolve_key(
+        &self,
+        id: &OpID,
+        ids: &mut impl OrderedMap<OpID, bool>,
+    ) -> Result<Key, AutomergeError> {
         let key = &self.key;
         let insert = self.insert;
         let del = self.action == ReqOpType::Del;
@@ -403,20 +408,17 @@ impl OpRequest {
                 let n: usize = *n as usize;
                 (if insert {
                     if n == 0 {
-                        ids.insert(0, id.clone());
+                        ids.insert_index(0, id.clone(), true);
                         Some(Key("_head".to_string()))
                     } else {
-                        ids.insert(n, id.clone());
-                        ids.get(n - 1).map(|i| i.to_key())
+                        // FIXME this is way too slow
+                        ids.insert_index(n, id.clone(), true);
+                        ids.key_of(n - 1).map(|i| i.to_key())
                     }
                 } else if del {
-                    if n < ids.len() {
-                        Some(ids.remove(n).to_key())
-                    } else {
-                        None
-                    }
+                    ids.remove_index(n).map(|(k, _)| k.to_key())
                 } else {
-                    ids.get(n).map(|i| i.to_key())
+                    ids.key_of(n).map(|i| i.to_key())
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }

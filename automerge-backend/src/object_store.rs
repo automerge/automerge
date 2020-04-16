@@ -2,7 +2,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
-use crate::skip_list::SkipList;
+use crate::skip_list::{OrderedMap, SkipList};
 use im_rc::{HashMap, HashSet};
 use std::slice::Iter;
 
@@ -18,8 +18,9 @@ pub(crate) struct ObjState {
     pub obj_type: ObjType,
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
-    pub seq: Vec<OpID>,
-    skip_list: SkipList<OpID, bool>,
+    pub insertions: HashMap<ElementID, OpHandle>,
+    //pub seq1: VecOrderedMap<OpID,bool>
+    pub seq1: SkipList<OpID, bool>,
 }
 
 impl ObjState {
@@ -29,10 +30,11 @@ impl ObjState {
         ObjState {
             props: HashMap::new(),
             following,
+            insertions: HashMap::new(),
             obj_type,
             inbound: HashSet::new(),
-            seq: Vec::new(),
-            skip_list: SkipList::new(),
+            //            seq1: VecOrderedMap::new()
+            seq1: SkipList::new(),
         }
     }
 
@@ -43,11 +45,62 @@ impl ObjState {
         }
     }
 
-    // self.seq is the materialized list of active elements
-    // self.ops_in_order() is an iterator across all elements
-    // by walking both lists at the same time we can determine the index of
-    // an element even if it was just deleted
-    pub fn get_index_for(&self, target: &OpID) -> Result<usize, AutomergeError> {
+    fn get_parent(&self, key: &ElementID) -> Option<ElementID> {
+        if key == &ElementID::Head {
+            return None;
+        }
+        // if (!insertion) throw new TypeError(`Missing index entry for list element ${key}`)
+        // FIXME key != elementID
+        self.insertions
+            .get(&key)
+            .and_then(|i| i.key.as_element_id().ok())
+    }
+
+    fn insertions_after(&self, parent: &ElementID) -> Vec<ElementID> {
+        self.following.get(parent).cloned().unwrap_or_default()
+    }
+
+    // this is the efficient way to do it for a SkipList
+    pub fn index_of2(&self, id: &OpID) -> Result<usize, AutomergeError> {
+        let mut prev_id = ElementID::ID(id.clone());
+        let mut index = None;
+        // reverse walk through the following/insertions and looking for something that not deleted
+        while index.is_none() {
+            prev_id = self.get_previous(&prev_id)?;
+            match &prev_id {
+                ElementID::ID(ref id) => {
+                    // FIXME maybe I can speed this up with self.props.get before looking for
+                    index = self.seq1.index_of(id)
+                }
+                ElementID::Head => break,
+            }
+        }
+        Ok(index.map(|i| i + 1).unwrap_or(0))
+    }
+
+    fn get_previous(&self, element: &ElementID) -> Result<ElementID, AutomergeError> {
+        let parent_id = self.get_parent(element).unwrap();
+        let children = self.insertions_after(&parent_id);
+        let pos = children
+            .iter()
+            .position(|k| k == element)
+            .ok_or_else(|| AutomergeError::GeneralError("get_previous".to_string()))?;
+        if pos == 0 {
+            Ok(parent_id)
+        } else {
+            let mut prev_id = children[pos - 1].clone(); // FIXME - use refs here
+            loop {
+                match self.insertions_after(&prev_id).last() {
+                    Some(id) => prev_id = id.clone(),
+                    None => return Ok(prev_id.clone()),
+                }
+            }
+        }
+    }
+
+    // this is the efficient way to do it for a Vec
+    #[allow(dead_code)]
+    pub fn index_of1(&self, target: &OpID) -> Result<usize, AutomergeError> {
         let _target = ElementID::ID(target.clone());
         let mut n = 0;
         for a in self.ops_in_order() {
@@ -55,13 +108,14 @@ impl ObjState {
                 return Ok(n);
             }
 
-            if a.as_opid() == self.seq.get(n) {
+            if a.as_opid() == self.seq1.key_of(n) {
                 n += 1;
             }
         }
         Err(AutomergeError::MissingIndex(target.clone()))
     }
 
+    #[allow(dead_code)]
     fn ops_in_order(&self) -> ElementIterator {
         ElementIterator {
             following: &self.following,
@@ -70,8 +124,10 @@ impl ObjState {
     }
 
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
+        let eid = ElementID::ID(op.id.clone());
+        self.insertions.insert(eid.clone(), op);
         let following = self.following.entry(elem).or_default();
-        following.push(ElementID::ID(op.id));
+        following.push(eid);
         following.sort_unstable_by(|a, b| b.cmp(a));
     }
 }

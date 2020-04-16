@@ -4,6 +4,7 @@ use crate::op_set::OpSet;
 use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
+use crate::skip_list::OrderedMap;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -225,10 +226,11 @@ impl Diff {
         if self.is_seq() && self.props.is_some() {
             let mut oldprops = self.props.take().unwrap_or_default();
             let mut newprops = HashMap::new();
-            let elemids = op_set.get_elem_ids(&self.object_id)?;
+            //let elemids = op_set.get_elem_ids(&self.object_id)?;
+            let elemids = op_set.get_obj(&self.object_id).map(|o| &o.seq1)?;
             for (key, keymap) in oldprops.drain() {
                 let key_op = key.to_opid()?;
-                let index = elemids.iter().position(|id| id == &key_op).ok_or_else(|| {
+                let index = elemids.index_of(&key_op).ok_or_else(|| {
                     AutomergeError::MissingElement(self.object_id.clone(), key_op.clone())
                 })?;
                 let new_key = Key(index.to_string());

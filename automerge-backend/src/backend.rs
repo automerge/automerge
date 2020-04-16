@@ -4,6 +4,7 @@ use crate::op_handle::OpHandle;
 use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
+use crate::skip_list::{OrderedMap, SkipList};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::cmp::max;
@@ -67,7 +68,7 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        let mut elemid_cache: HashMap<ObjectID, Vec<OpID>> = HashMap::new();
+        let mut elemid_cache: HashMap<ObjectID, SkipList<OpID, bool>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
@@ -83,14 +84,14 @@ impl Backend {
                     None => None,
                 };
 
-                let mut elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
+                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
                     op_set
-                        .get_elem_ids(&object_id)
-                        .map(|c| c.clone())
+                        .get_obj(&object_id)
+                        .map(|o| o.seq1.clone())
                         .unwrap_or_default()
                 });
 
-                let key = rop.resolve_key(&id, &mut elemids)?;
+                let key = rop.resolve_key(&id, elemids)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -465,7 +466,8 @@ impl Backend {
     }
 
     pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<Vec<OpID>, AutomergeError> {
-        Ok(self.op_set.get_elem_ids(object_id)?.to_vec())
+        //        Ok(self.op_set.get_elem_ids(object_id)?.to_vec())
+        self.op_set.get_obj(object_id).map(|o| o.seq1.to_vec())
     }
 
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
