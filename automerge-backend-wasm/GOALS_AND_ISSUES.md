@@ -43,47 +43,36 @@ that can do cleanup.
 
 ## Problem: WASM in fundamentally async - Automerge is sync
 
-WASM's love of all things async was surely the largest thorn in our side was
-dealing with this.  It basically boils down to this...
+WASM's love of all things async was surely the largest thorn in our side was dealing with this.  It basically boils down to this...
 
-### Loading WASM requires IO - IO is async
+1. ### Loading WASM requires IO - IO is async
+  
+  WASM binaries are not js - loading them from JS is async (with the notable exception of node's `readFileSync()`)
 
-WASM binaries are not js - loading them from JS is async (with the notable
-exception of node's `readFileSync()`)
+2. ### WebAssembly.Module(buffer) has a 4k limit on the render thread in browsers
+  
+  Even if you can synchronously load and compile the wasm, most browsers impose a 4k limit on synchronous (but not asynchronous) WASM compilation in the render thread.  This is not an issue in node applications or in web workers.
 
-### WebAssembly.Module(buffer) as a 4k limit on the render thread in browsers
+## Solutions
 
-Even if you can synchronously load and compile the wasm, most browsers impose a
-4k limit on synchronous (but not asynchronous) WASM compilation in the render
-thread.  This is not an issue in node applications or in web workers.
+1. ### Compile Rust to ASM.js - (no problems except it's big and slow)
 
-### Solution #1: Compile Rust to ASM.js - (no problems except it's big and slow)
+  Now it's javascript.  All the strangeness of WASM goes away.  Webpack will happily inline the code into a bundle.  The only downside, 400k of WASM becomes 5M of js and it runs 3 times slower.
+  
+2. ### Inline the WASM as a base64 encoded string - (no problems except the render thread)
 
-Now it's javascript.  All the strangeness of WASM goes away.  Webpack will happily 
-inline the code into a bundle.  The only downside, 400k of WASM becomes 5M of js and 
-it runs 3 times slower.
+  This is actually surprisingly effective.  The sized added to the js bundle is reasonable and the decode time is trivial.  The only issue is, it still wont work in the render thread
+  
+3. ### Wait for top level await (no problems - someday)
 
-### Solution #2: Inline the WASM as a base64 encoded string - (no problems except the render thread)
+  There is a proposal for top level await support in js modules.  This would allow us to insert an internal await into the backend module and hide the async load from users.  Unfortunately its not in JS yet... 
+  
+4. ### Change Automerge.init to be async (no problems except a breaking api change)
 
-This is actually surprisingly effective.  The sized added to the js bundle is
-reasonable and the decode time is trivial.  The only issue is, it still wont 
-work in the render thread
-
-### Solution #3: Wait for top level await (no problems - someday)
-
-There is a proposal for top level await support in js modules.  This would
-allow us to insert an internal await into the backend module and hide the 
-async load from users.  Unfortunately its not in JS yet... 
-
-### Solution #3: Change Automerge.init to be async (no problems except a breaking api change)
-
-All of the async strangeness can be boiled down to the Automerge.init() call.
-This would require introducing an api change that has no purpose in the JS only
-implementation and represents a non-trivial compromise in adopting WASM
-
-```js
+  All of the async strangeness can be boiled down to the Automerge.init() call. This would require introducing an api change that has no purpose in the JS only implementation and represents a non-trivial compromise in adopting WASM
+  ```js
   const doc = Automerge.init();
   // becomes 
   const doc = await Automerge.init();
-```
+  ```
 
