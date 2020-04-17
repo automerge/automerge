@@ -11,7 +11,7 @@ use std::iter::Iterator;
 use std::ops::AddAssign;
 
 #[derive(Debug, Clone, PartialEq)]
-struct Tower<K>
+struct Node<K>
 where
     K: Clone + Debug + PartialEq,
 {
@@ -19,17 +19,6 @@ where
     prev: Vec<Link<K>>,
     level: usize,
     is_head: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct Node<K, V>
-where
-    K: Clone + Debug + PartialEq,
-    V: Clone + Debug + PartialEq,
-{
-    tower: Tower<K>,
-    key: K,
-    value: V,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,7 +42,7 @@ where
     }
 }
 
-impl<K> Tower<K>
+impl<K> Node<K>
 where
     K: Debug + Clone + PartialEq,
 {
@@ -147,50 +136,43 @@ where
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct VecOrderedMap<K, V>
+pub(crate) struct VecOrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     keys: Vec<K>,
-    values: HashMap<K, V>,
 }
 
-impl<K, V> VecOrderedMap<K, V>
+impl<K> VecOrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    pub fn new() -> VecOrderedMap<K, V> {
-        VecOrderedMap {
+    pub fn new() -> VecOrderedSet<K> {
+        VecOrderedSet {
             keys: Vec::new(),
-            values: HashMap::new(),
         }
     }
 }
 
-pub trait OrderedMap<K, V>
+pub trait OrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     fn index_of(&self, key: &K) -> Option<usize>;
     fn remove_key(&mut self, key: &K) -> Option<usize>;
-    fn insert_index(&mut self, index: usize, key: K, val: V) -> Option<&K>;
-    fn remove_index(&mut self, index: usize) -> Option<(K, V)>;
+    fn insert_index(&mut self, index: usize, key: K) -> Option<&K>;
+    fn remove_index(&mut self, index: usize) -> Option<K>;
     fn key_of(&self, index: usize) -> Option<&K>;
     fn to_vec(&self) -> Vec<K>;
 }
 
-impl<K, V> OrderedMap<K, V> for SkipList<K, V>
+impl<K> OrderedSet<K> for SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    fn remove_index(&mut self, index: usize) -> Option<(K, V)> {
+    fn remove_index(&mut self, index: usize) -> Option<K> {
         if let Some(key) = self.key_of(index).cloned() {
-            let value = self._remove_key(&key).unwrap();
-            Some((key, value))
+            self._remove_key(&key).ok().map(|()| key)
         } else {
             None
         }
@@ -205,7 +187,7 @@ where
     }
 
     fn to_vec(&self) -> Vec<K> {
-        self.iter().map(|(k, _)| k).cloned().collect()
+        self.into_iter().cloned().collect()
     }
 
     fn key_of(&self, index: usize) -> Option<&K> {
@@ -225,7 +207,7 @@ where
             if count == target {
                 return k.as_ref();
             }
-            node = self.get_tower(k).unwrap(); // panic is correct
+            node = self.get_node(k).unwrap(); // panic is correct
         }
     }
 
@@ -238,7 +220,7 @@ where
         let mut k = key.clone();
         loop {
             if let Some(node) = self.nodes.get(&k) {
-                let link = &node.tower.prev[node.tower.level - 1];
+                let link = &node.prev[node.level - 1];
                 count += link.count;
                 if let Some(key) = &link.key {
                     k = key.clone();
@@ -252,28 +234,26 @@ where
         Some(count - 1)
     }
 
-    fn insert_index(&mut self, index: usize, key: K, value: V) -> Option<&K> {
+    fn insert_index(&mut self, index: usize, key: K) -> Option<&K> {
         if index == 0 {
-            self.insert_head(key, value).unwrap();
+            self.insert_head(key).unwrap();
             None
         } else {
             let suc = self.key_of(index - 1).unwrap().clone();
-            self.insert_after(&suc, key, value).unwrap();
+            self.insert_after(&suc, key).unwrap();
             self.key_of(index - 1) // FIXME
         }
     }
 }
 
-impl<K, V> OrderedMap<K, V> for VecOrderedMap<K, V>
+impl<K> OrderedSet<K> for VecOrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    fn remove_index(&mut self, index: usize) -> Option<(K, V)> {
+    fn remove_index(&mut self, index: usize) -> Option<K> {
         if self.keys.len() > index {
             let k = self.keys.remove(index);
-            let v = self.values.remove(&k).unwrap();
-            Some((k, v))
+            Some(k)
         } else {
             None
         }
@@ -291,9 +271,8 @@ where
         self.keys.iter().position(|o| o == key)
     }
 
-    fn insert_index(&mut self, index: usize, key: K, value: V) -> Option<&K> {
+    fn insert_index(&mut self, index: usize, key: K) -> Option<&K> {
         self.keys.insert(index, key.clone());
-        self.values.insert(key, value);
         if index == 0 {
             None
         } else {
@@ -311,30 +290,27 @@ where
     }
 }
 
-impl<K, V> Default for SkipList<K, V>
+impl<K> Default for SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V> Default for VecOrderedMap<K, V>
+impl<K> Default for VecOrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, K, V> IntoIterator for &'a VecOrderedMap<K, V>
+impl<'a, K> IntoIterator for &'a VecOrderedSet<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     type Item = &'a K;
     type IntoIter = std::slice::Iter<'a, K>;
@@ -344,13 +320,12 @@ where
     }
 }
 
-impl<'a, K, V> IntoIterator for &'a SkipList<K, V>
+impl<'a, K> IntoIterator for &'a SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     type Item = &'a K;
-    type IntoIter = SkipKeyIterator<'a, K, V>;
+    type IntoIter = SkipKeyIterator<'a, K>;
 
     fn into_iter(self) -> Self::IntoIter {
         SkipKeyIterator {
@@ -361,35 +336,32 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SkipList<K, V>
+pub(crate) struct SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    nodes: HashMap<K, Node<K, V>>,
-    head: Tower<K>,
+    nodes: HashMap<K, Node<K>>,
+    head: Node<K>,
     rng: ThreadRng,
     pub len: usize,
 }
 
-impl<K, V> PartialEq for SkipList<K, V>
+impl<K> PartialEq for SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.nodes.eq(&other.nodes)
     }
 }
 
-impl<K, V> SkipList<K, V>
+impl<K> SkipList<K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    pub fn new() -> SkipList<K, V> {
+    pub fn new() -> SkipList<K> {
         let nodes = HashMap::new();
-        let head = Tower {
+        let head = Node {
             next: Vec::new(),
             prev: Vec::new(),
             level: 1,
@@ -405,15 +377,15 @@ where
         }
     }
 
-    fn _remove_key(&mut self, key: &K) -> Result<V, AutomergeError> {
+    fn _remove_key(&mut self, key: &K) -> Result<(), AutomergeError> {
         let removed = self.nodes.remove(key).ok_or_else(|| {
             AutomergeError::SkipListError(
                 "The given key cannot be removed because it does not exist".to_string(),
             )
         })?;
         let max_level = self.head.level;
-        let mut pre = self.predecessors(&removed.tower.prev[0].key, max_level)?;
-        let mut suc = self.successors(&removed.tower.next[0].key, max_level)?;
+        let mut pre = self.predecessors(&removed.prev[0].key, max_level)?;
+        let mut suc = self.successors(&removed.next[0].key, max_level)?;
 
         for i in 0..max_level {
             let distance = pre[i].count + suc[i].count - 1;
@@ -426,11 +398,11 @@ where
         let mut suc_level = 0;
 
         for level in 1..(max_level + 1) {
-            let update_level = min(level, removed.tower.level);
+            let update_level = min(level, removed.level);
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
             {
-                self.get_tower_mut(&pre[pre_level].key)?.remove_after(
+                self.get_node_mut(&pre[pre_level].key)?.remove_after(
                     pre_level,
                     update_level,
                     &suc,
@@ -441,7 +413,7 @@ where
                 && (level == max_level
                     || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
             {
-                self.get_tower_mut(&suc[suc_level].key)?.remove_before(
+                self.get_node_mut(&suc[suc_level].key)?.remove_before(
                     suc_level,
                     update_level,
                     &pre,
@@ -449,38 +421,23 @@ where
                 suc_level = level;
             }
         }
-        Ok(removed.value)
-    }
-
-    fn set(&mut self, key: &K, value: V) -> Result<(), AutomergeError> {
-        let mut node = self
-            .nodes
-            .get_mut(&key)
-            .ok_or_else(|| AutomergeError::SkipListError("Set index out of bounds".to_string()))?;
-        node.value = value;
         Ok(())
     }
 
-    fn get(&self, key: &K) -> Option<&V> {
-        self.nodes.get(&key).map(|n| &n.value)
-    }
-
-    fn get_tower(&self, key: &Option<K>) -> Result<&Tower<K>, AutomergeError> {
+    fn get_node(&self, key: &Option<K>) -> Result<&Node<K>, AutomergeError> {
         if let Some(ref k) = key {
             self.nodes
                 .get(k)
-                .map(|n| &n.tower)
                 .ok_or_else(|| AutomergeError::SkipListError("Key not found".to_string()))
         } else {
             Ok(&self.head)
         }
     }
 
-    fn get_tower_mut(&mut self, key: &Option<K>) -> Result<&mut Tower<K>, AutomergeError> {
+    fn get_node_mut(&mut self, key: &Option<K>) -> Result<&mut Node<K>, AutomergeError> {
         if let Some(ref k) = key {
             self.nodes
                 .get_mut(k)
-                .map(|n| &mut n.tower)
                 .ok_or_else(|| AutomergeError::SkipListError("Key not found".to_string()))
         } else {
             Ok(&mut self.head)
@@ -500,7 +457,7 @@ where
         for level in 1..max_level {
             let mut link = pre[level - 1].clone();
             while link.key.is_some() {
-                let node = self.get_tower(&link.key)?;
+                let node = self.get_node(&link.key)?;
                 if node.level > level {
                     break;
                 }
@@ -529,47 +486,38 @@ where
         for level in 1..max_level {
             let mut link = suc[level - 1].clone();
             while link.key.is_some() {
-                let tower = self.get_tower(&link.key)?;
-                if tower.level > level {
+                let node = self.get_node(&link.key)?;
+                if node.level > level {
                     break;
                 }
-                if tower.level < level {
+                if node.level < level {
                     return Err(AutomergeError::SkipListError(
                         "Level lower than expected".to_string(),
                     ));
                 }
-                link += tower.next[level - 1].clone();
+                link += node.next[level - 1].clone();
             }
             suc.push(link);
         }
         Ok(suc)
     }
 
-    pub fn iter(&self) -> SkipKeyValIterator<K, V> {
-        SkipKeyValIterator {
-            id: self.head.successor(),
-            nodes: &self.nodes,
-        }
-    }
-
-    pub fn insert_head(&mut self, key: K, value: V) -> Result<(), AutomergeError> {
-        self._insert_after(&None, key, value)
+    pub fn insert_head(&mut self, key: K) -> Result<(), AutomergeError> {
+        self._insert_after(&None, key)
     }
 
     pub fn insert_after(
         &mut self,
         predecessor: &K,
         key: K,
-        value: V,
     ) -> Result<(), AutomergeError> {
-        self._insert_after(&Some(predecessor.clone()), key, value)
+        self._insert_after(&Some(predecessor.clone()), key)
     }
 
     fn _insert_after(
         &mut self,
         predecessor: &Option<K>,
         key: K,
-        value: V,
     ) -> Result<(), AutomergeError> {
         if self.nodes.contains_key(&key) {
             return Err(AutomergeError::SkipListError("DuplicateKey".to_string()));
@@ -577,7 +525,7 @@ where
 
         let new_level = self.random_level();
         let max_level = max(new_level, self.head.level);
-        let successor = self.get_tower(predecessor)?.successor();
+        let successor = self.get_node(predecessor)?.successor();
         let mut pre = self.predecessors(predecessor, max_level)?;
         let mut suc = self.successors(successor, max_level)?;
 
@@ -590,7 +538,7 @@ where
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
             {
-                self.get_tower_mut(&pre[pre_level].key)?.insert_after(
+                self.get_node_mut(&pre[pre_level].key)?.insert_after(
                     &key,
                     update_level,
                     pre_level,
@@ -602,7 +550,7 @@ where
                 && (level == max_level
                     || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
             {
-                self.get_tower_mut(&suc[suc_level].key)?.insert_before(
+                self.get_node_mut(&suc[suc_level].key)?.insert_before(
                     &key,
                     update_level,
                     suc_level,
@@ -617,14 +565,10 @@ where
         self.nodes.insert(
             key.clone(),
             Node {
-                key,
-                value,
-                tower: Tower {
                     level: new_level,
                     prev: pre,
                     next: suc,
                     is_head: false,
-                },
             },
         );
         Ok(())
@@ -647,50 +591,17 @@ where
     }
 }
 
-pub(crate) struct SkipKeyValIterator<'a, K, V>
+pub(crate) struct SkipKeyIterator<'a, K>
 where
     K: Debug + Clone + PartialEq,
-    V: Debug + Clone + PartialEq,
 {
     id: &'a Option<K>,
-    nodes: &'a HashMap<K, Node<K, V>>,
+    nodes: &'a HashMap<K, Node<K>>,
 }
 
-pub(crate) struct SkipKeyIterator<'a, K, V>
-where
-    K: Debug + Clone + PartialEq,
-    V: Debug + Clone + PartialEq,
-{
-    id: &'a Option<K>,
-    nodes: &'a HashMap<K, Node<K, V>>,
-}
-
-impl<'a, K, V> Iterator for SkipKeyValIterator<'a, K, V>
+impl<'a, K> Iterator for SkipKeyIterator<'a, K>
 where
     K: Debug + Clone + Hash + PartialEq + Eq,
-    V: Debug + Clone + PartialEq,
-{
-    type Item = (&'a K, &'a V);
-
-    fn next(&mut self) -> Option<(&'a K, &'a V)> {
-        match &self.id {
-            None => None,
-            Some(ref key) => {
-                if let Some(ref node) = &self.nodes.get(key) {
-                    self.id = node.tower.successor();
-                    Some((key, &node.value))
-                } else {
-                    panic!("iter::next hit a dead end")
-                }
-            }
-        }
-    }
-}
-
-impl<'a, K, V> Iterator for SkipKeyIterator<'a, K, V>
-where
-    K: Debug + Clone + Hash + PartialEq + Eq,
-    V: Debug + Clone + PartialEq,
 {
     type Item = &'a K;
 
@@ -699,7 +610,7 @@ where
             None => None,
             Some(ref key) => {
                 if let Some(ref node) = &self.nodes.get(key) {
-                    self.id = node.tower.successor();
+                    self.id = node.successor();
                     Some(key)
                 } else {
                     panic!("iter::next hit a dead end")
@@ -727,21 +638,19 @@ where
 // eg.. 10,000 changes with 10 ops each vs 10 changes with 10,000 ops each
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OrdDelta<'a, K, V>
+pub(crate) struct OrdDelta<'a, K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    list: Option<&'a SkipList<K, V>>,
+    list: Option<&'a SkipList<K>>,
     delta: Vec<Delta<K>>,
 }
 
-impl<'a, K, V> OrdDelta<'a, K, V>
+impl<'a, K> OrdDelta<'a, K>
 where
     K: Clone + Debug + Hash + PartialEq + Eq,
-    V: Clone + Debug + PartialEq,
 {
-    pub fn new(list: Option<&'a SkipList<K, V>>) -> OrdDelta<'a, K, V> {
+    pub fn new(list: Option<&'a SkipList<K>>) -> OrdDelta<'a, K> {
         OrdDelta {
             list,
             delta: Vec::new(),

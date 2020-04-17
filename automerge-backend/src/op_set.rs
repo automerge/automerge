@@ -12,7 +12,7 @@ use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
 use crate::protocol::{Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
-use crate::skip_list::OrderedMap;
+use crate::ordered_set::OrderedSet;
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -118,7 +118,7 @@ impl OpSet {
                     let id = op.operation_key().to_opid()?;
                     //                    let index = object.index_of1(&id)?;
                     let index = object.index_of2(&id)?;
-                    object.seq1.insert_index(index, id, true);
+                    object.seq1.insert_index(index, id);
                     PendingDiff::SeqInsert(op.clone(), index)
                 }
                 (false, false) => PendingDiff::Noop,

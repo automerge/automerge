@@ -5,7 +5,7 @@ use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 #[allow(unused_imports)]
-use crate::skip_list::{OrdDelta, OrderedMap, SkipList};
+use crate::ordered_set::{OrdDelta, OrderedSet, SkipList};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::cmp::max;
@@ -69,8 +69,8 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        //let mut elemid_cache1: HashMap<ObjectID, SkipList<OpID, bool>> = HashMap::new();
-        let mut elemid_cache2: HashMap<ObjectID, OrdDelta<OpID, bool>> = HashMap::new();
+        //let mut elemid_cache1: HashMap<ObjectID, SkipList<OpID>> = HashMap::new();
+        let mut elemid_cache2: HashMap<ObjectID, OrdDelta<OpID>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());

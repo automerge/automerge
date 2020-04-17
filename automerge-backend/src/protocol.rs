@@ -28,7 +28,7 @@ use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
 #[allow(unused_imports)]
-use crate::skip_list::{OrdDelta, OrderedMap};
+use crate::ordered_set::{OrdDelta, OrderedSet};
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -398,8 +398,8 @@ impl OpRequest {
     pub(crate) fn resolve_key(
         &self,
         id: &OpID,
-        //ids1: &mut SkipList<OpID, bool>,
-        ids2: &mut OrdDelta<OpID, bool>,
+        //ids1: &mut SkipList<OpID>,
+        ids2: &mut OrdDelta<OpID>,
     ) -> Result<Key, AutomergeError> {
         let key = &self.key;
         let insert = self.insert;

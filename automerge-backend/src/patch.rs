@@ -4,7 +4,7 @@ use crate::op_set::OpSet;
 use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
-use crate::skip_list::OrderedMap;
+use crate::ordered_set::OrderedSet;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 

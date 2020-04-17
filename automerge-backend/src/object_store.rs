@@ -2,7 +2,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
-use crate::skip_list::{OrderedMap, SkipList};
+use crate::ordered_set::{OrderedSet, SkipList};
 use im_rc::{HashMap, HashSet};
 use std::slice::Iter;
 
@@ -19,8 +19,8 @@ pub(crate) struct ObjState {
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub insertions: HashMap<ElementID, OpHandle>,
-    //pub seq1: VecOrderedMap<OpID,bool>
-    pub seq1: SkipList<OpID, bool>,
+    //pub seq1: VecOrderedSet<OpID>
+    pub seq1: SkipList<OpID>,
 }
 
 impl ObjState {
@@ -33,7 +33,7 @@ impl ObjState {
             insertions: HashMap::new(),
             obj_type,
             inbound: HashSet::new(),
-            //            seq1: VecOrderedMap::new()
+            //            seq1: VecOrderedSet::new()
             seq1: SkipList::new(),
         }
     }
