@@ -709,6 +709,115 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct Delta<K>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+{
+    index: isize,
+    key: Option<K>,
+}
+
+// this is an experiment to if I can change request processing
+// index lookups by not mutating the skip list
+// throuput was quite signifigant actually - about 1.5x over in the
+// mass edit perf test
+// ideally we can speed up the skip list enough to not need this
+// also this could perform worse if the ops per change were huge
+// eg.. 10,000 changes with 10 ops each vs 10 changes with 10,000 ops each
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OrdDelta<'a, K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    list: Option<&'a SkipList<K, V>>,
+    delta: Vec<Delta<K>>,
+}
+
+impl<'a, K, V> OrdDelta<'a, K, V>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+    V: Clone + Debug + PartialEq,
+{
+    pub fn new(list: Option<&'a SkipList<K, V>>) -> OrdDelta<'a, K, V> {
+        OrdDelta {
+            list,
+            delta: Vec::new(),
+        }
+    }
+
+    pub fn insert_index(&mut self, index: usize, key: K) {
+        let index = index as isize;
+        let delta = Delta {
+            index,
+            key: Some(key),
+        };
+        for i in 0..self.delta.len() {
+            if self.delta[i].index >= index {
+                self.delta.iter_mut().skip(i).for_each(|d| d.index += 1);
+                self.delta.insert(i, delta);
+                return;
+            }
+        }
+        self.delta.push(delta);
+    }
+
+    pub fn key_of(&self, index: usize) -> Option<K> {
+        let index = index as isize;
+        let mut acc: isize = 0;
+        for i in 0..self.delta.len() {
+            match &self.delta[i] {
+                Delta {
+                    index: j,
+                    key: Some(key),
+                } => {
+                    if j == &index {
+                        return Some(key.clone());
+                    }
+                    if j > &index {
+                        break;
+                    }
+                    acc += 1;
+                }
+                Delta {
+                    index: j,
+                    key: None,
+                } => {
+                    if j > &index {
+                        break;
+                    }
+                    acc -= 1;
+                }
+            }
+        }
+        self.list
+            .and_then(|l| l.key_of((index as isize - acc) as usize).cloned())
+    }
+
+    pub fn remove_index(&mut self, index: usize) -> Option<K> {
+        let index = index as isize;
+        let delta = Delta { index, key: None };
+        for i in 0..self.delta.len() {
+            if self.delta[i].index == index && self.delta[i].key.is_some() {
+                let old_insert = self.delta.remove(i);
+                self.delta.iter_mut().skip(i).for_each(|d| d.index -= 1);
+                return old_insert.key;
+            }
+            if self.delta[i].index > index {
+                let key = self.key_of(index as usize);
+                self.delta.iter_mut().skip(i).for_each(|d| d.index -= 1);
+                self.delta.insert(i, delta);
+                return key;
+            }
+        }
+        let key = self.key_of(index as usize);
+        self.delta.push(delta);
+        key
+    }
+}
+
 // get(n)
 // insert(n)
 // len()

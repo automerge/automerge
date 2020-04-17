@@ -27,7 +27,8 @@ use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
-use crate::skip_list::OrderedMap;
+#[allow(unused_imports)]
+use crate::skip_list::{OrdDelta, OrderedMap};
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -397,7 +398,8 @@ impl OpRequest {
     pub(crate) fn resolve_key(
         &self,
         id: &OpID,
-        ids: &mut impl OrderedMap<OpID, bool>,
+        //ids1: &mut SkipList<OpID, bool>,
+        ids2: &mut OrdDelta<OpID, bool>,
     ) -> Result<Key, AutomergeError> {
         let key = &self.key;
         let insert = self.insert;
@@ -408,17 +410,21 @@ impl OpRequest {
                 let n: usize = *n as usize;
                 (if insert {
                     if n == 0 {
-                        ids.insert_index(0, id.clone(), true);
+                        //ids1.insert_index(0, id.clone(), true);
+                        ids2.insert_index(0, id.clone());
                         Some(Key("_head".to_string()))
                     } else {
-                        // FIXME this is way too slow
-                        ids.insert_index(n, id.clone(), true);
-                        ids.key_of(n - 1).map(|i| i.to_key())
+                        //ids1.insert_index(n, id.clone(), true);
+                        ids2.insert_index(n, id.clone());
+                        //ids1.key_of(n - 1).map(|i| i.to_key())
+                        ids2.key_of(n - 1).map(|i| i.to_key())
                     }
                 } else if del {
-                    ids.remove_index(n).map(|(k, _)| k.to_key())
+                    //ids1.remove_index(n).map(|(k, _)| k.to_key())
+                    ids2.remove_index(n).map(|k| k.to_key())
                 } else {
-                    ids.key_of(n).map(|i| i.to_key())
+                    //ids1.key_of(n).map(|i| i.to_key())
+                    ids2.key_of(n).map(|i| i.to_key())
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }

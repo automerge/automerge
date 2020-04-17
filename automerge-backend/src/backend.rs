@@ -4,7 +4,8 @@ use crate::op_handle::OpHandle;
 use crate::op_set::{OpSet, Version};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
-use crate::skip_list::{OrderedMap, SkipList};
+#[allow(unused_imports)]
+use crate::skip_list::{OrdDelta, OrderedMap, SkipList};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::cmp::max;
@@ -68,7 +69,8 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        let mut elemid_cache: HashMap<ObjectID, SkipList<OpID, bool>> = HashMap::new();
+        //let mut elemid_cache1: HashMap<ObjectID, SkipList<OpID, bool>> = HashMap::new();
+        let mut elemid_cache2: HashMap<ObjectID, OrdDelta<OpID, bool>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
@@ -84,14 +86,22 @@ impl Backend {
                     None => None,
                 };
 
-                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
+                /*
+                let elemids1 = elemid_cache1.entry(object_id.clone()).or_insert_with(|| {
                     op_set
                         .get_obj(&object_id)
                         .map(|o| o.seq1.clone())
+                        .ok()
                         .unwrap_or_default()
                 });
+                */
 
-                let key = rop.resolve_key(&id, elemids)?;
+                let elemids2 = elemid_cache2.entry(object_id.clone()).or_insert_with(|| {
+                    OrdDelta::new(op_set.get_obj(&object_id).map(|o| &o.seq1).ok())
+                });
+
+                let key = rop.resolve_key(&id, elemids2)?;
+                //let key = rop.resolve_key(&id, elemids1)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
