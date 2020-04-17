@@ -2,10 +2,10 @@ use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::{OpSet, Version};
-use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 #[allow(unused_imports)]
 use crate::ordered_set::{OrdDelta, OrderedSet, SkipList};
+use crate::patch::{Diff, Patch, PendingDiff};
+use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::cmp::max;

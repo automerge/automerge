@@ -8,6 +8,7 @@ use std::cmp::{max, min};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::iter::Iterator;
+use std::mem;
 use std::ops::AddAssign;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,10 +36,8 @@ where
     K: Clone + Debug + PartialEq,
 {
     fn add_assign(&mut self, other: Self) {
-        *self = Self {
-            key: other.key.clone(),
-            count: self.count + other.count,
-        };
+        self.key = other.key;
+        self.count += other.count;
     }
 }
 
@@ -46,91 +45,83 @@ impl<K> Node<K>
 where
     K: Debug + Clone + PartialEq,
 {
-    fn successor(&self) -> &Option<K> {
+    fn successor(&self) -> Option<&K> {
         if self.next.is_empty() {
-            &None
+            None
         } else {
-            &self.next[0].key //.as_ref()
+            self.next[0].key.as_ref()
         }
     }
 
-    fn remove_after(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
-        for (level, item) in links.iter().enumerate().take(self.level).skip(from_level) {
+    fn remove_node_after(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
+        for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.next[level] = item.clone();
+                self.next[level] = link.clone();
             } else {
                 self.next[level].count -= 1;
             }
         }
     }
 
-    fn remove_before(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
-        for (level, item) in links.iter().enumerate().take(self.level).skip(from_level) {
+    fn remove_node_before(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
+        for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.prev[level] = item.clone();
+                self.prev[level] = link.clone();
             } else {
                 self.prev[level].count -= 1;
             }
         }
     }
 
-    fn insert_after(
+    fn insert_node_after(
         &mut self,
         new_key: &K,
         new_level: usize,
         from_level: usize,
         distance: usize,
-    ) -> Result<(), AutomergeError> {
-        if new_level > self.level && !self.is_head {
-            Err(AutomergeError::SkipListError(
-                "Cannot increase the level of a non-head node".to_string(),
-            ))
-        } else {
-            self.level = max(self.level, new_level);
+        is_head: bool,
+    ) {
+        if new_level > self.level && !is_head {
+            panic!("Cannot increase the level of a non-head node")
+        }
+        self.level = max(self.level, new_level);
 
-            for level in from_level..self.level {
-                if level < new_level {
-                    let link = Link {
-                        key: Some(new_key.clone()),
-                        count: distance,
-                    };
-                    if self.next.len() == level {
-                        self.next.push(link)
-                    } else {
-                        self.next[level] = link
-                    }
+        for level in from_level..self.level {
+            if level < new_level {
+                let link = Link {
+                    key: Some(new_key.clone()),
+                    count: distance,
+                };
+                if self.next.len() == level {
+                    self.next.push(link)
                 } else {
-                    self.next[level].count += 1;
+                    self.next[level] = link
                 }
+            } else {
+                self.next[level].count += 1;
             }
-
-            Ok(())
         }
     }
 
-    fn insert_before(
+    fn insert_node_before(
         &mut self,
         new_key: &K,
         new_level: usize,
         from_level: usize,
         distance: usize,
-    ) -> Result<(), AutomergeError> {
+    ) {
         if new_level > self.level {
-            Err(AutomergeError::SkipListError(
-                "Cannot increase the level on insert-before".to_string(),
-            ))
-        } else {
-            for level in from_level..self.level {
-                if level < new_level {
-                    self.prev[level] = Link {
-                        key: Some(new_key.clone()),
-                        count: distance,
-                    };
-                } else {
-                    self.prev[level].count += 1;
-                }
+            panic!("Cannot increase the level on insert-before")
+        }
+        for level in from_level..self.level {
+            if level < new_level {
+                self.prev[level] = Link {
+                    key: Some(new_key.clone()),
+                    count: distance,
+                };
+            } else {
+                self.prev[level].count += 1;
             }
-            Ok(())
         }
     }
 }
@@ -148,9 +139,7 @@ where
     K: Clone + Debug + Hash + PartialEq + Eq,
 {
     pub fn new() -> VecOrderedSet<K> {
-        VecOrderedSet {
-            keys: Vec::new(),
-        }
+        VecOrderedSet { keys: Vec::new() }
     }
 }
 
@@ -170,17 +159,17 @@ where
     K: Clone + Debug + Hash + PartialEq + Eq,
 {
     fn remove_index(&mut self, index: usize) -> Option<K> {
-        if let Some(key) = self.key_of(index).cloned() {
-            self._remove_key(&key).ok().map(|()| key)
-        } else {
-            None
+        let key = self.key_of(index).cloned();
+        if let Some(ref k) = &key {
+            self.remove(k);
         }
+        key
     }
 
     fn remove_key(&mut self, key: &K) -> Option<usize> {
         let index = self.index_of(key);
         if index.is_some() {
-            self._remove_key(key).unwrap();
+            self.remove(key);
         }
         index
     }
@@ -198,11 +187,11 @@ where
                 level -= 1
             }
             count += node.next[level].count;
-            let k: &Option<K> = &node.next[level].key;
+            let k = node.next[level].key.as_ref();
             if count == target {
-                return k.as_ref();
+                return k;
             }
-            node = self.get_node(k).unwrap(); // panic is correct
+            node = self.get_node(k)
         }
     }
 
@@ -316,10 +305,10 @@ where
     K: Clone + Debug + Hash + PartialEq + Eq,
 {
     type Item = &'a K;
-    type IntoIter = SkipKeyIterator<'a, K>;
+    type IntoIter = SkipIterator<'a, K>;
 
     fn into_iter(self) -> Self::IntoIter {
-        SkipKeyIterator {
+        SkipIterator {
             id: self.head.successor(),
             nodes: &self.nodes,
         }
@@ -368,15 +357,15 @@ where
         }
     }
 
-    fn _remove_key(&mut self, key: &K) -> Result<(), AutomergeError> {
-        let removed = self.nodes.remove(key).ok_or_else(|| {
-            AutomergeError::SkipListError(
-                "The given key cannot be removed because it does not exist".to_string(),
-            )
-        })?;
+    fn remove(&mut self, key: &K) {
+        let removed = self
+            .nodes
+            .remove(key)
+            .unwrap_or_else(|| panic!("The given key cannot be removed because it does not exist"));
+
         let max_level = self.head.level;
-        let mut pre = self.predecessors(&removed.prev[0].key, max_level)?;
-        let mut suc = self.successors(&removed.next[0].key, max_level)?;
+        let mut pre = self.predecessors(removed.prev[0].key.as_ref(), max_level);
+        let mut suc = self.successors(removed.next[0].key.as_ref(), max_level);
 
         for i in 0..max_level {
             let distance = pre[i].count + suc[i].count - 1;
@@ -393,132 +382,103 @@ where
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
             {
-                self.get_node_mut(&pre[pre_level].key)?.remove_after(
-                    pre_level,
-                    update_level,
-                    &suc,
-                );
+                self.get_node_mut(pre[pre_level].key.as_ref())
+                    .remove_node_after(pre_level, update_level, &suc);
                 pre_level = level;
             }
             if suc[suc_level].key.is_some()
                 && (level == max_level
                     || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
             {
-                self.get_node_mut(&suc[suc_level].key)?.remove_before(
-                    suc_level,
-                    update_level,
-                    &pre,
-                );
+                self.get_node_mut(suc[suc_level].key.as_ref())
+                    .remove_node_before(suc_level, update_level, &pre);
                 suc_level = level;
             }
         }
-        Ok(())
     }
 
-    fn get_node(&self, key: &Option<K>) -> Result<&Node<K>, AutomergeError> {
+    fn get_node(&self, key: Option<&K>) -> &Node<K> {
         if let Some(ref k) = key {
-            self.nodes
-                .get(k)
-                .ok_or_else(|| AutomergeError::SkipListError("Key not found".to_string()))
+            self.nodes.get(k).unwrap() // panic is correct
         } else {
-            Ok(&self.head)
+            &self.head
         }
     }
 
-    fn get_node_mut(&mut self, key: &Option<K>) -> Result<&mut Node<K>, AutomergeError> {
+    fn get_node_mut(&mut self, key: Option<&K>) -> &mut Node<K> {
         if let Some(ref k) = key {
-            self.nodes
-                .get_mut(k)
-                .ok_or_else(|| AutomergeError::SkipListError("Key not found".to_string()))
+            self.nodes.get_mut(k).unwrap() // panic is correct
         } else {
-            Ok(&mut self.head)
+            &mut self.head
         }
     }
 
-    fn predecessors(
-        &self,
-        predecessor: &Option<K>,
-        max_level: usize,
-    ) -> Result<Vec<Link<K>>, AutomergeError> {
-        let mut pre = vec![Link {
-            key: predecessor.clone(),
+    fn predecessors(&self, predecessor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
+        let mut pre = Vec::with_capacity(max_level);
+        pre.push(Link {
+            key: predecessor.cloned(),
             count: 1,
-        }];
+        });
 
         for level in 1..max_level {
             let mut link = pre[level - 1].clone();
             while link.key.is_some() {
-                let node = self.get_node(&link.key)?;
+                let node = self.get_node(link.key.as_ref());
                 if node.level > level {
                     break;
                 }
                 if node.level < level {
-                    return Err(AutomergeError::SkipListError(
-                        "Level lower than expected".to_string(),
-                    ));
+                    panic!("Level lower than expected");
                 }
                 link += node.prev[level - 1].clone();
             }
             pre.push(link);
         }
-        Ok(pre)
+        pre
     }
 
-    fn successors(
-        &self,
-        successor: &Option<K>,
-        max_level: usize,
-    ) -> Result<Vec<Link<K>>, AutomergeError> {
-        let mut suc = vec![Link {
-            key: successor.clone(),
+    fn successors(&self, successor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
+        let mut suc = Vec::with_capacity(max_level);
+        suc.push(Link {
+            key: successor.cloned(),
             count: 1,
-        }];
+        });
 
         for level in 1..max_level {
             let mut link = suc[level - 1].clone();
             while link.key.is_some() {
-                let node = self.get_node(&link.key)?;
+                let node = self.get_node(link.key.as_ref());
                 if node.level > level {
                     break;
                 }
                 if node.level < level {
-                    return Err(AutomergeError::SkipListError(
-                        "Level lower than expected".to_string(),
-                    ));
+                    panic!("Level lower than expected");
                 }
                 link += node.next[level - 1].clone();
             }
             suc.push(link);
         }
-        Ok(suc)
+        suc
     }
 
     pub fn insert_head(&mut self, key: K) -> Result<(), AutomergeError> {
-        self._insert_after(&None, key)
+        self.insert(None, key)
     }
 
-    pub fn insert_after(
-        &mut self,
-        predecessor: &K,
-        key: K,
-    ) -> Result<(), AutomergeError> {
-        self._insert_after(&Some(predecessor.clone()), key)
+    pub fn insert_after(&mut self, predecessor: &K, key: K) -> Result<(), AutomergeError> {
+        self.insert(Some(predecessor), key)
     }
 
-    fn _insert_after(
-        &mut self,
-        predecessor: &Option<K>,
-        key: K,
-    ) -> Result<(), AutomergeError> {
+    fn insert(&mut self, predecessor: Option<&K>, key: K) -> Result<(), AutomergeError> {
         if self.nodes.contains_key(&key) {
             return Err(AutomergeError::SkipListError("DuplicateKey".to_string()));
         }
 
         let new_level = self.random_level();
         let max_level = max(new_level, self.head.level);
-        let successor = self.get_node(predecessor)?.successor();
-        let mut pre = self.predecessors(predecessor, max_level)?;
-        let mut suc = self.successors(successor, max_level)?;
+        let successor = self.get_node(predecessor).successor();
+        let mut pre = self.predecessors(predecessor, max_level);
+        let mut suc = self.successors(successor, max_level);
 
         self.len += 1;
 
@@ -529,24 +489,22 @@ where
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
             {
-                self.get_node_mut(&pre[pre_level].key)?.insert_after(
-                    &key,
-                    update_level,
-                    pre_level,
-                    pre[pre_level].count,
-                )?;
+                self.get_node_mut(pre[pre_level].key.as_ref())
+                    .insert_node_after(
+                        &key,
+                        update_level,
+                        pre_level,
+                        pre[pre_level].count,
+                        pre[pre_level].key.is_none(),
+                    );
                 pre_level = level;
             }
             if suc[suc_level].key.is_some()
                 && (level == max_level
                     || suc.get(level).map(|l| &l.key) != suc.get(suc_level).map(|l| &l.key))
             {
-                self.get_node_mut(&suc[suc_level].key)?.insert_before(
-                    &key,
-                    update_level,
-                    suc_level,
-                    suc[suc_level].count,
-                )?;
+                self.get_node_mut(suc[suc_level].key.as_ref())
+                    .insert_node_before(&key, update_level, suc_level, suc[suc_level].count);
                 suc_level = level;
             }
         }
@@ -556,10 +514,10 @@ where
         self.nodes.insert(
             key,
             Node {
-                    level: new_level,
-                    prev: pre,
-                    next: suc,
-                    is_head: false,
+                level: new_level,
+                prev: pre,
+                next: suc,
+                is_head: false,
             },
         );
         Ok(())
@@ -582,32 +540,27 @@ where
     }
 }
 
-pub(crate) struct SkipKeyIterator<'a, K>
+pub(crate) struct SkipIterator<'a, K>
 where
     K: Debug + Clone + PartialEq,
 {
-    id: &'a Option<K>,
+    id: Option<&'a K>,
     nodes: &'a HashMap<K, Node<K>>,
 }
 
-impl<'a, K> Iterator for SkipKeyIterator<'a, K>
+impl<'a, K> Iterator for SkipIterator<'a, K>
 where
     K: Debug + Clone + Hash + PartialEq + Eq,
 {
     type Item = &'a K;
 
     fn next(&mut self) -> Option<&'a K> {
-        match &self.id {
+        let mut successor = match self.id {
             None => None,
-            Some(ref key) => {
-                if let Some(ref node) = &self.nodes.get(key) {
-                    self.id = node.successor();
-                    Some(key)
-                } else {
-                    panic!("iter::next hit a dead end")
-                }
-            }
-        }
+            Some(ref key) => self.nodes.get(key).and_then(|n| n.successor()),
+        };
+        mem::swap(&mut successor, &mut self.id);
+        successor
     }
 }
 

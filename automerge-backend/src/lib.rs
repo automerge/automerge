@@ -17,10 +17,10 @@ mod helper;
 mod object_store;
 mod op_handle;
 mod op_set;
+mod ordered_set;
 mod patch;
 mod protocol;
 mod serialize;
-mod ordered_set;
 mod time;
 
 pub use crate::patch::{Diff, DiffEdit, DiffLink, DiffValue, Patch};

@@ -1,10 +1,10 @@
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
+use crate::ordered_set::OrderedSet;
 use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
-use crate::ordered_set::OrderedSet;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
