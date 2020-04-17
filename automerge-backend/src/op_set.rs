@@ -32,12 +32,6 @@ use std::rc::Rc;
 /// at each node by examining the concurrent operationsi which are active for
 /// that node.
 ///
-#[derive(Debug, PartialEq, Clone)]
-pub(crate) struct Version {
-    pub version: u64,
-    pub local_only: bool,
-    pub op_set: Rc<OpSet>,
-}
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {

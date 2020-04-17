@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use crate::error::AutomergeError;
 use im_rc::HashMap;
 use rand::rngs::ThreadRng;
 use rand::Rng;
@@ -12,14 +11,24 @@ use std::mem;
 use std::ops::AddAssign;
 
 #[derive(Debug, Clone, PartialEq)]
+struct LinkLevel<K>
+where
+    K: Clone + Debug + PartialEq,
+{
+    next: Link<K>,
+    prev: Link<K>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 struct Node<K>
 where
     K: Clone + Debug + PartialEq,
 {
-    next: Vec<Link<K>>,
-    prev: Vec<Link<K>>,
+    //    next: Vec<Link<K>>,
+    //    prev: Vec<Link<K>>,
+    links: Vec<LinkLevel<K>>,
     level: usize,
-    is_head: bool,
+    //is_head: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,19 +55,19 @@ where
     K: Debug + Clone + PartialEq,
 {
     fn successor(&self) -> Option<&K> {
-        if self.next.is_empty() {
+        if self.links.is_empty() {
             None
         } else {
-            self.next[0].key.as_ref()
+            self.links[0].next.key.as_ref()
         }
     }
 
     fn remove_node_after(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
         for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.next[level] = link.clone();
+                self.links[level].next = link.clone();
             } else {
-                self.next[level].count -= 1;
+                self.links[level].next.count -= 1;
             }
         }
     }
@@ -66,9 +75,9 @@ where
     fn remove_node_before(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
         for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.prev[level] = link.clone();
+                self.links[level].prev = link.clone();
             } else {
-                self.prev[level].count -= 1;
+                self.links[level].prev.count -= 1;
             }
         }
     }
@@ -88,17 +97,21 @@ where
 
         for level in from_level..self.level {
             if level < new_level {
-                let link = Link {
+                let next = Link {
                     key: Some(new_key.clone()),
                     count: distance,
                 };
-                if self.next.len() == level {
-                    self.next.push(link)
+                let prev = Link {
+                    key: None,
+                    count: 0,
+                };
+                if self.links.len() == level {
+                    self.links.push(LinkLevel { next, prev });
                 } else {
-                    self.next[level] = link
+                    self.links[level].next = next;
                 }
             } else {
-                self.next[level].count += 1;
+                self.links[level].next.count += 1;
             }
         }
     }
@@ -111,16 +124,16 @@ where
         distance: usize,
     ) {
         if new_level > self.level {
-            panic!("Cannot increase the level on insert-before")
+            panic!("Cannot increase the level on insert_node_before")
         }
         for level in from_level..self.level {
             if level < new_level {
-                self.prev[level] = Link {
+                self.links[level].prev = Link {
                     key: Some(new_key.clone()),
                     count: distance,
                 };
             } else {
-                self.prev[level].count += 1;
+                self.links[level].prev.count += 1;
             }
         }
     }
@@ -149,7 +162,7 @@ where
 {
     fn index_of(&self, key: &K) -> Option<usize>;
     fn remove_key(&mut self, key: &K) -> Option<usize>;
-    fn insert_index(&mut self, index: usize, key: K) -> Option<&K>;
+    fn insert_index(&mut self, index: usize, key: K) -> bool;
     fn remove_index(&mut self, index: usize) -> Option<K>;
     fn key_of(&self, index: usize) -> Option<&K>;
 }
@@ -183,11 +196,11 @@ where
         let mut level = node.level - 1;
         let mut count = 0;
         loop {
-            while count + node.next[level].count > target {
+            while count + node.links[level].next.count > target {
                 level -= 1
             }
-            count += node.next[level].count;
-            let k = node.next[level].key.as_ref();
+            count += node.links[level].next.count;
+            let k = node.links[level].next.key.as_ref();
             if count == target {
                 return k;
             }
@@ -196,18 +209,14 @@ where
     }
 
     fn index_of(&self, key: &K) -> Option<usize> {
-        if !self.nodes.contains_key(&key) {
-            return None;
-        }
-
         let mut count = 0;
-        let mut k = key.clone();
+        let mut key = key;
         loop {
-            if let Some(node) = self.nodes.get(&k) {
-                let link = &node.prev[node.level - 1];
+            if let Some(node) = self.nodes.get(key) {
+                let link = &node.links[node.level - 1].prev;
                 count += link.count;
-                if let Some(key) = &link.key {
-                    k = key.clone();
+                if let Some(ref k) = &link.key {
+                    key = k;
                 } else {
                     break;
                 }
@@ -218,14 +227,14 @@ where
         Some(count - 1)
     }
 
-    fn insert_index(&mut self, index: usize, key: K) -> Option<&K> {
+    fn insert_index(&mut self, index: usize, key: K) -> bool {
         if index == 0 {
-            self.insert_head(key).unwrap();
-            None
+            self.insert_head(key)
         } else {
-            let suc = self.key_of(index - 1).unwrap().clone();
-            self.insert_after(&suc, key).unwrap();
-            self.key_of(index - 1) // FIXME
+            self.key_of(index - 1)
+                .cloned()
+                .map(|suc| self.insert_after(&suc, key))
+                .unwrap_or(false)
         }
     }
 }
@@ -251,13 +260,9 @@ where
         self.keys.iter().position(|o| o == key)
     }
 
-    fn insert_index(&mut self, index: usize, key: K) -> Option<&K> {
+    fn insert_index(&mut self, index: usize, key: K) -> bool {
         self.keys.insert(index, key);
-        if index == 0 {
-            None
-        } else {
-            self.keys.get(index - 1)
-        }
+        true
     }
 
     fn remove_key(&mut self, key: &K) -> Option<usize> {
@@ -342,10 +347,9 @@ where
     pub fn new() -> SkipList<K> {
         let nodes = HashMap::new();
         let head = Node {
-            next: Vec::new(),
-            prev: Vec::new(),
+            links: Vec::new(),
             level: 1,
-            is_head: true,
+            //is_head: true,
         };
         let len = 0;
         let rng = rand::thread_rng();
@@ -364,8 +368,8 @@ where
             .unwrap_or_else(|| panic!("The given key cannot be removed because it does not exist"));
 
         let max_level = self.head.level;
-        let mut pre = self.predecessors(removed.prev[0].key.as_ref(), max_level);
-        let mut suc = self.successors(removed.next[0].key.as_ref(), max_level);
+        let mut pre = self.predecessors(removed.links[0].prev.key.as_ref(), max_level);
+        let mut suc = self.successors(removed.links[0].next.key.as_ref(), max_level);
 
         for i in 0..max_level {
             let distance = pre[i].count + suc[i].count - 1;
@@ -399,7 +403,9 @@ where
 
     fn get_node(&self, key: Option<&K>) -> &Node<K> {
         if let Some(ref k) = key {
-            self.nodes.get(k).unwrap() // panic is correct
+            self.nodes
+                .get(k)
+                .unwrap_or_else(|| panic!(format!("get_node - missing key {:?}", key)))
         } else {
             &self.head
         }
@@ -407,7 +413,9 @@ where
 
     fn get_node_mut(&mut self, key: Option<&K>) -> &mut Node<K> {
         if let Some(ref k) = key {
-            self.nodes.get_mut(k).unwrap() // panic is correct
+            self.nodes
+                .get_mut(k)
+                .unwrap_or_else(|| panic!(format!("get_node - missing key {:?}", key)))
         } else {
             &mut self.head
         }
@@ -430,7 +438,7 @@ where
                 if node.level < level {
                     panic!("Level lower than expected");
                 }
-                link += node.prev[level - 1].clone();
+                link += node.links[level - 1].prev.clone();
             }
             pre.push(link);
         }
@@ -454,24 +462,24 @@ where
                 if node.level < level {
                     panic!("Level lower than expected");
                 }
-                link += node.next[level - 1].clone();
+                link += node.links[level - 1].next.clone();
             }
             suc.push(link);
         }
         suc
     }
 
-    pub fn insert_head(&mut self, key: K) -> Result<(), AutomergeError> {
+    pub fn insert_head(&mut self, key: K) -> bool {
         self.insert(None, key)
     }
 
-    pub fn insert_after(&mut self, predecessor: &K, key: K) -> Result<(), AutomergeError> {
+    pub fn insert_after(&mut self, predecessor: &K, key: K) -> bool {
         self.insert(Some(predecessor), key)
     }
 
-    fn insert(&mut self, predecessor: Option<&K>, key: K) -> Result<(), AutomergeError> {
+    fn insert(&mut self, predecessor: Option<&K>, key: K) -> bool {
         if self.nodes.contains_key(&key) {
-            return Err(AutomergeError::SkipListError("DuplicateKey".to_string()));
+            return false;
         }
 
         let new_level = self.random_level();
@@ -511,16 +519,19 @@ where
 
         pre.truncate(new_level);
         suc.truncate(new_level);
+        let links = pre
+            .into_iter()
+            .zip(suc.into_iter())
+            .map(|(prev, next)| LinkLevel { prev, next })
+            .collect();
         self.nodes.insert(
             key,
             Node {
                 level: new_level,
-                prev: pre,
-                next: suc,
-                is_head: false,
+                links,
             },
         );
-        Ok(())
+        true
     }
 
     // Returns a random number from the geometric distribution with p = 0.75.
@@ -684,22 +695,22 @@ mod tests {
     //use std::str::FromStr;
 
     #[test]
-    fn test_index_of() -> Result<(), AutomergeError> {
+    fn test_index_of() {
         let mut s = SkipList::<&str>::new();
 
         // should return None on an empty list
         assert_eq!(s.index_of(&"foo"), None);
 
         // should return None for a nonexistent key
-        s.insert_head("foo")?;
+        s.insert_head("foo");
         assert_eq!(s.index_of(&"baz"), None);
 
         // should return 0 for the first list element
         assert_eq!(s.index_of(&"foo"), Some(0));
 
         // should return length-1 for the last list element
-        s.insert_after(&"foo", "bar")?;
-        s.insert_after(&"bar", "baz")?;
+        s.insert_after(&"foo", "bar");
+        s.insert_after(&"bar", "baz");
         assert_eq!(s.index_of(&"baz"), Some(s.len - 1));
 
         // should adjust based on removed elements
@@ -708,39 +719,37 @@ mod tests {
         assert_eq!(s.index_of(&"baz"), Some(1));
         s.remove_key(&"bar");
         assert_eq!(s.index_of(&"baz"), Some(0));
-        Ok(())
     }
 
     #[test]
-    fn test_len() -> Result<(), AutomergeError> {
+    fn test_len() {
         let mut s = SkipList::<&str>::new();
 
         //should be 0 for an empty list
         assert_eq!(s.len, 0);
 
         // should increase by 1 for every insertion
-        s.insert_head("a3")?;
-        s.insert_head("a2")?;
-        s.insert_head("a1")?;
+        s.insert_head("a3");
+        s.insert_head("a2");
+        s.insert_head("a1");
         assert_eq!(s.len, 3);
 
         //should decrease by 1 for every removal
         s.remove_key(&"a2");
         assert_eq!(s.len, 2);
-        Ok(())
     }
 
     #[test]
-    fn test_key_of() -> Result<(), AutomergeError> {
+    fn test_key_of() {
         let mut s = SkipList::<&str>::new();
 
         // should return None on an empty list
         assert_eq!(s.key_of(0), None);
 
         // should return None for an index past the end of the list
-        s.insert_head("a3")?;
-        s.insert_head("a2")?;
-        s.insert_head("a1")?;
+        s.insert_head("a3");
+        s.insert_head("a2");
+        s.insert_head("a1");
         assert_eq!(s.key_of(10), None);
 
         // should return the first key for index 0
@@ -756,17 +765,15 @@ mod tests {
         s.remove_key(&"a1");
         s.remove_key(&"a3");
         assert_eq!(s.key_of(0), Some(&"a2"));
-
-        Ok(())
     }
 
     #[test]
-    fn test_insert_index() -> Result<(), AutomergeError> {
+    fn test_insert_index() {
         let mut s = SkipList::<&str>::new();
 
         // should insert the new key-value pair at the given index
-        s.insert_head("aaa")?;
-        s.insert_after(&"aaa", "ccc")?;
+        s.insert_head("aaa");
+        s.insert_after(&"aaa", "ccc");
         s.insert_index(1, "bbb");
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), Some(1));
@@ -775,17 +782,16 @@ mod tests {
         // should insert at the head if the index is zero
         s.insert_index(0, "a");
         assert_eq!(s.key_of(0), Some(&"a"));
-        Ok(())
     }
 
     #[test]
-    fn test_remove_index() -> Result<(), AutomergeError> {
+    fn test_remove_index() {
         let mut s = SkipList::<&str>::new();
 
         // should remove the value at the given index
-        s.insert_head("ccc")?;
-        s.insert_head("bbb")?;
-        s.insert_head("aaa")?;
+        s.insert_head("ccc");
+        s.insert_head("bbb");
+        s.insert_head("aaa");
         s.remove_index(1);
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), None);
@@ -793,15 +799,14 @@ mod tests {
 
         // should raise an error if the given index is out of bounds
         assert_eq!(s.remove_index(100), None);
-        Ok(())
     }
 
     #[test]
-    fn test_remove_key_big() -> Result<(), AutomergeError> {
+    fn test_remove_key_big() {
         let mut s = SkipList::<String>::new();
         for i in 0..10000 {
             let j = 9999 - i;
-            s.insert_head(format!("a{}", j))?;
+            s.insert_head(format!("a{}", j));
         }
 
         assert_eq!(s.index_of(&"a20".to_string()), Some(20));
@@ -817,34 +822,32 @@ mod tests {
         assert_eq!(s.index_of(&"a1000".to_string()), Some(500));
         assert_eq!(s.index_of(&"a500".to_string()), Some(250));
         assert_eq!(s.index_of(&"a20".to_string()), Some(10));
-
-        Ok(())
     }
 
     #[test]
-    fn test_remove_key() -> Result<(), AutomergeError> {
+    fn test_remove_key() {
         let mut s = SkipList::<&str>::new();
-        s.insert_head("a20")?;
-        s.insert_head("a19")?;
-        s.insert_head("a18")?;
-        s.insert_head("a17")?;
-        s.insert_head("a16")?;
-        s.insert_head("a15")?;
-        s.insert_head("a14")?;
-        s.insert_head("a13")?;
-        s.insert_head("a12")?;
-        s.insert_head("a11")?;
-        s.insert_head("a10")?;
-        s.insert_head("a9")?;
-        s.insert_head("a8")?;
-        s.insert_head("a7")?;
-        s.insert_head("a6")?;
-        s.insert_head("a5")?;
-        s.insert_head("a4")?;
-        s.insert_head("a3")?;
-        s.insert_head("a2")?;
-        s.insert_head("a1")?;
-        s.insert_head("a0")?;
+        s.insert_head("a20");
+        s.insert_head("a19");
+        s.insert_head("a18");
+        s.insert_head("a17");
+        s.insert_head("a16");
+        s.insert_head("a15");
+        s.insert_head("a14");
+        s.insert_head("a13");
+        s.insert_head("a12");
+        s.insert_head("a11");
+        s.insert_head("a10");
+        s.insert_head("a9");
+        s.insert_head("a8");
+        s.insert_head("a7");
+        s.insert_head("a6");
+        s.insert_head("a5");
+        s.insert_head("a4");
+        s.insert_head("a3");
+        s.insert_head("a2");
+        s.insert_head("a1");
+        s.insert_head("a0");
 
         assert_eq!(s.index_of(&"a20"), Some(20));
 
@@ -861,6 +864,5 @@ mod tests {
 
         assert_eq!(s.index_of(&"a20"), Some(10));
         assert_eq!(s.index_of(&"a10"), Some(5));
-        Ok(())
     }
 }

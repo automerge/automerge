@@ -1,9 +1,9 @@
 use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-use crate::op_set::{OpSet, Version};
+use crate::op_set::OpSet;
 #[allow(unused_imports)]
-use crate::ordered_set::{OrdDelta, OrderedSet, SkipList};
+use crate::ordered_set::{OrdDelta, OrderedSet, SkipList, VecOrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
@@ -17,7 +17,7 @@ use std::str::FromStr;
 pub struct Backend {
     versions: Vec<Version>,
     queue: Vec<Rc<Change>>,
-    op_set: OpSet,
+    op_set: Rc<OpSet>,
     states: ActorStates,
     obj_alias: HashMap<String, ObjectID>,
     max_op: u64,
@@ -30,14 +30,15 @@ pub struct Backend {
 impl Backend {
     pub fn init() -> Backend {
         let mut versions = Vec::new();
+        let op_set = Rc::new(OpSet::init());
         versions.push(Version {
             version: 0,
-            local_only: true,
-            op_set: Rc::new(OpSet::init()),
+            local_state: None,
+            queue: Vec::new(),
         });
         Backend {
             versions,
-            op_set: OpSet::init(),
+            op_set,
             queue: Vec::new(),
             obj_alias: HashMap::new(),
             states: ActorStates::new(),
@@ -61,7 +62,7 @@ impl Backend {
     fn process_request(
         &mut self,
         request: &ChangeRequest,
-        op_set: &OpSet,
+        op_set: Rc<OpSet>,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
         let time = time::unix_timestamp();
@@ -69,8 +70,9 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        //let mut elemid_cache1: HashMap<ObjectID, SkipList<OpID>> = HashMap::new();
-        let mut elemid_cache2: HashMap<ObjectID, OrdDelta<OpID>> = HashMap::new();
+        //let mut elemid_cache: HashMap<ObjectID, SkipList<OpID>> = HashMap::new();
+        //let mut elemid_cache: HashMap<ObjectID, VecOrderedSet<OpID>> = HashMap::new();
+        let mut elemid_cache: HashMap<ObjectID, OrdDelta<OpID>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
@@ -87,21 +89,15 @@ impl Backend {
                 };
 
                 /*
-                let elemids1 = elemid_cache1.entry(object_id.clone()).or_insert_with(|| {
-                    op_set
-                        .get_obj(&object_id)
-                        .map(|o| o.seq.clone())
-                        .ok()
-                        .unwrap_or_default()
+                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
+                    op_set.get_obj(&object_id).map(|o| o.seq.clone()).ok().unwrap_or_default()
                 });
                 */
-
-                let elemids2 = elemid_cache2.entry(object_id.clone()).or_insert_with(|| {
+                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
                     OrdDelta::new(op_set.get_obj(&object_id).map(|o| &o.seq).ok())
                 });
 
-                let key = rop.resolve_key(&id, elemids2)?;
-                //let key = rop.resolve_key(&id, elemids1)?;
+                let key = rop.resolve_key(&id, elemids)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -254,16 +250,33 @@ impl Backend {
     }
 
     pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
-        self.versions.iter_mut().for_each(|v| v.local_only = false);
+        let op_set = Some(self.op_set.clone());
+        self.versions.iter_mut().for_each(|v| {
+            if v.local_state == None {
+                v.local_state = op_set.clone()
+            }
+        });
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, true)
     }
 
-    fn get_version(&self, version: u64) -> Result<&Version, AutomergeError> {
-        self.versions
-            .iter()
+    fn get_version(&mut self, version: u64) -> Result<Rc<OpSet>, AutomergeError> {
+        let v = self
+            .versions
+            .iter_mut()
             .find(|v| v.version == version)
-            .ok_or_else(|| AutomergeError::UnknownVersion(version))
+            .ok_or_else(|| AutomergeError::UnknownVersion(version))?;
+        if let Some(ref mut op_set) = v.local_state {
+            // apply the queued ops lazily b/c hopefully these
+            // can be thrown away before they are applied
+            for change in v.queue.drain(0..) {
+                Rc::make_mut(op_set)
+                    .apply_ops(OpHandle::extract(change.clone()), false)
+                    .unwrap();
+            }
+            return Ok(op_set.clone());
+        }
+        Ok(self.op_set.clone())
     }
 
     fn apply(
@@ -284,15 +297,15 @@ impl Backend {
             let version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
             let version_obj = Version {
                 version,
-                local_only: true,
-                op_set: Rc::new(self.op_set.clone()),
+                queue: Vec::new(),
+                local_state: None,
             };
             self.versions.push(version_obj);
         } else {
             let version_obj = Version {
                 version: 0,
-                local_only: true,
-                op_set: Rc::new(self.op_set.clone()),
+                queue: Vec::new(),
+                local_state: None,
             };
             self.versions.clear();
             self.versions.push(version_obj);
@@ -309,16 +322,14 @@ impl Backend {
     ) -> Result<Patch, AutomergeError> {
         self.check_for_duplicate(&request)?; // Change has already been applied
 
-        let ver = self.get_version(request.version)?.clone();
+        let ver = self.get_version(request.version)?;
 
         let actor = request.actor.clone();
-        request
-            .deps
-            .get_or_insert_with(|| ver.op_set.deps.without(&actor));
+        request.deps.get_or_insert_with(|| ver.deps.without(&actor));
 
         let start_op = self.max_op + 1;
         let change = match request.request_type {
-            ChangeRequestType::Change => self.process_request(&request, &ver.op_set, start_op)?,
+            ChangeRequestType::Change => self.process_request(&request, ver, start_op)?,
             ChangeRequestType::Undo => self.undo(&request, start_op)?,
             ChangeRequestType::Redo => self.redo(&request, start_op)?,
         };
@@ -349,7 +360,7 @@ impl Backend {
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
         if local {
-            self.apply_change(change, local, undoable)
+            self.apply_change(change, undoable)
         } else {
             self.queue.push(change);
             self.apply_queued_ops()
@@ -359,7 +370,7 @@ impl Backend {
     fn apply_queued_ops(&mut self) -> Result<Vec<PendingDiff>, AutomergeError> {
         let mut all_diffs = Vec::new();
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            let diffs = self.apply_change(next_change, false, false)?;
+            let diffs = self.apply_change(next_change, false)?;
             all_diffs.extend(diffs)
         }
         Ok(all_diffs)
@@ -368,19 +379,26 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Rc<Change>,
-        _local: bool,
         undoable: bool,
     ) -> Result<Vec<PendingDiff>, AutomergeError> {
-        if let Some(all_deps) = self.states.add_change(&change)? {
-            self.clock.set(&change.actor_id, change.seq);
-            self.op_set.deps.subtract(&all_deps);
-            self.op_set.deps.set(&change.actor_id, change.seq);
-        } else {
+        let all_deps = self.states.add_change(&change)?;
+
+        if all_deps.is_none() {
             return Ok(Vec::new());
         }
+
+        let all_deps = all_deps.unwrap();
+
+        let op_set = Rc::make_mut(&mut self.op_set);
+
+        self.clock.set(&change.actor_id, change.seq);
+
+        op_set.deps.subtract(&all_deps);
+        op_set.deps.set(&change.actor_id, change.seq);
+
         self.max_op = max(self.max_op, change.max_op());
 
-        let (undo_ops, diffs) = self.op_set.apply_ops(OpHandle::extract(change), undoable)?;
+        let (undo_ops, diffs) = op_set.apply_ops(OpHandle::extract(change), undoable)?;
 
         if undoable {
             self.push_undo_ops(undo_ops);
@@ -418,10 +436,8 @@ impl Backend {
         }
 
         for v in self.versions.iter_mut() {
-            if v.local_only {
-                v.op_set = Rc::new(self.op_set.clone());
-            } else {
-                Rc::make_mut(&mut v.op_set).apply_ops(OpHandle::extract(change.clone()), false)?;
+            if v.local_state.is_some() {
+                v.queue.push(change.clone())
             }
         }
 
@@ -490,4 +506,11 @@ impl Backend {
         self.undo_stack.push(undo_ops);
         self.undo_pos += 1;
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+struct Version {
+    version: u64,
+    local_state: Option<Rc<OpSet>>,
+    queue: Vec<Rc<Change>>,
 }

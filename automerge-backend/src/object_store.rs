@@ -1,7 +1,8 @@
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-use crate::ordered_set::{OrderedSet, SkipList};
+#[allow(unused_imports)]
+use crate::ordered_set::{OrderedSet, SkipList, VecOrderedSet};
 use crate::protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
 use std::slice::Iter;
@@ -33,7 +34,7 @@ impl ObjState {
             insertions: HashMap::new(),
             obj_type,
             inbound: HashSet::new(),
-            //            seq: VecOrderedSet::new()
+            //seq: VecOrderedSet::new()
             seq: SkipList::new(),
         }
     }
