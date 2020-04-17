@@ -263,7 +263,7 @@ where
     }
 
     fn insert_index(&mut self, index: usize, key: K) -> Option<&K> {
-        self.keys.insert(index, key.clone());
+        self.keys.insert(index, key);
         if index == 0 {
             None
         } else {
@@ -554,7 +554,7 @@ where
         pre.truncate(new_level);
         suc.truncate(new_level);
         self.nodes.insert(
-            key.clone(),
+            key,
             Node {
                     level: new_level,
                     prev: pre,

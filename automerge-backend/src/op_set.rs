@@ -108,17 +108,13 @@ impl OpSet {
                 (true, true) => PendingDiff::SeqSet(op.clone()),
                 (true, false) => {
                     let opid = op.operation_key().to_opid()?;
-                    let index = object.seq1.remove_key(&opid).unwrap();
-                    //                    let index = object.seq1.iter().position(|o| o == &opid).unwrap();
-                    //                    object.seq1.remove(index);
-                    //                    object.seq2.remove_index(index)?;
+                    let index = object.seq.remove_key(&opid).unwrap();
                     PendingDiff::SeqRemove(op.clone(), index)
                 }
                 (false, true) => {
                     let id = op.operation_key().to_opid()?;
-                    //                    let index = object.index_of1(&id)?;
                     let index = object.index_of2(&id)?;
-                    object.seq1.insert_index(index, id);
+                    object.seq.insert_index(index, id);
                     PendingDiff::SeqInsert(op.clone(), index)
                 }
                 (false, false) => PendingDiff::Noop,
@@ -312,7 +308,7 @@ impl OpSet {
         let mut index = 0;
         let mut max_counter = 0;
 
-        for opid in object.seq1.into_iter() {
+        for opid in object.seq.into_iter() {
             max_counter = max(max_counter, opid.counter());
             if let Some(ops) = object.props.get(&opid.to_key()) {
                 if !ops.is_empty() {

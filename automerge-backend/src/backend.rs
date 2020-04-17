@@ -90,14 +90,14 @@ impl Backend {
                 let elemids1 = elemid_cache1.entry(object_id.clone()).or_insert_with(|| {
                     op_set
                         .get_obj(&object_id)
-                        .map(|o| o.seq1.clone())
+                        .map(|o| o.seq.clone())
                         .ok()
                         .unwrap_or_default()
                 });
                 */
 
                 let elemids2 = elemid_cache2.entry(object_id.clone()).or_insert_with(|| {
-                    OrdDelta::new(op_set.get_obj(&object_id).map(|o| &o.seq1).ok())
+                    OrdDelta::new(op_set.get_obj(&object_id).map(|o| &o.seq).ok())
                 });
 
                 let key = rop.resolve_key(&id, elemids2)?;

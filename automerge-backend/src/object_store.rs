@@ -19,8 +19,8 @@ pub(crate) struct ObjState {
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub insertions: HashMap<ElementID, OpHandle>,
-    //pub seq1: VecOrderedSet<OpID>
-    pub seq1: SkipList<OpID>,
+    //pub seq: VecOrderedSet<OpID>
+    pub seq: SkipList<OpID>,
 }
 
 impl ObjState {
@@ -33,8 +33,8 @@ impl ObjState {
             insertions: HashMap::new(),
             obj_type,
             inbound: HashSet::new(),
-            //            seq1: VecOrderedSet::new()
-            seq1: SkipList::new(),
+            //            seq: VecOrderedSet::new()
+            seq: SkipList::new(),
         }
     }
 
@@ -70,7 +70,7 @@ impl ObjState {
             match &prev_id {
                 ElementID::ID(ref id) => {
                     // FIXME maybe I can speed this up with self.props.get before looking for
-                    index = self.seq1.index_of(id)
+                    index = self.seq.index_of(id)
                 }
                 ElementID::Head => break,
             }
@@ -108,7 +108,7 @@ impl ObjState {
                 return Ok(n);
             }
 
-            if a.as_opid() == self.seq1.key_of(n) {
+            if a.as_opid() == self.seq.key_of(n) {
                 n += 1;
             }
         }
