@@ -163,7 +163,6 @@ where
     fn insert_index(&mut self, index: usize, key: K) -> Option<&K>;
     fn remove_index(&mut self, index: usize) -> Option<K>;
     fn key_of(&self, index: usize) -> Option<&K>;
-    fn to_vec(&self) -> Vec<K>;
 }
 
 impl<K> OrderedSet<K> for SkipList<K>
@@ -184,10 +183,6 @@ where
             self._remove_key(key).unwrap();
         }
         index
-    }
-
-    fn to_vec(&self) -> Vec<K> {
-        self.into_iter().cloned().collect()
     }
 
     fn key_of(&self, index: usize) -> Option<&K> {
@@ -257,10 +252,6 @@ where
         } else {
             None
         }
-    }
-
-    fn to_vec(&self) -> Vec<K> {
-        self.keys.clone()
     }
 
     fn key_of(&self, index: usize) -> Option<&K> {
@@ -741,21 +732,21 @@ mod tests {
 
     #[test]
     fn test_index_of() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, u32>::new();
+        let mut s = SkipList::<&str>::new();
 
         // should return None on an empty list
         assert_eq!(s.index_of(&"foo"), None);
 
         // should return None for a nonexistent key
-        s.insert_head("foo", 10)?;
+        s.insert_head("foo")?;
         assert_eq!(s.index_of(&"baz"), None);
 
         // should return 0 for the first list element
         assert_eq!(s.index_of(&"foo"), Some(0));
 
         // should return length-1 for the last list element
-        s.insert_after(&"foo", "bar", 20)?;
-        s.insert_after(&"bar", "baz", 30)?;
+        s.insert_after(&"foo", "bar")?;
+        s.insert_after(&"bar", "baz")?;
         assert_eq!(s.index_of(&"baz"), Some(s.len - 1));
 
         // should adjust based on removed elements
@@ -769,15 +760,15 @@ mod tests {
 
     #[test]
     fn test_len() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, u32>::new();
+        let mut s = SkipList::<&str>::new();
 
         //should be 0 for an empty list
         assert_eq!(s.len, 0);
 
         // should increase by 1 for every insertion
-        s.insert_head("a3", 3)?;
-        s.insert_head("a2", 2)?;
-        s.insert_head("a1", 1)?;
+        s.insert_head("a3")?;
+        s.insert_head("a2")?;
+        s.insert_head("a1")?;
         assert_eq!(s.len, 3);
 
         //should decrease by 1 for every removal
@@ -788,15 +779,15 @@ mod tests {
 
     #[test]
     fn test_key_of() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, u32>::new();
+        let mut s = SkipList::<&str>::new();
 
         // should return None on an empty list
         assert_eq!(s.key_of(0), None);
 
         // should return None for an index past the end of the list
-        s.insert_head("a3", 3)?;
-        s.insert_head("a2", 2)?;
-        s.insert_head("a1", 1)?;
+        s.insert_head("a3")?;
+        s.insert_head("a2")?;
+        s.insert_head("a1")?;
         assert_eq!(s.key_of(10), None);
 
         // should return the first key for index 0
@@ -817,70 +808,31 @@ mod tests {
     }
 
     #[test]
-    fn test_get() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, &str>::new();
-
-        // should return None for a nonexistent key
-        assert_eq!(s.get(&"key4"), None);
-
-        // should return the inserted value when present
-        s.insert_head("key3", "value3")?;
-        s.insert_head("key2", "value2")?;
-        s.insert_head("key1", "value1")?;
-
-        assert_eq!(s.get(&"key1"), Some(&"value1"));
-        assert_eq!(s.get(&"key3"), Some(&"value3"));
-        Ok(())
-    }
-
-    #[test]
-    fn test_set() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, &str>::new();
-
-        // should error when setting a nonexistent key
-        assert_eq!(s.set(&"hello", "world").is_err(), true);
-
-        // should update the value for an existing key
-        s.insert_head("key2", "value2")?;
-        s.insert_head("key1", "value1")?;
-
-        assert_eq!(s.get(&"key1"), Some(&"value1"));
-        assert_eq!(s.get(&"key2"), Some(&"value2"));
-
-        s.set(&"key2", "updated_value")?;
-
-        assert_eq!(s.get(&"key1"), Some(&"value1"));
-        assert_eq!(s.get(&"key2"), Some(&"updated_value"));
-
-        Ok(())
-    }
-
-    #[test]
     fn test_insert_index() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, &str>::new();
+        let mut s = SkipList::<&str>::new();
 
         // should insert the new key-value pair at the given index
-        s.insert_head("aaa", "AAA")?;
-        s.insert_after(&"aaa", "ccc", "CCC")?;
-        s.insert_index(1, "bbb", "BBB");
+        s.insert_head("aaa")?;
+        s.insert_after(&"aaa", "ccc")?;
+        s.insert_index(1, "bbb");
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), Some(1));
         assert_eq!(s.index_of(&"ccc"), Some(2));
 
         // should insert at the head if the index is zero
-        s.insert_index(0, "a", "aa");
+        s.insert_index(0, "a");
         assert_eq!(s.key_of(0), Some(&"a"));
         Ok(())
     }
 
     #[test]
     fn test_remove_index() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, &str>::new();
+        let mut s = SkipList::<&str>::new();
 
         // should remove the value at the given index
-        s.insert_head("ccc", "CCC")?;
-        s.insert_head("bbb", "BBB")?;
-        s.insert_head("aaa", "AAA")?;
+        s.insert_head("ccc")?;
+        s.insert_head("bbb")?;
+        s.insert_head("aaa")?;
         s.remove_index(1);
         assert_eq!(s.index_of(&"aaa"), Some(0));
         assert_eq!(s.index_of(&"bbb"), None);
@@ -893,10 +845,10 @@ mod tests {
 
     #[test]
     fn test_remove_key_big() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<String, u32>::new();
+        let mut s = SkipList::<String>::new();
         for i in 0..10000 {
             let j = 9999 - i;
-            s.insert_head(format!("a{}", j), j)?;
+            s.insert_head(format!("a{}", j))?;
         }
 
         assert_eq!(s.index_of(&"a20".to_string()), Some(20));
@@ -918,28 +870,28 @@ mod tests {
 
     #[test]
     fn test_remove_key() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<&str, u32>::new();
-        s.insert_head("a20", 20)?;
-        s.insert_head("a19", 19)?;
-        s.insert_head("a18", 18)?;
-        s.insert_head("a17", 17)?;
-        s.insert_head("a16", 16)?;
-        s.insert_head("a15", 15)?;
-        s.insert_head("a14", 14)?;
-        s.insert_head("a13", 13)?;
-        s.insert_head("a12", 12)?;
-        s.insert_head("a11", 11)?;
-        s.insert_head("a10", 10)?;
-        s.insert_head("a9", 9)?;
-        s.insert_head("a8", 8)?;
-        s.insert_head("a7", 7)?;
-        s.insert_head("a6", 6)?;
-        s.insert_head("a5", 5)?;
-        s.insert_head("a4", 4)?;
-        s.insert_head("a3", 3)?;
-        s.insert_head("a2", 2)?;
-        s.insert_head("a1", 1)?;
-        s.insert_head("a0", 0)?;
+        let mut s = SkipList::<&str>::new();
+        s.insert_head("a20")?;
+        s.insert_head("a19")?;
+        s.insert_head("a18")?;
+        s.insert_head("a17")?;
+        s.insert_head("a16")?;
+        s.insert_head("a15")?;
+        s.insert_head("a14")?;
+        s.insert_head("a13")?;
+        s.insert_head("a12")?;
+        s.insert_head("a11")?;
+        s.insert_head("a10")?;
+        s.insert_head("a9")?;
+        s.insert_head("a8")?;
+        s.insert_head("a7")?;
+        s.insert_head("a6")?;
+        s.insert_head("a5")?;
+        s.insert_head("a4")?;
+        s.insert_head("a3")?;
+        s.insert_head("a2")?;
+        s.insert_head("a1")?;
+        s.insert_head("a0")?;
 
         assert_eq!(s.index_of(&"a20"), Some(20));
 
@@ -956,22 +908,6 @@ mod tests {
 
         assert_eq!(s.index_of(&"a20"), Some(10));
         assert_eq!(s.index_of(&"a10"), Some(5));
-        Ok(())
-    }
-
-    #[test]
-    fn test_iter1() -> Result<(), AutomergeError> {
-        let mut s = SkipList::<String, u32>::new();
-        assert_eq!(s.len, 0);
-        let e1 = "10@actor1".to_string();
-        let e2 = "11@actor1".to_string();
-        let e3 = "12@actor2".to_string();
-        s.insert_head(e1.clone(), 10)?;
-        assert_eq!(s.to_vec(), vec![e1.clone()]);
-        s.insert_after(&e1, e2.clone(), 20).unwrap();
-        assert_eq!(s.to_vec(), vec![e1.clone(), e2.clone()]);
-        s.insert_after(&e1, e3.clone(), 15).unwrap();
-        assert_eq!(s.to_vec(), vec![e1.clone(), e3.clone(), e2.clone()]);
         Ok(())
     }
 }

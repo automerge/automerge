@@ -475,11 +475,6 @@ impl Backend {
         clock
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<Vec<OpID>, AutomergeError> {
-        //        Ok(self.op_set.get_elem_ids(object_id)?.to_vec())
-        self.op_set.get_obj(object_id).map(|o| o.seq1.to_vec())
-    }
-
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
         let missing_changes = remote
             .get_missing_changes(&self.clock)
