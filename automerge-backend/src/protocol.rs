@@ -398,8 +398,7 @@ impl OpRequest {
     pub(crate) fn resolve_key(
         &self,
         id: &OpID,
-        //ids: &mut SkipList<OpID>,
-        ids: &mut OrdDelta<OpID>,
+        ids: &mut dyn OrderedSet<OpID>,
     ) -> Result<Key, AutomergeError> {
         let key = &self.key;
         let insert = self.insert;

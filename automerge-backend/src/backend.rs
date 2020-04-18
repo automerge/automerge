@@ -8,6 +8,7 @@ use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
+use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -70,9 +71,7 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        //let mut elemid_cache: HashMap<ObjectID, SkipList<OpID>> = HashMap::new();
-        //let mut elemid_cache: HashMap<ObjectID, VecOrderedSet<OpID>> = HashMap::new();
-        let mut elemid_cache: HashMap<ObjectID, OrdDelta<OpID>> = HashMap::new();
+        let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
                 let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
@@ -88,16 +87,34 @@ impl Backend {
                     None => None,
                 };
 
-                /*
+                // Ok - this madness is that 30% of the execution time for lists was spent
+                // in resolve_key making tiny throw away edits to object.seq
+                // OrdDelta offered a huge speedup but this would blow up for
+                // huge bulk load changes so this way I do one vs the other
+                // I should run benchmarks and figure out where the correct break point
+                // really is
+                // !!!
+                // Idea - maybe the correct fast path here is feed the ops into op_set
+                // as they are generated so I dont need to make these list ops twice
+                // and when the version is out of date - i need to apply ops to that anyway...
                 let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
-                    op_set.get_obj(&object_id).map(|o| o.seq.clone()).ok().unwrap_or_default()
+                    if ops.len() > 2000 {
+                        Box::new(
+                            op_set
+                                .get_obj(&object_id)
+                                .map(|o| o.seq.clone())
+                                .ok()
+                                .unwrap_or_default(),
+                        )
+                    } else {
+                        Box::new(OrdDelta::new(
+                            op_set.get_obj(&object_id).map(|o| &o.seq).ok(),
+                        ))
+                    }
                 });
-                */
-                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
-                    OrdDelta::new(op_set.get_obj(&object_id).map(|o| &o.seq).ok())
-                });
+                let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
 
-                let key = rop.resolve_key(&id, elemids)?;
+                let key = rop.resolve_key(&id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -499,6 +516,10 @@ impl Backend {
             .cloned()
             .collect();
         self.apply_changes(missing_changes)
+    }
+
+    pub fn decode(&self, change: &[u8]) {
+        log!("DECODE {:?}", change);
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {

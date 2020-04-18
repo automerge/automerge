@@ -611,8 +611,13 @@ where
             delta: Vec::new(),
         }
     }
+}
 
-    pub fn insert_index(&mut self, index: usize, key: K) {
+impl<'a, K> OrderedSet<K> for OrdDelta<'a, K>
+where
+    K: Clone + Debug + Hash + PartialEq + Eq,
+{
+    fn insert_index(&mut self, index: usize, key: K) -> bool {
         let index = index as isize;
         let delta = Delta {
             index,
@@ -622,13 +627,14 @@ where
             if self.delta[i].index >= index {
                 self.delta.iter_mut().skip(i).for_each(|d| d.index += 1);
                 self.delta.insert(i, delta);
-                return;
+                return true;
             }
         }
         self.delta.push(delta);
+        true
     }
 
-    pub fn key_of(&self, index: usize) -> Option<K> {
+    fn key_of(&self, index: usize) -> Option<&K> {
         let index = index as isize;
         let mut acc: isize = 0;
         for i in 0..self.delta.len() {
@@ -638,7 +644,7 @@ where
                     key: Some(key),
                 } => {
                     if j == &index {
-                        return Some(key.clone());
+                        return Some(&key);
                     }
                     if j > &index {
                         break;
@@ -657,28 +663,36 @@ where
             }
         }
         self.list
-            .and_then(|l| l.key_of((index as isize - acc) as usize).cloned())
+            .and_then(|l| l.key_of((index as isize - acc) as usize))
     }
 
-    pub fn remove_index(&mut self, index: usize) -> Option<K> {
+    fn remove_index(&mut self, index: usize) -> Option<K> {
         let index = index as isize;
         let delta = Delta { index, key: None };
         for i in 0..self.delta.len() {
             if self.delta[i].index == index && self.delta[i].key.is_some() {
                 let old_insert = self.delta.remove(i);
                 self.delta.iter_mut().skip(i).for_each(|d| d.index -= 1);
-                return old_insert.key;
+                return old_insert.key
             }
             if self.delta[i].index > index {
-                let key = self.key_of(index as usize);
+                let key = self.key_of(index as usize).cloned();
                 self.delta.iter_mut().skip(i).for_each(|d| d.index -= 1);
                 self.delta.insert(i, delta);
                 return key;
             }
         }
-        let key = self.key_of(index as usize);
+        let key = self.key_of(index as usize).cloned();
         self.delta.push(delta);
         key
+    }
+
+    fn index_of(&self, _key: &K) -> Option<usize> {
+        panic!("not implemented");
+    }
+
+    fn remove_key(&mut self, _key: &K) -> Option<usize> {
+        panic!("not implemented");
     }
 }
 
