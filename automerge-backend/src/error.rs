@@ -23,6 +23,7 @@ pub enum AutomergeError {
     DuplicateChange(String),
     InvalidChange(String),
     DivergedState(String),
+    ChangeDecompressError(String),
 }
 
 impl fmt::Display for AutomergeError {

@@ -1,5 +1,13 @@
 let Backend = require('./pkg')
 let encodeChange, decodeChanges // initialized by initCodecFunctions
+let util = require("util");
+
+function appendBuffer(buffer1, buffer2) {
+  var tmp = new Uint8Array(buffer1.byteLength + buffer2.byteLength);
+  tmp.set(buffer1, 0);
+  tmp.set(buffer2, buffer1.byteLength);
+  return tmp;
+};
 
 function initCodecFunctions(functions) {
   encodeChange = functions.encodeChange
@@ -34,7 +42,10 @@ function free(backend) {
 
 function applyChanges(backend, changes) {
   const state = backendState(backend)
-  const patch = state.applyChanges(decodeChanges(changes))
+//  const js_changes = decodeChanges(changes);
+//  console.log("(js) CHANGES=",util.inspect(js_changes, {showHidden: false, depth: null} ));
+  const bigBuffer = changes.reduce(appendBuffer, new Uint8Array());
+  const patch = state.applyChanges(bigBuffer)
   backend.frozen = true
   return [{ state, frozen: false }, patch]
 }
@@ -48,7 +59,9 @@ function applyLocalChange(backend, request) {
 
 function loadChanges(backend, changes) {
   const state = backendState(backend)
-  state.loadChanges(decodeChanges(changes))
+  const bigBuffer = changes.reduce(appendBuffer, new Uint8Array());
+  //state.loadChanges(decodeChanges(changes))
+  state.loadChanges(bigBuffer)
   backend.frozen = true
   return { state, frozen: false }
 }
@@ -77,8 +90,13 @@ function getRedoStack(backend) {
   return backendState(backend).getRedoStack()
 }
 
+function decodeChange(backend,change) {
+  return backendState(backend).decodeChange(change)
+}
+
 module.exports = {
   initCodecFunctions,
   init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
-  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack
+  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
+  decodeChange
 }

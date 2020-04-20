@@ -1,5 +1,7 @@
 extern crate im_rc;
+extern crate leb128;
 extern crate rand;
+extern crate sha2;
 extern crate web_sys;
 
 #[allow(unused_macros)]
@@ -11,7 +13,9 @@ macro_rules! log {
 
 mod actor_states;
 mod backend;
+mod columnar;
 mod concurrent_operations;
+mod encoding;
 mod error;
 mod helper;
 mod object_store;

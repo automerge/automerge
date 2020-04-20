@@ -176,7 +176,7 @@ impl FromStr for ActorID {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
-pub struct Clock(pub HashMap<ActorID, u32>);
+pub struct Clock(pub HashMap<ActorID, u64>);
 
 impl Default for Clock {
     fn default() -> Self {
@@ -189,7 +189,7 @@ impl Clock {
         Clock(HashMap::new())
     }
 
-    pub fn with(&self, actor_id: &ActorID, seq: u32) -> Clock {
+    pub fn with(&self, actor_id: &ActorID, seq: u64) -> Clock {
         let mut result = self.clone();
         result.set(actor_id, max(seq, self.get(actor_id)));
         result
@@ -221,7 +221,7 @@ impl Clock {
         result
     }
 
-    pub fn set(&mut self, actor_id: &ActorID, seq: u32) {
+    pub fn set(&mut self, actor_id: &ActorID, seq: u64) {
         if seq == 0 {
             self.0.remove(actor_id);
         } else {
@@ -229,7 +229,7 @@ impl Clock {
         }
     }
 
-    pub fn get(&self, actor_id: &ActorID) -> u32 {
+    pub fn get(&self, actor_id: &ActorID) -> u64 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 
@@ -257,8 +257,8 @@ impl PartialOrd for Clock {
 }
 
 impl<'a> IntoIterator for &'a Clock {
-    type Item = (&'a ActorID, &'a u32);
-    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u32>;
+    type Item = (&'a ActorID, &'a u64);
+    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u64>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -557,7 +557,7 @@ pub struct Change {
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
-    pub seq: u32,
+    pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: u128,
@@ -576,7 +576,7 @@ impl Change {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
     pub actor: ActorID,
-    pub seq: u32,
+    pub seq: u64,
     pub version: u64,
     pub message: Option<String>,
     #[serde(default = "helper::make_true")]

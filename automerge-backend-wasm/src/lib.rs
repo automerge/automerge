@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
+use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -32,22 +32,23 @@ pub struct State {
 #[allow(clippy::new_without_default)]
 #[wasm_bindgen]
 impl State {
+
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<JsValue, JsValue> {
+    pub fn apply_changes(&mut self, changes: Vec<u8>) -> Result<JsValue, JsValue> {
         log!("apply_changes {:?}", changes);
-        let c: Vec<Change> = js_to_rust(changes)?;
+        //let c: Vec<Change> = js_to_rust(changes)?;
         let patch = self
             .backend
-            .apply_changes(c)
+            .apply_changes_binary(changes)
             .map_err(automerge_error_to_js)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = loadChanges)]
-    pub fn load_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+    pub fn load_changes(&mut self, changes: Vec<u8>) -> Result<(), JsValue> {
         log!("load_changes {:?}", changes);
-        let c: Vec<Change> = js_to_rust(changes)?;
-        self.backend.load_changes(c).map_err(automerge_error_to_js)
+        //let c: Vec<Change> = js_to_rust(changes)?;
+        self.backend.load_changes_binary(changes).map_err(automerge_error_to_js)
     }
 
     #[wasm_bindgen(js_name = applyLocalChange)]
@@ -107,12 +108,6 @@ impl State {
     pub fn get_redo_stack(&self) -> Result<JsValue, JsValue> {
         log!("get_redo_stack");
         rust_to_js(&self.backend.redo_stack)
-    }
-
-    #[wasm_bindgen]
-    pub fn fork(&self) -> State {
-        log!("fork");
-        self.clone()
     }
 
     #[wasm_bindgen(js_name = forkAt)]

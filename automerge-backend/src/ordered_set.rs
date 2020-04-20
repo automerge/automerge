@@ -24,11 +24,10 @@ struct Node<K>
 where
     K: Clone + Debug + PartialEq,
 {
-    //    next: Vec<Link<K>>,
-    //    prev: Vec<Link<K>>,
-    links: Vec<LinkLevel<K>>,
     level: usize,
-    //is_head: bool,
+    links: Vec<LinkLevel<K>>,
+    // IDEA: can I make this an unsized array??
+    // IDEA - Node could be Node(Vec<K>)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -421,6 +420,8 @@ where
         }
     }
 
+    // IDEA: Can i merge the successors and predecessors into a singlue unified function
+    // so we dont need to zip the results?
     fn predecessors(&self, predecessor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
         let mut pre = Vec::with_capacity(max_level);
         pre.push(Link {
@@ -673,7 +674,7 @@ where
             if self.delta[i].index == index && self.delta[i].key.is_some() {
                 let old_insert = self.delta.remove(i);
                 self.delta.iter_mut().skip(i).for_each(|d| d.index -= 1);
-                return old_insert.key
+                return old_insert.key;
             }
             if self.delta[i].index > index {
                 let key = self.key_of(index as usize).cloned();

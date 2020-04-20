@@ -1,4 +1,5 @@
 use crate::actor_states::ActorStates;
+use crate::columnar::ChangeDecoder;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
@@ -260,19 +261,35 @@ impl Backend {
         Ok(change)
     }
 
+    pub fn load_changes_binary(&mut self, data: Vec<u8>) -> Result<(), AutomergeError> {
+        let changes = ChangeDecoder::new(&data).decode()?;
+        self.load_changes(changes)
+    }
+
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, false)?;
         Ok(())
     }
 
-    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes_binary(&mut self, data: Vec<u8>) -> Result<Patch, AutomergeError> {
+        let changes = ChangeDecoder::new(&data).decode()?;
+        //log!("(rust) changes={:?}",changes);
+        //
+        self.apply_changes(changes)
+    }
+
+    pub fn apply_changes(
+        &mut self,
+        mut changes: Vec<Change>,
+    ) -> Result<Patch, AutomergeError> {
         let op_set = Some(self.op_set.clone());
         self.versions.iter_mut().for_each(|v| {
             if v.local_state == None {
                 v.local_state = op_set.clone()
             }
         });
+
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, true)
     }
@@ -518,8 +535,9 @@ impl Backend {
         self.apply_changes(missing_changes)
     }
 
-    pub fn decode(&self, change: &[u8]) {
-        log!("DECODE {:?}", change);
+    pub fn decode(&self, changes: Vec<u8>) -> Result<Vec<Change>, AutomergeError> {
+        let mut decoder = ChangeDecoder::new(&changes);
+        decoder.decode()
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {

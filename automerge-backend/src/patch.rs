@@ -295,7 +295,7 @@ pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u32>,
+    pub seq: Option<u64>,
     pub clock: Clock,
     pub can_undo: bool,
     pub can_redo: bool,
