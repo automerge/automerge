@@ -15,11 +15,11 @@
     "automerge_backend_wasm_bg.wasm",
     "automerge_backend_wasm.js"
   ],
-  "main": "./pkg.js",
+  "main": "./index.js",
   "scripts": {
-    "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
-    "release": "rm -rf pkg && wasm-pack build --target nodejs --release --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
-    "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --no-typescript && cp package.json pkg && cp index.js pkg/pkg.js",
+    "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --out-name index",
+    "release": "rm -rf pkg && wasm-pack build --target nodejs --release --out-name index",
+    "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --out-name index",
     "mocha": "yarn build && mocha --bail --full-trace",
     "test": "cargo test && wasm-pack test --node"
   },

@@ -27,6 +27,7 @@ use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
+use crate::ordered_set::OrderedSet;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -190,7 +191,7 @@ impl FromStr for ActorID {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
-pub struct Clock(pub HashMap<ActorID, u32>);
+pub struct Clock(pub HashMap<ActorID, u64>);
 
 impl Default for Clock {
     fn default() -> Self {
@@ -203,7 +204,7 @@ impl Clock {
         Clock(HashMap::new())
     }
 
-    pub fn with(&self, actor_id: &ActorID, seq: u32) -> Clock {
+    pub fn with(&self, actor_id: &ActorID, seq: u64) -> Clock {
         let mut result = self.clone();
         result.set(actor_id, max(seq, self.get(actor_id)));
         result
@@ -235,7 +236,7 @@ impl Clock {
         result
     }
 
-    pub fn set(&mut self, actor_id: &ActorID, seq: u32) {
+    pub fn set(&mut self, actor_id: &ActorID, seq: u64) {
         if seq == 0 {
             self.0.remove(actor_id);
         } else {
@@ -243,7 +244,7 @@ impl Clock {
         }
     }
 
-    pub fn get(&self, actor_id: &ActorID) -> u32 {
+    pub fn get(&self, actor_id: &ActorID) -> u64 {
         *self.0.get(actor_id).unwrap_or(&0)
     }
 
@@ -271,8 +272,8 @@ impl PartialOrd for Clock {
 }
 
 impl<'a> IntoIterator for &'a Clock {
-    type Item = (&'a ActorID, &'a u32);
-    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u32>;
+    type Item = (&'a ActorID, &'a u64);
+    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u64>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -306,6 +307,13 @@ impl ElementID {
         match self {
             ElementID::Head => Key("_head".to_string()),
             ElementID::ID(opid) => Key(opid.to_string()),
+        }
+    }
+
+    pub fn not_head(&self) -> bool {
+        match self {
+            ElementID::Head => false,
+            ElementID::ID(_) => true,
         }
     }
 }
@@ -402,7 +410,11 @@ impl OpRequest {
         self.value.clone().unwrap_or(PrimitiveValue::Null)
     }
 
-    pub fn resolve_key(&self, id: &OpID, ids: &mut Vec<OpID>) -> Result<Key, AutomergeError> {
+    pub(crate) fn resolve_key(
+        &self,
+        id: &OpID,
+        ids: &mut dyn OrderedSet<OpID>,
+    ) -> Result<Key, AutomergeError> {
         let key = &self.key;
         let insert = self.insert;
         let del = self.action == ReqOpType::Del;
@@ -412,20 +424,16 @@ impl OpRequest {
                 let n: usize = *n as usize;
                 (if insert {
                     if n == 0 {
-                        ids.insert(0, id.clone());
+                        ids.insert_index(0, id.clone());
                         Some(Key("_head".to_string()))
                     } else {
-                        ids.insert(n, id.clone());
-                        ids.get(n - 1).map(|i| i.to_key())
+                        ids.insert_index(n, id.clone());
+                        ids.key_of(n - 1).map(|i| i.to_key())
                     }
                 } else if del {
-                    if n < ids.len() {
-                        Some(ids.remove(n).to_key())
-                    } else {
-                        None
-                    }
+                    ids.remove_index(n).map(|k| k.to_key())
                 } else {
-                    ids.get(n).map(|i| i.to_key())
+                    ids.key_of(n).map(|i| i.to_key())
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }
@@ -564,7 +572,7 @@ pub struct Change {
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
-    pub seq: u32,
+    pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: u128,
@@ -583,15 +591,12 @@ impl Change {
 #[serde(rename_all = "camelCase")]
 pub struct ChangeRequest {
     pub actor: ActorID,
-    pub seq: u32,
+    pub seq: u64,
     pub version: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(default = "helper::make_true")]
     pub undoable: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub deps: Option<Clock>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub ops: Option<Vec<OpRequest>>,
     pub request_type: ChangeRequestType,
 }

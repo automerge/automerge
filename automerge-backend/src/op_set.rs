@@ -10,6 +10,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
+use crate::ordered_set::OrderedSet;
 use crate::patch::{Diff, DiffEdit, PendingDiff};
 use crate::protocol::{Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
 use core::cmp::max;
@@ -31,12 +32,6 @@ use std::rc::Rc;
 /// at each node by examining the concurrent operationsi which are active for
 /// that node.
 ///
-#[derive(Debug, PartialEq, Clone)]
-pub(crate) struct Version {
-    pub version: u64,
-    pub local_only: bool,
-    pub op_set: Rc<OpSet>,
-}
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
@@ -107,14 +102,13 @@ impl OpSet {
                 (true, true) => PendingDiff::SeqSet(op.clone()),
                 (true, false) => {
                     let opid = op.operation_key().to_opid()?;
-                    let index = object.seq.iter().position(|o| o == &opid).unwrap();
-                    object.seq.remove(index);
+                    let index = object.seq.remove_key(&opid).unwrap();
                     PendingDiff::SeqRemove(op.clone(), index)
                 }
                 (false, true) => {
                     let id = op.operation_key().to_opid()?;
-                    let index = object.get_index_for(&id)?;
-                    object.seq.insert(index, id);
+                    let index = object.index_of2(&id)?;
+                    object.seq.insert_index(index, id);
                     PendingDiff::SeqInsert(op.clone(), index)
                 }
                 (false, false) => PendingDiff::Noop,
@@ -259,10 +253,6 @@ impl OpSet {
             .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
     }
 
-    pub fn get_elem_ids(&self, object_id: &ObjectID) -> Result<&Vec<OpID>, AutomergeError> {
-        self.get_obj(object_id).map(|o| &o.seq)
-    }
-
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
         if insert {
             Vec::new()
@@ -312,7 +302,7 @@ impl OpSet {
         let mut index = 0;
         let mut max_counter = 0;
 
-        for opid in object.seq.iter() {
+        for opid in object.seq.into_iter() {
             max_counter = max(max_counter, opid.counter());
             if let Some(ops) = object.props.get(&opid.to_key()) {
                 if !ops.is_empty() {

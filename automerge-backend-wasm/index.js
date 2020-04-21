@@ -34,7 +34,7 @@ function free(backend) {
 
 function applyChanges(backend, changes) {
   const state = backendState(backend)
-  const patch = state.applyChanges(decodeChanges(changes))
+  const patch = state.applyChanges(changes)
   backend.frozen = true
   return [{ state, frozen: false }, patch]
 }
@@ -48,7 +48,7 @@ function applyLocalChange(backend, request) {
 
 function loadChanges(backend, changes) {
   const state = backendState(backend)
-  state.loadChanges(decodeChanges(changes))
+  state.loadChanges(changes)
   backend.frozen = true
   return { state, frozen: false }
 }
@@ -80,5 +80,5 @@ function getRedoStack(backend) {
 module.exports = {
   initCodecFunctions,
   init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
-  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack
+  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
 }

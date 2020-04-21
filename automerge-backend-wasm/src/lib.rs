@@ -1,7 +1,9 @@
-use automerge_backend::{ActorID, AutomergeError, Backend, Change, ChangeRequest, Clock};
+use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use js_sys::{Uint8Array, Array};
 
 extern crate web_sys;
 #[allow(unused_macros)]
@@ -32,22 +34,23 @@ pub struct State {
 #[allow(clippy::new_without_default)]
 #[wasm_bindgen]
 impl State {
+
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<JsValue, JsValue> {
-        log!("apply_changes {:?}", changes);
-        let c: Vec<Change> = js_to_rust(changes)?;
-        let patch = self
-            .backend
-            .apply_changes(c)
-            .map_err(automerge_error_to_js)?;
+    pub fn apply_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
+        let ch : Vec<Vec<u8>> = changes.iter().map(|c| {
+            c.dyn_into::<Uint8Array>().unwrap().to_vec()
+        }).collect();
+        let patch = self.backend.apply_changes_binary(ch).map_err(automerge_error_to_js)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = loadChanges)]
-    pub fn load_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+    pub fn load_changes(&mut self, changes: Array) -> Result<(), JsValue> {
         log!("load_changes {:?}", changes);
-        let c: Vec<Change> = js_to_rust(changes)?;
-        self.backend.load_changes(c).map_err(automerge_error_to_js)
+        let ch : Vec<Vec<u8>> = changes.iter().map(|c| {
+            c.dyn_into::<Uint8Array>().unwrap().to_vec()
+        }).collect();
+        self.backend.load_changes_binary(ch).map_err(automerge_error_to_js)
     }
 
     #[wasm_bindgen(js_name = applyLocalChange)]
@@ -109,12 +112,6 @@ impl State {
         rust_to_js(&self.backend.redo_stack)
     }
 
-    #[wasm_bindgen]
-    pub fn fork(&self) -> State {
-        log!("fork");
-        self.clone()
-    }
-
     #[wasm_bindgen(js_name = forkAt)]
     pub fn fork_at(&self, _clock: JsValue) -> Result<State, JsValue> {
         log!("fork_at");
@@ -145,9 +142,9 @@ impl State {
 }
 
 fn automerge_error_to_js(err: AutomergeError) -> JsValue {
-    JsValue::from(std::format!("Automerge error: {}", err))
+    js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
 }
 
 fn json_error_to_js(err: serde_json::Error) -> JsValue {
-    JsValue::from(std::format!("serde_json error: {}", err))
+    js_sys::Error::new(&std::format!("serde_json error: {}", err)).into()
 }

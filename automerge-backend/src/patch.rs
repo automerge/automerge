@@ -1,6 +1,7 @@
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
+use crate::ordered_set::OrderedSet;
 use crate::protocol::{
     ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
 };
@@ -225,10 +226,11 @@ impl Diff {
         if self.is_seq() && self.props.is_some() {
             let mut oldprops = self.props.take().unwrap_or_default();
             let mut newprops = HashMap::new();
-            let elemids = op_set.get_elem_ids(&self.object_id)?;
+            //let elemids = op_set.get_elem_ids(&self.object_id)?;
+            let elemids = op_set.get_obj(&self.object_id).map(|o| &o.seq)?;
             for (key, keymap) in oldprops.drain() {
                 let key_op = key.to_opid()?;
-                let index = elemids.iter().position(|id| id == &key_op).ok_or_else(|| {
+                let index = elemids.index_of(&key_op).ok_or_else(|| {
                     AutomergeError::MissingElement(self.object_id.clone(), key_op.clone())
                 })?;
                 let new_key = Key(index.to_string());
@@ -293,7 +295,7 @@ pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u32>,
+    pub seq: Option<u64>,
     pub clock: Clock,
     pub can_undo: bool,
     pub can_redo: bool,
