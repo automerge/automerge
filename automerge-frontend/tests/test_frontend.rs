@@ -1,4 +1,4 @@
-use automerge_frontend::{Value, Frontend};
+use automerge_frontend::{Value, Frontend, MapType, SequenceType};
 
 #[test]
 fn test_init_with_state(){
@@ -12,6 +12,7 @@ fn test_init_with_state(){
         }
     "#).unwrap();
     let value = Value::from_json(&initial_state_json);
+    println!("Value: {:?}", value);
     let frontend = Frontend::new_with_initial_state(value).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);

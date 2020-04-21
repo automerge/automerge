@@ -52,13 +52,19 @@ impl Value {
 
     pub fn to_json(&self) -> serde_json::Value {
         match self {
-            Value::Map(map, map_type) => {
+            Value::Map(map, _) => {
                 let result: serde_json::map::Map<String, serde_json::Value> =
                     map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
                 serde_json::Value::Object(result)
             }
-            Value::Sequence(elements, seq_type) => {
+            Value::Sequence(elements, SequenceType::List) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
+            }
+            Value::Sequence(elements, SequenceType::Text) => {
+                serde_json::Value::String(elements.iter().map(|v| match v {
+                    Value::Primitive(PrimitiveValue::Str(c), _) => c.as_str(),
+                    _ => panic!("Non string element in text sequence"),
+                }).collect())
             }
             Value::Primitive(v, _) => {
                 match v {

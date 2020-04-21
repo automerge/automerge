@@ -98,10 +98,6 @@ impl Values {
     fn update_for_opid(&mut self, opid: OpID, value: Rc<RefCell<Object>>) {
         self.0.insert(opid, value);
     }
-
-    fn remove_opid(&mut self, opid: &OpID) -> Option<Rc<RefCell<Object>>> {
-        self.0.remove(opid)
-    }
 }
 
 
@@ -362,7 +358,52 @@ impl ChangeContext {
                 };
                 Ok(obj)
             },
-            ObjType::Text => panic!("Not implemented"),
+            ObjType::Text => {
+                let obj = Self::get_or_create_object(
+                    &diff.object_id,
+                    original_objects,
+                    updated,
+                    || Object::Sequence(diff.object_id.clone(), Vec::new(), SequenceType::List)
+                );
+                match &mut*obj.borrow_mut() {
+                    Object::Sequence(_, ref mut elems, SequenceType::Text) => {
+                        if let Some(edits) = &diff.edits {
+                            for edit in edits {
+                                match edit {
+                                    DiffEdit::Insert{index} => elems.insert(*index, None),
+                                    DiffEdit::Remove{index} => {elems.remove(*index);},
+                                };
+                            }
+                        };
+                        if let Some(diffprops) = &diff.props {
+                            for (key, prop_diffs) in diffprops {
+                                let index = Self::key_to_index(key)?;
+                                let values = match elems[index].as_mut() {
+                                    Some(v) => v,
+                                    None => {
+                                        let to_insert = Some(Values(HashMap::new()));
+                                        elems[index] = to_insert;
+                                        elems[index].as_mut().unwrap()
+                                    }
+                                };
+                                for (opid, difflink) in prop_diffs.iter() {
+                                    let object = match difflink {
+                                        DiffLink::Link(subpatch) => Self::apply_diff_helper(
+                                            original_objects,
+                                            updated,
+                                            subpatch
+                                        )?,
+                                        DiffLink::Val(v) => Rc::new(RefCell::new(Object::Primitive(v.value.clone(), v.datatype)))
+                                    };
+                                    values.update_for_opid(opid.clone(), object);
+                                };
+                            }
+                        };
+                    },
+                    _ => panic!("Invalid object type when applying diff"),
+                };
+                Ok(obj)
+            }
         }
     }
 
