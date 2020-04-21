@@ -142,9 +142,9 @@ impl State {
 }
 
 fn automerge_error_to_js(err: AutomergeError) -> JsValue {
-    JsValue::from(std::format!("Automerge error: {}", err))
+    js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
 }
 
 fn json_error_to_js(err: serde_json::Error) -> JsValue {
-    JsValue::from(std::format!("serde_json error: {}", err))
+    js_sys::Error::new(&std::format!("serde_json error: {}", err)).into()
 }

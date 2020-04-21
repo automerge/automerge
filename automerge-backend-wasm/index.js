@@ -77,13 +77,8 @@ function getRedoStack(backend) {
   return backendState(backend).getRedoStack()
 }
 
-function decodeChange(backend,change) {
-  return backendState(backend).decodeChange(change)
-}
-
 module.exports = {
   initCodecFunctions,
   init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
   getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
-  decodeChange
 }

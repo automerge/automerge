@@ -12,7 +12,7 @@ fn err(s: &str) -> AutomergeError {
 #[derive(Clone)]
 pub(crate) struct Decoder<'a> {
     pub offset: usize,
-    pub buf: &'a [u8],
+    buf: &'a [u8],
 }
 
 impl<'a> Decoder<'a> {

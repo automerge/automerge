@@ -316,12 +316,12 @@ impl<'a> Columns<'a> {
     }
 
     // FIXME - this could be an iterator (zip).map()
-    fn child(&mut self) -> Option<ObjectID> {
+    fn child(&mut self) -> Option<Option<ObjectID>> {
         let actor = self.chld_actor.next()?;
         let ctr = self.chld_ctr.next()?;
         match (actor, ctr) {
-            (None, None) => Some(ObjectID::Root),
-            (Some(a), Some(c)) => Some(self.op_id(a, c)?.to_object_id()),
+            (None, None) => Some(None),
+            (Some(a), Some(c)) => Some(Some(self.op_id(a, c)?.to_object_id())),
             _ => None,
         }
     }
@@ -465,7 +465,7 @@ impl<'a> Columns<'a> {
                     return None;
                 }
             }
-            Action::Link => OpType::Link(child),
+            Action::Link => OpType::Link(child?),
         };
         Some(Operation {
             action,
