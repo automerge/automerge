@@ -62,7 +62,7 @@ impl Frontend {
         &self.state
     }
 
-    fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
+    pub fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
         let mut change_ctx = change_context::ChangeContext::new();
         if let Some(diff) = patch.diffs {
             change_ctx.apply_diff(&diff)?;

@@ -1,0 +1,15 @@
+[package]
+name = "automerge-cli"
+version = "0.1.0"
+authors = ["Alex Good <alex@memoryandthought.me>"]
+edition = "2018"
+
+[[bin]]
+name = "automerge"
+path = "src/main.rs"
+
+[dependencies]
+clap = { git = "https://github.com/clap-rs/clap/" }
+automerge-backend = { path = "../automerge-backend" }
+automerge-frontend = { path = "../automerge-frontend" }
+serde_json = "^1.0"
