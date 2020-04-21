@@ -261,8 +261,8 @@ impl Backend {
         Ok(change)
     }
 
-    pub fn load_changes_binary(&mut self, data: Vec<u8>) -> Result<(), AutomergeError> {
-        let changes = ChangeDecoder::new(&data).decode()?;
+    pub fn load_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<(), AutomergeError> {
+        let changes = ChangeDecoder::new(data).decode()?;
         self.load_changes(changes)
     }
 
@@ -272,17 +272,12 @@ impl Backend {
         Ok(())
     }
 
-    pub fn apply_changes_binary(&mut self, data: Vec<u8>) -> Result<Patch, AutomergeError> {
-        let changes = ChangeDecoder::new(&data).decode()?;
-        //log!("(rust) changes={:?}",changes);
-        //
+    pub fn apply_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<Patch, AutomergeError> {
+        let changes = ChangeDecoder::new(data).decode()?;
         self.apply_changes(changes)
     }
 
-    pub fn apply_changes(
-        &mut self,
-        mut changes: Vec<Change>,
-    ) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
         let op_set = Some(self.op_set.clone());
         self.versions.iter_mut().for_each(|v| {
             if v.local_state == None {
@@ -533,11 +528,6 @@ impl Backend {
             .cloned()
             .collect();
         self.apply_changes(missing_changes)
-    }
-
-    pub fn decode(&self, changes: Vec<u8>) -> Result<Vec<Change>, AutomergeError> {
-        let mut decoder = ChangeDecoder::new(&changes);
-        decoder.decode()
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {

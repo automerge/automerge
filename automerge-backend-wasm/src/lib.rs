@@ -2,6 +2,8 @@ use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
+use js_sys::{Uint8Array, Array};
 
 extern crate web_sys;
 #[allow(unused_macros)]
@@ -34,21 +36,21 @@ pub struct State {
 impl State {
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: Vec<u8>) -> Result<JsValue, JsValue> {
-        log!("apply_changes {:?}", changes);
-        //let c: Vec<Change> = js_to_rust(changes)?;
-        let patch = self
-            .backend
-            .apply_changes_binary(changes)
-            .map_err(automerge_error_to_js)?;
+    pub fn apply_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
+        let ch : Vec<Vec<u8>> = changes.iter().map(|c| {
+            c.dyn_into::<Uint8Array>().unwrap().to_vec()
+        }).collect();
+        let patch = self.backend.apply_changes_binary(ch).map_err(automerge_error_to_js)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = loadChanges)]
-    pub fn load_changes(&mut self, changes: Vec<u8>) -> Result<(), JsValue> {
+    pub fn load_changes(&mut self, changes: Array) -> Result<(), JsValue> {
         log!("load_changes {:?}", changes);
-        //let c: Vec<Change> = js_to_rust(changes)?;
-        self.backend.load_changes_binary(changes).map_err(automerge_error_to_js)
+        let ch : Vec<Vec<u8>> = changes.iter().map(|c| {
+            c.dyn_into::<Uint8Array>().unwrap().to_vec()
+        }).collect();
+        self.backend.load_changes_binary(ch).map_err(automerge_error_to_js)
     }
 
     #[wasm_bindgen(js_name = applyLocalChange)]

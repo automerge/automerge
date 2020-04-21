@@ -115,27 +115,29 @@ fn err(s: &str) -> AutomergeError {
     AutomergeError::ChangeDecompressError(s.to_string())
 }
 
-pub(crate) struct ChangeDecoder<'a> {
-    bytes: &'a [u8],
+pub(crate) struct ChangeDecoder {
+    blocks: Vec<Vec<u8>>,
 }
 
-impl<'a> ChangeDecoder<'a> {
-    pub fn new(bytes: &'a [u8]) -> Self {
-        ChangeDecoder { bytes }
+impl ChangeDecoder {
+    pub fn new(blocks: Vec<Vec<u8>>) -> Self {
+        ChangeDecoder { blocks }
     }
 
     pub fn decode(&mut self) -> Result<Vec<Change>, AutomergeError> {
-        let mut bytes = self.bytes;
         let mut changes = Vec::new();
-        while !bytes.is_empty() {
-            let (change, rest) = self.decode_change(bytes)?;
-            changes.push(change);
-            bytes = rest;
+        for block in &self.blocks {
+            let mut bytes: &[u8] = block.as_slice();
+            while !bytes.is_empty() {
+                let (change, rest) = self.decode_change(&bytes)?;
+                changes.push(change);
+                bytes = rest;
+            }
         }
         Ok(changes)
     }
 
-    fn decode_change(&mut self, bytes: &'a [u8]) -> Result<(Change, &'a [u8]), AutomergeError> {
+    fn decode_change<'a>(&self, bytes: &'a [u8]) -> Result<(Change, &'a [u8]), AutomergeError> {
         let mut decoder = Decoder::new(bytes);
         let mut hasher = Sha256::new();
 
@@ -168,7 +170,7 @@ impl<'a> ChangeDecoder<'a> {
         Ok((chunk, rest))
     }
 
-    fn decode_chunk(&mut self, bytes: &[u8]) -> Result<Change, AutomergeError> {
+    fn decode_chunk(&self, bytes: &[u8]) -> Result<Change, AutomergeError> {
         let mut decoder = Decoder::new(bytes);
         let actor_id: ActorID = decoder.read("actorid")?;
         let seq = decoder.read("seq")?;
@@ -203,7 +205,7 @@ impl<'a> ChangeDecoder<'a> {
     }
 
     fn decode_ops(
-        &mut self,
+        &self,
         bytes: &[u8],
         actors: Vec<ActorID>,
     ) -> Result<Vec<Operation>, AutomergeError> {

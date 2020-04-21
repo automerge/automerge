@@ -1,13 +1,5 @@
 let Backend = require('./pkg')
 let encodeChange, decodeChanges // initialized by initCodecFunctions
-let util = require("util");
-
-function appendBuffer(buffer1, buffer2) {
-  var tmp = new Uint8Array(buffer1.byteLength + buffer2.byteLength);
-  tmp.set(buffer1, 0);
-  tmp.set(buffer2, buffer1.byteLength);
-  return tmp;
-};
 
 function initCodecFunctions(functions) {
   encodeChange = functions.encodeChange
@@ -42,10 +34,7 @@ function free(backend) {
 
 function applyChanges(backend, changes) {
   const state = backendState(backend)
-//  const js_changes = decodeChanges(changes);
-//  console.log("(js) CHANGES=",util.inspect(js_changes, {showHidden: false, depth: null} ));
-  const bigBuffer = changes.reduce(appendBuffer, new Uint8Array());
-  const patch = state.applyChanges(bigBuffer)
+  const patch = state.applyChanges(changes)
   backend.frozen = true
   return [{ state, frozen: false }, patch]
 }
@@ -59,9 +48,7 @@ function applyLocalChange(backend, request) {
 
 function loadChanges(backend, changes) {
   const state = backendState(backend)
-  const bigBuffer = changes.reduce(appendBuffer, new Uint8Array());
-  //state.loadChanges(decodeChanges(changes))
-  state.loadChanges(bigBuffer)
+  state.loadChanges(changes)
   backend.frozen = true
   return { state, frozen: false }
 }
