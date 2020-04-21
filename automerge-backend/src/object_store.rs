@@ -1,8 +1,7 @@
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-#[allow(unused_imports)]
-use crate::ordered_set::{OrderedSet, SkipList, VecOrderedSet};
+use crate::ordered_set::{OrderedSet, SkipList};
 use crate::protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
 use std::slice::Iter;

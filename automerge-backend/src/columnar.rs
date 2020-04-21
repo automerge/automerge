@@ -316,6 +316,7 @@ impl<'a> Columns<'a> {
     }
 
     // FIXME - this could be an iterator (zip).map()
+    #[allow(clippy::option_option)]
     fn child(&mut self) -> Option<Option<ObjectID>> {
         let actor = self.chld_actor.next()?;
         let ctr = self.chld_ctr.next()?;

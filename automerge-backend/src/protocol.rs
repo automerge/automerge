@@ -27,8 +27,7 @@ use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
-#[allow(unused_imports)]
-use crate::ordered_set::{OrdDelta, OrderedSet, SkipList};
+use crate::ordered_set::OrderedSet;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]

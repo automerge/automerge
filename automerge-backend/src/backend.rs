@@ -3,8 +3,7 @@ use crate::columnar::ChangeDecoder;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
-#[allow(unused_imports)]
-use crate::ordered_set::{OrdDelta, OrderedSet, SkipList, VecOrderedSet};
+use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
