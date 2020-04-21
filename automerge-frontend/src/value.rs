@@ -1,3 +1,4 @@
+use automerge_backend::{DataType, PrimitiveValue};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -13,18 +14,12 @@ pub enum SequenceType {
     Text,
 }
 
-/// Possible values of an element of the state. Using this rather than
-/// serde_json::Value because we'll probably want to make the core logic
-/// independent of serde in order to be `no_std` compatible.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>, MapType),
     Sequence(Vec<Value>, SequenceType),
-    Str(String),
-    Number(f64),
-    Boolean(bool),
-    Null,
+    Primitive(PrimitiveValue, DataType),
 }
 
 impl Value {
@@ -37,11 +32,21 @@ impl Value {
                     .collect();
                 Value::Map(result, MapType::Map)
             }
-            serde_json::Value::Array(vs) => Value::Sequence(vs.iter().map(Value::from_json).collect(), SequenceType::List),
-            serde_json::Value::String(s) => Value::Str(s.to_string()),
-            serde_json::Value::Number(n) => Value::Number(n.as_f64().unwrap_or(0.0)),
-            serde_json::Value::Bool(b) => Value::Boolean(*b),
-            serde_json::Value::Null => Value::Null,
+            serde_json::Value::Array(vs) => Value::Sequence(
+                vs.iter().map(Value::from_json).collect(),
+                SequenceType::List,
+            ),
+            serde_json::Value::String(s) => {
+                Value::Primitive(PrimitiveValue::Str(s.to_string()), DataType::Undefined)
+            }
+            serde_json::Value::Number(n) => Value::Primitive(
+                PrimitiveValue::Number(n.as_f64().unwrap_or(0.0)),
+                DataType::Undefined,
+            ),
+            serde_json::Value::Bool(b) => {
+                Value::Primitive(PrimitiveValue::Boolean(*b), DataType::Undefined)
+            }
+            serde_json::Value::Null => Value::Primitive(PrimitiveValue::Null, DataType::Undefined),
         }
     }
 
@@ -55,12 +60,14 @@ impl Value {
             Value::Sequence(elements, seq_type) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
             }
-            Value::Str(s) => serde_json::Value::String(s.to_string()),
-            Value::Number(n) => serde_json::Value::Number(
-                serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
-            ),
-            Value::Boolean(b) => serde_json::Value::Bool(*b),
-            Value::Null => serde_json::Value::Null,
+            Value::Primitive(v, _) => {
+                match v {
+                    PrimitiveValue::Number(n) => serde_json::Value::Number(serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0))),
+                    PrimitiveValue::Str(s) =>  serde_json::Value::String(s.to_string()),
+                    PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
+                    PrimitiveValue::Null => serde_json::Value::Null,
+                }
+            }
         }
     }
 }

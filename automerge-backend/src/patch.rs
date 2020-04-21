@@ -266,9 +266,9 @@ pub enum DiffEdit {
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffValue {
-    pub(crate) value: PrimitiveValue,
+    pub value: PrimitiveValue,
     #[serde(skip_serializing_if = "DataType::is_undefined")]
-    pub(crate) datatype: DataType,
+    pub datatype: DataType,
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]

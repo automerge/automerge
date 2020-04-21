@@ -1,33 +1,75 @@
-use automerge_backend::{Patch, ActorID, RequestKey};
+use automerge_backend::{
+    ActorID, ChangeRequest, ChangeRequestType, Clock, DataType, ObjectID, Patch, PrimitiveValue,
+    RequestKey, Backend
+};
 
-mod value;
 mod change_context;
 mod error;
+mod value;
 
-pub use value::{Value, SequenceType, MapType};
-pub use error::AutomergeFrontendError;
+pub use error::{AutomergeFrontendError, InvalidInitialStateError};
+pub use value::{MapType, SequenceType, Value};
 
-
-struct Frontend {
+pub struct Frontend {
     actor_id: ActorID,
+    backend: Backend,
+    state: Value,
 }
 
 impl Frontend {
-    fn new() -> Self {
-        return Frontend{
-            actor_id: ActorID::random()
+    pub fn new() -> Self {
+        return Frontend {
+            actor_id: ActorID::random(),
+            backend: Backend::init(),
+            state: Value::Primitive(PrimitiveValue::Null, DataType::Undefined),
+        };
+    }
+
+    pub fn new_with_initial_state(inital_state: Value) -> Result<Self, InvalidInitialStateError> {
+        match inital_state {
+            Value::Map(kvs, MapType::Map) => {
+                let init_ops = kvs.iter().flat_map(|(k, v)| {
+                    change_context::value_to_op_requests(
+                        ObjectID::Root.to_string(),
+                        PathElement::Key(k.to_string()),
+                        v,
+                        false,
+                    )
+                }).collect();
+                let mut front = Frontend::new();
+                let init_change_request = ChangeRequest {
+                    actor: front.actor_id.clone(),
+                    seq: 1,
+                    version: 0,
+                    message: Some("Initialization".to_string()),
+                    undoable: false,
+                    deps: Some(Clock::empty()),
+                    ops: Some(init_ops),
+                    request_type: ChangeRequestType::Change,
+                };
+                // Unwrap here is fine because it should be impossible to
+                // cause an error applying a local change from a `Value`. If
+                // that happens we've made an error, not the user.
+                let patch = front.backend.apply_local_change(init_change_request).unwrap(); 
+                front.apply_patch(patch).unwrap();
+                Ok(front)
+            }
+            _ => Err(InvalidInitialStateError::InitialStateMustBeMap),
         }
     }
 
-    fn new_with_initial_state(inital_state: Value) -> Self {
-        panic!("not implemented")
+    pub fn state(&self) -> &Value {
+        &self.state
     }
 
-    fn state(&self) -> Value {
-        Value::Null
-    }
-
-    fn apply_patch(&mut self, patch: Patch) -> () {
+    fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
+        let mut change_ctx = change_context::ChangeContext::new();
+        if let Some(diff) = patch.diffs {
+            change_ctx.apply_diff(&diff)?;
+        };
+        let new_state = change_ctx.value_for_object(&ObjectID::Root).unwrap();
+        self.state = new_state;
+        Ok(())
     }
 }
 
@@ -45,17 +87,15 @@ impl PathElement {
     }
 }
 
-enum LocalOperation {
-    Set(Value),
-    Delete,
-}
+//enum LocalOperation {
+    //Set(Value),
+    //Delete,
+//}
 
-struct LocalChange {
-    path: Vec<PathElement>,
-    operation: LocalOperation
-}
+//struct LocalChange {
+    //path: Vec<PathElement>,
+    //operation: LocalOperation,
+//}
 
-#[cfg(test)]
-mod tests {
-
-}
+//#[cfg(test)]
+//mod tests {}

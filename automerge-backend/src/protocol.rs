@@ -43,6 +43,15 @@ pub enum ObjectID {
     Root,
 }
 
+impl ToString for ObjectID {
+    fn to_string(&self) -> String {
+        match self {
+            ObjectID::ID(OpID::ID(seq, actor)) => format!("{}@{}", seq, actor),
+            ObjectID::Root => "00000000-0000-0000-0000-000000000000".to_string()  
+        }
+    }
+}
+
 impl FromStr for ObjectID {
     type Err = AutomergeError;
 
@@ -154,6 +163,12 @@ impl Key {
 
     pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
         OpID::from_str(&self.0)
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -578,7 +593,6 @@ pub struct ChangeRequest {
     pub deps: Option<Clock>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ops: Option<Vec<OpRequest>>,
-    pub child: Option<String>,
     pub request_type: ChangeRequestType,
 }
 
