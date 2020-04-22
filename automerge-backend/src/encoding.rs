@@ -1,7 +1,6 @@
 use crate::error::AutomergeError;
 use crate::protocol::ActorID;
 use core::fmt::Debug;
-use leb128;
 use std::convert::TryFrom;
 use std::io::Read;
 use std::str;
@@ -78,8 +77,7 @@ impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
     }
 }
 
-// this is an endless iterator that returns a bunch all falses after finishing the buffer
-
+// this is an endless iterator that returns false after input is exhausted
 impl<'a> Iterator for BooleanDecoder<'a> {
     type Item = bool;
 
