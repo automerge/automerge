@@ -117,7 +117,7 @@ impl Serialize for OpType {
             OpType::Del => "del",
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",
-            OpType::Set(_, _) => "set",
+            OpType::Set(_) => "set",
         };
         serializer.serialize_str(s)
     }
@@ -131,8 +131,9 @@ impl Serialize for UndoOperation {
         let mut fields = 3;
 
         match &self.action {
-            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
-            OpType::Set(_, _) => fields += 2,
+            OpType::Set(PrimitiveValue::Counter(_)) => fields += 2,
+            OpType::Set(PrimitiveValue::Timestamp(_)) => fields += 2,
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
 
@@ -143,11 +144,15 @@ impl Serialize for UndoOperation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
-            OpType::Set(value, datatype) => {
+            OpType::Set(PrimitiveValue::Timestamp(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &datatype)?;
+                op.serialize_field("datatype", &DataType::Timestamp)?;
             }
+            OpType::Set(PrimitiveValue::Counter(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Counter)?;
+            }
+            OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
         op.end()
@@ -166,8 +171,9 @@ impl Serialize for Operation {
         }
 
         match &self.action {
-            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
-            OpType::Set(_, _) => fields += 2,
+            OpType::Set(PrimitiveValue::Timestamp(_)) => fields += 2,
+            OpType::Set(PrimitiveValue::Counter(_)) => fields += 2,
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
 
@@ -181,11 +187,15 @@ impl Serialize for Operation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
-            OpType::Set(value, datatype) => {
+            OpType::Set(PrimitiveValue::Counter(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &datatype)?;
+                op.serialize_field("datatype", &DataType::Counter)?;
             }
+            OpType::Set(PrimitiveValue::Timestamp(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Timestamp)?;
+            }
+            OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -237,6 +247,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let key = key.ok_or_else(|| Error::missing_field("key"))?;
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
+                let value = PrimitiveValue::from(value, datatype);
                 let action = match action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
                     ReqOpType::MakeTable => OpType::Make(ObjType::Table),
@@ -247,17 +258,22 @@ impl<'de> Deserialize<'de> for Operation {
                         OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
                     }
                     ReqOpType::Set => OpType::Set(
-                        value.ok_or_else(|| Error::missing_field("value"))?,
-                        datatype.unwrap_or(DataType::Undefined),
+                        PrimitiveValue::from(value, datatype)
+                            .ok_or_else(|| Error::missing_field("value"))?,
                     ),
                     ReqOpType::Inc => match value {
-                        Some(PrimitiveValue::Number(f)) => Ok(OpType::Inc(f)),
+                        Some(PrimitiveValue::Number(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(PrimitiveValue::Counter(n)) => Ok(OpType::Inc(n)),
                         Some(PrimitiveValue::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }
                         Some(PrimitiveValue::Boolean(b)) => {
                             Err(Error::invalid_value(Unexpected::Bool(b), &"a number"))
                         }
+                        Some(PrimitiveValue::Timestamp(_)) => Err(Error::invalid_value(
+                            Unexpected::Other("timestamp"),
+                            &"a number",
+                        )),
                         Some(PrimitiveValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }

@@ -58,11 +58,11 @@ function getPatch(backend) {
 }
 
 function getChanges(backend, clock) {
-  return backendState(backend).getChanges(clock).map(encodeChange)
+  return backendState(backend).getChanges(clock)
 }
 
 function getChangesForActor(backend, actor) {
-  return backendState(backend).getChangesForActor(actor).map(encodeChange)
+  return backendState(backend).getChangesForActor(actor)
 }
 
 function getMissingDeps(backend) {

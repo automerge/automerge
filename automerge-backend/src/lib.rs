@@ -3,6 +3,16 @@ extern crate leb128;
 extern crate rand;
 extern crate sha2;
 extern crate uuid;
+extern crate hex;
+
+extern crate web_sys;
+
+#[allow(unused_macros)]
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    }
+}
 
 mod actor_states;
 mod backend;

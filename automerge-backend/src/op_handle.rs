@@ -5,7 +5,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::protocol::{
-    Change, DataType, Key, ObjectID, OpID, OpType, Operation, PrimitiveValue, UndoOperation,
+    Change, Key, ObjectID, OpID, OpType, Operation, PrimitiveValue, UndoOperation,
 };
 
 #[derive(Clone)]
@@ -13,7 +13,7 @@ pub(crate) struct OpHandle {
     pub id: OpID,
     change: Rc<Change>,
     index: usize,
-    delta: f64,
+    delta: i64,
 }
 
 impl OpHandle {
@@ -23,12 +23,12 @@ impl OpHandle {
             .iter()
             .enumerate()
             .map(|(index, _)| {
-                let id = OpID::ID(change.start_op + (index as u64), change.actor_id.0.clone());
+                let id = OpID(change.start_op + (index as u64), change.actor_id.0.clone());
                 OpHandle {
                     id,
                     change: change.clone(),
                     index,
-                    delta: 0.0,
+                    delta: 0,
                 }
             })
             .collect()
@@ -64,8 +64,8 @@ impl OpHandle {
         if let OpType::Make(_) = base_op.action {
             action = OpType::Link(self.id.to_object_id());
         }
-        if let OpType::Set(_, DataType::Counter) = base_op.action {
-            action = OpType::Set(self.adjusted_value(), DataType::Counter);
+        if let OpType::Set(PrimitiveValue::Counter(_)) = base_op.action {
+            action = OpType::Set(self.adjusted_value());
         }
         UndoOperation {
             action,
@@ -76,10 +76,8 @@ impl OpHandle {
 
     pub fn adjusted_value(&self) -> PrimitiveValue {
         match &self.action {
-            OpType::Set(PrimitiveValue::Number(a), DataType::Counter) => {
-                PrimitiveValue::Number(a + self.delta)
-            }
-            OpType::Set(val, _) => val.clone(),
+            OpType::Set(PrimitiveValue::Counter(a)) => PrimitiveValue::Counter(a + self.delta),
+            OpType::Set(val) => val.clone(),
             _ => PrimitiveValue::Null,
         }
     }
@@ -103,7 +101,7 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let OpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                if let OpType::Set(PrimitiveValue::Number(_), DataType::Counter) = self.action {
+                if let OpType::Set(PrimitiveValue::Counter(_)) = self.action {
                     self.delta += amount;
                 }
             }

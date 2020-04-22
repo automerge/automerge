@@ -1,4 +1,4 @@
-#![feature(set_stdio)]
+//#![feature(set_stdio)]
 
 use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock};
 use js_sys::{Array, Uint8Array};
@@ -77,17 +77,27 @@ impl State {
     }
 
     #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&self, clock: JsValue) -> Result<JsValue, JsValue> {
+    pub fn get_changes(&self, clock: JsValue) -> Result<Array, JsValue> {
         let c: Clock = js_to_rust(clock)?;
-        let changes = self.backend.get_missing_changes(&c);
-        rust_to_js(&changes)
+        let changes = self.backend.get_missing_changes(&c).map_err(automerge_error_to_js)?;
+        let result = Array::new();
+        for c in changes {
+            let bytes : Uint8Array = c.as_slice().into();
+            result.push(bytes.as_ref());
+        }
+        Ok(result)
     }
 
     #[wasm_bindgen(js_name = getChangesForActor)]
-    pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<JsValue, JsValue> {
+    pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<Array, JsValue> {
         let a: ActorID = js_to_rust(actorid)?;
-        let changes = self.backend.get_changes_for_actor_id(&a);
-        rust_to_js(&changes)
+        let changes = self.backend.get_changes_for_actor_id(&a).map_err(automerge_error_to_js)?;
+        let result = Array::new();
+        for c in changes {
+            let bytes : Uint8Array = c.as_slice().into();
+            result.push(bytes.as_ref());
+        }
+        Ok(result)
     }
 
     #[wasm_bindgen(js_name = getMissingDeps)]
@@ -147,6 +157,7 @@ fn json_error_to_js(err: serde_json::Error) -> JsValue {
     js_sys::Error::new(&std::format!("serde_json error: {}", err)).into()
 }
 
+/*
 struct WasmSTDIO {}
 
 impl std::io::Write for WasmSTDIO {
@@ -163,5 +174,5 @@ impl std::io::Write for WasmSTDIO {
 
 #[wasm_bindgen(start)]
 pub fn main() {
-    std::io::set_print(Some(Box::new(WasmSTDIO {})));
 }
+*/

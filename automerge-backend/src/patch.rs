@@ -153,11 +153,29 @@ impl Diff {
         op_set: &OpSet,
     ) -> Result<&mut Diff, AutomergeError> {
         Ok(match &op.action {
-            OpType::Set(_, ref datatype) => {
+            OpType::Set(PrimitiveValue::Counter(_)) => {
                 let id = op.id.clone();
                 let value = DiffLink::Val(DiffValue {
                     value: op.adjusted_value(),
-                    datatype: *datatype,
+                    datatype: DataType::Counter,
+                });
+                self.prop_key(key).insert(id, value);
+                self
+            }
+            OpType::Set(PrimitiveValue::Timestamp(_)) => {
+                let id = op.id.clone();
+                let value = DiffLink::Val(DiffValue {
+                    value: op.adjusted_value(),
+                    datatype: DataType::Timestamp,
+                });
+                self.prop_key(key).insert(id, value);
+                self
+            }
+            OpType::Set(_) => {
+                let id = op.id.clone();
+                let value = DiffLink::Val(DiffValue {
+                    value: op.adjusted_value(),
+                    datatype: DataType::Undefined,
                 });
                 self.prop_key(key).insert(id, value);
                 self

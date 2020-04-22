@@ -1,11 +1,11 @@
 use crate::actor_states::ActorStates;
-use crate::columnar::ChangeDecoder;
+use crate::columnar::{ bin_to_changes, changes_to_bin};
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{DataType, ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
+use crate::protocol::{ ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::borrow::BorrowMut;
@@ -66,7 +66,7 @@ impl Backend {
         op_set: Rc<OpSet>,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
-        let time = time::unix_timestamp();
+        let time = request.time.unwrap_or_else(|| time::unix_timestamp());
         let actor_id = request.actor.clone();
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
@@ -74,7 +74,7 @@ impl Backend {
         let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
-                let id = OpID::ID(start_op + (operations.len() as u64), actor_id.0.clone());
+                let id = OpID(start_op + (operations.len() as u64), actor_id.0.clone());
                 let insert = rop.insert;
                 let object_id = self.str_to_object(&rop.obj)?;
 
@@ -125,11 +125,8 @@ impl Backend {
                     ReqOpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
                     ),
-                    ReqOpType::Inc => OpType::Inc(rop.number_value()?),
-                    ReqOpType::Set => OpType::Set(
-                        rop.primitive_value(),
-                        rop.datatype.clone().unwrap_or(DataType::Undefined),
-                    ),
+                    ReqOpType::Inc => OpType::Inc(rop.to_i64()?),
+                    ReqOpType::Set => OpType::Set(rop.primitive_value()),
                 };
 
                 let op = Operation {
@@ -184,7 +181,7 @@ impl Backend {
         let undo_pos = self.undo_pos;
 
         if undo_pos < 1 || self.undo_stack.len() < undo_pos {
-            return Err(AutomergeError::InvalidChange(
+            return Err(AutomergeError::InvalidChangeRequest(
                 "Cannot undo: there is nothing to be undone".to_string(),
             ));
         }
@@ -232,7 +229,7 @@ impl Backend {
         let mut redo_ops = self
             .redo_stack
             .pop()
-            .ok_or_else(|| AutomergeError::InvalidChange("no redo ops".to_string()))?;
+            .ok_or_else(|| AutomergeError::InvalidChangeRequest("no redo ops".to_string()))?;
 
         let operations = redo_ops
             .drain(0..)
@@ -261,8 +258,10 @@ impl Backend {
     }
 
     pub fn load_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<(), AutomergeError> {
-        let changes = ChangeDecoder::new(data).decode()?;
+        let mut changes = Vec::new();
+        for d in data { changes.extend(bin_to_changes(&d)?); }
         self.load_changes(changes)
+
     }
 
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
@@ -272,12 +271,14 @@ impl Backend {
     }
 
     pub fn apply_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<Patch, AutomergeError> {
-        let changes = ChangeDecoder::new(data).decode()?;
+        let mut changes = Vec::new();
+        for d in data { changes.extend(bin_to_changes(&d)?); }
         self.apply_changes(changes)
     }
 
     pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
         let op_set = Some(self.op_set.clone());
+
         self.versions.iter_mut().for_each(|v| {
             if v.local_state == None {
                 v.local_state = op_set.clone()
@@ -473,6 +474,7 @@ impl Backend {
     }
 
     pub fn history(&self) -> Vec<&Change> {
+        // FIXME
         self.states.history.iter().map(|rc| rc.as_ref()).collect()
     }
 
@@ -481,26 +483,16 @@ impl Backend {
         self.make_patch(Some(diffs), None)
     }
 
-    pub fn get_changes<'a>(&self, other: &'a Backend) -> Result<Vec<&'a Change>, AutomergeError> {
-        if self.clock.divergent(&other.clock) {
-            return Err(AutomergeError::DivergedState(
-                "Cannot diff two states that have diverged".to_string(),
-            ));
-        }
-        Ok(other.get_missing_changes(&self.clock))
+    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Result<Vec<Vec<u8>>,AutomergeError> {
+        changes_to_bin(&self.states.get(actor_id))
     }
 
-    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Vec<&Change> {
-        self.states.get(actor_id)
-    }
-
-    pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
-        self.states
-            .history
-            .iter()
-            .map(|rc| rc.as_ref())
+    pub fn get_missing_changes(&self, since: &Clock) -> Result<Vec<Vec<u8>>,AutomergeError> {
+        let changes : Vec<&Change> = self.states.history.iter()
+            .map(|change| change.as_ref())
             .filter(|change| change.seq > since.get(&change.actor_id))
-            .collect()
+            .collect();
+        changes_to_bin(&changes)
     }
 
     pub fn can_undo(&self) -> bool {
@@ -519,15 +511,12 @@ impl Backend {
         clock
     }
 
+    /*
     pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
-        let missing_changes = remote
-            .get_missing_changes(&self.clock)
-            .iter()
-            .cloned()
-            .cloned()
-            .collect();
-        self.apply_changes(missing_changes)
+        let missing_changes = remote.get_missing_changes(&self.clock);
+        self.apply_changes_binary(missing_changes)
     }
+    */
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
         self.undo_stack.truncate(self.undo_pos);

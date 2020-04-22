@@ -21,9 +21,13 @@ pub enum AutomergeError {
     MissingNumberValue(OpRequest),
     UnknownVersion(u64),
     DuplicateChange(String),
-    InvalidChange(String),
     DivergedState(String),
     ChangeDecompressError(String),
+    InvalidKey(String),
+    InvalidChangeRequest(String),
+    EncodeFailed,
+    InvalidChange,
+    ChangeBadFormat,
 }
 
 impl fmt::Display for AutomergeError {

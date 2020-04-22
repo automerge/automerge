@@ -2,7 +2,9 @@ use crate::error::AutomergeError;
 use crate::protocol::ActorID;
 use core::fmt::Debug;
 use std::convert::TryFrom;
-use std::io::Read;
+use std::io;
+use std::io::{Read, Write};
+use std::mem;
 use std::str;
 
 fn err(s: &str) -> AutomergeError {
@@ -18,13 +20,6 @@ pub(crate) struct Decoder<'a> {
 impl<'a> Decoder<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
         Decoder { offset: 0, buf }
-    }
-
-    pub fn iter<T>(&self) -> T
-    where
-        T: From<&'a [u8]>,
-    {
-        T::from(&self.buf[..])
     }
 
     pub fn read<T: Decodable + Debug>(&mut self, name: &str) -> Result<T, AutomergeError> {
@@ -56,8 +51,40 @@ impl<'a> Decoder<'a> {
         self.buf.is_empty()
     }
 
-    pub fn rest(self) -> &'a [u8] {
-        &self.buf[..]
+}
+
+pub(crate) struct BooleanEncoder {
+    buf: Vec<u8>,
+    last: bool,
+    count: usize,
+}
+
+impl BooleanEncoder {
+    pub fn new() -> BooleanEncoder {
+        BooleanEncoder {
+            buf: Vec::new(),
+            last: false,
+            count: 0,
+        }
+    }
+
+    pub fn append(&mut self, value: bool) {
+        if value == self.last {
+            self.count += 1;
+        } else {
+            self.count.encode(&mut self.buf).ok();
+            self.last = value;
+            self.count = 1;
+        }
+    }
+
+    pub fn finish(mut self, col: u32) -> ColData {
+        if self.count > 0 {
+            self.count.encode(&mut self.buf).ok();
+        }
+        ColData { 
+            col,
+            data: self.buf }
     }
 }
 
@@ -65,6 +92,12 @@ pub(crate) struct BooleanDecoder<'a> {
     decoder: Decoder<'a>,
     last_value: bool,
     count: usize,
+}
+
+impl<'a> From<&'a [u8]> for Decoder<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        Decoder::new(bytes)
+    }
 }
 
 impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
@@ -91,6 +124,164 @@ impl<'a> Iterator for BooleanDecoder<'a> {
         }
         self.count -= 1;
         Some(self.last_value)
+    }
+}
+
+pub(crate) struct DeltaEncoder {
+    rle: RLEEncoder<i64>,
+    absolute_value: u64,
+}
+
+impl DeltaEncoder {
+    pub fn new() -> DeltaEncoder {
+        DeltaEncoder {
+            rle: RLEEncoder::new(),
+            absolute_value: 0,
+        }
+    }
+
+    pub fn append_value(&mut self, value: u64) {
+        self.rle
+            .append_value(value as i64 - self.absolute_value as i64);
+        self.absolute_value = value;
+    }
+
+    pub fn append_null(&mut self) {
+        self.rle.append_null();
+    }
+
+    pub fn finish(self, col: u32) -> ColData {
+        self.rle.finish(col)
+    }
+}
+
+enum RLEState<T> {
+    Empty,
+    NullRun(usize),
+    LiteralRun(T, Vec<T>),
+    LoneVal(T),
+    Run(T, usize),
+}
+
+pub(crate) struct RLEEncoder<T>
+where
+    T: Encodable + PartialEq + Clone,
+{
+    buf: Vec<u8>,
+    state: RLEState<T>,
+}
+
+impl<T> RLEEncoder<T>
+where
+    T: Encodable + PartialEq + Clone,
+{
+    pub fn new() -> RLEEncoder<T> {
+        RLEEncoder {
+            buf: Vec::new(),
+            state: RLEState::Empty,
+        }
+    }
+
+    pub fn finish(mut self, col: u32) -> ColData {
+        match self.take_state() {
+            // this coveres `only_nulls`
+            RLEState::NullRun(size) if !self.buf.is_empty() => self.flush_null_run(size),
+            RLEState::LoneVal(value) => self.flush_lit_run(vec![value]),
+            RLEState::Run(value, len) => self.flush_run(value, len),
+            RLEState::LiteralRun(last, mut run) => {
+                run.push(last);
+                self.flush_lit_run(run);
+            }
+            _ => {}
+        }
+        ColData {
+            col,
+            data: self.buf,
+        }
+    }
+
+    fn flush_run(&mut self, val: T, len: usize) {
+        self.encode(len);
+        self.encode(val);
+    }
+
+    fn flush_null_run(&mut self, len: usize) {
+        self.encode::<usize>(0);
+        self.encode(len);
+    }
+
+    fn flush_lit_run(&mut self, run: Vec<T>) {
+        self.encode(-(run.len() as i64));
+        for val in run {
+            self.encode(val);
+        }
+    }
+
+    fn take_state(&mut self) -> RLEState<T> {
+        let mut state = RLEState::Empty;
+        mem::swap(&mut self.state, &mut state);
+        state
+    }
+
+    pub fn append_null(&mut self) {
+        self.state = match self.take_state() {
+            RLEState::Empty => RLEState::NullRun(1),
+            RLEState::NullRun(size) => RLEState::NullRun(size + 1),
+            RLEState::LoneVal(other) => {
+                self.flush_lit_run(vec![other]);
+                RLEState::NullRun(1)
+            }
+            RLEState::Run(other, len) => {
+                self.flush_run(other, len);
+                RLEState::NullRun(1)
+            }
+            RLEState::LiteralRun(last, mut run) => {
+                run.push(last);
+                self.flush_lit_run(run);
+                RLEState::NullRun(1)
+            }
+        }
+    }
+
+    pub fn append_value(&mut self, value: T) {
+        self.state = match self.take_state() {
+            RLEState::Empty => RLEState::LoneVal(value),
+            RLEState::LoneVal(other) => {
+                if other == value {
+                    RLEState::Run(value, 2)
+                } else {
+                    RLEState::LiteralRun(value, vec![other])
+                }
+            }
+            RLEState::Run(other, len) => {
+                if other == value {
+                    RLEState::Run(other, len + 1)
+                } else {
+                    self.flush_run(other, len);
+                    RLEState::LoneVal(value)
+                }
+            }
+            RLEState::LiteralRun(last, mut run) => {
+                if last == value {
+                    self.flush_lit_run(run);
+                    RLEState::Run(value, 2)
+                } else {
+                    run.push(last);
+                    RLEState::LiteralRun(value, run)
+                }
+            }
+            RLEState::NullRun(size) => {
+                self.flush_null_run(size);
+                RLEState::LoneVal(value)
+            }
+        }
+    }
+
+    fn encode<V>(&mut self, val: V)
+    where
+        V: Encodable,
+    {
+        val.encode(&mut self.buf).ok();
     }
 }
 
@@ -281,18 +472,27 @@ impl Decodable for u64 {
     }
 }
 
-impl Decodable for String {
-    fn decode<R>(bytes: &mut R) -> Option<String>
+impl Decodable for Vec<u8> {
+    fn decode<R>(bytes: &mut R) -> Option<Self>
     where
         R: Read,
     {
         let len = usize::decode::<R>(bytes)?;
         if len == 0 {
-            return Some("".into());
+            return Some(vec![]);
         }
-        let mut string = vec![0; len];
-        bytes.read_exact(string.as_mut_slice()).ok()?;
-        str::from_utf8(&string).map(|t| t.into()).ok()
+        let mut buffer = vec![0; len];
+        bytes.read_exact(buffer.as_mut_slice()).ok()?;
+        Some(buffer)
+    }
+}
+impl Decodable for String {
+    fn decode<R>(bytes: &mut R) -> Option<String>
+    where
+        R: Read,
+    {
+        let buffer = Vec::decode(bytes)?;
+        str::from_utf8(&buffer).map(|t| t.into()).ok()
     }
 }
 
@@ -301,13 +501,11 @@ impl Decodable for Option<String> {
     where
         R: Read,
     {
-        let len = usize::decode::<R>(bytes)?;
-        if len == 0 {
+        let buffer = Vec::decode(bytes)?;
+        if buffer.len() == 0 {
             return Some(None);
         }
-        let mut string = vec![0; len];
-        bytes.read_exact(string.as_mut_slice()).ok()?;
-        Some(str::from_utf8(&string).map(|s| s.into()).ok())
+        Some(str::from_utf8(&buffer).map(|t| t.into()).ok())
     }
 }
 
@@ -316,7 +514,94 @@ impl Decodable for ActorID {
     where
         R: Read,
     {
-        let s = String::decode::<R>(bytes)?;
-        Some(ActorID(s))
+        let buffer = Vec::decode(bytes)?;
+        Some(ActorID::from_bytes(&buffer))
     }
 }
+
+pub(crate) trait Encodable {
+    fn encode_with_actors_to_vec(&self, actors: &mut Vec<ActorID>) -> io::Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.encode_with_actors(&mut buf, actors)?;
+        Ok(buf)
+    }
+
+    fn encode_with_actors<R: Write>(
+        &self,
+        buf: &mut R,
+        _actors: &mut Vec<ActorID>,
+    ) -> io::Result<usize> {
+        self.encode(buf)
+    }
+
+    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl Encodable for String {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.as_bytes();
+        let head = bytes.len().encode(buf)?;
+        buf.write_all(bytes)?;
+        Ok(head + bytes.len())
+    }
+}
+
+impl Encodable for Option<String> {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        if let Some(s) = self {
+            s.encode(buf)
+        } else {
+            0.encode(buf)
+        }
+    }
+}
+
+impl Encodable for u64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        Ok(leb128::write::unsigned(buf, *self)?)
+    }
+}
+
+impl Encodable for i64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        Ok(leb128::write::signed(buf, *self)?)
+    }
+}
+
+impl Encodable for usize {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as u64).encode(buf)
+    }
+}
+
+impl Encodable for u32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as u64).encode(buf)
+    }
+}
+
+impl Encodable for i32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as i64).encode(buf)
+    }
+}
+
+#[derive(Debug)]
+pub (crate) struct ColData {
+    pub col: u32,
+    pub data: Vec<u8>,
+}
+
+impl Encodable for ColData {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let mut len = 0;
+        if !self.data.is_empty() {
+            len += self.col.encode(buf)?;
+            len += self.data.as_slice().encode(buf)?;
+        }
+        Ok(len)
+    }
+}
+

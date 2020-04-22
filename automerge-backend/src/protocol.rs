@@ -61,29 +61,22 @@ impl FromStr for ObjectID {
 impl From<&ObjectID> for String {
     fn from(o: &ObjectID) -> String {
         match o {
-            ObjectID::ID(OpID::ID(seq, actor)) => format!("{}@{}", seq, actor),
+            ObjectID::ID(OpID(seq, actor)) => format!("{}@{}", seq, actor),
             ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
         }
     }
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub enum OpID {
-    ID(u64, String),
-}
+pub struct OpID(pub u64, pub String);
 
 impl Ord for OpID {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (OpID::ID(counter1, actor1), OpID::ID(counter2, actor2)) => {
-                // Lamport compare
-                if counter1 != counter2 {
-                    counter1.cmp(&counter2)
+                if self.0 != other.0 {
+                    self.0.cmp(&other.0)
                 } else {
-                    actor1.cmp(&actor2)
+                    self.1.cmp(&other.1)
                 }
-            }
-        }
     }
 }
 
@@ -101,7 +94,7 @@ impl PartialOrd for OpID {
 
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
-        OpID::ID(seq, actor.0.clone())
+        OpID(seq, actor.0.clone())
     }
 
     pub fn to_object_id(&self) -> ObjectID {
@@ -115,7 +108,7 @@ impl OpID {
     // I think object_id and op_id need to be distinct so there's not a panic here
     pub fn counter(&self) -> u64 {
         match self {
-            OpID::ID(counter, _) => *counter,
+            OpID(counter, _) => *counter,
         }
     }
 }
@@ -128,7 +121,7 @@ impl FromStr for OpID {
         match (i.next(), i.next(), i.next()) {
             (Some(seq_str), Some(actor_str), None) => seq_str
                 .parse()
-                .map(|seq| OpID::ID(seq, actor_str.to_string()))
+                .map(|seq| OpID(seq, actor_str.to_string()))
                 .map_err(|_| AutomergeError::InvalidOpID(s.to_string())),
             _ => Err(AutomergeError::InvalidOpID(s.to_string())),
         }
@@ -139,7 +132,7 @@ impl fmt::Display for OpID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             //OpID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
-            OpID::ID(seq, actor) => write!(f, "{}@{}", seq, actor),
+            OpID(seq, actor) => write!(f, "{}@{}", seq, actor),
         }
     }
 }
@@ -149,7 +142,7 @@ pub struct Key(pub String);
 
 impl Key {
     pub fn as_element_id(&self) -> Result<ElementID, AutomergeError> {
-        ElementID::from_str(&self.0).map_err(|_| AutomergeError::InvalidChange(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", self.0)))
+        ElementID::from_str(&self.0).map_err(|_| AutomergeError::InvalidKey(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", self.0)))
     }
 
     pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
@@ -161,8 +154,16 @@ impl Key {
 pub struct ActorID(pub String);
 
 impl ActorID {
-    pub fn random() -> ActorID {
-        ActorID(uuid::Uuid::new_v4().to_string())
+//    pub fn random() -> ActorID {
+//        ActorID(uuid::Uuid::new_v4().to_string())
+//    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        // FIXME
+        hex::decode(&self.0).unwrap()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> ActorID {
+        ActorID(hex::encode(bytes))
     }
 }
 
@@ -269,8 +270,33 @@ impl<'a> IntoIterator for &'a Clock {
 pub enum PrimitiveValue {
     Str(String),
     Number(f64),
+    Counter(i64),
+    Timestamp(i64),
     Boolean(bool),
     Null,
+}
+
+impl PrimitiveValue {
+    pub fn from(val: Option<PrimitiveValue>, datatype: Option<DataType>) -> Option<PrimitiveValue> {
+        match (&val, datatype) {
+            (Some(PrimitiveValue::Number(f)), Some(DataType::Counter)) => {
+                Some(PrimitiveValue::Counter(*f as i64))
+            }
+            (Some(PrimitiveValue::Number(f)), Some(DataType::Timestamp)) => {
+                Some(PrimitiveValue::Timestamp(*f as i64))
+            }
+            _ => val,
+        }
+    }
+
+    pub fn to_i64(&self) -> Option<i64> {
+        match self {
+            PrimitiveValue::Number(n) => Some(*n as i64),
+            PrimitiveValue::Counter(n) => Some(*n),
+            PrimitiveValue::Timestamp(n) => Some(*n),
+            _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
@@ -391,7 +417,15 @@ pub struct OpRequest {
 
 impl OpRequest {
     pub fn primitive_value(&self) -> PrimitiveValue {
-        self.value.clone().unwrap_or(PrimitiveValue::Null)
+        match (&self.value, self.datatype) {
+            (Some(PrimitiveValue::Number(n)), Some(DataType::Counter)) => {
+                PrimitiveValue::Counter(*n as i64)
+            }
+            (Some(PrimitiveValue::Number(n)), Some(DataType::Timestamp)) => {
+                PrimitiveValue::Timestamp(*n as i64)
+            }
+            _ => self.value.clone().unwrap_or(PrimitiveValue::Null),
+        }
     }
 
     pub(crate) fn resolve_key(
@@ -434,12 +468,11 @@ impl OpRequest {
         }
     }
 
-    pub fn number_value(&self) -> Result<f64, AutomergeError> {
-        if let Some(PrimitiveValue::Number(f)) = self.value {
-            Ok(f)
-        } else {
-            Err(AutomergeError::MissingNumberValue(self.clone()))
-        }
+    pub fn to_i64(&self) -> Result<i64, AutomergeError> {
+        self.value
+            .as_ref()
+            .and_then(|v| v.to_i64())
+            .ok_or_else(|| AutomergeError::MissingNumberValue(self.clone()))
     }
 }
 
@@ -448,8 +481,8 @@ pub enum OpType {
     Make(ObjType),
     Del,
     Link(ObjectID),
-    Inc(f64),
-    Set(PrimitiveValue, DataType),
+    Inc(i64),
+    Set(PrimitiveValue),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -508,7 +541,7 @@ impl Operation {
     pub fn is_basic_assign(&self) -> bool {
         !self.insert
             && match self.action {
-                OpType::Del | OpType::Set(_, _) | OpType::Inc(_) | OpType::Link(_) => true,
+                OpType::Del | OpType::Set(_) | OpType::Inc(_) | OpType::Link(_) => true,
                 _ => false,
             }
     }
@@ -520,16 +553,15 @@ impl Operation {
     pub(crate) fn merge(&mut self, other: Operation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {
-                OpType::Set(PrimitiveValue::Number(number), DataType::Counter) => {
-                    self.action =
-                        OpType::Set(PrimitiveValue::Number(number + delta), DataType::Counter)
+                OpType::Set(PrimitiveValue::Counter(number)) => {
+                    self.action = OpType::Set(PrimitiveValue::Counter(number + delta))
                 }
                 OpType::Inc(number) => self.action = OpType::Inc(number + delta),
                 _ => {}
             } // error?
         } else {
             match other.action {
-                OpType::Set(_, _) | OpType::Link(_) | OpType::Del => self.action = other.action,
+                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
                 _ => {}
             }
         }
@@ -559,7 +591,7 @@ pub struct Change {
     pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
-    pub time: u128,
+    pub time: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     pub deps: Clock,
@@ -580,6 +612,7 @@ pub struct ChangeRequest {
     pub message: Option<String>,
     #[serde(default = "helper::make_true")]
     pub undoable: bool,
+    pub time: Option<i64>,
     pub deps: Option<Clock>,
     pub ops: Option<Vec<OpRequest>>,
     pub child: Option<String>,
