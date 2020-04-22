@@ -5,6 +5,7 @@ use crate::protocol::{
     PrimitiveValue,
 };
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::str;
 
 const VALUE_TYPE_NULL: usize = 0;
@@ -65,45 +66,51 @@ enum Action {
 }
 
 impl Decodable for Action {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (num, offset) = u32::decode(bytes)?;
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let num = u32::decode::<R>(bytes)?;
         match num {
-            i if i == 0 => Some((Action::Set, offset)),
-            i if i == 1 => Some((Action::Del, offset)),
-            i if i == 2 => Some((Action::Inc, offset)),
-            i if i == 3 => Some((Action::Link, offset)),
-            i if i == 4 => Some((Action::MakeMap, offset)),
-            i if i == 5 => Some((Action::MakeList, offset)),
-            i if i == 6 => Some((Action::MakeText, offset)),
-            i if i == 7 => Some((Action::MakeTable, offset)),
+            i if i == 0 => Some(Action::Set),
+            i if i == 1 => Some(Action::Del),
+            i if i == 2 => Some(Action::Inc),
+            i if i == 3 => Some(Action::Link),
+            i if i == 4 => Some(Action::MakeMap),
+            i if i == 5 => Some(Action::MakeList),
+            i if i == 6 => Some(Action::MakeText),
+            i if i == 7 => Some(Action::MakeTable),
             _ => None,
         }
     }
 }
 
 impl Decodable for Column {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (s, offset) = u32::decode(bytes)?;
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let s = u32::decode::<R>(bytes)?;
         match s {
-            i if i == COLUMN_TYPE_ACTOR_ID => Some((Self::ObjActor, offset)),
-            i if i == COLUMN_TYPE_INT_RLE => Some((Self::ObjCtr, offset)),
-            i if i == 1 << 3 | COLUMN_TYPE_ACTOR_ID => Some((Self::KeyActor, offset)),
-            i if i == 1 << 3 | COLUMN_TYPE_INT_DELTA => Some((Self::KeyCtr, offset)),
-            i if i == 1 << 3 | COLUMN_TYPE_STRING_RLE => Some((Self::KeyStr, offset)),
-            i if i == 2 << 3 | COLUMN_TYPE_ACTOR_ID => Some((Self::IdActor, offset)),
-            i if i == 2 << 3 | COLUMN_TYPE_INT_DELTA => Some((Self::IdCtr, offset)),
-            i if i == 3 << 3 | COLUMN_TYPE_BOOLEAN => Some((Self::Insert, offset)),
-            i if i == 4 << 3 | COLUMN_TYPE_INT_RLE => Some((Self::Action, offset)),
-            i if i == 5 << 3 | COLUMN_TYPE_VALUE_LEN => Some((Self::ValLen, offset)),
-            i if i == 5 << 3 | COLUMN_TYPE_VALUE_RAW => Some((Self::ValRaw, offset)),
-            i if i == 6 << 3 | COLUMN_TYPE_ACTOR_ID => Some((Self::ChildActor, offset)),
-            i if i == 6 << 3 | COLUMN_TYPE_INT_DELTA => Some((Self::ChildCtr, offset)),
-            i if i == 7 << 3 | COLUMN_TYPE_GROUP_CARD => Some((Self::PredNum, offset)),
-            i if i == 7 << 3 | COLUMN_TYPE_ACTOR_ID => Some((Self::PredActor, offset)),
-            i if i == 7 << 3 | COLUMN_TYPE_INT_DELTA => Some((Self::PredCtr, offset)),
-            i if i == 8 << 3 | COLUMN_TYPE_GROUP_CARD => Some((Self::SuccNum, offset)),
-            i if i == 8 << 3 | COLUMN_TYPE_ACTOR_ID => Some((Self::SuccActor, offset)),
-            i if i == 8 << 3 | COLUMN_TYPE_INT_DELTA => Some((Self::SuccCtr, offset)),
+            i if i == COLUMN_TYPE_ACTOR_ID => Some(Self::ObjActor),
+            i if i == COLUMN_TYPE_INT_RLE => Some(Self::ObjCtr),
+            i if i == 1 << 3 | COLUMN_TYPE_ACTOR_ID => Some(Self::KeyActor),
+            i if i == 1 << 3 | COLUMN_TYPE_INT_DELTA => Some(Self::KeyCtr),
+            i if i == 1 << 3 | COLUMN_TYPE_STRING_RLE => Some(Self::KeyStr),
+            i if i == 2 << 3 | COLUMN_TYPE_ACTOR_ID => Some(Self::IdActor),
+            i if i == 2 << 3 | COLUMN_TYPE_INT_DELTA => Some(Self::IdCtr),
+            i if i == 3 << 3 | COLUMN_TYPE_BOOLEAN => Some(Self::Insert),
+            i if i == 4 << 3 | COLUMN_TYPE_INT_RLE => Some(Self::Action),
+            i if i == 5 << 3 | COLUMN_TYPE_VALUE_LEN => Some(Self::ValLen),
+            i if i == 5 << 3 | COLUMN_TYPE_VALUE_RAW => Some(Self::ValRaw),
+            i if i == 6 << 3 | COLUMN_TYPE_ACTOR_ID => Some(Self::ChildActor),
+            i if i == 6 << 3 | COLUMN_TYPE_INT_DELTA => Some(Self::ChildCtr),
+            i if i == 7 << 3 | COLUMN_TYPE_GROUP_CARD => Some(Self::PredNum),
+            i if i == 7 << 3 | COLUMN_TYPE_ACTOR_ID => Some(Self::PredActor),
+            i if i == 7 << 3 | COLUMN_TYPE_INT_DELTA => Some(Self::PredCtr),
+            i if i == 8 << 3 | COLUMN_TYPE_GROUP_CARD => Some(Self::SuccNum),
+            i if i == 8 << 3 | COLUMN_TYPE_ACTOR_ID => Some(Self::SuccActor),
+            i if i == 8 << 3 | COLUMN_TYPE_INT_DELTA => Some(Self::SuccCtr),
             _ => None,
         }
     }

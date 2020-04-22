@@ -3,6 +3,7 @@ use crate::protocol::ActorID;
 use core::fmt::Debug;
 use leb128;
 use std::convert::TryFrom;
+use std::io::Read;
 use std::str;
 
 fn err(s: &str) -> AutomergeError {
@@ -24,34 +25,40 @@ impl<'a> Decoder<'a> {
     where
         T: From<&'a [u8]>,
     {
-        T::from(&self.buf[self.offset..])
+        T::from(&self.buf[..])
     }
 
     pub fn read<T: Decodable + Debug>(&mut self, name: &str) -> Result<T, AutomergeError> {
-        let (val, offset) = T::decode(&self.buf[self.offset..]).ok_or_else(|| err(name))?;
-        self.offset += offset;
-        //log!("read {:?}={:?}", name, val);
-        Ok(val)
+        let mut new_buf = &self.buf[..];
+        let val = T::decode::<&[u8]>(&mut new_buf).ok_or_else(|| err(name))?;
+        let delta = self.buf.len() - new_buf.len();
+        if delta == 0 {
+            Err(err("buffer size didnt change..."))
+        } else {
+            self.buf = new_buf;
+            self.offset += delta;
+            Ok(val)
+        }
     }
 
     pub fn read_bytes(&mut self, index: usize, name: &str) -> Result<&'a [u8], AutomergeError> {
-        let buf = &self.buf[self.offset..];
+        let buf = &self.buf[..];
         if buf.len() < index {
             Err(err(name))
         } else {
             let head = &buf[0..index];
-            //log!("read_bytes {:?}={:?}", name, head);
+            self.buf = &buf[index..];
             self.offset += index;
             Ok(head)
         }
     }
 
     pub fn done(&self) -> bool {
-        self.buf.len() == self.offset
+        self.buf.is_empty()
     }
 
     pub fn rest(self) -> &'a [u8] {
-        &self.buf[self.offset..]
+        &self.buf[..]
     }
 }
 
@@ -184,110 +191,134 @@ impl<'a> Iterator for DeltaDecoder<'a> {
 }
 
 pub(crate) trait Decodable: Sized {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)>;
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read;
 }
 
 impl Decodable for u8 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        bytes.first().map(|b| (*b, 1))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 1];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(buffer[0])
     }
 }
 
 impl Decodable for u32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = u64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        u64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for usize {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = u64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        u64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for isize {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = i64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        i64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for i32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = i64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        i64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for i64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let mut readable = &bytes[..];
-        leb128::read::signed(&mut readable)
-            .ok()
-            .map(|val| (val, bytes.len() - readable.len()))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        leb128::read::signed(bytes).ok()
     }
 }
 
 impl Decodable for f64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        match &bytes {
-            [a0, a1, a2, a3, a4, a5, a6, a7, ..] => Some((
-                Self::from_le_bytes([*a0, *a1, *a2, *a3, *a4, *a5, *a6, *a7]),
-                8,
-            )),
-            _ => None,
-        }
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 8];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(Self::from_le_bytes(buffer))
     }
 }
 
 impl Decodable for f32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        match &bytes {
-            [a0, a1, a2, a3, ..] => Some((Self::from_le_bytes([*a0, *a1, *a2, *a3]), 4)),
-            _ => None,
-        }
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 4];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(Self::from_le_bytes(buffer))
     }
 }
 
 impl Decodable for u64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let mut readable = &bytes[..];
-        leb128::read::unsigned(&mut readable)
-            .ok()
-            .map(|val| (val, bytes.len() - readable.len()))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        leb128::read::unsigned(bytes).ok()
     }
 }
 
 impl Decodable for String {
-    fn decode(bytes: &[u8]) -> Option<(String, usize)> {
-        let (len, offset) = usize::decode(bytes)?;
-        let size = offset + len;
-        bytes
-            .get(offset..size)
-            .and_then(|data| str::from_utf8(&data).ok())
-            .map(|s| (s.to_string(), size))
+    fn decode<R>(bytes: &mut R) -> Option<String>
+    where
+        R: Read,
+    {
+        let len = usize::decode::<R>(bytes)?;
+        if len == 0 {
+            return Some("".into());
+        }
+        let mut string = vec![0; len];
+        bytes.read_exact(string.as_mut_slice()).ok()?;
+        str::from_utf8(&string).map(|t| t.into()).ok()
     }
 }
 
 impl Decodable for Option<String> {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (len, offset) = usize::decode(bytes)?;
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let len = usize::decode::<R>(bytes)?;
         if len == 0 {
-            return Some((None, offset));
+            return Some(None);
         }
-        let size = offset + len;
-        bytes
-            .get(offset..size)
-            .and_then(|data| str::from_utf8(&data).ok())
-            .map(|s| (Some(s.to_string()), size))
+        let mut string = vec![0; len];
+        bytes.read_exact(string.as_mut_slice()).ok()?;
+        Some(str::from_utf8(&string).map(|s| s.into()).ok())
     }
 }
 
 impl Decodable for ActorID {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (s, offset) = String::decode(bytes)?;
-        Some((ActorID(s), offset))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let s = String::decode::<R>(bytes)?;
+        Some(ActorID(s))
     }
 }
