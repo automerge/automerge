@@ -1,9 +1,9 @@
+extern crate hex;
 extern crate im_rc;
 extern crate leb128;
 extern crate rand;
 extern crate sha2;
 extern crate uuid;
-extern crate hex;
 
 extern crate web_sys;
 

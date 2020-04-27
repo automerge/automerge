@@ -50,7 +50,6 @@ impl<'a> Decoder<'a> {
     pub fn done(&self) -> bool {
         self.buf.is_empty()
     }
-
 }
 
 pub(crate) struct BooleanEncoder {
@@ -82,9 +81,10 @@ impl BooleanEncoder {
         if self.count > 0 {
             self.count.encode(&mut self.buf).ok();
         }
-        ColData { 
+        ColData {
             col,
-            data: self.buf }
+            data: self.buf,
+        }
     }
 }
 
@@ -185,14 +185,18 @@ where
     pub fn finish(mut self, col: u32) -> ColData {
         match self.take_state() {
             // this coveres `only_nulls`
-            RLEState::NullRun(size) if !self.buf.is_empty() => self.flush_null_run(size),
+            RLEState::NullRun(size) => {
+                if !self.buf.is_empty() {
+                    self.flush_null_run(size)
+                }
+            }
             RLEState::LoneVal(value) => self.flush_lit_run(vec![value]),
             RLEState::Run(value, len) => self.flush_run(value, len),
             RLEState::LiteralRun(last, mut run) => {
                 run.push(last);
                 self.flush_lit_run(run);
             }
-            _ => {}
+            RLEState::Empty => {}
         }
         ColData {
             col,
@@ -502,7 +506,7 @@ impl Decodable for Option<String> {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        if buffer.len() == 0 {
+        if buffer.is_empty() {
             return Some(None);
         }
         Some(str::from_utf8(&buffer).map(|t| t.into()).ok())
@@ -589,7 +593,7 @@ impl Encodable for i32 {
 }
 
 #[derive(Debug)]
-pub (crate) struct ColData {
+pub(crate) struct ColData {
     pub col: u32,
     pub data: Vec<u8>,
 }
@@ -604,4 +608,3 @@ impl Encodable for ColData {
         Ok(len)
     }
 }
-

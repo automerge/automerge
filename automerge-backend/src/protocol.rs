@@ -72,11 +72,11 @@ pub struct OpID(pub u64, pub String);
 
 impl Ord for OpID {
     fn cmp(&self, other: &Self) -> Ordering {
-                if self.0 != other.0 {
-                    self.0.cmp(&other.0)
-                } else {
-                    self.1.cmp(&other.1)
-                }
+        if self.0 != other.0 {
+            self.0.cmp(&other.0)
+        } else {
+            self.1.cmp(&other.1)
+        }
     }
 }
 
@@ -154,9 +154,9 @@ impl Key {
 pub struct ActorID(pub String);
 
 impl ActorID {
-//    pub fn random() -> ActorID {
-//        ActorID(uuid::Uuid::new_v4().to_string())
-//    }
+    //    pub fn random() -> ActorID {
+    //        ActorID(uuid::Uuid::new_v4().to_string())
+    //    }
     pub fn to_bytes(&self) -> Vec<u8> {
         // FIXME
         hex::decode(&self.0).unwrap()

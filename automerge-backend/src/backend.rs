@@ -1,11 +1,11 @@
 use crate::actor_states::ActorStates;
-use crate::columnar::{ bin_to_changes, changes_to_bin};
+use crate::columnar::{bin_to_changes, changes_to_bin};
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{ ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
+use crate::protocol::{ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
 use crate::time;
 use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
 use std::borrow::BorrowMut;
@@ -66,7 +66,7 @@ impl Backend {
         op_set: Rc<OpSet>,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
-        let time = request.time.unwrap_or_else(|| time::unix_timestamp());
+        let time = request.time.unwrap_or_else(time::unix_timestamp);
         let actor_id = request.actor.clone();
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
@@ -259,9 +259,10 @@ impl Backend {
 
     pub fn load_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<(), AutomergeError> {
         let mut changes = Vec::new();
-        for d in data { changes.extend(bin_to_changes(&d)?); }
+        for d in data {
+            changes.extend(bin_to_changes(&d)?);
+        }
         self.load_changes(changes)
-
     }
 
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
@@ -272,7 +273,9 @@ impl Backend {
 
     pub fn apply_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<Patch, AutomergeError> {
         let mut changes = Vec::new();
-        for d in data { changes.extend(bin_to_changes(&d)?); }
+        for d in data {
+            changes.extend(bin_to_changes(&d)?);
+        }
         self.apply_changes(changes)
     }
 
@@ -483,12 +486,18 @@ impl Backend {
         self.make_patch(Some(diffs), None)
     }
 
-    pub fn get_changes_for_actor_id(&self, actor_id: &ActorID) -> Result<Vec<Vec<u8>>,AutomergeError> {
+    pub fn get_changes_for_actor_id(
+        &self,
+        actor_id: &ActorID,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
         changes_to_bin(&self.states.get(actor_id))
     }
 
-    pub fn get_missing_changes(&self, since: &Clock) -> Result<Vec<Vec<u8>>,AutomergeError> {
-        let changes : Vec<&Change> = self.states.history.iter()
+    pub fn get_missing_changes(&self, since: &Clock) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        let changes: Vec<&Change> = self
+            .states
+            .history
+            .iter()
             .map(|change| change.as_ref())
             .filter(|change| change.seq > since.get(&change.actor_id))
             .collect();

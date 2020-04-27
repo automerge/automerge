@@ -1,22 +1,25 @@
 use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
-use crate::encoding::{BooleanEncoder, DeltaEncoder, Encodable, RLEEncoder, ColData };
+use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::error::AutomergeError;
 use crate::protocol::{
     ActorID, Change, Clock, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation,
     PrimitiveValue,
 };
-use sha2::{Digest, Sha256};
 use core::fmt::Debug;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
 use std::str;
 
-pub(crate) fn bin_to_changes(bindata: &[u8]) -> Result<Vec<Change>,AutomergeError> {
-    BinaryContainer::from(&bindata)?.iter().map(|bin| bin.to_change()).collect()
+pub(crate) fn bin_to_changes(bindata: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+    BinaryContainer::from(&bindata)?
+        .iter()
+        .map(|bin| bin.to_change())
+        .collect()
 }
 
-pub (crate) fn changes_to_bin(changes: &[&Change]) -> Result<Vec<Vec<u8>>, AutomergeError> {
+pub(crate) fn changes_to_bin(changes: &[&Change]) -> Result<Vec<Vec<u8>>, AutomergeError> {
     let mut bins = Vec::new();
     for c in changes {
         let bin = change_to_bin(c)?;
@@ -156,22 +159,23 @@ impl Encodable for &[u8] {
     }
 }
 
-fn read_slice<T: Decodable + Debug>(buf: &mut &[u8]) -> Result<T,AutomergeError> {
+fn read_slice<T: Decodable + Debug>(buf: &mut &[u8]) -> Result<T, AutomergeError> {
     T::decode::<&[u8]>(buf).ok_or(AutomergeError::ChangeBadFormat)
 }
 
-fn slice_bytes<'a>(bytes: &mut &'a[u8]) -> Result<&'a [u8],AutomergeError>
-{
+fn slice_bytes<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], AutomergeError> {
     let mut buf = &bytes[..];
-    let len = leb128::read::unsigned(&mut buf).map_err(|_| AutomergeError::ChangeBadFormat)? as usize;
+    let len =
+        leb128::read::unsigned(&mut buf).map_err(|_| AutomergeError::ChangeBadFormat)? as usize;
     let result = &buf[0..len];
     *bytes = &buf[len..];
     Ok(result)
 }
 
-fn slice_bytes_len<'a>(bytes: &'a [u8]) -> Result<(&'a [u8], usize),AutomergeError> {
+fn slice_bytes_len(bytes: &[u8]) -> Result<(&[u8], usize), AutomergeError> {
     let mut view = &bytes[..];
-    let len = leb128::read::unsigned(&mut view).map_err(|_| AutomergeError::ChangeBadFormat)? as usize;
+    let len =
+        leb128::read::unsigned(&mut view).map_err(|_| AutomergeError::ChangeBadFormat)? as usize;
     let len_bytes = bytes.len() - view.len();
     Ok((&view[0..len], len + len_bytes))
 }
@@ -194,12 +198,12 @@ struct BinaryChange<'a> {
     time: i64,
     message: &'a [u8],
     actors: Vec<&'a [u8]>,
-    deps: Vec<(usize,u64)>,
-    ops: HashMap<u32,&'a [u8]>,
+    deps: Vec<(usize, u64)>,
+    ops: HashMap<u32, &'a [u8]>,
 }
 
-impl <'a> BinaryChange<'a> {
-    fn from(bytes: &'a [u8]) -> Result<BinaryChange<'a>,AutomergeError> {
+impl<'a> BinaryChange<'a> {
+    fn from(bytes: &'a [u8]) -> Result<BinaryChange<'a>, AutomergeError> {
         let bytes = &mut &bytes[..];
         let all = &bytes[0..];
         let actor = slice_bytes(bytes)?;
@@ -208,7 +212,7 @@ impl <'a> BinaryChange<'a> {
         let time = read_slice(bytes)?;
         let message = slice_bytes(bytes)?;
         let num_actors = read_slice(bytes)?;
-        let mut actors = vec![ &actor[..] ];
+        let mut actors = vec![&actor[..]];
         for _ in 0..num_actors {
             let actor = slice_bytes(bytes)?;
             actors.push(actor);
@@ -218,13 +222,13 @@ impl <'a> BinaryChange<'a> {
         for _ in 0..num_deps {
             let actor: usize = read_slice(bytes)?;
             let val: u64 = read_slice(bytes)?;
-            deps.push((actor,val));
+            deps.push((actor, val));
         }
         let mut ops = HashMap::new();
         while !bytes.is_empty() {
             let id = read_slice(bytes)?;
             let column = slice_bytes(bytes)?;
-            ops.insert(id,column);
+            ops.insert(id, column);
         }
         Ok(BinaryChange {
             all,
@@ -240,21 +244,21 @@ impl <'a> BinaryChange<'a> {
 
     fn gen_deps(&self) -> Option<Clock> {
         let mut deps = Clock::empty();
-        for (id,val) in self.deps.iter() {
-            deps.set(&ActorID::from_bytes(self.actors.get(*id)?),*val)
+        for (id, val) in self.deps.iter() {
+            deps.set(&ActorID::from_bytes(self.actors.get(*id)?), *val)
         }
         Some(deps)
     }
 
     fn message(&self) -> Option<String> {
-        if self.message.len() == 0 {
+        if self.message.is_empty() {
             None
         } else {
             str::from_utf8(&self.message).map(|s| s.to_string()).ok()
         }
     }
 
-    fn to_change(&self) -> Result<Change,AutomergeError> {
+    fn to_change(&self) -> Result<Change, AutomergeError> {
         let change = Change {
             start_op: self.start_op,
             seq: self.seq,
@@ -268,7 +272,8 @@ impl <'a> BinaryChange<'a> {
     }
 
     fn col_iter<T>(&self, col_id: u32) -> T
-        where T: From<&'a [u8]>,
+    where
+        T: From<&'a [u8]>,
     {
         let empty = &self.all[0..0];
         let buf = self.ops.get(&col_id).unwrap_or(&empty);
@@ -310,7 +315,7 @@ impl <'a> BinaryChange<'a> {
 }
 
 struct OperationIterator<'a> {
-    action: RLEDecoder<'a,Action>,
+    action: RLEDecoder<'a, Action>,
     objs: ObjIterator<'a>,
     chld: ObjIterator<'a>,
     keys: KeyIterator<'a>,
@@ -344,7 +349,7 @@ struct ValueIterator<'a> {
     val_raw: Decoder<'a>,
 }
 
-impl <'a> Iterator for PredIterator<'a> {
+impl<'a> Iterator for PredIterator<'a> {
     type Item = Vec<OpID>;
     fn next(&mut self) -> Option<Vec<OpID>> {
         let num = self.pred_num.next()??;
@@ -354,14 +359,14 @@ impl <'a> Iterator for PredIterator<'a> {
             let ctr = self.pred_ctr.next()??;
             let actor_bytes = self.actors.get(actor)?;
             let actor_id = ActorID::from_bytes(actor_bytes);
-            let op_id = OpID::new(ctr,&actor_id);
+            let op_id = OpID::new(ctr, &actor_id);
             p.push(op_id)
         }
         Some(p)
     }
 }
 
-impl <'a> Iterator for ValueIterator<'a> {
+impl<'a> Iterator for ValueIterator<'a> {
     type Item = PrimitiveValue;
     fn next(&mut self) -> Option<PrimitiveValue> {
         let val_type = self.val_len.next()??;
@@ -430,27 +435,27 @@ impl <'a> Iterator for ValueIterator<'a> {
     }
 }
 
-impl <'a> Iterator for KeyIterator<'a> {
+impl<'a> Iterator for KeyIterator<'a> {
     type Item = Key;
     fn next(&mut self) -> Option<Key> {
         match (self.actor.next()?, self.ctr.next()?, self.str.next()?) {
-            (None,None,Some(string)) => Some(Key(string)),
-            (Some(0),Some(0),None) => Some(Key("_head".to_string())),
-            (Some(actor),Some(ctr),None) => {
+            (None, None, Some(string)) => Some(Key(string)),
+            (Some(0), Some(0), None) => Some(Key("_head".to_string())),
+            (Some(actor), Some(ctr), None) => {
                 let actor_bytes = self.actors.get(actor)?;
                 let actor_id = ActorID::from_bytes(actor_bytes);
-                let op_id = OpID::new(ctr,&actor_id);
+                let op_id = OpID::new(ctr, &actor_id);
                 Some(op_id.to_key())
-            },
-            _ => None
+            }
+            _ => None,
         }
     }
 }
 
-impl <'a> Iterator for ObjIterator<'a> {
+impl<'a> Iterator for ObjIterator<'a> {
     type Item = ObjectID;
     fn next(&mut self) -> Option<ObjectID> {
-        if let (Some(actor),Some(ctr)) = (self.actor.next()?, self.ctr.next()? ) {
+        if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
             let actor_id = ActorID::from_bytes(self.actors.get(actor)?);
             Some(ObjectID::ID(OpID(ctr, actor_id.0)))
         } else {
@@ -459,7 +464,7 @@ impl <'a> Iterator for ObjIterator<'a> {
     }
 }
 
-impl <'a> Iterator for OperationIterator<'a> {
+impl<'a> Iterator for OperationIterator<'a> {
     type Item = Operation;
     fn next(&mut self) -> Option<Operation> {
         let action = self.action.next()??;
@@ -489,28 +494,27 @@ impl <'a> Iterator for OperationIterator<'a> {
     }
 }
 
-impl <'a> BinaryContainer<'a> {
-
-    fn from(mut bytes: &'a [u8]) -> Result<Vec<BinaryContainer<'a>>,AutomergeError> {
+impl<'a> BinaryContainer<'a> {
+    fn from(mut bytes: &'a [u8]) -> Result<Vec<BinaryContainer<'a>>, AutomergeError> {
         let mut changes = Vec::new();
         while !bytes.is_empty() {
             let change = Self::parse_single(bytes)?;
-            bytes = &bytes[change.len .. ];
+            bytes = &bytes[change.len..];
             changes.push(change);
         }
         Ok(changes)
     }
 
-    fn parse_single(bytes: &'a [u8]) -> Result<BinaryContainer<'a>,AutomergeError> {
+    fn parse_single(bytes: &'a [u8]) -> Result<BinaryContainer<'a>, AutomergeError> {
         if bytes.len() < 8 {
-            return Err(AutomergeError::ChangeBadFormat)
+            return Err(AutomergeError::ChangeBadFormat);
         }
-        let (header,rest) = &bytes.split_at(8);
-        let (magic,checksum) = &header.split_at(4);
+        let (header, rest) = &bytes.split_at(8);
+        let (magic, checksum) = &header.split_at(4);
         if magic != &MAGIC_BYTES {
-            return Err(AutomergeError::ChangeBadFormat)
+            return Err(AutomergeError::ChangeBadFormat);
         }
-        let (chunk_data,chunk_len) = slice_bytes_len(&rest[1..])?;
+        let (chunk_data, chunk_len) = slice_bytes_len(&rest[1..])?;
         let body = &rest[0..(chunk_len + 1)]; // +1 for chunktype
         let chunktype = body[0];
         let len = body.len() + header.len();
@@ -530,9 +534,9 @@ impl <'a> BinaryContainer<'a> {
         &hasher.result()[0..4] == self.checksum
     }
 
-    fn to_change(&self) -> Result<Change,AutomergeError> {
+    fn to_change(&self) -> Result<Change, AutomergeError> {
         if !self.is_valid() {
-            return Err(AutomergeError::InvalidChange)
+            return Err(AutomergeError::InvalidChange);
         }
         self.chunk.to_change()
     }
@@ -604,7 +608,13 @@ impl ValEncoder {
     }
 
     fn finish(self) -> Vec<ColData> {
-        vec![self.len.finish(COL_VAL_LEN), ColData { col: COL_VAL_RAW, data: self.raw } ]
+        vec![
+            self.len.finish(COL_VAL_LEN),
+            ColData {
+                col: COL_VAL_RAW,
+                data: self.raw,
+            },
+        ]
     }
 }
 
@@ -644,7 +654,11 @@ impl KeyEncoder {
     }
 
     fn finish(self) -> Vec<ColData> {
-        vec![ self.actor.finish(COL_KEY_ACTOR), self.ctr.finish(COL_KEY_CTR), self.str.finish(COL_KEY_STR) ]
+        vec![
+            self.actor.finish(COL_KEY_ACTOR),
+            self.ctr.finish(COL_KEY_CTR),
+            self.str.finish(COL_KEY_STR),
+        ]
     }
 }
 
@@ -672,7 +686,11 @@ impl PredEncoder {
     }
 
     fn finish(self) -> Vec<ColData> {
-        vec![ self.num.finish(COL_PRED_NUM), self.actor.finish(COL_PRED_ACTOR), self.ctr.finish(COL_PRED_CTR) ]
+        vec![
+            self.num.finish(COL_PRED_NUM),
+            self.actor.finish(COL_PRED_ACTOR),
+            self.ctr.finish(COL_PRED_CTR),
+        ]
     }
 }
 
@@ -703,7 +721,10 @@ impl ObjEncoder {
     }
 
     fn finish(self) -> Vec<ColData> {
-        vec![ self.actor.finish(COL_OBJ_ACTOR), self.ctr.finish(COL_OBJ_CTR) ]
+        vec![
+            self.actor.finish(COL_OBJ_ACTOR),
+            self.ctr.finish(COL_OBJ_CTR),
+        ]
     }
 }
 
@@ -736,7 +757,10 @@ impl ChildEncoder {
     }
 
     fn finish(self) -> Vec<ColData> {
-        vec![ self.actor.finish(COL_CHILD_ACTOR), self.ctr.finish(COL_CHILD_CTR) ]
+        vec![
+            self.actor.finish(COL_CHILD_ACTOR),
+            self.ctr.finish(COL_CHILD_CTR),
+        ]
     }
 }
 
@@ -751,10 +775,9 @@ struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-
     fn encode_ops(ops: &[Operation], actors: &mut Vec<ActorID>) -> Vec<u8> {
         let mut e = Self::new();
-        e.encode(ops,actors);
+        e.encode(ops, actors);
         e.finish()
     }
 
@@ -786,23 +809,23 @@ impl ColumnEncoder {
                 self.val.append_value(value);
                 self.chld.append_null();
                 Action::Set
-            },
+            }
             OpType::Inc(val) => {
                 // FIXME - should be int or uint
                 self.val.append_value(&PrimitiveValue::Number(*val as f64));
                 self.chld.append_null();
                 Action::Inc
-            },
+            }
             OpType::Del => {
                 self.val.append_null();
                 self.chld.append_null();
                 Action::Del
-            },
+            }
             OpType::Link(child) => {
                 self.val.append_null();
                 self.chld.append(child, actors);
                 Action::Link
-            },
+            }
             OpType::Make(kind) => {
                 self.val.append_null();
                 self.chld.append_null();
@@ -826,7 +849,7 @@ impl ColumnEncoder {
         coldata.extend(self.val.finish());
         coldata.extend(self.chld.finish());
         coldata.extend(self.pred.finish());
-        coldata.sort_by(|a,b| a.col.cmp(&b.col));
+        coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut result = Vec::new();
         for d in coldata.iter() {
@@ -859,31 +882,6 @@ const COLUMN_TYPE_BOOLEAN: u32 = 4;
 const COLUMN_TYPE_STRING_RLE: u32 = 5;
 const COLUMN_TYPE_VALUE_LEN: u32 = 6;
 const COLUMN_TYPE_VALUE_RAW: u32 = 7;
-
-/*
-#[derive(PartialEq, Debug, Clone, Copy)]
-enum Column {
-    ObjActor,
-    ObjCtr,
-    KeyActor,
-    KeyCtr,
-    KeyStr,
-    IdActor,
-    IdCtr,
-    Insert,
-    Action,
-    ValLen,
-    ValRaw,
-    ChildActor,
-    ChildCtr,
-    PredNum,
-    PredActor,
-    PredCtr,
-    SuccNum,
-    SuccActor,
-    SuccCtr,
-}
-*/
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
@@ -918,22 +916,22 @@ impl Decodable for Action {
     }
 }
 
-const COL_OBJ_ACTOR : u32 = COLUMN_TYPE_ACTOR_ID;
-const COL_OBJ_CTR : u32 = COLUMN_TYPE_INT_RLE;
-const COL_KEY_ACTOR : u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_KEY_CTR : u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_KEY_STR : u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
+const COL_OBJ_ACTOR: u32 = COLUMN_TYPE_ACTOR_ID;
+const COL_OBJ_CTR: u32 = COLUMN_TYPE_INT_RLE;
+const COL_KEY_ACTOR: u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_KEY_CTR: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_KEY_STR: u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
 //const COL_ID_ACTOR : u32 = 2 << 3 | COLUMN_TYPE_ACTOR_ID;
 //const COL_ID_CTR : u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_INSERT : u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
-const COL_ACTION : u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
-const COL_VAL_LEN : u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
-const COL_VAL_RAW : u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
-const COL_CHILD_ACTOR : u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_CHILD_CTR : u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_PRED_NUM : u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
-const COL_PRED_ACTOR : u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_PRED_CTR : u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
+const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
+const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
+const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
+const COL_CHILD_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_CHILD_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
+const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
 //const COL_SUCC_NUM : u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
 //const COL_SUCC_ACTOR : u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
 //const COL_SUCC_CTR : u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
