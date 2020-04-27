@@ -1,11 +1,13 @@
 use std::error::Error;
 use std::fmt;
 use automerge_backend::ObjectID;
+use crate::mutation::Path;
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeFrontendError {
     InvalidChangeRequest,
-    MissingObjectError(ObjectID)
+    MissingObjectError(ObjectID),
+    NoSuchPathError(Path)
 }
 
 impl fmt::Display for AutomergeFrontendError {
@@ -28,3 +30,4 @@ impl fmt::Display for InvalidInitialStateError {
 }
 
 impl Error for InvalidInitialStateError {}
+

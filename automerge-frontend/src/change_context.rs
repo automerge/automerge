@@ -1,140 +1,36 @@
 use automerge_backend::{
-    DataType, Diff, Key, ObjType, ObjectID, OpID, OpRequest, PrimitiveValue, ReqOpType,
-    DiffLink, DiffEdit
+    Diff, DiffEdit, DiffLink, Key, ObjType, ObjectID, OpID
 };
-use uuid;
 //use crate::AutomergeFrontendError;
-use crate::{AutomergeFrontendError, MapType, PathElement, SequenceType, Value};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use crate::object::{Object, Values};
+use crate::{
+    AutomergeFrontendError, MapType, PrimitiveValue, SequenceType,
+    Value
+};
 use std::str::FromStr;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-pub(crate) fn value_to_op_requests(
-    parent_object: String,
-    key: PathElement,
-    v: &Value,
-    insert: bool,
-) -> Vec<OpRequest> {
-    match v {
-        Value::Sequence(vs, seq_type) => {
-            let make_action = match seq_type {
-                SequenceType::List => ReqOpType::MakeList,
-                SequenceType::Text => ReqOpType::MakeText,
-            };
-            let list_id = new_object_id();
-            let make_op = OpRequest {
-                action: make_action,
-                obj: parent_object,
-                key: key.to_request_key(),
-                child: Some(list_id.clone()),
-                value: None,
-                datatype: None,
-                insert,
-            };
-            let child_requests: Vec<OpRequest> = vs
-                .iter()
-                .enumerate()
-                .flat_map(|(index, v)| {
-                    value_to_op_requests(list_id.clone(), PathElement::Index(index), v, true)
-                })
-                .collect();
-            let mut result = vec![make_op];
-            result.extend(child_requests);
-            result
-        }
-        Value::Map(kvs, map_type) => {
-            let make_action = match map_type {
-                MapType::Map => ReqOpType::MakeMap,
-                MapType::Table => ReqOpType::MakeTable,
-            };
-            let map_id = new_object_id();
-            let make_op = OpRequest {
-                action: make_action,
-                obj: parent_object,
-                key: key.to_request_key(),
-                child: Some(map_id.clone()),
-                value: None,
-                datatype: None,
-                insert,
-            };
-            let child_requests: Vec<OpRequest> = kvs
-                .iter()
-                .flat_map(|(k, v)| {
-                    value_to_op_requests(map_id.clone(), PathElement::Key(k.clone()), v, false)
-                })
-                .collect();
-            let mut result = vec![make_op];
-            result.extend(child_requests);
-            result
-        }
-        Value::Primitive(prim_value, datatype) => vec![OpRequest {
-            action: ReqOpType::Set,
-            obj: parent_object,
-            key: key.to_request_key(),
-            child: None,
-            value: Some(prim_value.clone()),
-            datatype: Some(*datatype),
-            insert,
-        }],
-    }
-}
-
-fn new_object_id() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
-/// Represents the set of conflicting values for a register in an automerge
-/// document. 
-#[derive(Clone)]
-pub struct Values(HashMap<OpID, Rc<RefCell<Object>>>);
-
-impl Values {
-    fn default_value(&self) -> Rc<RefCell<Object>> {
-        let mut op_ids: Vec<&OpID> = self.0.keys().collect();
-        op_ids.sort();
-        let op_id = op_ids.first().unwrap();
-        Rc::clone(self.0.get(op_id).unwrap())
-    }
-
-    fn update_for_opid(&mut self, opid: OpID, value: Rc<RefCell<Object>>) {
-        self.0.insert(opid, value);
-    }
-}
-
-
-#[derive(Clone)]
-pub enum Object {
-    Sequence(ObjectID, Vec<Option<Values>>, SequenceType),
-    Map(ObjectID, HashMap<Key, Values>, MapType),
-    Primitive(PrimitiveValue, DataType),
-}
-
-impl Object {
-    fn value(&self) -> Value {
-        match self {
-            Object::Sequence(_, vals, seq_type) => Value::Sequence(
-                vals.iter().filter_map(|v| v.clone().map(|v2| v2.default_value().borrow().value())).collect(),
-                seq_type.clone(),
-            ),
-            Object::Map(_, vals, map_type) => Value::Map(
-                vals.iter()
-                    .map(|(k, v)| (k.to_string(), v.default_value().borrow().value()))
-                    .collect(),
-                map_type.clone(),
-            ),
-            Object::Primitive(v, d) => Value::Primitive(v.clone(), *d),
-        }
-    }
-}
-
-pub struct ChangeContext {
-    original_objects: HashMap<ObjectID, Object>,
+/// A `ChangeContext` represents some kind of change which has not been applied
+/// yet. This is usefule in two contexts:
+///
+/// 1. When applying the diffs in a patch.
+/// 2. When generating changes in a mutation closure (passed to Frontend::change)
+///
+/// In both of these cases we have an initial set of objects and then diffs
+/// which we want to apply to those objects under the constraint that if the
+/// change fails we want to be able to roll everything back. This is implemented
+/// by accumulating all the changes in a separate set of objects, then only
+/// actually mutating the original object set (which you will note is captured
+/// by mutable reference) when `commit` is called.
+pub struct ChangeContext<'a> {
+    original_objects: &'a mut HashMap<ObjectID, Object>,
     updated: RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
 }
 
-impl ChangeContext {
-    pub fn new() -> ChangeContext {
+impl<'a> ChangeContext<'a> {
+    pub fn new(original_objects: &'a mut HashMap<ObjectID, Object>) -> ChangeContext {
         ChangeContext {
-            original_objects: HashMap::new(),
+            original_objects,
             updated: RefCell::new(HashMap::new()),
         }
     }
@@ -230,43 +126,44 @@ impl ChangeContext {
     /// change is complete we can `commit` the change context.
     ///
     pub fn apply_diff(&mut self, diff: &Diff) -> Result<(), AutomergeFrontendError> {
-        Self::apply_diff_helper(
-            &self.original_objects,
-            &self.updated,
-            diff,
-        )?;
+        Self::apply_diff_helper(&self.original_objects, &self.updated, diff)?;
         Ok(())
     }
 
-    fn apply_diff_helper<'a>(
-        original_objects: &'a HashMap<ObjectID, Object>,
-        updated: &'a RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
-        diff: &Diff
+    fn apply_diff_helper<'b>(
+        original_objects: &'b HashMap<ObjectID, Object>,
+        updated: &'b RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
+        diff: &Diff,
     ) -> Result<Rc<RefCell<Object>>, AutomergeFrontendError> {
         match diff.obj_type {
             ObjType::Map => {
-                let obj = Self::get_or_create_object(
-                    &diff.object_id,
-                    original_objects,
-                    updated,
-                    || Object::Map(diff.object_id.clone(), HashMap::new(), MapType::Map),
-                );
+                let obj =
+                    Self::get_or_create_object(&diff.object_id, original_objects, updated, || {
+                        Object::Map(diff.object_id.clone(), HashMap::new(), MapType::Map)
+                    });
                 if let Some(diffprops) = &diff.props {
-                    match &mut*obj.borrow_mut() {
+                    match &mut *obj.borrow_mut() {
                         Object::Map(_, ref mut kvs, MapType::Map) => {
                             for (key, prop_diffs) in diffprops {
-                                let values = kvs.entry(key.clone()).or_insert_with(|| Values(HashMap::new()));
+                                let values = kvs
+                                    .entry(key.clone())
+                                    .or_insert_with(|| Values(HashMap::new()));
                                 for (opid, difflink) in prop_diffs.iter() {
                                     let object = match difflink {
                                         DiffLink::Link(subpatch) => Self::apply_diff_helper(
                                             original_objects,
                                             updated,
-                                            subpatch
+                                            subpatch,
                                         )?,
-                                        DiffLink::Val(v) => Rc::new(RefCell::new(Object::Primitive(v.value.clone(), v.datatype)))
+                                        DiffLink::Val(v) => Rc::new(RefCell::new(
+                                            Object::Primitive(PrimitiveValue::from_backend_values(
+                                                v.value.clone(),
+                                                v.datatype,
+                                            )),
+                                        )),
                                     };
                                     values.update_for_opid(opid.clone(), object);
-                                };
+                                }
                                 if prop_diffs.len() == 0 {
                                     kvs.remove(key);
                                 }
@@ -276,56 +173,66 @@ impl ChangeContext {
                     }
                 };
                 Ok(obj)
-            },
+            }
             ObjType::Table => {
-                let obj = Self::get_or_create_object(
-                    &diff.object_id,
-                    original_objects,
-                    updated,
-                    || Object::Map(diff.object_id.clone(), HashMap::new(), MapType::Table),
-                );
+                let obj =
+                    Self::get_or_create_object(&diff.object_id, original_objects, updated, || {
+                        Object::Map(diff.object_id.clone(), HashMap::new(), MapType::Table)
+                    });
                 if let Some(diffprops) = &diff.props {
-                    match &mut*obj.borrow_mut() {
+                    match &mut *obj.borrow_mut() {
                         Object::Map(_, ref mut kvs, MapType::Table) => {
                             for (key, prop_diffs) in diffprops {
-                                let values = kvs.entry(key.clone()).or_insert_with(|| Values(HashMap::new()));
-                                let prop_diffs_vec: Vec<(&OpID, &DiffLink)> = prop_diffs.into_iter().collect();
+                                let values = kvs
+                                    .entry(key.clone())
+                                    .or_insert_with(|| Values(HashMap::new()));
+                                let prop_diffs_vec: Vec<(&OpID, &DiffLink)> =
+                                    prop_diffs.into_iter().collect();
                                 match prop_diffs_vec[..] {
-                                    [] => {kvs.remove(key);},
+                                    [] => {
+                                        kvs.remove(key);
+                                    }
                                     [(opid, difflink)] => {
                                         let object = match difflink {
                                             DiffLink::Link(subpatch) => Self::apply_diff_helper(
                                                 original_objects,
                                                 updated,
-                                                subpatch
+                                                subpatch,
                                             )?,
-                                            DiffLink::Val(v) => Rc::new(RefCell::new(Object::Primitive(v.value.clone(), v.datatype)))
+                                            DiffLink::Val(v) => {
+                                                Rc::new(RefCell::new(Object::Primitive(
+                                                    PrimitiveValue::from_backend_values(
+                                                        v.value.clone(),
+                                                        v.datatype,
+                                                    ),
+                                                )))
+                                            }
                                         };
                                         values.update_for_opid(opid.clone(), object);
-                                    },
-                                    _ => return Err(AutomergeFrontendError::InvalidChangeRequest)
+                                    }
+                                    _ => return Err(AutomergeFrontendError::InvalidChangeRequest),
                                 };
                             }
-                        },
+                        }
                         _ => panic!("Invalid object type when applying diff"),
                     };
                 };
                 Ok(obj)
-            },
+            }
             ObjType::List => {
-                let obj = Self::get_or_create_object(
-                    &diff.object_id,
-                    original_objects,
-                    updated,
-                    || Object::Sequence(diff.object_id.clone(), Vec::new(), SequenceType::List)
-                );
-                match &mut*obj.borrow_mut() {
+                let obj =
+                    Self::get_or_create_object(&diff.object_id, original_objects, updated, || {
+                        Object::Sequence(diff.object_id.clone(), Vec::new(), SequenceType::List)
+                    });
+                match &mut *obj.borrow_mut() {
                     Object::Sequence(_, ref mut elems, SequenceType::List) => {
                         if let Some(edits) = &diff.edits {
                             for edit in edits {
                                 match edit {
-                                    DiffEdit::Insert{index} => elems.insert(*index, None),
-                                    DiffEdit::Remove{index} => {elems.remove(*index);},
+                                    DiffEdit::Insert { index } => elems.insert(*index, None),
+                                    DiffEdit::Remove { index } => {
+                                        elems.remove(*index);
+                                    }
                                 };
                             }
                         };
@@ -345,33 +252,38 @@ impl ChangeContext {
                                         DiffLink::Link(subpatch) => Self::apply_diff_helper(
                                             original_objects,
                                             updated,
-                                            subpatch
+                                            subpatch,
                                         )?,
-                                        DiffLink::Val(v) => Rc::new(RefCell::new(Object::Primitive(v.value.clone(), v.datatype)))
+                                        DiffLink::Val(v) => Rc::new(RefCell::new(
+                                            Object::Primitive(PrimitiveValue::from_backend_values(
+                                                v.value.clone(),
+                                                v.datatype,
+                                            )),
+                                        )),
                                     };
                                     values.update_for_opid(opid.clone(), object);
-                                };
+                                }
                             }
                         };
-                    },
+                    }
                     _ => panic!("Invalid object type when applying diff"),
                 };
                 Ok(obj)
-            },
+            }
             ObjType::Text => {
-                let obj = Self::get_or_create_object(
-                    &diff.object_id,
-                    original_objects,
-                    updated,
-                    || Object::Sequence(diff.object_id.clone(), Vec::new(), SequenceType::List)
-                );
-                match &mut*obj.borrow_mut() {
+                let obj =
+                    Self::get_or_create_object(&diff.object_id, original_objects, updated, || {
+                        Object::Sequence(diff.object_id.clone(), Vec::new(), SequenceType::List)
+                    });
+                match &mut *obj.borrow_mut() {
                     Object::Sequence(_, ref mut elems, SequenceType::Text) => {
                         if let Some(edits) = &diff.edits {
                             for edit in edits {
                                 match edit {
-                                    DiffEdit::Insert{index} => elems.insert(*index, None),
-                                    DiffEdit::Remove{index} => {elems.remove(*index);},
+                                    DiffEdit::Insert { index } => elems.insert(*index, None),
+                                    DiffEdit::Remove { index } => {
+                                        elems.remove(*index);
+                                    }
                                 };
                             }
                         };
@@ -391,15 +303,20 @@ impl ChangeContext {
                                         DiffLink::Link(subpatch) => Self::apply_diff_helper(
                                             original_objects,
                                             updated,
-                                            subpatch
+                                            subpatch,
                                         )?,
-                                        DiffLink::Val(v) => Rc::new(RefCell::new(Object::Primitive(v.value.clone(), v.datatype)))
+                                        DiffLink::Val(v) => Rc::new(RefCell::new(
+                                            Object::Primitive(PrimitiveValue::from_backend_values(
+                                                v.value.clone(),
+                                                v.datatype,
+                                            )),
+                                        )),
                                     };
                                     values.update_for_opid(opid.clone(), object);
-                                };
+                                }
                             }
                         };
-                    },
+                    }
                     _ => panic!("Invalid object type when applying diff"),
                 };
                 Ok(obj)
@@ -408,17 +325,18 @@ impl ChangeContext {
     }
 
     fn key_to_index(key: &Key) -> Result<usize, AutomergeFrontendError> {
-        usize::from_str(key.to_string().as_str()).map_err(|_| AutomergeFrontendError::InvalidChangeRequest)
+        usize::from_str(key.to_string().as_str())
+            .map_err(|_| AutomergeFrontendError::InvalidChangeRequest)
     }
 
-
-    fn get_or_create_object<'a, F>(
+    fn get_or_create_object<'b, F>(
         object_id: &ObjectID,
-        original: &'a HashMap<ObjectID, Object>,
-        updated: &'a RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
-        create_new: F
-    ) -> Rc<RefCell<Object>> 
-        where F: FnOnce() -> Object
+        original: &'b HashMap<ObjectID, Object>,
+        updated: &'b RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
+        create_new: F,
+    ) -> Rc<RefCell<Object>>
+    where
+        F: FnOnce() -> Object,
     {
         updated
             .borrow_mut()
@@ -429,16 +347,26 @@ impl ChangeContext {
                     .cloned()
                     .map(|o| Rc::new(RefCell::new(o)))
                     .unwrap_or_else(|| Rc::new(RefCell::new(create_new())))
-                    //.unwrap_or_else(|| {
-                        //Rc::new(RefCell::new(Object::Map(object_id.clone(), HashMap::new(), MapType::Map)))
-                    //})
-            }).clone()
+            })
+            .clone()
     }
 
-    pub fn value_for_object(&self, object_id: &ObjectID) -> Option<Value> {
+    pub(crate) fn value_for_object_id(&self, object_id: &ObjectID) -> Option<Rc<RefCell<Object>>> {
         if let Some(updated) = self.updated.borrow().get(object_id) {
-            return Some(updated.borrow().value())
+            return Some(*updated);
         }
-        self.original_objects.get(object_id).map(|o| o.value())
+        self.original_objects.get(object_id).map(|o| Rc::new(RefCell::new(o.clone())))
+    }
+
+    pub fn commit(self) -> Result<Value, AutomergeFrontendError> {
+        for (object_id, object) in self.updated.into_inner().into_iter() {
+            let cloned_object = object.borrow().clone();
+            self.original_objects
+                .insert(object_id.clone(), cloned_object);
+        }
+        // The root ID must be in result by this point so we can unwrap
+        let state = self.original_objects.get(&ObjectID::Root).unwrap().value();
+        Ok(state)
     }
 }
+
