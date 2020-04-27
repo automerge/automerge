@@ -79,7 +79,7 @@ impl State {
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, clock: JsValue) -> Result<Array, JsValue> {
         let c: Clock = js_to_rust(clock)?;
-        let changes = self.backend.get_missing_changes(&c).map_err(automerge_error_to_js)?;
+        let changes = self.backend.get_missing_changes_binary(&c).map_err(automerge_error_to_js)?;
         let result = Array::new();
         for c in changes {
             let bytes : Uint8Array = c.as_slice().into();

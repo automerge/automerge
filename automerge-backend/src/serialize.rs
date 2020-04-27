@@ -331,8 +331,10 @@ impl<'de> Deserialize<'de> for DiffLink {
                     }
                 }
                 if value.is_some() || datatype.is_some() {
-                    let value = value.ok_or_else(|| Error::missing_field("value"))?;
                     let datatype = datatype.unwrap_or(DataType::Undefined);
+                    let value = value
+                        .ok_or_else(|| Error::missing_field("value"))?
+                        .adjust(datatype);
                     Ok(DiffLink::Val(DiffValue { value, datatype }))
                 } else {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;

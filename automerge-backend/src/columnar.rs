@@ -97,7 +97,10 @@ impl Encodable for Clock {
     ) -> io::Result<usize> {
         let mut len = 0;
         self.0.len().encode(buf)?;
-        for (actor, val) in self.0.iter() {
+        let mut keys: Vec<&ActorID> = self.0.keys().collect();
+        keys.sort_unstable();
+        for actor in keys.iter() {
+            let val = self.get(actor);
             len += actor.encode_with_actors(buf, actors)?;
             len += val.encode(buf)?;
         }
@@ -265,7 +268,7 @@ impl<'a> BinaryChange<'a> {
             time: self.time,
             message: self.message(),
             actor_id: ActorID::from_bytes(self.actors[0]),
-            deps: self.gen_deps().ok_or_else(|| err("failed to gen deps"))?,
+            deps: self.gen_deps().ok_or(AutomergeError::ChangeBadFormat)?,
             operations: self.iter_ops().collect(),
         };
         Ok(change)
@@ -938,6 +941,144 @@ const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
 
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
 
-fn err(s: &str) -> AutomergeError {
-    AutomergeError::ChangeDecompressError(s.to_string())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    //use std::str::FromStr;
+
+    #[test]
+    fn test_empty_change() {
+        let change1 = Change {
+            start_op: 1,
+            seq: 2,
+            time: 1234,
+            message: None,
+            actor_id: ActorID("deadbeefdeadbeef".into()),
+            deps: Clock::empty(),
+            operations: vec![],
+        };
+        let bin1 = change_to_bin(&change1).unwrap();
+        let changes2 = bin_to_changes(&bin1).unwrap();
+        let bin2 = change_to_bin(&changes2[0]).unwrap();
+        assert_eq!(bin1, bin2);
+        assert_eq!(vec![change1], changes2);
+    }
+
+    #[test]
+    fn test_complex_change() -> Result<(), AutomergeError> {
+        let actor1 = ActorID("deadbeefdeadbeef".into());
+        let actor2 = ActorID("feeddefaff".into());
+        let actor3 = ActorID("00101010fafafafa".into());
+        let opid1 = OpID(102, actor1.0.clone());
+        let opid2 = OpID(391, actor1.0.clone());
+        let opid3 = OpID(299, actor2.0.clone());
+        let opid4 = OpID(762, actor3.0.clone());
+        let opid5 = OpID(100203, actor2.0.clone());
+        let obj1 = ObjectID::ID(opid1.clone());
+        let obj2 = ObjectID::Root;
+        let obj3 = ObjectID::ID(opid4.clone());
+        let key1 = Key("field1".into());
+        let key2 = Key("field2".into());
+        let key3 = Key("field3".into());
+        let head = Key("_head".into());
+        let keyseq1 = Key("19@deadbeefdeadbeef".into());
+        let keyseq2 = Key("12@feeddefaff".into());
+        let insert = false;
+        let change1 = Change {
+            start_op: 123,
+            seq: 29291,
+            time: 12341231,
+            message: Some("This is my message".into()),
+            actor_id: actor1.clone(),
+            deps: Clock::empty()
+                .with(&actor1, 10)
+                .with(&actor2, 100)
+                .with(&actor3, 1000),
+            operations: vec![
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Number(10.0)),
+                    key: key1.clone(),
+                    obj: obj1.clone(),
+                    insert,
+                    pred: vec![opid1.clone(), opid2.clone()],
+                },
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Counter(-11)),
+                    key: key2.clone(),
+                    obj: obj1.clone(),
+                    insert,
+                    pred: vec![opid1.clone(), opid2.clone()],
+                },
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Timestamp(20)),
+                    key: key3.clone(),
+                    obj: obj1.clone(),
+                    insert,
+                    pred: vec![opid1.clone(), opid2.clone()],
+                },
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Str("some value".into())),
+                    key: key2.clone(),
+                    obj: obj2.clone(),
+                    insert,
+                    pred: vec![opid3.clone(), opid4.clone()],
+                },
+                Operation {
+                    action: OpType::Make(ObjType::List),
+                    key: key2.clone(),
+                    obj: obj2.clone(),
+                    insert,
+                    pred: vec![opid3.clone(), opid4.clone()],
+                },
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Str("val1".into())),
+                    key: head.clone(),
+                    obj: obj3.clone(),
+                    insert: true,
+                    pred: vec![opid3.clone(), opid4.clone()],
+                },
+                Operation {
+                    action: OpType::Set(PrimitiveValue::Str("val2".into())),
+                    key: head.clone(),
+                    obj: obj3.clone(),
+                    insert: true,
+                    pred: vec![opid4.clone(), opid5.clone()],
+                },
+                Operation {
+                    action: OpType::Inc(10),
+                    key: key2.clone(),
+                    obj: obj2.clone(),
+                    insert,
+                    pred: vec![opid1.clone(), opid5.clone()],
+                },
+                Operation {
+                    action: OpType::Link(obj3.clone()),
+                    obj: obj1.clone(),
+                    key: key1.clone(),
+                    insert,
+                    pred: vec![opid1.clone(), opid3.clone()],
+                },
+                Operation {
+                    action: OpType::Del,
+                    obj: obj3.clone(),
+                    key: keyseq1.clone(),
+                    insert: true,
+                    pred: vec![opid4.clone(), opid5.clone()],
+                },
+                Operation {
+                    action: OpType::Del,
+                    obj: obj3.clone(),
+                    key: keyseq2.clone(),
+                    insert: true,
+                    pred: vec![opid4.clone(), opid5.clone()],
+                },
+            ],
+        };
+        let bin1 = change_to_bin(&change1)?;
+        let changes2 = bin_to_changes(&bin1)?;
+        let bin2 = change_to_bin(&changes2[0])?;
+        assert_eq!(bin1, bin2);
+        assert_eq!(vec![change1], changes2);
+        Ok(())
+    }
 }

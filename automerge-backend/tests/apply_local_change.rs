@@ -79,7 +79,8 @@ fn test_apply_local_change() {
     )
     .unwrap();
     let backend2 = Backend::init();
-    let changes = backend2.get_changes(&backend).unwrap();
+    let changes = backend.get_missing_changes(&backend2.clock); //.unwrap();
+                                                                //let changes = backend2.get_missing_changes(&backend.clock);//.unwrap();
     let change = changes.get(0).unwrap();
     expected_change.time = change.time;
     assert_eq!(change, &&expected_change);

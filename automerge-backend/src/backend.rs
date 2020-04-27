@@ -375,7 +375,7 @@ impl Backend {
         Ok(patch)
     }
 
-    pub fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
+    fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
         if self.clock.get(&request.actor) >= request.seq {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {}:{}",
@@ -493,7 +493,10 @@ impl Backend {
         changes_to_bin(&self.states.get(actor_id))
     }
 
-    pub fn get_missing_changes(&self, since: &Clock) -> Result<Vec<Vec<u8>>, AutomergeError> {
+    pub fn get_missing_changes_binary(
+        &self,
+        since: &Clock,
+    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
         let changes: Vec<&Change> = self
             .states
             .history
@@ -504,11 +507,23 @@ impl Backend {
         changes_to_bin(&changes)
     }
 
-    pub fn can_undo(&self) -> bool {
+    pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
+        let changes: Vec<&Change> = self
+            .states
+            .history
+            .iter()
+            .map(|change| change.as_ref())
+            .filter(|change| change.seq > since.get(&change.actor_id))
+            .collect();
+        //        changes_to_bin(&changes)
+        changes
+    }
+
+    fn can_undo(&self) -> bool {
         self.undo_pos > 0
     }
 
-    pub fn can_redo(&self) -> bool {
+    fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
     }
 
@@ -519,13 +534,6 @@ impl Backend {
         }
         clock
     }
-
-    /*
-    pub fn merge(&mut self, remote: &Backend) -> Result<Patch, AutomergeError> {
-        let missing_changes = remote.get_missing_changes(&self.clock);
-        self.apply_changes_binary(missing_changes)
-    }
-    */
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
         self.undo_stack.truncate(self.undo_pos);

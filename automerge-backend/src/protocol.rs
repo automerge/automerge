@@ -154,11 +154,9 @@ impl Key {
 pub struct ActorID(pub String);
 
 impl ActorID {
-    //    pub fn random() -> ActorID {
-    //        ActorID(uuid::Uuid::new_v4().to_string())
-    //    }
     pub fn to_bytes(&self) -> Vec<u8> {
-        // FIXME
+        // FIXME - I should be storing u8 internally - not strings
+        // i need proper error handling for non-hex strings
         hex::decode(&self.0).unwrap()
     }
 
@@ -286,6 +284,26 @@ impl PrimitiveValue {
                 Some(PrimitiveValue::Timestamp(*f as i64))
             }
             _ => val,
+        }
+    }
+
+    pub fn adjust(self, datatype: DataType) -> PrimitiveValue {
+        match datatype {
+            DataType::Counter => {
+                if let Some(n) = self.to_i64() {
+                    PrimitiveValue::Counter(n)
+                } else {
+                    self
+                }
+            }
+            DataType::Timestamp => {
+                if let Some(n) = self.to_i64() {
+                    PrimitiveValue::Timestamp(n)
+                } else {
+                    self
+                }
+            }
+            _ => self,
         }
     }
 

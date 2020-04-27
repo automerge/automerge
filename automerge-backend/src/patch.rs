@@ -283,7 +283,7 @@ pub enum DiffEdit {
     Remove { index: usize },
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffValue {
     pub(crate) value: PrimitiveValue,
