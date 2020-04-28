@@ -263,11 +263,14 @@ impl<'a> IntoIterator for &'a Clock {
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum PrimitiveValue {
     Str(String),
-    Number(f64),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    F32(f32),
     Counter(i64),
     Timestamp(i64),
     Boolean(bool),
@@ -276,13 +279,9 @@ pub enum PrimitiveValue {
 
 impl PrimitiveValue {
     pub fn from(val: Option<PrimitiveValue>, datatype: Option<DataType>) -> Option<PrimitiveValue> {
-        match (&val, datatype) {
-            (Some(PrimitiveValue::Number(f)), Some(DataType::Counter)) => {
-                Some(PrimitiveValue::Counter(*f as i64))
-            }
-            (Some(PrimitiveValue::Number(f)), Some(DataType::Timestamp)) => {
-                Some(PrimitiveValue::Timestamp(*f as i64))
-            }
+        match datatype {
+            Some(DataType::Counter) => Some(PrimitiveValue::Counter(val?.to_i64()?)),
+            Some(DataType::Timestamp) => Some(PrimitiveValue::Timestamp(val?.to_i64()?)),
             _ => val,
         }
     }
@@ -309,7 +308,10 @@ impl PrimitiveValue {
 
     pub fn to_i64(&self) -> Option<i64> {
         match self {
-            PrimitiveValue::Number(n) => Some(*n as i64),
+            PrimitiveValue::Int(n) => Some(*n),
+            PrimitiveValue::Uint(n) => Some(*n as i64),
+            PrimitiveValue::F32(n) => Some(*n as i64),
+            PrimitiveValue::F64(n) => Some(*n as i64),
             PrimitiveValue::Counter(n) => Some(*n),
             PrimitiveValue::Timestamp(n) => Some(*n),
             _ => None,
@@ -435,13 +437,9 @@ pub struct OpRequest {
 
 impl OpRequest {
     pub fn primitive_value(&self) -> PrimitiveValue {
-        match (&self.value, self.datatype) {
-            (Some(PrimitiveValue::Number(n)), Some(DataType::Counter)) => {
-                PrimitiveValue::Counter(*n as i64)
-            }
-            (Some(PrimitiveValue::Number(n)), Some(DataType::Timestamp)) => {
-                PrimitiveValue::Timestamp(*n as i64)
-            }
+        match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
+            (Some(n), Some(DataType::Counter)) => PrimitiveValue::Counter(n),
+            (Some(n), Some(DataType::Timestamp)) => PrimitiveValue::Timestamp(n),
             _ => self.value.clone().unwrap_or(PrimitiveValue::Null),
         }
     }

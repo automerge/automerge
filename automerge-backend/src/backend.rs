@@ -181,9 +181,7 @@ impl Backend {
         let undo_pos = self.undo_pos;
 
         if undo_pos < 1 || self.undo_stack.len() < undo_pos {
-            return Err(AutomergeError::InvalidChangeRequest(
-                "Cannot undo: there is nothing to be undone".to_string(),
-            ));
+            return Err(AutomergeError::NoUndo);
         }
 
         let mut undo_ops = self.undo_stack.get(undo_pos - 1).unwrap().clone();
@@ -226,10 +224,7 @@ impl Backend {
         request: &ChangeRequest,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
-        let mut redo_ops = self
-            .redo_stack
-            .pop()
-            .ok_or_else(|| AutomergeError::InvalidChangeRequest("no redo ops".to_string()))?;
+        let mut redo_ops = self.redo_stack.pop().ok_or(AutomergeError::NoRedo)?;
 
         let operations = redo_ops
             .drain(0..)
@@ -477,7 +472,6 @@ impl Backend {
     }
 
     pub fn history(&self) -> Vec<&Change> {
-        // FIXME
         self.states.history.iter().map(|rc| rc.as_ref()).collect()
     }
 

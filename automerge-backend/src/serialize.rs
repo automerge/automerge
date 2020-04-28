@@ -43,6 +43,58 @@ impl<'de> Deserialize<'de> for ObjectID {
     }
 }
 
+impl<'de> Deserialize<'de> for PrimitiveValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PrimitiveValueVisitor;
+        impl<'de> Visitor<'de> for PrimitiveValueVisitor {
+            type Value = PrimitiveValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number, string, bool, or null")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<PrimitiveValue, E>
+            where
+                E: de::Error,
+            {
+                Ok(PrimitiveValue::Boolean(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<PrimitiveValue, E>
+            where
+                E: de::Error,
+            {
+                Ok(PrimitiveValue::Uint(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<PrimitiveValue, E>
+            where
+                E: de::Error,
+            {
+                Ok(PrimitiveValue::Int(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<PrimitiveValue, E>
+            where
+                E: de::Error,
+            {
+                Ok(PrimitiveValue::F64(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<PrimitiveValue, E>
+            where
+                E: de::Error,
+            {
+                Ok(PrimitiveValue::Str(value.to_string()))
+            }
+        }
+        deserializer.deserialize_any(PrimitiveValueVisitor)
+    }
+}
+
 impl<'de> Deserialize<'de> for OpID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -262,18 +314,18 @@ impl<'de> Deserialize<'de> for Operation {
                             .ok_or_else(|| Error::missing_field("value"))?,
                     ),
                     ReqOpType::Inc => match value {
-                        Some(PrimitiveValue::Number(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(PrimitiveValue::Int(n)) => Ok(OpType::Inc(n)),
+                        Some(PrimitiveValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(PrimitiveValue::F64(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(PrimitiveValue::F32(n)) => Ok(OpType::Inc(n as i64)),
                         Some(PrimitiveValue::Counter(n)) => Ok(OpType::Inc(n)),
+                        Some(PrimitiveValue::Timestamp(n)) => Ok(OpType::Inc(n)),
                         Some(PrimitiveValue::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }
                         Some(PrimitiveValue::Boolean(b)) => {
                             Err(Error::invalid_value(Unexpected::Bool(b), &"a number"))
                         }
-                        Some(PrimitiveValue::Timestamp(_)) => Err(Error::invalid_value(
-                            Unexpected::Other("timestamp"),
-                            &"a number",
-                        )),
                         Some(PrimitiveValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }

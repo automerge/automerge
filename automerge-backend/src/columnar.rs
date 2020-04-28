@@ -378,40 +378,52 @@ impl<'a> Iterator for ValueIterator<'a> {
             VALUE_TYPE_FALSE => Some(PrimitiveValue::Boolean(false)),
             VALUE_TYPE_TRUE => Some(PrimitiveValue::Boolean(true)),
             v if v % 16 == VALUE_TYPE_COUNTER => {
-                let _len = v >> 4; // FIXME - should confirm this length
-                let val = self.val_raw.read::<i64>("").ok()?;
+                let len = v >> 4;
+                let val = self.val_raw.read().ok()?;
+                if len != self.val_raw.last_read {
+                    return None;
+                }
                 Some(PrimitiveValue::Counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
-                let _len = v >> 4; // FIXME - should confirm this length
-                let val = self.val_raw.read::<i64>("").ok()?;
+                let len = v >> 4;
+                let val = self.val_raw.read().ok()?;
+                if len != self.val_raw.last_read {
+                    return None;
+                }
                 Some(PrimitiveValue::Timestamp(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_UINT => {
-                let _len = v >> 4; // FIXME - should confirm this length
-                let val = self.val_raw.read::<u64>("").ok()?;
-                Some(PrimitiveValue::Number(val as f64))
+                let len = v >> 4;
+                let val = self.val_raw.read().ok()?;
+                if len != self.val_raw.last_read {
+                    return None;
+                }
+                Some(PrimitiveValue::Uint(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_INT => {
-                let _len = v >> 4; // FIXME - should confirm this length
-                let val = self.val_raw.read::<i64>("").ok()?;
-                Some(PrimitiveValue::Number(val as f64))
+                let len = v >> 4;
+                let val = self.val_raw.read().ok()?;
+                if len != self.val_raw.last_read {
+                    return None;
+                }
+                Some(PrimitiveValue::Int(val))
             }
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
-                let data = self.val_raw.read_bytes(len, "raw_val_utf8").ok()?;
+                let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(&data).ok()?;
                 Some(PrimitiveValue::Str(s.to_string()))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
-                let _data = self.val_raw.read_bytes(len, "raw_val_bytes").ok()?;
+                let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
                 //Some((PrimitiveValue::Bytes(data))
             }
             v if v % 16 >= VALUE_TYPE_MIN_UNKNOWN && v % 16 <= VALUE_TYPE_MAX_UNKNOWN => {
                 let len = v >> 4;
-                let _data = self.val_raw.read_bytes(len, "raw_unknown").ok()?;
+                let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
                 //Some((PrimitiveValue::Bytes(data))
             }
@@ -419,12 +431,12 @@ impl<'a> Iterator for ValueIterator<'a> {
                 let len = v >> 4;
                 if len == 4 {
                     // confirm only 4 bytes read
-                    let num: f32 = self.val_raw.read("f32").ok()?;
-                    Some(PrimitiveValue::Number(num as f64))
+                    let num: f32 = self.val_raw.read().ok()?;
+                    Some(PrimitiveValue::F32(num))
                 } else if len == 8 {
                     // confirm only 8 bytes read
-                    let num = self.val_raw.read("f64").ok()?;
-                    Some(PrimitiveValue::Number(num))
+                    let num = self.val_raw.read().ok()?;
+                    Some(PrimitiveValue::F64(num))
                 } else {
                     // bad size of float
                     None
@@ -584,19 +596,22 @@ impl ValEncoder {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP)
             }
-            PrimitiveValue::Number(n) => {
-                if *n < 0.0 {
-                    let len = (*n as i64).encode(&mut self.raw).unwrap();
-                    self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
-                } else {
-                    let len = (*n as u64).encode(&mut self.raw).unwrap();
-                    self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
-                }
+            PrimitiveValue::Int(n) => {
+                let len = n.encode(&mut self.raw).unwrap();
+                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
+            }
+            PrimitiveValue::Uint(n) => {
+                let len = n.encode(&mut self.raw).unwrap();
+                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
+            }
+            PrimitiveValue::F32(n) => {
+                let len = (*n).encode(&mut self.raw).unwrap();
+                self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
+            }
+            PrimitiveValue::F64(n) => {
+                let len = (*n).encode(&mut self.raw).unwrap();
+                self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             } /*
-              PrimitiveValue::Int(n) => { }
-              PrimitiveValue::UInt(n) => { }
-              PrimitiveValue::F32(n) => { }
-              PrimitiveValue::F64(n) => { }
               PrimitiveValue::Unknown(num,bytes) => {
                   let len = bytes.len();
                   self.raw.extend(bytes);
@@ -814,8 +829,7 @@ impl ColumnEncoder {
                 Action::Set
             }
             OpType::Inc(val) => {
-                // FIXME - should be int or uint
-                self.val.append_value(&PrimitiveValue::Number(*val as f64));
+                self.val.append_value(&PrimitiveValue::Int(*val));
                 self.chld.append_null();
                 Action::Inc
             }
@@ -996,7 +1010,7 @@ mod tests {
                 .with(&actor3, 1000),
             operations: vec![
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Number(10.0)),
+                    action: OpType::Set(PrimitiveValue::F64(10.0)),
                     key: key1.clone(),
                     obj: obj1.clone(),
                     insert,

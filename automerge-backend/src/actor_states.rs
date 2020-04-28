@@ -68,8 +68,7 @@ impl ActorStates {
             if change.as_ref() == c.as_ref() {
                 return Ok(None);
             } else {
-                // FIXME - this is the wrong error
-                return Err(AutomergeError::InvalidChangeRequest(
+                return Err(AutomergeError::DivergentChange(
                     "Invalid reuse of sequence number for actor".to_string(),
                 ));
             }

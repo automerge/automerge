@@ -14,34 +14,41 @@ fn err(s: &str) -> AutomergeError {
 #[derive(Clone)]
 pub(crate) struct Decoder<'a> {
     pub offset: usize,
+    pub last_read: usize,
     buf: &'a [u8],
 }
 
 impl<'a> Decoder<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
-        Decoder { offset: 0, buf }
+        Decoder {
+            offset: 0,
+            last_read: 0,
+            buf,
+        }
     }
 
-    pub fn read<T: Decodable + Debug>(&mut self, name: &str) -> Result<T, AutomergeError> {
+    pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, AutomergeError> {
         let mut new_buf = &self.buf[..];
-        let val = T::decode::<&[u8]>(&mut new_buf).ok_or_else(|| err(name))?;
+        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::DecodeFailed)?;
         let delta = self.buf.len() - new_buf.len();
         if delta == 0 {
             Err(err("buffer size didnt change..."))
         } else {
             self.buf = new_buf;
+            self.last_read = delta;
             self.offset += delta;
             Ok(val)
         }
     }
 
-    pub fn read_bytes(&mut self, index: usize, name: &str) -> Result<&'a [u8], AutomergeError> {
+    pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], AutomergeError> {
         let buf = &self.buf[..];
         if buf.len() < index {
-            Err(err(name))
+            Err(AutomergeError::DecodeFailed)
         } else {
             let head = &buf[0..index];
             self.buf = &buf[index..];
+            self.last_read = index;
             self.offset += index;
             Ok(head)
         }
@@ -119,7 +126,7 @@ impl<'a> Iterator for BooleanDecoder<'a> {
             if self.decoder.done() && self.count == 0 {
                 return Some(false);
             }
-            self.count = self.decoder.read("bool_count").unwrap_or_default();
+            self.count = self.decoder.read().unwrap_or_default();
             self.last_value = !self.last_value;
         }
         self.count -= 1;
@@ -321,10 +328,10 @@ where
             if self.decoder.done() {
                 return Some(None);
             }
-            match self.decoder.read("RLE_count") {
+            match self.decoder.read() {
                 Ok(count) if count > 0 => {
                     self.count = count;
-                    self.last_value = self.decoder.read("RLE_val").ok();
+                    self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
                 Ok(count) if count < 0 => {
@@ -332,7 +339,7 @@ where
                     self.literal = true;
                 }
                 _ => {
-                    self.count = self.decoder.read("RLE_count2").unwrap_or_default();
+                    self.count = self.decoder.read().unwrap_or_default();
                     self.last_value = None;
                     self.literal = false;
                 }
@@ -340,7 +347,7 @@ where
         }
         self.count -= 1;
         if self.literal {
-            Some(self.decoder.read("RLE_literal").ok())
+            Some(self.decoder.read().ok())
         } else {
             Some(self.last_value.clone())
         }
@@ -565,6 +572,22 @@ impl Encodable for Option<String> {
 impl Encodable for u64 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         Ok(leb128::write::unsigned(buf, *self)?)
+    }
+}
+
+impl Encodable for f64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.to_le_bytes();
+        buf.write_all(&bytes)?;
+        Ok(bytes.len())
+    }
+}
+
+impl Encodable for f32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.to_le_bytes();
+        buf.write_all(&bytes)?;
+        Ok(bytes.len())
     }
 }
 
