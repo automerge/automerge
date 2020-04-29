@@ -17,6 +17,7 @@ sha2 = "^0.8.1"
 hex = "^0.4.2"
 rand = { version = "^0.7.3", features=["wasm-bindgen"] }
 leb128 = "^0.2.4"
+maplit = "^1.0.2"
 
 [dependencies.web-sys]
 version = "0.3"

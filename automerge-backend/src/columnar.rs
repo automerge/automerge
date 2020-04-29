@@ -2,8 +2,7 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::error::AutomergeError;
 use crate::protocol::{
-    ActorID, Change, Clock, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation,
-    PrimitiveValue,
+    ActorID, Change, Clock, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
 };
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
@@ -370,20 +369,20 @@ impl<'a> Iterator for PredIterator<'a> {
 }
 
 impl<'a> Iterator for ValueIterator<'a> {
-    type Item = PrimitiveValue;
-    fn next(&mut self) -> Option<PrimitiveValue> {
+    type Item = Value;
+    fn next(&mut self) -> Option<Value> {
         let val_type = self.val_len.next()??;
         match val_type {
-            VALUE_TYPE_NULL => Some(PrimitiveValue::Null),
-            VALUE_TYPE_FALSE => Some(PrimitiveValue::Boolean(false)),
-            VALUE_TYPE_TRUE => Some(PrimitiveValue::Boolean(true)),
+            VALUE_TYPE_NULL => Some(Value::Null),
+            VALUE_TYPE_FALSE => Some(Value::Boolean(false)),
+            VALUE_TYPE_TRUE => Some(Value::Boolean(true)),
             v if v % 16 == VALUE_TYPE_COUNTER => {
                 let len = v >> 4;
                 let val = self.val_raw.read().ok()?;
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(PrimitiveValue::Counter(val))
+                Some(Value::Counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
                 let len = v >> 4;
@@ -391,7 +390,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(PrimitiveValue::Timestamp(val))
+                Some(Value::Timestamp(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_UINT => {
                 let len = v >> 4;
@@ -399,7 +398,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(PrimitiveValue::Uint(val))
+                Some(Value::Uint(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_INT => {
                 let len = v >> 4;
@@ -407,36 +406,36 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(PrimitiveValue::Int(val))
+                Some(Value::Int(val))
             }
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(&data).ok()?;
-                Some(PrimitiveValue::Str(s.to_string()))
+                Some(Value::Str(s.to_string()))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
                 let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
-                //Some((PrimitiveValue::Bytes(data))
+                //Some((Value::Bytes(data))
             }
             v if v % 16 >= VALUE_TYPE_MIN_UNKNOWN && v % 16 <= VALUE_TYPE_MAX_UNKNOWN => {
                 let len = v >> 4;
                 let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
-                //Some((PrimitiveValue::Bytes(data))
+                //Some((Value::Bytes(data))
             }
             v if v % 16 == VALUE_TYPE_IEEE754 => {
                 let len = v >> 4;
                 if len == 4 {
                     // confirm only 4 bytes read
                     let num: f32 = self.val_raw.read().ok()?;
-                    Some(PrimitiveValue::F32(num))
+                    Some(Value::F32(num))
                 } else if len == 8 {
                     // confirm only 8 bytes read
                     let num = self.val_raw.read().ok()?;
-                    Some(PrimitiveValue::F64(num))
+                    Some(Value::F64(num))
                 } else {
                     // bad size of float
                     None
@@ -454,13 +453,12 @@ impl<'a> Iterator for KeyIterator<'a> {
     type Item = Key;
     fn next(&mut self) -> Option<Key> {
         match (self.actor.next()?, self.ctr.next()?, self.str.next()?) {
-            (None, None, Some(string)) => Some(Key(string)),
-            (Some(0), Some(0), None) => Some(Key("_head".to_string())),
+            (None, None, Some(string)) => Some(Key::Map(string)),
+            (Some(0), Some(0), None) => Some(Key::head()),
             (Some(actor), Some(ctr), None) => {
                 let actor_bytes = self.actors.get(actor)?;
                 let actor_id = ActorID::from_bytes(actor_bytes);
-                let op_id = OpID::new(ctr, &actor_id);
-                Some(op_id.to_key())
+                Some(OpID(ctr, actor_id.0).into())
             }
             _ => None,
         }
@@ -570,49 +568,49 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &PrimitiveValue) {
+    fn append_value(&mut self, val: &Value) {
         match val {
-            PrimitiveValue::Null => self.len.append_value(VALUE_TYPE_NULL),
-            PrimitiveValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
-            PrimitiveValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            PrimitiveValue::Str(s) => {
+            Value::Null => self.len.append_value(VALUE_TYPE_NULL),
+            Value::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
+            Value::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            Value::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8)
             }
             /*
-            PrimitiveValue::Bytes(bytes) => {
+            Value::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES)
             },
             */
-            PrimitiveValue::Counter(count) => {
+            Value::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER)
             }
-            PrimitiveValue::Timestamp(time) => {
+            Value::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP)
             }
-            PrimitiveValue::Int(n) => {
+            Value::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
             }
-            PrimitiveValue::Uint(n) => {
+            Value::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
             }
-            PrimitiveValue::F32(n) => {
+            Value::F32(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             }
-            PrimitiveValue::F64(n) => {
+            Value::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             } /*
-              PrimitiveValue::Unknown(num,bytes) => {
+              Value::Unknown(num,bytes) => {
                   let len = bytes.len();
                   self.raw.extend(bytes);
                   self.len.append_value(len << 4 | num)
@@ -652,20 +650,20 @@ impl KeyEncoder {
     }
 
     fn append(&mut self, key: &Key, actors: &mut Vec<ActorID>) {
-        match key.as_element_id().ok() {
-            None => {
+        match &key {
+            Key::Map(s) => {
                 self.actor.append_null();
                 self.ctr.append_null();
-                self.str.append_value(key.0.clone());
+                self.str.append_value(s.clone());
             }
-            Some(ElementID::Head) => {
+            Key::Seq(ElementID::Head) => {
                 self.actor.append_value(0);
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Some(ElementID::ID(OpID(ctr, actor))) => {
+            Key::Seq(ElementID::ID(OpID(ctr, actor))) => {
                 self.actor.append_value(map_string(&actor, actors));
-                self.ctr.append_value(ctr);
+                self.ctr.append_value(*ctr);
                 self.str.append_null();
             }
         }
@@ -829,7 +827,7 @@ impl ColumnEncoder {
                 Action::Set
             }
             OpType::Inc(val) => {
-                self.val.append_value(&PrimitiveValue::Int(*val));
+                self.val.append_value(&Value::Int(*val));
                 self.chld.append_null();
                 Action::Inc
             }
@@ -991,12 +989,12 @@ mod tests {
         let obj1 = ObjectID::ID(opid1.clone());
         let obj2 = ObjectID::Root;
         let obj3 = ObjectID::ID(opid4.clone());
-        let key1 = Key("field1".into());
-        let key2 = Key("field2".into());
-        let key3 = Key("field3".into());
-        let head = Key("_head".into());
-        let keyseq1 = Key("19@deadbeefdeadbeef".into());
-        let keyseq2 = Key("12@feeddefaff".into());
+        let key1 = Key::Map("field1".into());
+        let key2 = Key::Map("field2".into());
+        let key3 = Key::Map("field3".into());
+        let head = Key::head();
+        let keyseq1 = Key::from(&opid1);
+        let keyseq2 = Key::from(&opid2);
         let insert = false;
         let change1 = Change {
             start_op: 123,
@@ -1010,28 +1008,28 @@ mod tests {
                 .with(&actor3, 1000),
             operations: vec![
                 Operation {
-                    action: OpType::Set(PrimitiveValue::F64(10.0)),
+                    action: OpType::Set(Value::F64(10.0)),
                     key: key1.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Counter(-11)),
+                    action: OpType::Set(Value::Counter(-11)),
                     key: key2.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Timestamp(20)),
+                    action: OpType::Set(Value::Timestamp(20)),
                     key: key3.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Str("some value".into())),
+                    action: OpType::Set(Value::Str("some value".into())),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
@@ -1045,14 +1043,14 @@ mod tests {
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Str("val1".into())),
+                    action: OpType::Set(Value::Str("val1".into())),
                     key: head.clone(),
                     obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(PrimitiveValue::Str("val2".into())),
+                    action: OpType::Set(Value::Str("val2".into())),
                     key: head.clone(),
                     obj: obj3.clone(),
                     insert: true,

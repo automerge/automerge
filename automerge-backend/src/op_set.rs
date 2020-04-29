@@ -11,7 +11,7 @@ use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use crate::patch::{Diff, DiffEdit, PendingDiff};
+use crate::patch::{Diff, DiffEdit, DiffKey, PendingDiff};
 use crate::protocol::{Clock, Key, ObjType, ObjectID, OpID, UndoOperation};
 use core::cmp::max;
 use std::collections::HashMap;
@@ -58,12 +58,14 @@ impl OpSet {
         let mut all_undo_ops = Vec::new();
         let mut new_objects: HashSet<ObjectID> = HashSet::new();
         let mut diffs = Vec::new();
+        println!("--------------------!1");
         for op in ops.drain(0..) {
             if op.is_make() {
-                new_objects.insert(op.id.to_object_id());
+                new_objects.insert(ObjectID::from(&op.id));
             }
             let use_undo = undoable && !(new_objects.contains(&op.obj));
 
+            println!("apply op");
             let (diff, undo_ops) = self.apply_op(op)?;
 
             diffs.push(diff);
@@ -121,6 +123,9 @@ impl OpSet {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
+            println!("op={:?}",op);
+            println!("ops={:?}",ops);
+            println!("overwritten={:?}",overwritten_ops);
             let after = !ops.is_empty();
             let undo_ops = op.generate_undos(&overwritten_ops);
             self.unlink(&op, &overwritten_ops)?;
@@ -192,7 +197,7 @@ impl OpSet {
                     PendingDiff::SeqSet(op) => {
                         if let Some((path, ops)) = self.extract(&op)? {
                             diff.expand_path(&path, self)?.add_values(
-                                &op.operation_key(),
+                                &DiffKey::from(&op.operation_key()),
                                 &ops,
                                 self,
                             )?;
@@ -202,20 +207,23 @@ impl OpSet {
                         if let Some((path, ops)) = self.extract(&op)? {
                             let node = diff.expand_path(&path, self)?;
                             node.add_insert(*index);
-                            node.add_values(&op.operation_key(), &ops, self)?;
+                            node.add_values(&DiffKey::from(&op.operation_key()), &ops, self)?;
                         }
                     }
                     PendingDiff::SeqRemove(op, index) => {
                         if let Some((path, ops)) = self.extract(&op)? {
                             let node = diff.expand_path(&path, self)?;
                             node.add_remove(*index);
-                            node.add_values(&op.operation_key(), &ops, self)?;
+                            node.add_values(&DiffKey::from(&op.operation_key()), &ops, self)?;
                         }
                     }
                     PendingDiff::Map(op) => {
                         if let Some((path, ops)) = self.extract(&op)? {
-                            diff.expand_path(&path, self)?
-                                .add_values(&op.key, &ops, self)?;
+                            diff.expand_path(&path, self)?.add_values(
+                                &DiffKey::from(&op.key),
+                                &ops,
+                                self,
+                            )?;
                         }
                     }
                     PendingDiff::Noop => {
@@ -277,11 +285,12 @@ impl OpSet {
             obj_type: object.obj_type,
         };
         for (key, ops) in object.props.iter() {
+            let diffkey = key.into();
             for op in ops.iter() {
                 if let Some(child_id) = op.child() {
-                    diff.add_child(&key, &op.id, self.construct_object(&child_id)?);
+                    diff.add_child(&diffkey, &op.id, self.construct_object(&child_id)?);
                 } else {
-                    diff.add_value(&key, &op, self)?;
+                    diff.add_value(&diffkey, &op, self)?;
                 }
             }
         }
@@ -304,12 +313,13 @@ impl OpSet {
 
         for opid in object.seq.into_iter() {
             max_counter = max(max_counter, opid.counter());
-            if let Some(ops) = object.props.get(&opid.to_key()) {
+            let key = opid.into(); // FIXME - something is wrong here
+            if let Some(ops) = object.props.get(&key) {
                 if !ops.is_empty() {
                     diff.edits
                         .get_or_insert_with(Vec::new)
                         .push(DiffEdit::Insert { index });
-                    let key = Key(index.to_string());
+                    let key = DiffKey::Seq(index);
                     for op in ops.iter() {
                         if let Some(child_id) = op.child() {
                             diff.add_child(&key, &op.id, self.construct_object(&child_id)?);

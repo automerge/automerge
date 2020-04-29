@@ -7,18 +7,12 @@
 //! console.log(JSON.stringify(changes, null, 4))
 //! ```
 //!
-//! The output of this can then be deserialized like so
-//!
-//! ```rust,no_run
-//! # use automerge_backend::Change;
-//! let changes_str = "<paste the contents of the output here>";
-//! let changes: Vec<Change> = serde_json::from_str(changes_str).unwrap();
-//! ```
+
 use core::cmp::max;
 use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, PartialOrd};
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::convert::{Infallible, TryFrom};
 use std::fmt;
 use std::hash::Hash;
 use std::str::FromStr;
@@ -44,6 +38,12 @@ pub enum ObjectID {
     Root,
 }
 
+impl From<&OpID> for ObjectID {
+    fn from(o: &OpID) -> Self {
+        ObjectID::ID(o.clone())
+    }
+}
+
 impl FromStr for ObjectID {
     type Err = AutomergeError;
 
@@ -54,15 +54,6 @@ impl FromStr for ObjectID {
             Ok(ObjectID::ID(id))
         } else {
             Err(AutomergeError::InvalidObjectID(s.to_string()))
-        }
-    }
-}
-
-impl From<&ObjectID> for String {
-    fn from(o: &ObjectID) -> String {
-        match o {
-            ObjectID::ID(OpID(seq, actor)) => format!("{}@{}", seq, actor),
-            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
         }
     }
 }
@@ -97,19 +88,32 @@ impl OpID {
         OpID(seq, actor.0.clone())
     }
 
-    pub fn to_object_id(&self) -> ObjectID {
-        ObjectID::ID(self.clone())
-    }
-
-    pub fn to_key(&self) -> Key {
-        Key(self.to_string())
-    }
-
-    // I think object_id and op_id need to be distinct so there's not a panic here
     pub fn counter(&self) -> u64 {
-        match self {
-            OpID(counter, _) => *counter,
-        }
+        self.0
+    }
+}
+
+impl From<OpID> for ObjectID {
+    fn from(id: OpID) -> Self {
+        ObjectID::ID(id)
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Self {
+        Key::Map(s.into())
+    }
+}
+
+impl From<OpID> for Key {
+    fn from(id: OpID) -> Self {
+        Key::Seq(ElementID::ID(id))
+    }
+}
+
+impl From<&OpID> for Key {
+    fn from(id: &OpID) -> Self {
+        Key::Seq(ElementID::ID(id.clone()))
     }
 }
 
@@ -128,25 +132,51 @@ impl FromStr for OpID {
     }
 }
 
+impl TryFrom<&str> for OpID {
+    type Error = AutomergeError;
+    fn try_from(s: &str) -> Result<Self, AutomergeError> {
+        OpID::from_str(s)
+    }
+}
+
 impl fmt::Display for OpID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            //OpID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
             OpID(seq, actor) => write!(f, "{}@{}", seq, actor),
         }
     }
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Hash, Clone)]
-pub struct Key(pub String);
+impl From<&OpID> for String {
+    fn from(id: &OpID) -> Self {
+        format!("{}@{}", id.0, id.1)
+    }
+}
+
+#[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
+#[serde(untagged)]
+pub enum Key {
+    Map(String),
+    Seq(ElementID),
+}
 
 impl Key {
+    pub fn head() -> Key {
+        Key::Seq(ElementID::Head)
+    }
+
     pub fn as_element_id(&self) -> Result<ElementID, AutomergeError> {
-        ElementID::from_str(&self.0).map_err(|_| AutomergeError::InvalidKey(format!("Attempted to link, set, delete, or increment an object in a list with invalid element ID {:?}", self.0)))
+        match self {
+            Key::Map(_) => Err(AutomergeError::MapKeyInSeq),
+            Key::Seq(eid) => Ok(eid.clone()),
+        }
     }
 
     pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
-        OpID::from_str(&self.0)
+        match self.as_element_id()? {
+            ElementID::ID(id) => Ok(id),
+            ElementID::Head => Err(AutomergeError::HeadToOpID),
+        }
     }
 }
 
@@ -162,6 +192,12 @@ impl ActorID {
 
     pub fn from_bytes(bytes: &[u8]) -> ActorID {
         ActorID(hex::encode(bytes))
+    }
+}
+
+impl From<&str> for ActorID {
+    fn from(s: &str) -> Self {
+        ActorID(s.into())
     }
 }
 
@@ -185,6 +221,14 @@ impl Default for Clock {
 impl Clock {
     pub fn empty() -> Clock {
         Clock(HashMap::new())
+    }
+
+    pub fn from(ids: &[(&ActorID, u64)]) -> Clock {
+        let mut result = Clock::empty();
+        for (act, seq) in ids.iter() {
+            result.set(act, *seq);
+        }
+        result
     }
 
     pub fn with(&self, actor_id: &ActorID, seq: u64) -> Clock {
@@ -265,7 +309,7 @@ impl<'a> IntoIterator for &'a Clock {
 
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
-pub enum PrimitiveValue {
+pub enum Value {
     Str(String),
     Int(i64),
     Uint(u64),
@@ -277,27 +321,27 @@ pub enum PrimitiveValue {
     Null,
 }
 
-impl PrimitiveValue {
-    pub fn from(val: Option<PrimitiveValue>, datatype: Option<DataType>) -> Option<PrimitiveValue> {
+impl Value {
+    pub fn from(val: Option<Value>, datatype: Option<DataType>) -> Option<Value> {
         match datatype {
-            Some(DataType::Counter) => Some(PrimitiveValue::Counter(val?.to_i64()?)),
-            Some(DataType::Timestamp) => Some(PrimitiveValue::Timestamp(val?.to_i64()?)),
+            Some(DataType::Counter) => Some(Value::Counter(val?.to_i64()?)),
+            Some(DataType::Timestamp) => Some(Value::Timestamp(val?.to_i64()?)),
             _ => val,
         }
     }
 
-    pub fn adjust(self, datatype: DataType) -> PrimitiveValue {
+    pub fn adjust(self, datatype: DataType) -> Value {
         match datatype {
             DataType::Counter => {
                 if let Some(n) = self.to_i64() {
-                    PrimitiveValue::Counter(n)
+                    Value::Counter(n)
                 } else {
                     self
                 }
             }
             DataType::Timestamp => {
                 if let Some(n) = self.to_i64() {
-                    PrimitiveValue::Timestamp(n)
+                    Value::Timestamp(n)
                 } else {
                     self
                 }
@@ -308,14 +352,32 @@ impl PrimitiveValue {
 
     pub fn to_i64(&self) -> Option<i64> {
         match self {
-            PrimitiveValue::Int(n) => Some(*n),
-            PrimitiveValue::Uint(n) => Some(*n as i64),
-            PrimitiveValue::F32(n) => Some(*n as i64),
-            PrimitiveValue::F64(n) => Some(*n as i64),
-            PrimitiveValue::Counter(n) => Some(*n),
-            PrimitiveValue::Timestamp(n) => Some(*n),
+            Value::Int(n) => Some(*n),
+            Value::Uint(n) => Some(*n as i64),
+            Value::F32(n) => Some(*n as i64),
+            Value::F64(n) => Some(*n as i64),
+            Value::Counter(n) => Some(*n),
+            Value::Timestamp(n) => Some(*n),
             _ => None,
         }
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Str(s.into())
+    }
+}
+
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Int(n)
+    }
+}
+
+impl From<u64> for Value {
+    fn from(n: u64) -> Self {
+        Value::Uint(n)
     }
 }
 
@@ -333,11 +395,8 @@ impl ElementID {
         }
     }
 
-    pub fn as_key(&self) -> Key {
-        match self {
-            ElementID::Head => Key("_head".to_string()),
-            ElementID::ID(opid) => Key(opid.to_string()),
-        }
+    pub fn into_key(self) -> Key {
+        Key::Seq(self)
     }
 
     pub fn not_head(&self) -> bool {
@@ -404,11 +463,13 @@ pub enum RequestKey {
     Num(u64),
 }
 
+/*
 impl RequestKey {
     pub fn to_key(&self) -> Key {
         Key(format!("{:?}", self))
     }
 }
+*/
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -429,18 +490,18 @@ pub struct OpRequest {
     pub obj: String,
     pub key: RequestKey,
     pub child: Option<String>,
-    pub value: Option<PrimitiveValue>,
+    pub value: Option<Value>,
     pub datatype: Option<DataType>,
     #[serde(default = "helper::make_false")]
     pub insert: bool,
 }
 
 impl OpRequest {
-    pub fn primitive_value(&self) -> PrimitiveValue {
+    pub fn primitive_value(&self) -> Value {
         match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
-            (Some(n), Some(DataType::Counter)) => PrimitiveValue::Counter(n),
-            (Some(n), Some(DataType::Timestamp)) => PrimitiveValue::Timestamp(n),
-            _ => self.value.clone().unwrap_or(PrimitiveValue::Null),
+            (Some(n), Some(DataType::Counter)) => Value::Counter(n),
+            (Some(n), Some(DataType::Timestamp)) => Value::Timestamp(n),
+            _ => self.value.clone().unwrap_or(Value::Null),
         }
     }
 
@@ -453,21 +514,21 @@ impl OpRequest {
         let insert = self.insert;
         let del = self.action == ReqOpType::Del;
         match key {
-            RequestKey::Str(s) => Ok(Key(s.clone())),
+            RequestKey::Str(s) => Ok(Key::Map(s.clone())),
             RequestKey::Num(n) => {
                 let n: usize = *n as usize;
                 (if insert {
                     if n == 0 {
                         ids.insert_index(0, id.clone());
-                        Some(Key("_head".to_string()))
+                        Some(Key::head())
                     } else {
                         ids.insert_index(n, id.clone());
-                        ids.key_of(n - 1).map(|i| i.to_key())
+                        ids.key_of(n - 1).map(|i| i.into())
                     }
                 } else if del {
-                    ids.remove_index(n).map(|k| k.to_key())
+                    ids.remove_index(n).map(|k| k.into())
                 } else {
-                    ids.key_of(n).map(|i| i.to_key())
+                    ids.key_of(n).map(|i| i.into())
                 })
                 .ok_or(AutomergeError::IndexOutOfBounds(n))
             }
@@ -498,7 +559,7 @@ pub enum OpType {
     Del,
     Link(ObjectID),
     Inc(i64),
-    Set(PrimitiveValue),
+    Set(Value),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -530,6 +591,46 @@ pub struct Operation {
 }
 
 impl Operation {
+    pub fn set(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
+        Operation {
+            action: OpType::Set(value),
+            obj,
+            key,
+            insert: false,
+            pred,
+        }
+    }
+
+    pub fn insert(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
+        Operation {
+            action: OpType::Set(value),
+            obj,
+            key,
+            insert: true,
+            pred,
+        }
+    }
+
+    pub fn inc(obj: ObjectID, key: Key, value: i64, pred: Vec<OpID>) -> Operation {
+        Operation {
+            action: OpType::Inc(value),
+            obj,
+            key,
+            insert: false,
+            pred,
+        }
+    }
+
+    pub fn del(obj: ObjectID, key: Key, pred: Vec<OpID>) -> Operation {
+        Operation {
+            action: OpType::Del,
+            obj,
+            key,
+            insert: false,
+            pred,
+        }
+    }
+
     pub fn is_make(&self) -> bool {
         self.obj_type().is_some()
     }
@@ -569,8 +670,8 @@ impl Operation {
     pub(crate) fn merge(&mut self, other: Operation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {
-                OpType::Set(PrimitiveValue::Counter(number)) => {
-                    self.action = OpType::Set(PrimitiveValue::Counter(number + delta))
+                OpType::Set(Value::Counter(number)) => {
+                    self.action = OpType::Set(Value::Counter(number + delta))
                 }
                 OpType::Inc(number) => self.action = OpType::Inc(number + delta),
                 _ => {}

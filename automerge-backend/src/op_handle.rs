@@ -4,9 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::protocol::{
-    Change, Key, ObjectID, OpID, OpType, Operation, PrimitiveValue, UndoOperation,
-};
+use crate::protocol::{Change, Key, ObjectID, OpID, OpType, Operation, UndoOperation, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
@@ -62,9 +60,9 @@ impl OpHandle {
             key = field_key
         }
         if let OpType::Make(_) = base_op.action {
-            action = OpType::Link(self.id.to_object_id());
+            action = OpType::Link(ObjectID::from(&self.id));
         }
-        if let OpType::Set(PrimitiveValue::Counter(_)) = base_op.action {
+        if let OpType::Set(Value::Counter(_)) = base_op.action {
             action = OpType::Set(self.adjusted_value());
         }
         UndoOperation {
@@ -74,17 +72,17 @@ impl OpHandle {
         }
     }
 
-    pub fn adjusted_value(&self) -> PrimitiveValue {
+    pub fn adjusted_value(&self) -> Value {
         match &self.action {
-            OpType::Set(PrimitiveValue::Counter(a)) => PrimitiveValue::Counter(a + self.delta),
+            OpType::Set(Value::Counter(a)) => Value::Counter(a + self.delta),
             OpType::Set(val) => val.clone(),
-            _ => PrimitiveValue::Null,
+            _ => Value::Null,
         }
     }
 
     pub fn child(&self) -> Option<ObjectID> {
         match &self.action {
-            OpType::Make(_) => Some(self.id.to_object_id()),
+            OpType::Make(_) => Some(ObjectID::from(&self.id)),
             OpType::Link(obj) => Some(obj.clone()),
             _ => None,
         }
@@ -92,7 +90,7 @@ impl OpHandle {
 
     pub fn operation_key(&self) -> Key {
         if self.insert {
-            self.id.to_key()
+            self.id.clone().into()
         } else {
             self.key.clone()
         }
@@ -101,7 +99,7 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let OpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                if let OpType::Set(PrimitiveValue::Counter(_)) = self.action {
+                if let OpType::Set(Value::Counter(_)) = self.action {
                     self.delta += amount;
                 }
             }

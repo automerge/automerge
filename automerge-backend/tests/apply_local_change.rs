@@ -2,6 +2,7 @@ extern crate automerge_backend;
 use automerge_backend::{ActorID, Backend, Change, ChangeRequest, Clock, Patch};
 use std::str::FromStr;
 
+
 #[test]
 fn test_apply_local_change() {
     let change_request: ChangeRequest = serde_json::from_str(
@@ -412,7 +413,7 @@ fn test_transform_list_indexes_into_element_ids() {
     )
     .unwrap();
     let mut expected_change1: Change = serde_json::from_str(
-        r#" 
+        r#"
         {
             "actor": "8f389df8-fecb-4ddc-9891-02321af3578e",
             "seq": 1,

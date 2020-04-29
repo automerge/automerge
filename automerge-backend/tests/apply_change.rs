@@ -1,181 +1,152 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend, Change, Patch};
+use automerge_backend::{
+    AutomergeError, Backend, Change, Clock, Diff, ObjType, ObjectID,
+    Operation, Patch, Value,
+};
+use maplit::hashmap;
+use std::convert::TryInto;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
-    let change: Change = serde_json::from_str(
-        r#"{
-        "actor": "7b7723af-d9e6-4803-97a4-d467b7693156", 
-        "seq": 1, 
-        "startOp": 1, 
-        "time": 0, 
-        "deps": {}, 
-        "ops": [
-            {
-                "action": "set",
-                "obj": "00000000-0000-0000-0000-000000000000",
-                "key": "bird",
-                "value": "magpie", 
-                "pred": []
-            }
-        ]
-    }"#,
-    )
-    .unwrap();
+    let change = Change {
+        actor_id: "7b7723afd9e6480397a4d467b7693156".into(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Clock::empty(),
+        operations: vec![Operation::set(
+            ObjectID::Root,
+            "bird".into(),
+            "magpie".into(),
+            vec![],
+        )],
+    };
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
-    let expected_patch: Patch = serde_json::from_str(
-        r#"{
-        "version": 1,
-        "clock": {
-            "7b7723af-d9e6-4803-97a4-d467b7693156": 1
-        },
-        "canUndo": false,
-        "canRedo": false,
-        "diffs": {
-            "objectId": "00000000-0000-0000-0000-000000000000", 
-            "type": "map", 
-            "props": {
-                "bird": {
-                    "1@7b7723af-d9e6-4803-97a4-d467b7693156": {"value": "magpie"}
-                }
-            }
-        }
-    }"#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 1,
+        actor: None,
+        seq: None,
+        clock: Clock::empty().with(&"7b7723afd9e6480397a4d467b7693156".into(), 1),
+        can_undo: false,
+        can_redo: false,
+        diffs: Diff {
+            object_id: ObjectID::Root,
+            obj_type: ObjType::Map,
+            edits: None,
+            props: Some(hashmap!( "bird".into() => hashmap!( "1@7b7723afd9e6480397a4d467b7693156".into() => "magpie".into() )))
+        }.into(),
+    };
     assert_eq!(patch, expected_patch)
 }
 
 #[test]
-fn test_increment_key_in_map() {
-    let change1: Change = serde_json::from_str(
-        r#"{
-        "actor": "cdee6963-c166-4645-920b-e8b41a933c2b", 
-        "seq": 1, 
-        "startOp": 1,
-        "time": 0, 
-        "deps": {},
-        "ops": [{
-          "action": "set",
-          "obj": "00000000-0000-0000-0000-000000000000",
-          "key": "counter",
-          "value": 1,
-          "datatype": "counter",
-          "pred": []
-        }]
-    }"#,
-    )
-    .unwrap();
-    let change2: Change = serde_json::from_str(
-        r#"{
-        "actor": "cdee6963-c166-4645-920b-e8b41a933c2b",
-        "seq": 2,
-        "startOp": 2, 
-        "time": 0, 
-        "deps": {}, 
-        "ops": [{
-          "action": "inc",
-          "obj": "00000000-0000-0000-0000-000000000000",
-          "key": "counter",
-          "value": 2,
-          "pred": ["1@cdee6963-c166-4645-920b-e8b41a933c2b"]
-        }]
-    }"#,
-    )
-    .unwrap();
-    let expected_patch: Patch = serde_json::from_str(r#"{
-        "version": 2,
-        "clock": {"cdee6963-c166-4645-920b-e8b41a933c2b": 2}, 
-        "canUndo": false,
-        "canRedo": false,
-        "diffs": {
-            "objectId": "00000000-0000-0000-0000-000000000000",
-            "type": "map",
-            "props": {
-                "counter": {"1@cdee6963-c166-4645-920b-e8b41a933c2b": {"value": 3, "datatype": "counter"}}
+fn test_increment_key_in_map() -> Result<(), AutomergeError> {
+    let change1 = Change {
+        actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Clock::empty(),
+        operations: vec![Operation::set(
+            ObjectID::Root,
+            "counter".into(),
+            Value::Counter(1),
+            vec![],
+        )],
+    };
+    let change2 = Change {
+        actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
+        seq: 2,
+        start_op: 2,
+        time: 2,
+        message: None,
+        deps: Clock::empty(),
+        operations: vec![Operation::inc(
+            ObjectID::Root,
+            "counter".into(),
+            2,
+            vec!["1@cdee6963c1664645920be8b41a933c2b".try_into()?],
+        )],
+    };
+    let expected_patch = Patch {
+        version: 2,
+        actor: None,
+        seq: None,
+        clock: Clock::empty().with(&"cdee6963c1664645920be8b41a933c2b".into(), 2),
+        can_undo: false,
+        can_redo: false,
+        diffs: {
+            Diff {
+                edits: None,
+                object_id: ObjectID::Root,
+                obj_type: ObjType::Map,
+                props: Some(hashmap!(
+                "counter".into() => hashmap!{
+                    "1@cdee6963c1664645920be8b41a933c2b".into() =>  Value::Counter(3).into(),
+                })),
             }
-        }
-    }"#).unwrap();
+            .into()
+        },
+    };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch);
+    Ok(())
 }
 
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-            "actor": "actor1",
-            "seq": 1,
-            "startOp": 1,
-            "time": 0,
-            "deps": {},
-            "ops": [
-                {
-                    "action": "set",
-                    "obj": "00000000-0000-0000-0000-000000000000",
-                    "key": "bird",
-                    "value": "magpie",
-                    "pred": []
-                }
-            ]
-        }
-    "#,
-    )
-    .unwrap();
+    let change1 = Change {
+        actor_id: "ac11".into(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Clock::empty(),
+        operations: vec![Operation::set(
+            ObjectID::Root,
+            "bird".into(),
+            "magpie".into(),
+            vec![],
+        )],
+    };
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-            "actor": "actor2",
-            "seq": 1,
-            "startOp": 2,
-            "time": 0,
-            "deps": {},
-            "ops": [
-                {
-                    "action": "set",
-                    "obj": "00000000-0000-0000-0000-000000000000",
-                    "key": "bird",
-                    "value": "blackbird",
-                    "pred": []
-                }
-            ]
-        }
-    "#,
-    )
-    .unwrap();
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-            "version": 2,
-            "clock": {
-                "actor1": 1,
-                "actor2": 1
-            },
-            "canUndo": false,
-            "canRedo": false,
-            "diffs": {
-                "objectId": "00000000-0000-0000-0000-000000000000",
-                "type": "map",
-                "props": {
-                    "bird": {
-                        "1@actor1": {
-                            "value": "magpie"
-                        },
-                        "2@actor2": {
-                            "value": "blackbird"
-                        }
-                    }
-                }
-            }
-        }
-    "#,
-    )
-    .unwrap();
+    let change2 = Change {
+        actor_id: "ac22".into(),
+        seq: 1,
+        start_op: 2,
+        time: 0,
+        message: None,
+        deps: Clock::empty(),
+        operations: vec![Operation::set(
+            ObjectID::Root,
+            "bird".into(),
+            "blackbird".into(),
+            vec![],
+        )],
+    };
+
+    let expected_patch = Patch {
+        version: 2,
+        actor: None,
+        seq: None,
+        clock: Clock::from(&vec![(&"ac11".into(), 1), (&"ac22".into(), 1)]),
+        can_undo: false,
+        can_redo: false,
+        diffs: Some(Diff {
+            object_id: ObjectID::Root,
+            obj_type: ObjType::Map,
+            edits: None,
+            props: Some(hashmap!( "bird".into() => hashmap!(
+                        "1@ac11".into() => "magpie".into(),
+                        "2@ac22".into() => "blackbird".into(),
+            ))),
+        }),
+    };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();

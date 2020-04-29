@@ -2,9 +2,7 @@ use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::ordered_set::OrderedSet;
-use crate::protocol::{
-    ActorID, Clock, DataType, Key, ObjType, ObjectID, OpID, OpType, PrimitiveValue,
-};
+use crate::protocol::{ActorID, Clock, ElementID, Key, ObjType, ObjectID, OpID, OpType, Value};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -27,7 +25,7 @@ pub(crate) enum PendingDiff {
 //  props: {
 //      "key1": {
 //          "10@abc123":
-//              DiffLink::Link(Diff {
+//              DiffLink::Diff(Diff {
 //                  object_id: 444,
 //                  obj_type: list,
 //                  edits: [ DiffEdit { ... } ],
@@ -36,7 +34,7 @@ pub(crate) enum PendingDiff {
 //          }
 //      "key2": {
 //          "11@abc123":
-//              DiffLink::Val(DiffValue {
+//              DiffLink::Value(DiffValue {
 //                  value: 10,
 //                  datatype: "counter"
 //              }
@@ -44,16 +42,48 @@ pub(crate) enum PendingDiff {
 //      }
 // }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Debug, PartialEq, Clone, Eq, Hash)]
+#[serde(untagged)]
+pub enum DiffKey {
+    Map(String),
+    Seq(usize),
+    ID(ElementID), // FIXME - remove this
+}
+
+impl From<&Key> for DiffKey {
+    fn from(key: &Key) -> Self {
+        match key {
+            Key::Map(s) => DiffKey::Map(s.clone()),
+            Key::Seq(id) => DiffKey::ID(id.clone()),
+        }
+    }
+}
+
+impl From<&str> for DiffKey {
+    fn from(s: &str) -> Self {
+        DiffKey::Map(s.into())
+    }
+}
+
+impl DiffKey {
+    fn into_opid(self) -> Result<OpID, AutomergeError> {
+        match self {
+            DiffKey::ID(ElementID::ID(id)) => Ok(id),
+            _ => Err(AutomergeError::DiffKeyToOpID),
+        }
+    }
+}
+
+#[derive(Deserialize,Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Diff {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub edits: Option<Vec<DiffEdit>>,
-    pub object_id: ObjectID,
+    pub object_id: ObjectID, // FIXME - make this a string
     #[serde(rename = "type")]
     pub obj_type: ObjType,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub props: Option<HashMap<Key, HashMap<OpID, DiffLink>>>,
+    pub props: Option<HashMap<DiffKey, HashMap<String, DiffLink>>>,
 }
 
 impl Diff {
@@ -91,13 +121,16 @@ impl Diff {
         }
     }
 
-    pub(crate) fn add_child(&mut self, key: &Key, opid: &OpID, child: Diff) -> &mut Diff {
+    pub(crate) fn add_child(&mut self, key: &DiffKey, opid: &OpID, child: Diff) -> &mut Diff {
         self.prop_key(key)
-            .insert(opid.clone(), DiffLink::Link(child));
-        self.prop_key(key).get_mut(&opid).unwrap().get_ref()
+            .insert(opid.to_string(), DiffLink::Diff(child));
+        self.prop_key(key)
+            .get_mut(&opid.to_string())
+            .unwrap()
+            .get_ref()
     }
 
-    fn touch(&mut self, key: &Key) {
+    fn touch(&mut self, key: &DiffKey) {
         if self.is_seq() {
             self.props.get_or_insert_with(HashMap::new);
             self.edits.get_or_insert_with(Vec::new);
@@ -111,7 +144,7 @@ impl Diff {
 
     pub(crate) fn add_values(
         &mut self,
-        key: &Key,
+        key: &DiffKey,
         ops: &[OpHandle],
         op_set: &OpSet,
     ) -> Result<&mut Diff, AutomergeError> {
@@ -124,7 +157,7 @@ impl Diff {
         Ok(self)
     }
 
-    fn prop_key(&mut self, key: &Key) -> &mut HashMap<OpID, DiffLink> {
+    fn prop_key(&mut self, key: &DiffKey) -> &mut HashMap<String, DiffLink> {
         self.props
             .get_or_insert_with(HashMap::new)
             .entry(key.clone())
@@ -133,7 +166,7 @@ impl Diff {
 
     pub(crate) fn add_value(
         &mut self,
-        key: &Key,
+        key: &DiffKey,
         op: &OpHandle,
         op_set: &OpSet,
     ) -> Result<&mut Diff, AutomergeError> {
@@ -148,40 +181,19 @@ impl Diff {
 
     pub(crate) fn add_shallow_value(
         &mut self,
-        key: &Key,
+        key: &DiffKey,
         op: &OpHandle,
         op_set: &OpSet,
     ) -> Result<&mut Diff, AutomergeError> {
         Ok(match &op.action {
-            OpType::Set(PrimitiveValue::Counter(_)) => {
-                let id = op.id.clone();
-                let value = DiffLink::Val(DiffValue {
-                    value: op.adjusted_value(),
-                    datatype: DataType::Counter,
-                });
-                self.prop_key(key).insert(id, value);
-                self
-            }
-            OpType::Set(PrimitiveValue::Timestamp(_)) => {
-                let id = op.id.clone();
-                let value = DiffLink::Val(DiffValue {
-                    value: op.adjusted_value(),
-                    datatype: DataType::Timestamp,
-                });
-                self.prop_key(key).insert(id, value);
-                self
-            }
             OpType::Set(_) => {
                 let id = op.id.clone();
-                let value = DiffLink::Val(DiffValue {
-                    value: op.adjusted_value(),
-                    datatype: DataType::Undefined,
-                });
-                self.prop_key(key).insert(id, value);
+                let value = DiffLink::Value(op.adjusted_value()); // FIXME
+                self.prop_key(key).insert(id.to_string(), value);
                 self
             }
             OpType::Make(obj_type) => {
-                let object_id = op.id.to_object_id(); // op.child()
+                let object_id = ObjectID::from(&op.id); // op.child()
                 self.add_child(&key, &op.id, Diff::init(object_id, *obj_type))
             }
             OpType::Link(ref object_id) => {
@@ -201,24 +213,25 @@ impl Diff {
             [] => Ok(self),
             [op, tail @ ..] => {
                 let key = &op.operation_key();
+                let diffkey = key.into();
 
-                if self.prop_key(key).is_empty() {
+                if self.prop_key(&diffkey).is_empty() {
                     if let Some(ops) = op_set.get_field_ops(&op.obj, &key) {
                         for i in ops.iter() {
-                            self.add_shallow_value(key, &i, op_set)?;
+                            self.add_shallow_value(&diffkey, &i, op_set)?;
                         }
                     }
                 }
 
-                self.get_child(key, op)?.expand_path(tail, op_set)
+                self.get_child(&diffkey, op)?.expand_path(tail, op_set)
             }
         }
     }
 
-    fn get_child(&mut self, key: &Key, op: &OpHandle) -> Result<&mut Diff, AutomergeError> {
+    fn get_child(&mut self, key: &DiffKey, op: &OpHandle) -> Result<&mut Diff, AutomergeError> {
         let target = &op.child().unwrap();
         for (_, link) in self.prop_key(&key).iter_mut() {
-            if let DiffLink::Link(ref mut diff) = link {
+            if let DiffLink::Diff(ref mut diff) = link {
                 if &diff.object_id == target {
                     return Ok(diff);
                 }
@@ -230,8 +243,8 @@ impl Diff {
     // constructed diffs are already remapped
     pub(crate) fn already_remapped(&mut self) -> bool {
         if let Some(p) = &self.props {
-            if let Some(key) = p.keys().next() {
-                return key.0.parse::<usize>().is_ok();
+            if let Some(DiffKey::Seq(_)) = p.keys().next() {
+                return true;
             }
         }
         false
@@ -247,11 +260,11 @@ impl Diff {
             //let elemids = op_set.get_elem_ids(&self.object_id)?;
             let elemids = op_set.get_obj(&self.object_id).map(|o| &o.seq)?;
             for (key, keymap) in oldprops.drain() {
-                let key_op = key.to_opid()?;
+                let key_op = key.into_opid()?;
                 let index = elemids.index_of(&key_op).ok_or_else(|| {
                     AutomergeError::MissingElement(self.object_id.clone(), key_op.clone())
                 })?;
-                let new_key = Key(index.to_string());
+                let new_key = DiffKey::Seq(index);
                 newprops.insert(new_key, keymap);
             }
             self.props = Some(newprops);
@@ -260,8 +273,8 @@ impl Diff {
             for (_, keymap) in props.iter_mut() {
                 for (_, link) in keymap.iter_mut() {
                     match link {
-                        DiffLink::Val(_) => {}
-                        DiffLink::Link(d) => d.remap_list_keys(op_set)?,
+                        DiffLink::Value(_) => {}
+                        DiffLink::Diff(d) => d.remap_list_keys(op_set)?,
                     }
                 }
             }
@@ -276,34 +289,53 @@ impl Default for Diff {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
     Insert { index: usize },
     Remove { index: usize },
 }
 
+/*
 #[derive(Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct DiffValue {
-    pub(crate) value: PrimitiveValue,
+    pub(crate) value: Value,
     #[serde(skip_serializing_if = "DataType::is_undefined")]
     pub(crate) datatype: DataType,
 }
+*/
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
-#[serde(untagged)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum DiffLink {
-    Link(Diff),
-    Val(DiffValue),
+    Diff(Diff),
+    Value(Value),
 }
 
 impl DiffLink {
     fn get_ref(&mut self) -> &mut Diff {
         match self {
-            DiffLink::Link(ref mut diff) => diff,
-            DiffLink::Val(_) => panic!("DiffLink not a link()"),
+            DiffLink::Diff(ref mut diff) => diff,
+            DiffLink::Value(_) => panic!("DiffLink not a link()"),
         }
+    }
+}
+
+impl From<Diff> for DiffLink {
+    fn from(d: Diff) -> Self {
+        DiffLink::Diff(d)
+    }
+}
+
+impl From<Value> for DiffLink {
+    fn from(v: Value) -> Self {
+        DiffLink::Value(v)
+    }
+}
+
+impl From<&str> for DiffLink {
+    fn from(s: &str) -> Self {
+        DiffLink::Value(s.into())
     }
 }
 
@@ -326,6 +358,7 @@ impl Patch {
     // the default behavior is to return {} for an empty patch
     // this patch implementation comes with ObjectID::Root baked in so this covered
     // the top level scope where not even Root is referenced
+
     pub(crate) fn top_level_serialize<S>(
         maybe_diff: &Option<Diff>,
         serializer: S,
