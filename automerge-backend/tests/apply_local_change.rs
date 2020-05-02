@@ -2,7 +2,6 @@ extern crate automerge_backend;
 use automerge_backend::{ActorID, Backend, Change, ChangeRequest, Clock, Patch};
 use std::str::FromStr;
 
-
 #[test]
 fn test_apply_local_change() {
     let change_request: ChangeRequest = serde_json::from_str(

@@ -4,7 +4,6 @@ use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
 use crate::protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
-use std::slice::Iter;
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -19,7 +18,6 @@ pub(crate) struct ObjState {
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub insertions: HashMap<ElementID, OpHandle>,
-    //pub seq: VecOrderedSet<OpID>
     pub seq: SkipList<OpID>,
 }
 
@@ -33,7 +31,6 @@ impl ObjState {
             insertions: HashMap::new(),
             obj_type,
             inbound: HashSet::new(),
-            //seq: VecOrderedSet::new()
             seq: SkipList::new(),
         }
     }
@@ -45,15 +42,8 @@ impl ObjState {
         }
     }
 
-    fn get_parent(&self, key: &ElementID) -> Option<ElementID> {
-        if key == &ElementID::Head {
-            return None;
-        }
-        // if (!insertion) throw new TypeError(`Missing index entry for list element ${key}`)
-        // FIXME key != elementID
-        self.insertions
-            .get(&key)
-            .and_then(|i| i.key.as_element_id().ok())
+    fn get_parent(&self, id: &ElementID) -> Option<ElementID> {
+        self.insertions.get(&id).and_then(|i| i.key.as_element_id().ok())
     }
 
     fn insertions_after(&self, parent: &ElementID) -> Vec<ElementID> {
@@ -61,8 +51,8 @@ impl ObjState {
     }
 
     // this is the efficient way to do it for a SkipList
-    pub fn index_of2(&self, id: &OpID) -> Result<usize, AutomergeError> {
-        let mut prev_id = ElementID::ID(id.clone());
+    pub fn index_of(&self, id: &OpID) -> Result<usize, AutomergeError> {
+        let mut prev_id = id.into();
         let mut index = None;
         // reverse walk through the following/insertions and looking for something that not deleted
         while index.is_none() {
@@ -98,33 +88,8 @@ impl ObjState {
         }
     }
 
-    // this is the efficient way to do it for a Vec
-    #[allow(dead_code)]
-    pub fn index_of1(&self, target: &OpID) -> Result<usize, AutomergeError> {
-        let _target = ElementID::ID(target.clone());
-        let mut n = 0;
-        for a in self.ops_in_order() {
-            if a == &_target {
-                return Ok(n);
-            }
-
-            if a.as_opid() == self.seq.key_of(n) {
-                n += 1;
-            }
-        }
-        Err(AutomergeError::MissingIndex(target.clone()))
-    }
-
-    #[allow(dead_code)]
-    fn ops_in_order(&self) -> ElementIterator {
-        ElementIterator {
-            following: &self.following,
-            stack: vec![self.following.get(&ElementID::Head).unwrap().iter()],
-        }
-    }
-
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
-        let eid = ElementID::ID(op.id.clone());
+        let eid = ElementID::from(&op.id);
         self.insertions.insert(eid.clone(), op);
         let following = self.following.entry(elem).or_default();
         following.push(eid);
@@ -132,24 +97,3 @@ impl ObjState {
     }
 }
 
-pub(crate) struct ElementIterator<'a> {
-    pub following: &'a HashMap<ElementID, Vec<ElementID>>,
-    pub stack: Vec<Iter<'a, ElementID>>,
-}
-
-impl<'a> Iterator for ElementIterator<'a> {
-    type Item = &'a ElementID;
-
-    fn next(&mut self) -> Option<&'a ElementID> {
-        while let Some(mut last) = self.stack.pop() {
-            if let Some(next) = last.next() {
-                self.stack.push(last);
-                if let Some(more) = self.following.get(next) {
-                    self.stack.push(more.iter());
-                }
-                return Some(next);
-            }
-        }
-        None
-    }
-}

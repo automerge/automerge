@@ -5,9 +5,9 @@ use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation};
+use crate::protocol::{ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation, OpID};
 use crate::time;
-use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock, OpID};
+use crate::{ActorID, Change, ChangeRequest, ChangeRequestType, Clock };
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::HashMap;
@@ -168,7 +168,7 @@ impl Backend {
             can_redo: self.can_redo(),
             diffs,
             clock: self.clock.clone(),
-            actor: request.map(|r| r.actor.clone()),
+            actor: request.map(|r| r.actor.0.clone()),
             seq: request.map(|r| r.seq),
         })
     }
@@ -297,8 +297,9 @@ impl Backend {
             // apply the queued ops lazily b/c hopefully these
             // can be thrown away before they are applied
             for change in v.queue.drain(0..) {
+                let mut m = HashMap::new();
                 Rc::make_mut(op_set)
-                    .apply_ops(OpHandle::extract(change.clone()), false)
+                    .apply_ops(OpHandle::extract(change.clone()), false, &mut m)
                     .unwrap();
             }
             return Ok(op_set.clone());
@@ -313,11 +314,10 @@ impl Backend {
         undoable: bool,
         incremental: bool,
     ) -> Result<Patch, AutomergeError> {
-        let mut pending_diffs = Vec::new();
+        let mut pending_diffs = HashMap::new();
 
-        for change in changes.drain(0..) {
-            let diffs = self.add_change(change, request.is_some(), undoable)?;
-            pending_diffs.extend(diffs);
+        for change in changes.drain(..) {
+            self.add_change(change, request.is_some(), undoable, &mut pending_diffs)?;
         }
 
         if incremental {
@@ -385,33 +385,33 @@ impl Backend {
         change: Rc<Change>,
         local: bool,
         undoable: bool,
-    ) -> Result<Vec<PendingDiff>, AutomergeError> {
+        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
+    ) -> Result<(), AutomergeError> {
         if local {
-            self.apply_change(change, undoable)
+            self.apply_change(change, undoable, diffs)
         } else {
             self.queue.push(change);
-            self.apply_queued_ops()
+            self.apply_queued_ops(diffs)
         }
     }
 
-    fn apply_queued_ops(&mut self) -> Result<Vec<PendingDiff>, AutomergeError> {
-        let mut all_diffs = Vec::new();
+    fn apply_queued_ops(&mut self, diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            let diffs = self.apply_change(next_change, false)?;
-            all_diffs.extend(diffs)
+            self.apply_change(next_change, false, diffs)?;
         }
-        Ok(all_diffs)
+        Ok(())
     }
 
     fn apply_change(
         &mut self,
         change: Rc<Change>,
         undoable: bool,
-    ) -> Result<Vec<PendingDiff>, AutomergeError> {
+        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
+    ) -> Result<(),AutomergeError> {
         let all_deps = self.states.add_change(&change)?;
 
         if all_deps.is_none() {
-            return Ok(Vec::new());
+            return Ok(())
         }
 
         let all_deps = all_deps.unwrap();
@@ -425,13 +425,13 @@ impl Backend {
 
         self.max_op = max(self.max_op, change.max_op());
 
-        let (undo_ops, diffs) = op_set.apply_ops(OpHandle::extract(change), undoable)?;
+        let undo_ops = op_set.apply_ops(OpHandle::extract(change), undoable, diffs)?;
 
         if undoable {
             self.push_undo_ops(undo_ops);
         };
 
-        Ok(diffs)
+        Ok(())
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Rc<Change>> {

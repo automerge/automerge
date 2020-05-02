@@ -1,20 +1,34 @@
-use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-use crate::op_set::OpSet;
-use crate::ordered_set::OrderedSet;
-use crate::protocol::{ActorID, Clock, ElementID, Key, ObjType, ObjectID, OpID, OpType, Value};
+use crate::protocol::{Clock, Key, ObjType, Value};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {
-    SeqSet(OpHandle),
     SeqInsert(OpHandle, usize),
     SeqRemove(OpHandle, usize),
-    Map(OpHandle),
-    Noop,
+    Set(OpHandle),
+}
+
+impl PendingDiff {
+
+    pub fn operation_key(&self) -> Key {
+        match self {
+            Self::SeqInsert(op, _) => op.operation_key(),
+            Self::SeqRemove(op, _) => op.operation_key(),
+            Self::Set(op) => op.operation_key(),
+        }
+    }
+
+    pub fn edit(&self) -> Option<DiffEdit> {
+        match *self {
+            Self::SeqInsert(_, index) => Some(DiffEdit::Insert { index }),
+            Self::SeqRemove(_, index) => Some(DiffEdit::Remove { index }),
+            _ => None,
+        }
+    }
 }
 
 // The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
@@ -42,251 +56,70 @@ pub(crate) enum PendingDiff {
 //      }
 // }
 
-#[derive(Serialize, Debug, PartialEq, Clone, Eq, Hash)]
-#[serde(untagged)]
-pub enum DiffKey {
-    Map(String),
-    Seq(usize),
-    ID(ElementID), // FIXME - remove this
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Diff {
+    Map(MapDiff),
+    Seq(SeqDiff),
+    Unchanged(ObjDiff),
+    Value(Value),
 }
 
-impl From<&Key> for DiffKey {
-    fn from(key: &Key) -> Self {
-        match key {
-            Key::Map(s) => DiffKey::Map(s.clone()),
-            Key::Seq(id) => DiffKey::ID(id.clone()),
-        }
+impl From<MapDiff> for Diff {
+    fn from(m: MapDiff) -> Self {
+        Diff::Map(m)
     }
 }
 
-impl From<&str> for DiffKey {
+impl From<SeqDiff> for Diff {
+    fn from(s: SeqDiff) -> Self {
+        Diff::Seq(s)
+    }
+}
+
+impl From<&Value> for Diff {
+    fn from(v: &Value) -> Self {
+        Diff::Value(v.clone())
+    }
+}
+
+impl From<Value> for Diff {
+    fn from(v: Value) -> Self {
+        Diff::Value(v)
+    }
+}
+
+impl From<&str> for Diff {
     fn from(s: &str) -> Self {
-        DiffKey::Map(s.into())
+        Diff::Value(s.into())
     }
 }
 
-impl DiffKey {
-    fn into_opid(self) -> Result<OpID, AutomergeError> {
-        match self {
-            DiffKey::ID(ElementID::ID(id)) => Ok(id),
-            _ => Err(AutomergeError::DiffKeyToOpID),
-        }
-    }
-}
-
-#[derive(Deserialize,Serialize, Debug, PartialEq, Clone)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct Diff {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub edits: Option<Vec<DiffEdit>>,
-    pub object_id: ObjectID, // FIXME - make this a string
+pub struct MapDiff {
+    pub object_id: String,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub props: Option<HashMap<DiffKey, HashMap<String, DiffLink>>>,
+    pub props: HashMap<String, HashMap<String, Diff>>,
 }
 
-impl Diff {
-    pub(crate) fn new() -> Diff {
-        Diff::init(ObjectID::Root, ObjType::Map)
-    }
-
-    pub(crate) fn init(object_id: ObjectID, obj_type: ObjType) -> Diff {
-        Diff {
-            obj_type,
-            object_id,
-            edits: None,
-            props: None,
-        }
-    }
-
-    pub(crate) fn add_insert(&mut self, index: usize) -> &mut Diff {
-        self.edits
-            .get_or_insert_with(Vec::new)
-            .push(DiffEdit::Insert { index });
-        self
-    }
-
-    pub(crate) fn add_remove(&mut self, index: usize) -> &mut Diff {
-        self.edits
-            .get_or_insert_with(Vec::new)
-            .push(DiffEdit::Remove { index });
-        self
-    }
-
-    pub(crate) fn is_seq(&self) -> bool {
-        match self.obj_type {
-            ObjType::Map | ObjType::Table => false,
-            ObjType::Text | ObjType::List => true,
-        }
-    }
-
-    pub(crate) fn add_child(&mut self, key: &DiffKey, opid: &OpID, child: Diff) -> &mut Diff {
-        self.prop_key(key)
-            .insert(opid.to_string(), DiffLink::Diff(child));
-        self.prop_key(key)
-            .get_mut(&opid.to_string())
-            .unwrap()
-            .get_ref()
-    }
-
-    fn touch(&mut self, key: &DiffKey) {
-        if self.is_seq() {
-            self.props.get_or_insert_with(HashMap::new);
-            self.edits.get_or_insert_with(Vec::new);
-        } else {
-            self.props
-                .get_or_insert_with(HashMap::new)
-                .entry(key.clone())
-                .or_insert_with(HashMap::new);
-        }
-    }
-
-    pub(crate) fn add_values(
-        &mut self,
-        key: &DiffKey,
-        ops: &[OpHandle],
-        op_set: &OpSet,
-    ) -> Result<&mut Diff, AutomergeError> {
-        self.touch(key);
-
-        for op in ops.iter() {
-            self.add_value(key, &op, op_set)?;
-        }
-
-        Ok(self)
-    }
-
-    fn prop_key(&mut self, key: &DiffKey) -> &mut HashMap<String, DiffLink> {
-        self.props
-            .get_or_insert_with(HashMap::new)
-            .entry(key.clone())
-            .or_insert_with(HashMap::new)
-    }
-
-    pub(crate) fn add_value(
-        &mut self,
-        key: &DiffKey,
-        op: &OpHandle,
-        op_set: &OpSet,
-    ) -> Result<&mut Diff, AutomergeError> {
-        Ok(match &op.action {
-            OpType::Link(child_id) => {
-                self.add_child(&key, &op.id, op_set.construct_object(child_id)?);
-                self
-            }
-            _ => self.add_shallow_value(key, op, op_set)?,
-        })
-    }
-
-    pub(crate) fn add_shallow_value(
-        &mut self,
-        key: &DiffKey,
-        op: &OpHandle,
-        op_set: &OpSet,
-    ) -> Result<&mut Diff, AutomergeError> {
-        Ok(match &op.action {
-            OpType::Set(_) => {
-                let id = op.id.clone();
-                let value = DiffLink::Value(op.adjusted_value()); // FIXME
-                self.prop_key(key).insert(id.to_string(), value);
-                self
-            }
-            OpType::Make(obj_type) => {
-                let object_id = ObjectID::from(&op.id); // op.child()
-                self.add_child(&key, &op.id, Diff::init(object_id, *obj_type))
-            }
-            OpType::Link(ref object_id) => {
-                let obj_type = op_set.get_obj(&object_id)?.obj_type;
-                self.add_child(&key, &op.id, Diff::init(object_id.clone(), obj_type))
-            }
-            _ => panic!("Inc and Del should never get here"),
-        })
-    }
-
-    pub(crate) fn expand_path(
-        &mut self,
-        path: &[&OpHandle],
-        op_set: &OpSet,
-    ) -> Result<&mut Diff, AutomergeError> {
-        match path {
-            [] => Ok(self),
-            [op, tail @ ..] => {
-                let key = &op.operation_key();
-                let diffkey = key.into();
-
-                if self.prop_key(&diffkey).is_empty() {
-                    if let Some(ops) = op_set.get_field_ops(&op.obj, &key) {
-                        for i in ops.iter() {
-                            self.add_shallow_value(&diffkey, &i, op_set)?;
-                        }
-                    }
-                }
-
-                self.get_child(&diffkey, op)?.expand_path(tail, op_set)
-            }
-        }
-    }
-
-    fn get_child(&mut self, key: &DiffKey, op: &OpHandle) -> Result<&mut Diff, AutomergeError> {
-        let target = &op.child().unwrap();
-        for (_, link) in self.prop_key(&key).iter_mut() {
-            if let DiffLink::Diff(ref mut diff) = link {
-                if &diff.object_id == target {
-                    return Ok(diff);
-                }
-            }
-        }
-        Err(AutomergeError::GetChildFailed(target.clone(), key.clone()))
-    }
-
-    // constructed diffs are already remapped
-    pub(crate) fn already_remapped(&mut self) -> bool {
-        if let Some(p) = &self.props {
-            if let Some(DiffKey::Seq(_)) = p.keys().next() {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub(crate) fn remap_list_keys(&mut self, op_set: &OpSet) -> Result<(), AutomergeError> {
-        if self.already_remapped() {
-            return Ok(());
-        }
-        if self.is_seq() && self.props.is_some() {
-            let mut oldprops = self.props.take().unwrap_or_default();
-            let mut newprops = HashMap::new();
-            //let elemids = op_set.get_elem_ids(&self.object_id)?;
-            let elemids = op_set.get_obj(&self.object_id).map(|o| &o.seq)?;
-            for (key, keymap) in oldprops.drain() {
-                let key_op = key.into_opid()?;
-                let index = elemids.index_of(&key_op).ok_or_else(|| {
-                    AutomergeError::MissingElement(self.object_id.clone(), key_op.clone())
-                })?;
-                let new_key = DiffKey::Seq(index);
-                newprops.insert(new_key, keymap);
-            }
-            self.props = Some(newprops);
-        }
-        if let Some(ref mut props) = self.props {
-            for (_, keymap) in props.iter_mut() {
-                for (_, link) in keymap.iter_mut() {
-                    match link {
-                        DiffLink::Value(_) => {}
-                        DiffLink::Diff(d) => d.remap_list_keys(op_set)?,
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SeqDiff {
+    pub object_id: String,
+    #[serde(rename = "type")]
+    pub obj_type: ObjType,
+    pub edits: Vec<DiffEdit>,
+    pub props: HashMap<usize, HashMap<String, Diff>>,
 }
 
-impl Default for Diff {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjDiff {
+    pub object_id: String,
+    #[serde(rename = "type")]
+    pub obj_type: ObjType,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
@@ -296,54 +129,11 @@ pub enum DiffEdit {
     Remove { index: usize },
 }
 
-/*
-#[derive(Serialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct DiffValue {
-    pub(crate) value: Value,
-    #[serde(skip_serializing_if = "DataType::is_undefined")]
-    pub(crate) datatype: DataType,
-}
-*/
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum DiffLink {
-    Diff(Diff),
-    Value(Value),
-}
-
-impl DiffLink {
-    fn get_ref(&mut self) -> &mut Diff {
-        match self {
-            DiffLink::Diff(ref mut diff) => diff,
-            DiffLink::Value(_) => panic!("DiffLink not a link()"),
-        }
-    }
-}
-
-impl From<Diff> for DiffLink {
-    fn from(d: Diff) -> Self {
-        DiffLink::Diff(d)
-    }
-}
-
-impl From<Value> for DiffLink {
-    fn from(v: Value) -> Self {
-        DiffLink::Value(v)
-    }
-}
-
-impl From<&str> for DiffLink {
-    fn from(s: &str) -> Self {
-        DiffLink::Value(s.into())
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub actor: Option<ActorID>,
+    pub actor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
     pub clock: Clock,

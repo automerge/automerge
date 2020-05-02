@@ -419,8 +419,8 @@ fn test_create_lists() {
 
 #[test]
 fn test_includes_latests_state_of_list() {
-        let change1: Change = serde_json::from_str(
-            r#"
+    let change1: Change = serde_json::from_str(
+        r#"
             {
                "actor": "6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
                "seq": 1,
@@ -458,11 +458,11 @@ fn test_includes_latests_state_of_list() {
                ]
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let expected_patch: Patch = serde_json::from_str(
-            r#"
+    let expected_patch: Patch = serde_json::from_str(
+        r#"
             {
                "version": 0,
                "clock": {
@@ -510,19 +510,19 @@ fn test_includes_latests_state_of_list() {
                }
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let mut backend = Backend::init();
-        backend.load_changes(vec![change1]).unwrap();
-        let patch = backend.get_patch().unwrap();
-        assert_eq!(patch, expected_patch)
-    }
+    let mut backend = Backend::init();
+    backend.load_changes(vec![change1]).unwrap();
+    let patch = backend.get_patch().unwrap();
+    assert_eq!(patch, expected_patch)
+}
 
-    #[test]
-    fn test_includes_date_objects_at_root() {
-        let change1: Change = serde_json::from_str(
-            r#"
+#[test]
+fn test_includes_date_objects_at_root() {
+    let change1: Change = serde_json::from_str(
+        r#"
             {
                "actor": "90f5dd5d-4f52-4e95-ad59-29e08d1194f1",
                "seq": 1,
@@ -541,11 +541,11 @@ fn test_includes_latests_state_of_list() {
                ]
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let expected_patch: Patch = serde_json::from_str(
-            r#"
+    let expected_patch: Patch = serde_json::from_str(
+        r#"
             {
                "version": 0,
                "clock": {
@@ -567,19 +567,19 @@ fn test_includes_latests_state_of_list() {
                }
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let mut backend = Backend::init();
-        backend.load_changes(vec![change1]).unwrap();
-        let patch = backend.get_patch().unwrap();
-        assert_eq!(patch, expected_patch)
-    }
+    let mut backend = Backend::init();
+    backend.load_changes(vec![change1]).unwrap();
+    let patch = backend.get_patch().unwrap();
+    assert_eq!(patch, expected_patch)
+}
 
-    #[test]
-    fn test_includes_date_objects_in_a_list() {
-        let change1: Change = serde_json::from_str(
-            r#"
+#[test]
+fn test_includes_date_objects_in_a_list() {
+    let change1: Change = serde_json::from_str(
+        r#"
             {
                "actor": "08b050f9-76a2-4934-9021-a2e63d99c8e8",
                "seq": 1,
@@ -605,11 +605,11 @@ fn test_includes_latests_state_of_list() {
                ]
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let expected_patch: Patch = serde_json::from_str(
-            r#"
+    let expected_patch: Patch = serde_json::from_str(
+        r#"
             {
                "version": 0,
                "clock": {
@@ -645,11 +645,11 @@ fn test_includes_latests_state_of_list() {
                }
             }
         "#,
-        )
-        .unwrap();
+    )
+    .unwrap();
 
-        let mut backend = Backend::init();
-        backend.load_changes(vec![change1]).unwrap();
-        let patch = backend.get_patch().unwrap();
-        assert_eq!(patch, expected_patch)
+    let mut backend = Backend::init();
+    backend.load_changes(vec![change1]).unwrap();
+    let patch = backend.get_patch().unwrap();
+    assert_eq!(patch, expected_patch)
 }

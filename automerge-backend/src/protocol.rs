@@ -153,6 +153,33 @@ impl From<&OpID> for String {
     }
 }
 
+impl From<&ObjectID> for String {
+    fn from(obj: &ObjectID) -> Self {
+        match obj {
+            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
+            ObjectID::ID(id) => id.into(),
+        }
+    }
+}
+
+impl From<&ElementID> for String {
+    fn from(eid: &ElementID) -> Self {
+        match eid {
+            ElementID::Head => "_head".into(),
+            ElementID::ID(id) => id.into(),
+        }
+    }
+}
+
+impl From<&Key> for String {
+    fn from(k: &Key) -> Self {
+        match k {
+            Key::Map(s) => s.clone(),
+            Key::Seq(eid) => eid.into(),
+        }
+    }
+}
+
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 #[serde(untagged)]
 pub enum Key {
@@ -404,6 +431,18 @@ impl ElementID {
             ElementID::Head => false,
             ElementID::ID(_) => true,
         }
+    }
+}
+
+impl From<OpID> for ElementID {
+    fn from(o: OpID) -> Self {
+        ElementID::ID(o)
+    }
+}
+
+impl From<&OpID> for ElementID {
+    fn from(o: &OpID) -> Self {
+        ElementID::ID(o.clone())
     }
 }
 

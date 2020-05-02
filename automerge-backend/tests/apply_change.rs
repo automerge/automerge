@@ -1,7 +1,6 @@
 extern crate automerge_backend;
 use automerge_backend::{
-    AutomergeError, Backend, Change, Clock, Diff, ObjType, ObjectID,
-    Operation, Patch, Value,
+    AutomergeError, Backend, Change, Clock, ObjType, ObjectID, Operation, Patch, MapDiff, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -31,12 +30,11 @@ fn test_incremental_diffs_in_a_map() {
         clock: Clock::empty().with(&"7b7723afd9e6480397a4d467b7693156".into(), 1),
         can_undo: false,
         can_redo: false,
-        diffs: Diff {
-            object_id: ObjectID::Root,
+        diffs: Some(MapDiff {
+            object_id: String::from(&ObjectID::Root),
             obj_type: ObjType::Map,
-            edits: None,
-            props: Some(hashmap!( "bird".into() => hashmap!( "1@7b7723afd9e6480397a4d467b7693156".into() => "magpie".into() )))
-        }.into(),
+            props: hashmap!( "bird".into() => hashmap!( "1@7b7723afd9e6480397a4d467b7693156".into() => "magpie".into() ))
+        }.into()),
     };
     assert_eq!(patch, expected_patch)
 }
@@ -78,18 +76,16 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
         clock: Clock::empty().with(&"cdee6963c1664645920be8b41a933c2b".into(), 2),
         can_undo: false,
         can_redo: false,
-        diffs: {
-            Diff {
-                edits: None,
-                object_id: ObjectID::Root,
+        diffs: Some(
+            MapDiff {
+                object_id: String::from(&ObjectID::Root),
                 obj_type: ObjType::Map,
-                props: Some(hashmap!(
+                props: hashmap!(
                 "counter".into() => hashmap!{
                     "1@cdee6963c1664645920be8b41a933c2b".into() =>  Value::Counter(3).into(),
-                })),
+                }),
             }
-            .into()
-        },
+            .into()),
     };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -137,15 +133,14 @@ fn test_conflict_on_assignment_to_same_map_key() {
         clock: Clock::from(&vec![(&"ac11".into(), 1), (&"ac22".into(), 1)]),
         can_undo: false,
         can_redo: false,
-        diffs: Some(Diff {
-            object_id: ObjectID::Root,
+        diffs: Some(MapDiff {
+            object_id: String::from(&ObjectID::Root),
             obj_type: ObjType::Map,
-            edits: None,
-            props: Some(hashmap!( "bird".into() => hashmap!(
+            props: hashmap!( "bird".into() => hashmap!(
                         "1@ac11".into() => "magpie".into(),
                         "2@ac22".into() => "blackbird".into(),
-            ))),
-        }),
+            )),
+        }.into()),
     };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
