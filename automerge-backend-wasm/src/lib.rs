@@ -1,6 +1,6 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock};
+use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock, ChangeHash};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -28,7 +28,7 @@ fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug)]
 pub struct State {
     backend: Backend,
 }
@@ -77,9 +77,9 @@ impl State {
     }
 
     #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&self, clock: JsValue) -> Result<Array, JsValue> {
-        let c: Clock = js_to_rust(clock)?;
-        let changes = self.backend.get_missing_changes_binary(&c).map_err(automerge_error_to_js)?;
+    pub fn get_changes(&self, have_deps: JsValue) -> Result<Array, JsValue> {
+        let deps: Vec<ChangeHash> = js_to_rust(have_deps)?;
+        let changes = self.backend.get_changes(&deps).map_err(automerge_error_to_js)?;
         let result = Array::new();
         for c in changes {
             let bytes : Uint8Array = c.as_slice().into();
@@ -106,10 +106,12 @@ impl State {
         rust_to_js(&clock)
     }
 
+    /*
     #[wasm_bindgen(js_name = getClock)]
     pub fn get_clock(&self) -> Result<JsValue, JsValue> {
         rust_to_js(&self.backend.clock)
     }
+    */
 
     #[wasm_bindgen(js_name = getUndoStack)]
     pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
@@ -121,24 +123,23 @@ impl State {
         rust_to_js(&self.backend.redo_stack)
     }
 
-    #[wasm_bindgen(js_name = forkAt)]
-    pub fn fork_at(&self, _clock: JsValue) -> Result<State, JsValue> {
-        let clock: Clock = js_to_rust(_clock)?;
-        let changes = self
-            .backend
-            .history()
-            .iter()
-            .filter(|change| clock.get(&change.actor_id) >= change.seq)
-            .map(|&c| c.clone())
-            .collect();
-        let mut fork = State {
-            backend: Backend::init(),
-        };
-        let _patch = fork
-            .backend
-            .apply_changes(changes)
-            .map_err(automerge_error_to_js)?;
-        Ok(fork)
+    #[wasm_bindgen(js_name = clone)]
+    pub fn clone(&self) -> Result<State, JsValue> {
+        Ok(State { backend: self.backend.clone() })
+    }
+
+    #[wasm_bindgen(js_name = save)]
+    pub fn save(&self) -> Result<JsValue, JsValue> {
+        let data = self.backend.save().map_err(automerge_error_to_js)?;
+        let js_bytes : Uint8Array = data.as_slice().into();
+        Ok(js_bytes.into())
+    }
+
+    #[wasm_bindgen(js_name = load)]
+    pub fn load(data: JsValue) -> Result<State, JsValue> {
+        let data = data.dyn_into::<Uint8Array>().unwrap().to_vec();
+        let backend = Backend::load(data).map_err(automerge_error_to_js)?;
+        Ok(State { backend })
     }
 
     #[wasm_bindgen]

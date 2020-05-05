@@ -1,5 +1,5 @@
 use crate::op_handle::OpHandle;
-use crate::protocol::{Clock, Key, ObjType, Value};
+use crate::protocol::{Key, ObjType, Value, ChangeHash};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -136,7 +136,8 @@ pub struct Patch {
     pub actor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
-    pub clock: Clock,
+    pub clock: HashMap<String,u64>,
+    pub deps: Vec<ChangeHash>,
     pub can_undo: bool,
     pub can_redo: bool,
     pub version: u64,

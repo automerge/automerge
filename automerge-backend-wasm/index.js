@@ -1,5 +1,6 @@
 let Backend = require('./pkg')
 let encodeChange, decodeChanges // initialized by initCodecFunctions
+const util = require('util');
 
 function initCodecFunctions(functions) {
   encodeChange = functions.encodeChange
@@ -8,6 +9,10 @@ function initCodecFunctions(functions) {
 
 function init() {
   return { state: Backend.State.new(), frozen: false }
+}
+
+function load(data) {
+  return { state: Backend.State.load(data), frozen: false }
 }
 
 function backendState(backend) {
@@ -22,7 +27,7 @@ function backendState(backend) {
 }
 
 function clone(backend) {
-  const state = backend.state.forkAt(backend.state.getClock())
+  const state = backend.state.clone();
   return { state, frozen: false }
 }
 
@@ -77,8 +82,12 @@ function getRedoStack(backend) {
   return backendState(backend).getRedoStack()
 }
 
+function save(backend) {
+  return backendState(backend).save()
+}
+
 module.exports = {
   initCodecFunctions,
-  init, clone, free, applyChanges, applyLocalChange, loadChanges, getPatch,
+  init, clone, save, load, free, applyChanges, applyLocalChange, loadChanges, getPatch,
   getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
 }

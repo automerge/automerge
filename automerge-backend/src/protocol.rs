@@ -8,10 +8,8 @@
 //! ```
 //!
 
-use core::cmp::max;
 use serde::{Deserialize, Serialize};
 use std::cmp::{Ordering, PartialOrd};
-use std::collections::HashMap;
 use std::convert::{Infallible, TryFrom};
 use std::fmt;
 use std::hash::Hash;
@@ -30,6 +28,56 @@ pub enum ObjType {
     Table,
     Text,
     List,
+}
+
+#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+pub struct ActorID(pub String);
+
+impl ActorID {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        // FIXME - I should be storing u8 internally - not strings
+        // i need proper error handling for non-hex strings
+        hex::decode(&self.0).unwrap()
+    }
+
+    pub fn to_string(&self) -> String {
+        self.0.clone()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> ActorID {
+        ActorID(hex::encode(bytes))
+    }
+}
+
+impl From<&str> for ActorID {
+    fn from(s: &str) -> Self {
+        ActorID(s.into())
+    }
+}
+
+impl FromStr for ActorID {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(ActorID(s.into()))
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
+pub struct ChangeHash(pub [u8; 32]);
+
+impl ChangeHash {
+    pub fn new() -> Self {
+        ChangeHash([0; 32])
+    }
+}
+
+impl From<&[u8]> for ChangeHash {
+    fn from(bytes: &[u8]) -> Self {
+        let mut array = [0; 32];
+        array.copy_from_slice(bytes);
+        ChangeHash(array)
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
@@ -153,33 +201,6 @@ impl From<&OpID> for String {
     }
 }
 
-impl From<&ObjectID> for String {
-    fn from(obj: &ObjectID) -> Self {
-        match obj {
-            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
-            ObjectID::ID(id) => id.into(),
-        }
-    }
-}
-
-impl From<&ElementID> for String {
-    fn from(eid: &ElementID) -> Self {
-        match eid {
-            ElementID::Head => "_head".into(),
-            ElementID::ID(id) => id.into(),
-        }
-    }
-}
-
-impl From<&Key> for String {
-    fn from(k: &Key) -> Self {
-        match k {
-            Key::Map(s) => s.clone(),
-            Key::Seq(eid) => eid.into(),
-        }
-    }
-}
-
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 #[serde(untagged)]
 pub enum Key {
@@ -204,133 +225,6 @@ impl Key {
             ElementID::ID(id) => Ok(id),
             ElementID::Head => Err(AutomergeError::HeadToOpID),
         }
-    }
-}
-
-#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
-pub struct ActorID(pub String);
-
-impl ActorID {
-    pub fn to_bytes(&self) -> Vec<u8> {
-        // FIXME - I should be storing u8 internally - not strings
-        // i need proper error handling for non-hex strings
-        hex::decode(&self.0).unwrap()
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> ActorID {
-        ActorID(hex::encode(bytes))
-    }
-}
-
-impl From<&str> for ActorID {
-    fn from(s: &str) -> Self {
-        ActorID(s.into())
-    }
-}
-
-impl FromStr for ActorID {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(ActorID(s.into()))
-    }
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
-pub struct Clock(pub HashMap<ActorID, u64>);
-
-impl Default for Clock {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
-impl Clock {
-    pub fn empty() -> Clock {
-        Clock(HashMap::new())
-    }
-
-    pub fn from(ids: &[(&ActorID, u64)]) -> Clock {
-        let mut result = Clock::empty();
-        for (act, seq) in ids.iter() {
-            result.set(act, *seq);
-        }
-        result
-    }
-
-    pub fn with(&self, actor_id: &ActorID, seq: u64) -> Clock {
-        let mut result = self.clone();
-        result.set(actor_id, max(seq, self.get(actor_id)));
-        result
-    }
-
-    pub fn without(&self, actor_id: &ActorID) -> Clock {
-        let mut result = self.clone();
-        result.0.remove(actor_id);
-        result
-    }
-
-    pub fn merge(&mut self, other: &Clock) {
-        other.into_iter().for_each(|(actor_id, seq)| {
-            self.set(actor_id, max(*seq, self.get(actor_id)));
-        });
-    }
-
-    pub fn subtract(&mut self, other: &Clock) {
-        other.into_iter().for_each(|(actor_id, seq)| {
-            if self.get(actor_id) <= *seq {
-                self.0.remove(actor_id);
-            }
-        });
-    }
-
-    pub fn union(&self, other: &Clock) -> Clock {
-        let mut result = self.clone();
-        result.merge(other);
-        result
-    }
-
-    pub fn set(&mut self, actor_id: &ActorID, seq: u64) {
-        if seq == 0 {
-            self.0.remove(actor_id);
-        } else {
-            self.0.insert(actor_id.clone(), seq);
-        }
-    }
-
-    pub fn get(&self, actor_id: &ActorID) -> u64 {
-        *self.0.get(actor_id).unwrap_or(&0)
-    }
-
-    pub fn divergent(&self, other: &Clock) -> bool {
-        !self.less_or_equal(other)
-    }
-
-    fn less_or_equal(&self, other: &Clock) -> bool {
-        self.into_iter()
-            .all(|(actor_id, _)| self.get(actor_id) <= other.get(actor_id))
-    }
-}
-
-impl PartialOrd for Clock {
-    fn partial_cmp(&self, other: &Clock) -> Option<Ordering> {
-        let le1 = self.less_or_equal(other);
-        let le2 = other.less_or_equal(self);
-        match (le1, le2) {
-            (true, true) => Some(Ordering::Equal),
-            (true, false) => Some(Ordering::Less),
-            (false, true) => Some(Ordering::Greater),
-            (false, false) => None,
-        }
-    }
-}
-
-impl<'a> IntoIterator for &'a Clock {
-    type Item = (&'a ActorID, &'a u64);
-    type IntoIter = ::std::collections::hash_map::Iter<'a, ActorID, u64>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
     }
 }
 
@@ -459,6 +353,7 @@ impl FromStr for ElementID {
     }
 }
 
+/*
 impl PartialOrd for ElementID {
     fn partial_cmp(&self, other: &ElementID) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -475,6 +370,7 @@ impl Ord for ElementID {
         }
     }
 }
+*/
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
 pub enum DataType {
@@ -744,13 +640,14 @@ pub struct Change {
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
+    pub hash: ChangeHash,
     pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    pub deps: Clock,
+    pub deps: Vec<ChangeHash>,
 }
 
 impl Change {
@@ -769,7 +666,7 @@ pub struct ChangeRequest {
     #[serde(default = "helper::make_true")]
     pub undoable: bool,
     pub time: Option<i64>,
-    pub deps: Option<Clock>,
+    pub deps: Option<Vec<ChangeHash>>,
     pub ops: Option<Vec<OpRequest>>,
     pub child: Option<String>,
     pub request_type: ChangeRequestType,

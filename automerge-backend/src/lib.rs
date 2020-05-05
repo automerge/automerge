@@ -14,7 +14,6 @@ macro_rules! log {
     }
 }
 
-mod actor_states;
 mod backend;
 mod columnar;
 mod concurrent_operations;
@@ -29,11 +28,12 @@ mod patch;
 mod protocol;
 mod serialize;
 mod time;
+mod actor_map;
 
 pub use crate::patch::{DiffEdit, Patch, Diff, MapDiff, SeqDiff, ObjDiff};
 pub use crate::protocol::{
-    ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, Key, ObjType, ObjectID,
-    OpType, Operation, Value,
+    ActorID, Change, ChangeRequest, ChangeRequestType, DataType, Key, ObjType, ObjectID,
+    OpType, Operation, Value, ChangeHash
 };
 pub use backend::Backend;
 pub use error::AutomergeError;

@@ -2,6 +2,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
+use crate::actor_map::ActorMap;
 use crate::protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
 
@@ -88,12 +89,12 @@ impl ObjState {
         }
     }
 
-    pub fn insert_after(&mut self, elem: ElementID, op: OpHandle) {
+    pub fn insert_after(&mut self, elem: ElementID, op: OpHandle, actors: &ActorMap) {
         let eid = ElementID::from(&op.id);
         self.insertions.insert(eid.clone(), op);
         let following = self.following.entry(elem).or_default();
         following.push(eid);
-        following.sort_unstable_by(|a, b| b.cmp(a));
+        following.sort_unstable_by(|a, b| actors.cmp(b,a));
     }
 }
 
