@@ -23,12 +23,12 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 /// actually mutating the original object set (which you will note is captured
 /// by mutable reference) when `commit` is called.
 pub struct ChangeContext<'a> {
-    original_objects: &'a mut HashMap<ObjectID, Object>,
+    original_objects: &'a mut HashMap<ObjectID, Rc<Object>>,
     updated: RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
 }
 
 impl<'a> ChangeContext<'a> {
-    pub fn new(original_objects: &'a mut HashMap<ObjectID, Object>) -> ChangeContext {
+    pub fn new(original_objects: &'a mut HashMap<ObjectID, Rc<Object>>) -> ChangeContext {
         ChangeContext {
             original_objects,
             updated: RefCell::new(HashMap::new()),
@@ -131,7 +131,7 @@ impl<'a> ChangeContext<'a> {
     }
 
     fn apply_diff_helper<'b>(
-        original_objects: &'b HashMap<ObjectID, Object>,
+        original_objects: &'b HashMap<ObjectID, Rc<Object>>,
         updated: &'b RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
         diff: &Diff,
     ) -> Result<Rc<RefCell<Object>>, AutomergeFrontendError> {
@@ -331,7 +331,7 @@ impl<'a> ChangeContext<'a> {
 
     fn get_or_create_object<'b, F>(
         object_id: &ObjectID,
-        original: &'b HashMap<ObjectID, Object>,
+        original: &'b HashMap<ObjectID, Rc<Object>>,
         updated: &'b RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
         create_new: F,
     ) -> Rc<RefCell<Object>>
@@ -344,25 +344,28 @@ impl<'a> ChangeContext<'a> {
             .or_insert_with(|| {
                 original
                     .get(object_id)
-                    .cloned()
-                    .map(|o| Rc::new(RefCell::new(o)))
+                    .map(|o| Rc::new(RefCell::new(o.as_ref().clone())))
                     .unwrap_or_else(|| Rc::new(RefCell::new(create_new())))
             })
             .clone()
     }
 
-    pub(crate) fn value_for_object_id(&self, object_id: &ObjectID) -> Option<Rc<RefCell<Object>>> {
+    pub(crate) fn value_for_object_id(&self, object_id: &ObjectID) -> Option<Rc<Object>> {
         if let Some(updated) = self.updated.borrow().get(object_id) {
-            return Some(*updated);
+            // This is irritating. Ideally we would return `impl Deref<Object>` but
+            // unfortunately the type checker won't allow returning different
+            // types for the same impl (in this case Rc<T> and RefCell::Ref<T>)
+            // and so instead we clone and wrap.
+            return Some(Rc::new(updated.borrow().clone()))
         }
-        self.original_objects.get(object_id).map(|o| Rc::new(RefCell::new(o.clone())))
+        self.original_objects.get(object_id).map(|r| r.clone())
     }
 
     pub fn commit(self) -> Result<Value, AutomergeFrontendError> {
         for (object_id, object) in self.updated.into_inner().into_iter() {
             let cloned_object = object.borrow().clone();
             self.original_objects
-                .insert(object_id.clone(), cloned_object);
+                .insert(object_id.clone(), Rc::new(cloned_object));
         }
         // The root ID must be in result by this point so we can unwrap
         let state = self.original_objects.get(&ObjectID::Root).unwrap().value();

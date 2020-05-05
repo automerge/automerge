@@ -16,7 +16,7 @@ impl Values {
         let mut op_ids: Vec<&amb::OpID> = self.0.keys().collect();
         op_ids.sort();
         let default_op_id = op_ids.first().unwrap();
-        *self.0.get(default_op_id).unwrap()
+        self.0.get(default_op_id).map(|o| o.clone()).unwrap()
     }
 
     pub(crate) fn update_for_opid(&mut self, opid: amb::OpID, value: Rc<RefCell<Object>>) {
@@ -48,6 +48,28 @@ impl Object {
                 map_type.clone(),
             ),
             Object::Primitive(v) => Value::Primitive(v.clone()),
+        }
+    }
+
+    pub(crate) fn id(&self) -> Option<amb::ObjectID> {
+        match self {
+            Object::Sequence(oid, _, _) => Some(oid.clone()),
+            Object::Map(oid, _, _) => Some(oid.clone()),
+            Object::Primitive(..) => None,
+        }
+    }
+
+    pub(crate) fn backend_type(&self) -> Option<amb::ObjType> {
+        match self {
+            Object::Sequence(oid, _, seq_type) => Some(match seq_type {
+                SequenceType::List => amb::ObjType::List,
+                SequenceType::Text => amb::ObjType::Text,
+            }),
+            Object::Map(oid, _, map_type) => Some(match map_type {
+                MapType::Map => amb::ObjType::Map,
+                MapType::Table => amb::ObjType::Table,
+            }),
+            Object::Primitive(..) => None,
         }
     }
 }

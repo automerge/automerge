@@ -1,5 +1,5 @@
 use automerge_backend::{
-    ActorID, Backend, ChangeRequest, ChangeRequestType, Clock, ObjectID, Patch
+    ActorID, Backend, ChangeRequest, ChangeRequestType, Clock, ObjectID, Patch,
 };
 
 mod object;
@@ -10,16 +10,29 @@ mod mutation;
 
 use object::Object;
 pub use error::{AutomergeFrontendError, InvalidInitialStateError};
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 pub use value::{Conflicts, MapType, PrimitiveValue, SequenceType, Value};
 pub use mutation::{MutableDocument, LocalChange, Path};
 use mutation::PathElement;
 
+struct InFlightRequest {
+    state_before: HashMap<ObjectID, Rc<Object>>,
+    seq: u64
+}
+
 pub struct Frontend {
     pub actor_id: ActorID,
+    pub seq: u64,
     backend: Backend,
-    objects: RefCell<HashMap<ObjectID, Object>>,
-    state: Value,
+    /// The current state of this frontend
+    objects: RefCell<HashMap<ObjectID, Rc<Object>>>,
+    /// The current state of this frontend as a `Value`
+    cached_state: Value,
+    /// Requests which we have optimistically applied but haven't yet 
+    /// received a patch from the backend for
+    in_flight_requests: Vec<InFlightRequest>,
+    /// The highest version number we've received from the backend
+    version: u64,
 }
 
 impl Frontend {
@@ -27,13 +40,16 @@ impl Frontend {
         let mut objects = HashMap::new();
         objects.insert(
             ObjectID::Root,
-            Object::Map(ObjectID::Root, HashMap::new(), MapType::Map),
+            Rc::new(Object::Map(ObjectID::Root, HashMap::new(), MapType::Map)),
         );
         return Frontend {
             actor_id: ActorID::random(),
+            seq: 0,
             backend: Backend::init(),
             objects: RefCell::new(objects),
-            state: Value::Map(HashMap::new(), MapType::Map),
+            cached_state: Value::Map(HashMap::new(), MapType::Map),
+            in_flight_requests: Vec::new(),
+            version: 0,
         };
     }
 
@@ -48,7 +64,7 @@ impl Frontend {
                             PathElement::Key(k.to_string()),
                             v,
                             false,
-                        )
+                        ).0
                     })
                     .collect();
                 let mut front = Frontend::new();
@@ -77,20 +93,36 @@ impl Frontend {
     }
 
     pub fn state(&self) -> &Value {
-        &self.state
+        &self.cached_state
     }
 
-    pub fn change<F>(&mut self, change_closure: F) -> Result<Option<ChangeRequest>, AutomergeFrontendError>
+    pub fn change<F>(&mut self, message: Option<String>, change_closure: F) -> Result<Option<ChangeRequest>, AutomergeFrontendError>
     where
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
         let mut change_ctx = change_context::ChangeContext::new(self.objects.get_mut());
         let mut mutation_tracker = mutation::MutationTracker::new(&mut change_ctx);
         change_closure(&mut mutation_tracker)?;
-        let change_request = mutation_tracker.change_request();
-        let new_state = change_ctx.commit()?;
-        self.state = new_state;
-        Ok(change_request)
+        let maybe_change_request = match mutation_tracker.ops() {
+            Some(ops) => {
+                let new_state = change_ctx.commit()?;
+                self.cached_state = new_state;
+                self.seq += 1;
+                let change_request = ChangeRequest{
+                    actor: self.actor_id.clone(),
+                    seq: self.seq,
+                    version: self.version,
+                    message,
+                    undoable: false,
+                    deps: None,
+                    ops: Some(ops),
+                    request_type: ChangeRequestType::Change,
+                };
+                Some(change_request)
+            }
+            None => None
+        };
+        Ok(maybe_change_request)
     }
 
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
@@ -100,7 +132,8 @@ impl Frontend {
             change_ctx.apply_diff(&diff)?;
         };
         let new_state = change_ctx.commit()?;
-        self.state = new_state;
+        self.cached_state = new_state;
+        self.version = std::cmp::max(self.version, patch.version);
         Ok(())
     }
 }
