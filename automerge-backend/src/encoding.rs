@@ -11,7 +11,7 @@ fn err(s: &str) -> AutomergeError {
     AutomergeError::ChangeDecompressError(s.to_string())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Decoder<'a> {
     pub offset: usize,
     pub last_read: usize,
@@ -212,12 +212,12 @@ where
     }
 
     fn flush_run(&mut self, val: T, len: usize) {
-        self.encode(len);
+        self.encode(len as i64);
         self.encode(val);
     }
 
     fn flush_null_run(&mut self, len: usize) {
-        self.encode::<usize>(0);
+        self.encode::<i64>(0);
         self.encode(len);
     }
 
