@@ -1,6 +1,6 @@
 use crate::change_context::ChangeContext;
 use crate::object::Object;
-use crate::value::{value_to_op_requests, random_op_id};
+use crate::value::{value_to_op_requests, random_op_id, MapType};
 use crate::{AutomergeFrontendError, Value};
 use automerge_backend as amb;
 use std::rc::Rc;
@@ -122,7 +122,11 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
     }
 
     pub fn ops(&self) -> Option<Vec<amb::OpRequest>> {
-        panic!("not implemented")
+        if self.ops.len() > 0 {
+            Some(self.ops.clone())
+        } else {
+            None
+        }
     }
 
     fn parent_object<'c>(&'a self, path: &'c Path) -> Option<Rc<Object>> {
@@ -221,6 +225,9 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
         // This is just the logic for reducing the path
         let mut stack = path.0.clone();
+        // We don't need the final element as that's where we're applying this
+        // diff (I think).
+        stack.pop();
         stack.reverse();
         let mut current_obj: Rc<Object> = self
             .change_context
@@ -268,7 +275,17 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         })
     }
 
-
+    fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), AutomergeFrontendError> {
+        match value {
+            Value::Map(kvs, MapType::Map) => {
+                for (k, v) in kvs.into_iter() {
+                    self.add_change(LocalChange::set(Path::root().key(k), v.clone()))?;
+                };
+                Ok(())
+            }
+            _ => Err(AutomergeFrontendError::InvalidChangeRequest)
+        }
+    }
 
 }
 
@@ -280,6 +297,9 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
     fn add_change(&mut self, change: LocalChange) -> Result<(), AutomergeFrontendError> {
         match &change.operation {
             LocalOperation::Set(value) => {
+                if change.path == Path::root() {
+                    return self.wrap_root_assignment(value)
+                }
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
                     // We are not inserting unless this path references an
                     // existing index in a sequence
@@ -322,4 +342,5 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
             LocalOperation::Delete => panic!("delete not implemented"),
         }
     }
+
 }

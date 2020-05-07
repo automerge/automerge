@@ -7,7 +7,8 @@ use crate::mutation::Path;
 pub enum AutomergeFrontendError {
     InvalidChangeRequest,
     MissingObjectError(ObjectID),
-    NoSuchPathError(Path)
+    NoSuchPathError(Path),
+    MismatchedSequenceNumber,
 }
 
 impl fmt::Display for AutomergeFrontendError {

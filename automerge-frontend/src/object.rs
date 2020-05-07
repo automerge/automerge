@@ -4,7 +4,7 @@ use automerge_backend as amb;
 
 /// Represents the set of conflicting values for a register in an automerge
 /// document.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Values(pub(crate) HashMap<amb::OpID, Rc<RefCell<Object>>>);
 
 impl Values {
@@ -25,7 +25,7 @@ impl Values {
 }
 
 /// Internal data type used to represent the values of an automerge document
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Object {
     Sequence(amb::ObjectID, Vec<Option<Values>>, SequenceType),
     Map(amb::ObjectID, HashMap<amb::Key, Values>, MapType),

@@ -26,7 +26,7 @@ fn test_init_with_state() {
     )
     .unwrap();
     let value = Value::from_json(&initial_state_json);
-    let frontend = Frontend::new_with_initial_state(value).unwrap();
+    let (frontend, _) = Frontend::new_with_initial_state(value).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }
@@ -35,7 +35,7 @@ fn test_init_with_state() {
 fn test_init_with_empty_state() {
     let initial_state_json: serde_json::Value = serde_json::from_str("{}").unwrap();
     let value = Value::from_json(&initial_state_json);
-    let frontend = Frontend::new_with_initial_state(value).unwrap();
+    let (frontend, _) = Frontend::new_with_initial_state(value).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }
@@ -44,7 +44,7 @@ fn test_init_with_empty_state() {
 fn test_set_root_object_properties() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change(|doc| {
+        .change(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
                 Value::Primitive(PrimitiveValue::Str("magpie".to_string())),
@@ -56,21 +56,21 @@ fn test_set_root_object_properties() {
         actor: doc.actor_id,
         seq: 1,
         version: 0,
-        message: None,
+        message: Some("set root object".into()),
         undoable: true,
         deps: None,
         ops: Some(vec![
             amb::OpRequest{
-                action: amb::ReqOpType::MakeMap,
+                action: amb::ReqOpType::Set,
                 obj: ROOT_ID.to_string(),
                 key: amb::RequestKey::Str("bird".to_string()),
                 child: None,
                 value: Some(amb::PrimitiveValue::Str("magpie".to_string())),
-                datatype: None,
+                datatype: Some(amb::DataType::Undefined),
                 insert: false,
             }
         ]),
         request_type: amb::ChangeRequestType::Change,
     };
-    assert_eq!(change_request, Some(expected_change));
+    assert_eq!(change_request, expected_change);
 }
