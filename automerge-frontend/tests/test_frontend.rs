@@ -72,5 +72,27 @@ fn test_set_root_object_properties() {
         ]),
         request_type: amb::ChangeRequestType::Change,
     };
-    assert_eq!(change_request, expected_change);
+    assert_eq!(change_request, Some(expected_change));
+}
+
+#[test]
+fn it_should_return_no_changes_if_nothing_was_changed() {
+    let mut doc = Frontend::new();
+    let change_request = doc
+        .change(Some("do nothing".into()), |_| {
+            Ok(())
+        }).unwrap();
+    assert!(change_request.is_none())
+}
+
+#[test]
+fn it_should_create_nested_maps() {
+    let mut doc = Frontend::new();
+    let change_request = doc.change(None, |doc| {
+        doc.add_change(LocalChange::set(Path::root().key("birds"), Value::from_json(&serde_json::json!({
+            "wrens": 3
+        }))))?;
+        Ok(())
+    }).unwrap();
+
 }

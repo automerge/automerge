@@ -3,7 +3,7 @@ use crate::object::Object;
 use crate::value::{value_to_op_requests, random_op_id, MapType};
 use crate::{AutomergeFrontendError, Value};
 use automerge_backend as amb;
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 use maplit::hashmap;
 
 pub trait MutableDocument {
@@ -275,6 +275,8 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         })
     }
 
+    /// If the `value` is a map, individually assign each k,v in it to a key in
+    /// the root object
     fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), AutomergeFrontendError> {
         match value {
             Value::Map(kvs, MapType::Map) => {
@@ -343,4 +345,31 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
         }
     }
 
+}
+
+
+pub(crate) fn resolve_path(path: &Path, objects: &HashMap<amb::ObjectID, Rc<Object>>) -> Option<Rc<Object>> {
+    let mut stack = path.clone().0;
+    stack.reverse();
+    let mut current_obj: Rc<Object> = objects.get(&amb::ObjectID::Root).unwrap().clone();
+    while let Some(next_elem) = stack.pop() {
+        match (next_elem, &*current_obj) {
+            (PathElement::Key(ref k), Object::Map(_, ref vals, _)) => {
+                if let Some(target) = vals.get(&amb::Key(k.clone())) {
+                    current_obj = Rc::new(target.default_value().borrow().clone());
+                } else {
+                    return None;
+                }
+            }
+            (PathElement::Index(i), Object::Sequence(_, vals, _)) => {
+                if let Some(Some(target)) = vals.get(i) {
+                    current_obj = Rc::new(target.default_value().borrow().clone());
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(current_obj)
 }

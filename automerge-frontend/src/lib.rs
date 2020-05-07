@@ -24,8 +24,7 @@ pub use value::{Conflicts, MapType, PrimitiveValue, SequenceType, Value};
 /// so have to high a latency to be acceptable on the UI thread.
 ///
 /// This frontend/backend split implies that we need to optimistically apply
-/// local changes somehow. In order to do this we immediately apply changes to
-/// a copy of the local state (state being the HashMap<ObjectID, Object>) and
+/// local changes somehow. In order to do this we immediately apply changes to a copy of the local state (state being the HashMap<ObjectID, Object>) and
 /// add the sequence number of the new change to a list of in flight requests.
 /// In detail the logic looks like this:
 ///
@@ -37,7 +36,7 @@ pub use value::{Conflicts, MapType, PrimitiveValue, SequenceType, Value};
 /// 3. If there are no in flight requests remaining then transition from
 ///    the `WaitingForInFlightRequests` state to the `Reconciled` state,
 ///    moving the `reconciled_state` into the `Reconciled` enum branch
-///
+#[derive(Clone)]
 enum FrontendState {
     WaitingForInFlightRequests {
         in_flight_requests: Vec<u64>,
@@ -98,6 +97,14 @@ impl FrontendState {
                 Ok((new_state, FrontendState::Reconciled { objects }))
             }
         }
+    }
+
+    fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
+        let objects = match self {
+            FrontendState::WaitingForInFlightRequests{optimistically_updated_objects, ..} => optimistically_updated_objects,
+            FrontendState::Reconciled{objects, ..} => objects
+        };
+        mutation::resolve_path(path, objects).and_then(|o| o.id())
     }
 
     /// Apply a patch
@@ -220,13 +227,16 @@ impl Frontend {
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<ChangeRequest, AutomergeFrontendError>
+    ) -> Result<Option<ChangeRequest>, AutomergeFrontendError>
     where
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
-        self.seq += 1;
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let (ops, new_state, new_value) = self.state.take().unwrap().optimistically_apply_change(change_closure, self.seq)?;
+        let (ops, new_state, new_value) = self.state.take().unwrap().optimistically_apply_change(change_closure, self.seq + 1)?;
+        if ops.is_none() {
+            return Ok(None)
+        }
+        self.seq += 1;
         self.state = Some(new_state);
         self.cached_value = new_value;
         let change_request = ChangeRequest {
@@ -239,7 +249,7 @@ impl Frontend {
             ops,
             request_type: ChangeRequestType::Change,
         };
-        Ok(change_request)
+        Ok(Some(change_request))
     }
 
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
@@ -249,5 +259,11 @@ impl Frontend {
         self.cached_value = new_cached_value;
         self.version = std::cmp::max(self.version, patch.version);
         Ok(())
+    }
+
+    pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
+        // So gross, this is just a quick hack before refactoring to a proper
+        // state machine
+        self.state.clone().and_then(|s| s.get_object_id(path)).map(|o| o.clone())
     }
 }
