@@ -10,6 +10,7 @@ impl ActorMap {
         ActorMap(Vec::new())
     }
 
+    #[allow(dead_code)]
     pub fn index_of(&mut self, actor: &ActorID) -> usize {
         if let Some(index) = self.0.iter().position(|a| a == actor) {
             return index
@@ -18,6 +19,7 @@ impl ActorMap {
         self.0.len() - 1
     }
 
+    #[allow(dead_code)]
     pub fn actor_for(&self, index: usize) -> Option<&ActorID> {
         self.0.get(index)
     }

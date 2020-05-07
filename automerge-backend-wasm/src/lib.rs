@@ -1,6 +1,6 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, Clock, ChangeHash};
+use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, ChangeHash};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -102,16 +102,9 @@ impl State {
 
     #[wasm_bindgen(js_name = getMissingDeps)]
     pub fn get_missing_deps(&self) -> Result<JsValue, JsValue> {
-        let clock = self.backend.get_missing_deps();
-        rust_to_js(&clock)
+        let hashes = self.backend.get_missing_deps();
+        rust_to_js(&hashes)
     }
-
-    /*
-    #[wasm_bindgen(js_name = getClock)]
-    pub fn get_clock(&self) -> Result<JsValue, JsValue> {
-        rust_to_js(&self.backend.clock)
-    }
-    */
 
     #[wasm_bindgen(js_name = getUndoStack)]
     pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {

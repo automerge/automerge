@@ -2,6 +2,7 @@
 
 members = [
     "automerge",
+    "automerge-c",
     "automerge-cli",
     "automerge-backend",
     "automerge-backend-wasm",
