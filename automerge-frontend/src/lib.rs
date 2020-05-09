@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, ChangeRequest, ChangeRequestType, Clock, ObjectID, Patch, OpRequest};
+use automerge_backend::{ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpRequest, Patch};
 
 mod change_context;
 mod error;
@@ -10,8 +10,10 @@ pub use error::{AutomergeFrontendError, InvalidInitialStateError};
 use mutation::PathElement;
 pub use mutation::{LocalChange, MutableDocument, Path};
 use object::Object;
+use std::convert::TryFrom;
+use std::time;
 use std::{collections::HashMap, rc::Rc};
-pub use value::{Conflicts, MapType, PrimitiveValue, SequenceType, Value};
+pub use value::{Conflicts, MapType, SequenceType, Value};
 
 /// Tracks the possible states of the frontend
 ///
@@ -24,7 +26,8 @@ pub use value::{Conflicts, MapType, PrimitiveValue, SequenceType, Value};
 /// so have to high a latency to be acceptable on the UI thread.
 ///
 /// This frontend/backend split implies that we need to optimistically apply
-/// local changes somehow. In order to do this we immediately apply changes to a copy of the local state (state being the HashMap<ObjectID, Object>) and
+/// local changes somehow. In order to do this we immediately apply changes to 
+/// a copy of the local state (state being the HashMap<ObjectID, Object>) and
 /// add the sequence number of the new change to a list of in flight requests.
 /// In detail the logic looks like this:
 ///
@@ -49,10 +52,14 @@ enum FrontendState {
 }
 
 impl FrontendState {
-    /// Apply a patch received from the backend to this frontend state, 
+    /// Apply a patch received from the backend to this frontend state,
     /// returns the updated cached value and a new `FrontendState` which
     /// replaces this one
-    fn apply_remote_patch(self, self_actor: &ActorID, patch: &Patch) -> Result<(Value, Self), AutomergeFrontendError> {
+    fn apply_remote_patch(
+        self,
+        self_actor: &ActorID,
+        patch: &Patch,
+    ) -> Result<(Value, Self), AutomergeFrontendError> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
@@ -63,7 +70,7 @@ impl FrontendState {
                 // out of order
                 match (&patch.actor, patch.seq) {
                     (Some(patch_actor), Some(patch_seq)) => {
-                        if self_actor == patch_actor
+                        if self_actor == &ActorID::from(patch_actor.as_str())
                             && in_flight_requests[0] != patch_seq
                         {
                             return Err(AutomergeFrontendError::MismatchedSequenceNumber);
@@ -75,18 +82,23 @@ impl FrontendState {
                 if let Some(diff) = &patch.diffs {
                     change_ctx.apply_diff(&diff)?;
                 }
-                let new_state = change_ctx.commit()?; 
+                let new_state = change_ctx.commit()?;
                 // unwrap should be fine here as `in_flight_requests` should never have zero lenght
                 // given the following code
                 let (_, new_in_flight_requests) = in_flight_requests.split_first().unwrap();
-                Ok((new_state, match new_in_flight_requests[..] {
-                    [] => FrontendState::Reconciled{objects: reconciled_objects},
-                    _ => FrontendState::WaitingForInFlightRequests{
-                        in_flight_requests: new_in_flight_requests.into(),
-                        reconciled_objects,
-                        optimistically_updated_objects,
-                    }
-                }))
+                Ok((
+                    new_state,
+                    match new_in_flight_requests[..] {
+                        [] => FrontendState::Reconciled {
+                            objects: reconciled_objects,
+                        },
+                        _ => FrontendState::WaitingForInFlightRequests {
+                            in_flight_requests: new_in_flight_requests.into(),
+                            reconciled_objects,
+                            optimistically_updated_objects,
+                        },
+                    },
+                ))
             }
             FrontendState::Reconciled { mut objects } => {
                 let mut change_ctx = change_context::ChangeContext::new(&mut objects);
@@ -101,8 +113,11 @@ impl FrontendState {
 
     fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
         let objects = match self {
-            FrontendState::WaitingForInFlightRequests{optimistically_updated_objects, ..} => optimistically_updated_objects,
-            FrontendState::Reconciled{objects, ..} => objects
+            FrontendState::WaitingForInFlightRequests {
+                optimistically_updated_objects,
+                ..
+            } => optimistically_updated_objects,
+            FrontendState::Reconciled { objects, .. } => objects,
         };
         mutation::resolve_path(path, objects).and_then(|o| o.id())
     }
@@ -111,38 +126,52 @@ impl FrontendState {
     pub fn optimistically_apply_change<F>(
         self,
         change_closure: F,
-        seq: u64
+        seq: u64,
     ) -> Result<(Option<Vec<OpRequest>>, FrontendState, Value), AutomergeFrontendError>
     where
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
         match self {
-            FrontendState::WaitingForInFlightRequests{mut in_flight_requests, reconciled_objects, mut optimistically_updated_objects} => {
-                let mut change_ctx = change_context::ChangeContext::new(&mut optimistically_updated_objects);
+            FrontendState::WaitingForInFlightRequests {
+                mut in_flight_requests,
+                reconciled_objects,
+                mut optimistically_updated_objects,
+            } => {
+                let mut change_ctx =
+                    change_context::ChangeContext::new(&mut optimistically_updated_objects);
                 let mut mutation_tracker = mutation::MutationTracker::new(&mut change_ctx);
                 change_closure(&mut mutation_tracker)?;
                 let ops = mutation_tracker.ops();
                 let new_value = change_ctx.commit()?;
                 in_flight_requests.push(seq);
-                Ok((ops, FrontendState::WaitingForInFlightRequests{
-                    in_flight_requests,
-                    optimistically_updated_objects, 
-                    reconciled_objects,
-                }, new_value))
+                Ok((
+                    ops,
+                    FrontendState::WaitingForInFlightRequests {
+                        in_flight_requests,
+                        optimistically_updated_objects,
+                        reconciled_objects,
+                    },
+                    new_value,
+                ))
             }
-            FrontendState::Reconciled{objects} => {
+            FrontendState::Reconciled { objects } => {
                 let mut optimistically_updated_objects = objects.clone();
-                let mut change_ctx = change_context::ChangeContext::new(&mut optimistically_updated_objects);
+                let mut change_ctx =
+                    change_context::ChangeContext::new(&mut optimistically_updated_objects);
                 let mut mutation_tracker = mutation::MutationTracker::new(&mut change_ctx);
                 change_closure(&mut mutation_tracker)?;
                 let ops = mutation_tracker.ops();
                 let new_value = change_ctx.commit()?;
                 let in_flight_requests = vec![seq];
-                Ok((ops, FrontendState::WaitingForInFlightRequests{
-                    in_flight_requests,
-                    optimistically_updated_objects, 
-                    reconciled_objects: objects,
-                }, new_value))
+                Ok((
+                    ops,
+                    FrontendState::WaitingForInFlightRequests {
+                        in_flight_requests,
+                        optimistically_updated_objects,
+                        reconciled_objects: objects,
+                    },
+                    new_value,
+                ))
             }
         }
     }
@@ -195,13 +224,16 @@ impl Frontend {
                     })
                     .collect();
                 let mut front = Frontend::new();
+
                 let init_change_request = ChangeRequest {
                     actor: front.actor_id.clone(),
+                    time: system_time(),
+                    child: None,
                     seq: 1,
                     version: 0,
                     message: Some("Initialization".to_string()),
                     undoable: false,
-                    deps: Some(Clock::empty()),
+                    deps: None,
                     ops: Some(init_ops),
                     request_type: ChangeRequestType::Change,
                 };
@@ -232,9 +264,13 @@ impl Frontend {
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let (ops, new_state, new_value) = self.state.take().unwrap().optimistically_apply_change(change_closure, self.seq + 1)?;
+        let (ops, new_state, new_value) = self
+            .state
+            .take()
+            .unwrap()
+            .optimistically_apply_change(change_closure, self.seq + 1)?;
         if ops.is_none() {
-            return Ok(None)
+            return Ok(None);
         }
         self.seq += 1;
         self.state = Some(new_state);
@@ -242,6 +278,8 @@ impl Frontend {
         let change_request = ChangeRequest {
             actor: self.actor_id.clone(),
             seq: self.seq,
+            time: system_time(),
+            child: None,
             version: self.version,
             message,
             undoable: true,
@@ -254,7 +292,11 @@ impl Frontend {
 
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let (new_cached_value, new_state) = self.state.take().unwrap().apply_remote_patch(&self.actor_id, &patch)?;
+        let (new_cached_value, new_state) = self
+            .state
+            .take()
+            .unwrap()
+            .apply_remote_patch(&self.actor_id, &patch)?;
         self.state = Some(new_state);
         self.cached_value = new_cached_value;
         self.version = std::cmp::max(self.version, patch.version);
@@ -264,6 +306,20 @@ impl Frontend {
     pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
         // So gross, this is just a quick hack before refactoring to a proper
         // state machine
-        self.state.clone().and_then(|s| s.get_object_id(path)).map(|o| o.clone())
+        self.state
+            .clone()
+            .and_then(|s| s.get_object_id(path))
+            .map(|o| o.clone())
     }
+}
+
+fn system_time() -> Option<i64> {
+    // TODO note this can fail as SystemTime is not monotonic, also
+    // it's a system call so it's not no_std compatible. Finally,
+    // it doesn't handle system times before 1970 (which should be
+    // very rare one imagines).
+    time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
 }

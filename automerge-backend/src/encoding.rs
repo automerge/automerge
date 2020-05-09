@@ -1,57 +1,97 @@
 use crate::error::AutomergeError;
 use crate::protocol::ActorID;
 use core::fmt::Debug;
-use leb128;
 use std::convert::TryFrom;
+use std::io;
+use std::io::{Read, Write};
+use std::mem;
 use std::str;
 
 fn err(s: &str) -> AutomergeError {
     AutomergeError::ChangeDecompressError(s.to_string())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Decoder<'a> {
     pub offset: usize,
+    pub last_read: usize,
     buf: &'a [u8],
 }
 
 impl<'a> Decoder<'a> {
     pub fn new(buf: &'a [u8]) -> Self {
-        Decoder { offset: 0, buf }
+        Decoder {
+            offset: 0,
+            last_read: 0,
+            buf,
+        }
     }
 
-    pub fn iter<T>(&self) -> T
-    where
-        T: From<&'a [u8]>,
-    {
-        T::from(&self.buf[self.offset..])
+    pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, AutomergeError> {
+        let mut new_buf = &self.buf[..];
+        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::DecodeFailed)?;
+        let delta = self.buf.len() - new_buf.len();
+        if delta == 0 {
+            Err(err("buffer size didnt change..."))
+        } else {
+            self.buf = new_buf;
+            self.last_read = delta;
+            self.offset += delta;
+            Ok(val)
+        }
     }
 
-    pub fn read<T: Decodable + Debug>(&mut self, name: &str) -> Result<T, AutomergeError> {
-        let (val, offset) = T::decode(&self.buf[self.offset..]).ok_or_else(|| err(name))?;
-        self.offset += offset;
-        //log!("read {:?}={:?}", name, val);
-        Ok(val)
-    }
-
-    pub fn read_bytes(&mut self, index: usize, name: &str) -> Result<&'a [u8], AutomergeError> {
-        let buf = &self.buf[self.offset..];
+    pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], AutomergeError> {
+        let buf = &self.buf[..];
         if buf.len() < index {
-            Err(err(name))
+            Err(AutomergeError::DecodeFailed)
         } else {
             let head = &buf[0..index];
-            //log!("read_bytes {:?}={:?}", name, head);
+            self.buf = &buf[index..];
+            self.last_read = index;
             self.offset += index;
             Ok(head)
         }
     }
 
     pub fn done(&self) -> bool {
-        self.buf.len() == self.offset
+        self.buf.is_empty()
+    }
+}
+
+pub(crate) struct BooleanEncoder {
+    buf: Vec<u8>,
+    last: bool,
+    count: usize,
+}
+
+impl BooleanEncoder {
+    pub fn new() -> BooleanEncoder {
+        BooleanEncoder {
+            buf: Vec::new(),
+            last: false,
+            count: 0,
+        }
     }
 
-    pub fn rest(self) -> &'a [u8] {
-        &self.buf[self.offset..]
+    pub fn append(&mut self, value: bool) {
+        if value == self.last {
+            self.count += 1;
+        } else {
+            self.count.encode(&mut self.buf).ok();
+            self.last = value;
+            self.count = 1;
+        }
+    }
+
+    pub fn finish(mut self, col: u32) -> ColData {
+        if self.count > 0 {
+            self.count.encode(&mut self.buf).ok();
+        }
+        ColData {
+            col,
+            data: self.buf,
+        }
     }
 }
 
@@ -59,6 +99,12 @@ pub(crate) struct BooleanDecoder<'a> {
     decoder: Decoder<'a>,
     last_value: bool,
     count: usize,
+}
+
+impl<'a> From<&'a [u8]> for Decoder<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        Decoder::new(bytes)
+    }
 }
 
 impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
@@ -71,8 +117,7 @@ impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
     }
 }
 
-// this is an endless iterator that returns a bunch all falses after finishing the buffer
-
+// this is an endless iterator that returns false after input is exhausted
 impl<'a> Iterator for BooleanDecoder<'a> {
     type Item = bool;
 
@@ -81,11 +126,173 @@ impl<'a> Iterator for BooleanDecoder<'a> {
             if self.decoder.done() && self.count == 0 {
                 return Some(false);
             }
-            self.count = self.decoder.read("bool_count").unwrap_or_default();
+            self.count = self.decoder.read().unwrap_or_default();
             self.last_value = !self.last_value;
         }
         self.count -= 1;
         Some(self.last_value)
+    }
+}
+
+pub(crate) struct DeltaEncoder {
+    rle: RLEEncoder<i64>,
+    absolute_value: u64,
+}
+
+impl DeltaEncoder {
+    pub fn new() -> DeltaEncoder {
+        DeltaEncoder {
+            rle: RLEEncoder::new(),
+            absolute_value: 0,
+        }
+    }
+
+    pub fn append_value(&mut self, value: u64) {
+        self.rle
+            .append_value(value as i64 - self.absolute_value as i64);
+        self.absolute_value = value;
+    }
+
+    pub fn append_null(&mut self) {
+        self.rle.append_null();
+    }
+
+    pub fn finish(self, col: u32) -> ColData {
+        self.rle.finish(col)
+    }
+}
+
+enum RLEState<T> {
+    Empty,
+    NullRun(usize),
+    LiteralRun(T, Vec<T>),
+    LoneVal(T),
+    Run(T, usize),
+}
+
+pub(crate) struct RLEEncoder<T>
+where
+    T: Encodable + PartialEq + Clone,
+{
+    buf: Vec<u8>,
+    state: RLEState<T>,
+}
+
+impl<T> RLEEncoder<T>
+where
+    T: Encodable + PartialEq + Clone,
+{
+    pub fn new() -> RLEEncoder<T> {
+        RLEEncoder {
+            buf: Vec::new(),
+            state: RLEState::Empty,
+        }
+    }
+
+    pub fn finish(mut self, col: u32) -> ColData {
+        match self.take_state() {
+            // this coveres `only_nulls`
+            RLEState::NullRun(size) => {
+                if !self.buf.is_empty() {
+                    self.flush_null_run(size)
+                }
+            }
+            RLEState::LoneVal(value) => self.flush_lit_run(vec![value]),
+            RLEState::Run(value, len) => self.flush_run(value, len),
+            RLEState::LiteralRun(last, mut run) => {
+                run.push(last);
+                self.flush_lit_run(run);
+            }
+            RLEState::Empty => {}
+        }
+        ColData {
+            col,
+            data: self.buf,
+        }
+    }
+
+    fn flush_run(&mut self, val: T, len: usize) {
+        self.encode(len as i64);
+        self.encode(val);
+    }
+
+    fn flush_null_run(&mut self, len: usize) {
+        self.encode::<i64>(0);
+        self.encode(len);
+    }
+
+    fn flush_lit_run(&mut self, run: Vec<T>) {
+        self.encode(-(run.len() as i64));
+        for val in run {
+            self.encode(val);
+        }
+    }
+
+    fn take_state(&mut self) -> RLEState<T> {
+        let mut state = RLEState::Empty;
+        mem::swap(&mut self.state, &mut state);
+        state
+    }
+
+    pub fn append_null(&mut self) {
+        self.state = match self.take_state() {
+            RLEState::Empty => RLEState::NullRun(1),
+            RLEState::NullRun(size) => RLEState::NullRun(size + 1),
+            RLEState::LoneVal(other) => {
+                self.flush_lit_run(vec![other]);
+                RLEState::NullRun(1)
+            }
+            RLEState::Run(other, len) => {
+                self.flush_run(other, len);
+                RLEState::NullRun(1)
+            }
+            RLEState::LiteralRun(last, mut run) => {
+                run.push(last);
+                self.flush_lit_run(run);
+                RLEState::NullRun(1)
+            }
+        }
+    }
+
+    pub fn append_value(&mut self, value: T) {
+        self.state = match self.take_state() {
+            RLEState::Empty => RLEState::LoneVal(value),
+            RLEState::LoneVal(other) => {
+                if other == value {
+                    RLEState::Run(value, 2)
+                } else {
+                    RLEState::LiteralRun(value, vec![other])
+                }
+            }
+            RLEState::Run(other, len) => {
+                if other == value {
+                    RLEState::Run(other, len + 1)
+                } else {
+                    self.flush_run(other, len);
+                    RLEState::LoneVal(value)
+                }
+            }
+            RLEState::LiteralRun(last, mut run) => {
+                if last == value {
+                    self.flush_lit_run(run);
+                    RLEState::Run(value, 2)
+                } else {
+                    run.push(last);
+                    RLEState::LiteralRun(value, run)
+                }
+            }
+            RLEState::NullRun(size) => {
+                self.flush_null_run(size);
+                RLEState::LoneVal(value)
+            }
+        }
+    }
+
+    fn encode<V>(&mut self, val: V)
+    where
+        V: Encodable,
+    {
+        val.encode(&mut self.buf).ok();
     }
 }
 
@@ -121,10 +328,10 @@ where
             if self.decoder.done() {
                 return Some(None);
             }
-            match self.decoder.read("RLE_count") {
+            match self.decoder.read() {
                 Ok(count) if count > 0 => {
                     self.count = count;
-                    self.last_value = self.decoder.read("RLE_val").ok();
+                    self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
                 Ok(count) if count < 0 => {
@@ -132,7 +339,7 @@ where
                     self.literal = true;
                 }
                 _ => {
-                    self.count = self.decoder.read("RLE_count2").unwrap_or_default();
+                    self.count = self.decoder.read().unwrap_or_default();
                     self.last_value = None;
                     self.literal = false;
                 }
@@ -140,7 +347,7 @@ where
         }
         self.count -= 1;
         if self.literal {
-            Some(self.decoder.read("RLE_literal").ok())
+            Some(self.decoder.read().ok())
         } else {
             Some(self.last_value.clone())
         }
@@ -184,110 +391,243 @@ impl<'a> Iterator for DeltaDecoder<'a> {
 }
 
 pub(crate) trait Decodable: Sized {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)>;
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read;
 }
 
 impl Decodable for u8 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        bytes.first().map(|b| (*b, 1))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 1];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(buffer[0])
     }
 }
 
 impl Decodable for u32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = u64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        u64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for usize {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = u64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        u64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for isize {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = i64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        i64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for i32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (val, size) = i64::decode(bytes)?;
-        Some((Self::try_from(val).ok()?, size))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        i64::decode::<R>(bytes).and_then(|val| Self::try_from(val).ok())
     }
 }
 
 impl Decodable for i64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let mut readable = &bytes[..];
-        leb128::read::signed(&mut readable)
-            .ok()
-            .map(|val| (val, bytes.len() - readable.len()))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        leb128::read::signed(bytes).ok()
     }
 }
 
 impl Decodable for f64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        match &bytes {
-            [a0, a1, a2, a3, a4, a5, a6, a7, ..] => Some((
-                Self::from_le_bytes([*a0, *a1, *a2, *a3, *a4, *a5, *a6, *a7]),
-                8,
-            )),
-            _ => None,
-        }
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 8];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(Self::from_le_bytes(buffer))
     }
 }
 
 impl Decodable for f32 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        match &bytes {
-            [a0, a1, a2, a3, ..] => Some((Self::from_le_bytes([*a0, *a1, *a2, *a3]), 4)),
-            _ => None,
-        }
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let mut buffer = [0; 4];
+        bytes.read_exact(&mut buffer).ok()?;
+        Some(Self::from_le_bytes(buffer))
     }
 }
 
 impl Decodable for u64 {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let mut readable = &bytes[..];
-        leb128::read::unsigned(&mut readable)
-            .ok()
-            .map(|val| (val, bytes.len() - readable.len()))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        leb128::read::unsigned(bytes).ok()
     }
 }
 
+impl Decodable for Vec<u8> {
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let len = usize::decode::<R>(bytes)?;
+        if len == 0 {
+            return Some(vec![]);
+        }
+        let mut buffer = vec![0; len];
+        bytes.read_exact(buffer.as_mut_slice()).ok()?;
+        Some(buffer)
+    }
+}
 impl Decodable for String {
-    fn decode(bytes: &[u8]) -> Option<(String, usize)> {
-        let (len, offset) = usize::decode(bytes)?;
-        let size = offset + len;
-        bytes
-            .get(offset..size)
-            .and_then(|data| str::from_utf8(&data).ok())
-            .map(|s| (s.to_string(), size))
+    fn decode<R>(bytes: &mut R) -> Option<String>
+    where
+        R: Read,
+    {
+        let buffer = Vec::decode(bytes)?;
+        str::from_utf8(&buffer).map(|t| t.into()).ok()
     }
 }
 
 impl Decodable for Option<String> {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (len, offset) = usize::decode(bytes)?;
-        if len == 0 {
-            return Some((None, offset));
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let buffer = Vec::decode(bytes)?;
+        if buffer.is_empty() {
+            return Some(None);
         }
-        let size = offset + len;
-        bytes
-            .get(offset..size)
-            .and_then(|data| str::from_utf8(&data).ok())
-            .map(|s| (Some(s.to_string()), size))
+        Some(str::from_utf8(&buffer).map(|t| t.into()).ok())
     }
 }
 
 impl Decodable for ActorID {
-    fn decode(bytes: &[u8]) -> Option<(Self, usize)> {
-        let (s, offset) = String::decode(bytes)?;
-        Some((ActorID(s), offset))
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let buffer = Vec::decode(bytes)?;
+        Some(ActorID::from_bytes(&buffer))
+    }
+}
+
+pub(crate) trait Encodable {
+    fn encode_with_actors_to_vec(&self, actors: &mut Vec<ActorID>) -> io::Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.encode_with_actors(&mut buf, actors)?;
+        Ok(buf)
+    }
+
+    fn encode_with_actors<R: Write>(
+        &self,
+        buf: &mut R,
+        _actors: &mut Vec<ActorID>,
+    ) -> io::Result<usize> {
+        self.encode(buf)
+    }
+
+    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
+        Ok(0)
+    }
+}
+
+impl Encodable for String {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.as_bytes();
+        let head = bytes.len().encode(buf)?;
+        buf.write_all(bytes)?;
+        Ok(head + bytes.len())
+    }
+}
+
+impl Encodable for Option<String> {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        if let Some(s) = self {
+            s.encode(buf)
+        } else {
+            0.encode(buf)
+        }
+    }
+}
+
+impl Encodable for u64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        Ok(leb128::write::unsigned(buf, *self)?)
+    }
+}
+
+impl Encodable for f64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.to_le_bytes();
+        buf.write_all(&bytes)?;
+        Ok(bytes.len())
+    }
+}
+
+impl Encodable for f32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.to_le_bytes();
+        buf.write_all(&bytes)?;
+        Ok(bytes.len())
+    }
+}
+
+impl Encodable for i64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        Ok(leb128::write::signed(buf, *self)?)
+    }
+}
+
+impl Encodable for usize {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as u64).encode(buf)
+    }
+}
+
+impl Encodable for u32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as u64).encode(buf)
+    }
+}
+
+impl Encodable for i32 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        (*self as i64).encode(buf)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ColData {
+    pub col: u32,
+    pub data: Vec<u8>,
+}
+
+impl Encodable for ColData {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let mut len = 0;
+        if !self.data.is_empty() {
+            len += self.col.encode(buf)?;
+            len += self.data.as_slice().encode(buf)?;
+        }
+        Ok(len)
     }
 }

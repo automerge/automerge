@@ -10,10 +10,28 @@ pub enum MapType {
     Table,
 }
 
+impl MapType {
+    pub(crate) fn to_obj_type(&self) -> amb::ObjType {
+        match self {
+            MapType::Map => amb::ObjType::Map,
+            MapType::Table => amb::ObjType::Table,
+        }
+    }
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub enum SequenceType {
     List,
     Text,
+}
+
+impl SequenceType {
+    pub(crate) fn to_obj_type(&self) -> amb::ObjType {
+        match self {
+            SequenceType::List => amb::ObjType::List,
+            SequenceType::Text => amb::ObjType::Text,
+        }
+    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -26,75 +44,11 @@ impl From<HashMap<amb::OpID, Value>> for Conflicts {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub enum PrimitiveValue {
-    Str(String),
-    Number(f64),
-    Boolean(bool),
-    Counter(i64),
-    Timestamp(i64),
-    Null,
-}
-
-impl PrimitiveValue {
-    /// Converts from the frontend data model to the backend one.
-    ///
-    /// The two models are slightly different because it felt more ergonomic
-    /// from an application developers point of view to represent counters
-    /// and timestamps as distinct, primitive values.
-    pub(crate) fn to_backend_value(
-        &self,
-    ) -> (
-        automerge_backend::PrimitiveValue,
-        automerge_backend::DataType,
-    ) {
-        match self {
-            PrimitiveValue::Number(n) => {
-                (amb::PrimitiveValue::Number(*n), amb::DataType::Undefined)
-            }
-            PrimitiveValue::Str(s) => (
-                amb::PrimitiveValue::Str(s.to_string()),
-                amb::DataType::Undefined,
-            ),
-            PrimitiveValue::Boolean(b) => {
-                (amb::PrimitiveValue::Boolean(*b), amb::DataType::Undefined)
-            }
-            PrimitiveValue::Counter(c) => (
-                amb::PrimitiveValue::Number(*c as f64),
-                amb::DataType::Counter,
-            ),
-            PrimitiveValue::Timestamp(t) => (
-                amb::PrimitiveValue::Number(*t as f64),
-                amb::DataType::Timestamp,
-            ),
-            PrimitiveValue::Null => (amb::PrimitiveValue::Null, amb::DataType::Undefined),
-        }
-    }
-
-    pub(crate) fn from_backend_values(
-        val: amb::PrimitiveValue,
-        dtype: amb::DataType,
-    ) -> PrimitiveValue {
-        match (val, dtype) {
-            (amb::PrimitiveValue::Number(n), amb::DataType::Undefined) => PrimitiveValue::Number(n),
-            (amb::PrimitiveValue::Number(n), amb::DataType::Counter) => {
-                PrimitiveValue::Counter(n.round() as i64)
-            }
-            (amb::PrimitiveValue::Number(n), amb::DataType::Timestamp) => {
-                PrimitiveValue::Timestamp(n.round() as i64)
-            }
-            (amb::PrimitiveValue::Str(s), _) => PrimitiveValue::Str(s),
-            (amb::PrimitiveValue::Boolean(b), _) => PrimitiveValue::Boolean(b),
-            (amb::PrimitiveValue::Null, _) => PrimitiveValue::Null,
-        }
-    }
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>, MapType),
     Sequence(Vec<Value>, SequenceType),
-    Primitive(PrimitiveValue),
+    Primitive(amb::Value),
 }
 
 impl Value {
@@ -111,12 +65,12 @@ impl Value {
                 vs.iter().map(Value::from_json).collect(),
                 SequenceType::List,
             ),
-            serde_json::Value::String(s) => Value::Primitive(PrimitiveValue::Str(s.to_string())),
+            serde_json::Value::String(s) => Value::Primitive(amb::Value::Str(s.clone())),
             serde_json::Value::Number(n) => {
-                Value::Primitive(PrimitiveValue::Number(n.as_f64().unwrap_or(0.0)))
+                Value::Primitive(amb::Value::F64(n.as_f64().unwrap_or(0.0)))
             }
-            serde_json::Value::Bool(b) => Value::Primitive(PrimitiveValue::Boolean(*b)),
-            serde_json::Value::Null => Value::Primitive(PrimitiveValue::Null),
+            serde_json::Value::Bool(b) => Value::Primitive(amb::Value::Boolean(*b)),
+            serde_json::Value::Null => Value::Primitive(amb::Value::Null),
         }
     }
 
@@ -134,24 +88,29 @@ impl Value {
                 elements
                     .iter()
                     .map(|v| match v {
-                        Value::Primitive(PrimitiveValue::Str(c)) => c.as_str(),
+                        Value::Primitive(amb::Value::Str(c)) => c.as_str(),
                         _ => panic!("Non string element in text sequence"),
                     })
                     .collect(),
             ),
             Value::Primitive(v) => match v {
-                PrimitiveValue::Number(n) => serde_json::Value::Number(
+                amb::Value::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                PrimitiveValue::Str(s) => serde_json::Value::String(s.to_string()),
-                PrimitiveValue::Boolean(b) => serde_json::Value::Bool(*b),
-                PrimitiveValue::Counter(c) => {
+                amb::Value::F32(n) => serde_json::Value::Number(
+                    serde_json::Number::from_f64(f64::from(*n)).unwrap_or_else(|| serde_json::Number::from(0)),
+                ),
+                amb::Value::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                amb::Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                amb::Value::Str(s) => serde_json::Value::String(s.to_string()),
+                amb::Value::Boolean(b) => serde_json::Value::Bool(*b),
+                amb::Value::Counter(c) => {
                     serde_json::Value::Number(serde_json::Number::from(*c))
                 }
-                PrimitiveValue::Timestamp(t) => {
+                amb::Value::Timestamp(t) => {
                     serde_json::Value::Number(serde_json::Number::from(*t))
                 }
-                PrimitiveValue::Null => serde_json::Value::Null,
+                amb::Value::Null => serde_json::Value::Null,
             },
         }
     }
@@ -174,7 +133,7 @@ pub(crate) fn value_to_op_requests(
     key: PathElement,
     v: &Value,
     insert: bool,
-) -> (Vec<amb::OpRequest>, amb::DiffLink) {
+) -> (Vec<amb::OpRequest>, amb::Diff) {
     match v {
         Value::Sequence(vs, seq_type) => {
             let make_action = match seq_type {
@@ -191,7 +150,7 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: Vec<(Vec<amb::OpRequest>, amb::DiffLink)> = vs
+            let child_requests_and_diffs: Vec<(Vec<amb::OpRequest>, amb::Diff)> = vs
                 .iter()
                 .enumerate()
                 .map(|(index, v)| {
@@ -203,32 +162,27 @@ pub(crate) fn value_to_op_requests(
                 .cloned()
                 .flat_map(|(o, _)| o)
                 .collect();
-            let child_diff = amb::Diff {
-                edits: Some(
-                    vs.iter()
+            let child_diff = amb::SeqDiff {
+                edits: vs.iter()
                         .enumerate()
                         .map(|(index, _)| amb::DiffEdit::Insert { index })
                         .collect(),
-                ),
-                object_id: amb::ObjectID::ID(amb::OpID::ID(1, list_id)),
+                object_id: amb::ObjectID::ID(amb::OpID(1, list_id)).to_string(),
                 obj_type: match seq_type {
                     SequenceType::List => amb::ObjType::List,
                     SequenceType::Text => amb::ObjType::Text,
                 },
-                props: Some(
-                    child_requests_and_diffs
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, (_, diff_link))| {
-                            let key = amb::Key(index.to_string());
-                            (key, hashmap!{random_op_id() => diff_link})
-                        })
-                        .collect(),
-                ),
+                props: child_requests_and_diffs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (_, diff_link))| {
+                        (index, hashmap!{random_op_id().to_string() => diff_link})
+                    })
+                    .collect(),
             };
             let mut result = vec![make_op];
             result.extend(child_requests);
-            (result, amb::DiffLink::Link(child_diff))
+            (result, amb::Diff::Seq(child_diff))
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {
@@ -245,7 +199,7 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: HashMap<String, (Vec<amb::OpRequest>, amb::DiffLink)> =
+            let child_requests_and_diffs: HashMap<String, (Vec<amb::OpRequest>, amb::Diff)> =
                 kvs.iter()
                     .map(|(k, v)| {
                         (
@@ -265,40 +219,33 @@ pub(crate) fn value_to_op_requests(
                 .flat_map(|(_, (o, _))| o)
                 .cloned()
                 .collect();
-            let child_diff = amb::Diff {
-                edits: None,
-                object_id: amb::ObjectID::ID(amb::OpID::ID(1, map_id)),
+            let child_diff = amb::MapDiff {
+                object_id: amb::ObjectID::ID(amb::OpID(1, map_id)).to_string(),
                 obj_type: match map_type {
                     MapType::Map => amb::ObjType::Map,
                     MapType::Table => amb::ObjType::Table,
                 },
-                props: Some(
-                    child_requests_and_diffs
-                        .into_iter()
-                        .map(|(k, (_, diff_link))| {
-                            (amb::Key(k.clone()), hashmap!{random_op_id() => diff_link})
-                        })
-                        .collect(),
-                ),
+                props: child_requests_and_diffs
+                    .into_iter()
+                    .map(|(k, (_, diff_link))| {
+                        (k, hashmap!{random_op_id().to_string() => diff_link})
+                    })
+                    .collect(),
             };
             result.extend(child_requests);
-            (result, amb::DiffLink::Link(child_diff))
+            (result, amb::Diff::Map(child_diff))
         }
         Value::Primitive(prim_value) => {
-            let (backend_val, datatype) = prim_value.to_backend_value();
             let ops = vec![amb::OpRequest {
                 action: amb::ReqOpType::Set,
                 obj: parent_object,
                 key: key.to_request_key(),
                 child: None,
-                value: Some(backend_val.clone()),
-                datatype: Some(datatype),
+                value: Some(prim_value.clone()),
+                datatype: Some(prim_value.datatype()),
                 insert,
             }];
-            let diff = amb::DiffLink::Val(amb::DiffValue {
-                value: backend_val,
-                datatype,
-            });
+            let diff = amb::Diff::Value(prim_value.clone());
             (ops, diff)
         }
     }
@@ -309,5 +256,5 @@ fn new_object_id() -> String {
 }
 
 pub(crate) fn random_op_id() -> amb::OpID {
-    amb::OpID::ID(1, amb::ActorID::random().0)
+    amb::OpID(1, amb::ActorID::random().0)
 }

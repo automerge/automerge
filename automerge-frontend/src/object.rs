@@ -1,4 +1,4 @@
-use crate::{Value, PrimitiveValue, MapType, SequenceType};
+use crate::{Value, MapType, SequenceType};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use automerge_backend as amb;
 
@@ -28,8 +28,8 @@ impl Values {
 #[derive(Clone, Debug)]
 pub enum Object {
     Sequence(amb::ObjectID, Vec<Option<Values>>, SequenceType),
-    Map(amb::ObjectID, HashMap<amb::Key, Values>, MapType),
-    Primitive(PrimitiveValue),
+    Map(amb::ObjectID, HashMap<String, Values>, MapType),
+    Primitive(amb::Value),
 }
 
 impl Object {

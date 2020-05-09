@@ -1,3 +1,8 @@
+use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
+use crate::protocol::{
+    DataType, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, ReqOpType, RequestKey,
+    UndoOperation, Value, ChangeHash
+};
 use serde::de;
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
 use serde::ser::SerializeStruct;
@@ -6,11 +11,57 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
-use crate::patch::{Diff, DiffEdit, DiffLink, DiffValue};
-use crate::protocol::{
-    DataType, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, PrimitiveValue,
-    ReqOpType, RequestKey, UndoOperation,
-};
+impl Serialize for ChangeHash {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        hex::encode(&self.0).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ChangeHash {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let vec = hex::decode(&s).map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid hex string"))?;
+        Ok(vec.as_slice().into())
+    }
+}
+
+impl Serialize for Diff {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Diff::Map(diff) => diff.serialize(serializer),
+            Diff::Seq(diff) => diff.serialize(serializer),
+            Diff::Unchanged(diff) => diff.serialize(serializer),
+            Diff::Value(val) => match val {
+                Value::Counter(_) => {
+                    let mut op = serializer.serialize_struct("Value", 2)?;
+                    op.serialize_field("value", &val)?;
+                    op.serialize_field("datatype", "counter")?;
+                    op.end()
+                }
+                Value::Timestamp(_) => {
+                    let mut op = serializer.serialize_struct("Value", 2)?;
+                    op.serialize_field("value", &val)?;
+                    op.serialize_field("datatype", "timestamp")?;
+                    op.end()
+                }
+                _ => {
+                    let mut op = serializer.serialize_struct("Value", 1)?;
+                    op.serialize_field("value", &val)?;
+                    op.end()
+                }
+            },
+        }
+    }
+}
 
 impl Serialize for ObjectID {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -23,6 +74,19 @@ impl Serialize for ObjectID {
         }
     }
 }
+
+impl Serialize for ElementID {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            ElementID::ID(id) => id.serialize(serializer),
+            ElementID::Head => serializer.serialize_str("_head"),
+        }
+    }
+}
+
 
 impl<'de> Deserialize<'de> for ObjectID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -40,6 +104,58 @@ impl<'de> Deserialize<'de> for ObjectID {
                 &"A valid ObjectID",
             ))
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ValueVisitor;
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number, string, bool, or null")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Value::Boolean(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Value::Uint(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Value::Int(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Value::F64(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Value::Str(value.to_string()))
+            }
+        }
+        deserializer.deserialize_any(ValueVisitor)
     }
 }
 
@@ -70,6 +186,20 @@ impl<'de> Deserialize<'de> for ElementID {
     {
         let s = String::deserialize(deserializer)?;
         ElementID::from_str(&s).map_err(|_| de::Error::custom("invalid element ID"))
+    }
+}
+
+impl<'de> Deserialize<'de> for Key {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if let Ok(eid) = ElementID::from_str(&s) {
+            Ok(Key::Seq(eid))
+        } else {
+            Ok(Key::Map(s))
+        }
     }
 }
 
@@ -117,7 +247,7 @@ impl Serialize for OpType {
             OpType::Del => "del",
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",
-            OpType::Set(_, _) => "set",
+            OpType::Set(_) => "set",
         };
         serializer.serialize_str(s)
     }
@@ -131,8 +261,9 @@ impl Serialize for UndoOperation {
         let mut fields = 3;
 
         match &self.action {
-            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
-            OpType::Set(_, _) => fields += 2,
+            OpType::Set(Value::Counter(_)) => fields += 2,
+            OpType::Set(Value::Timestamp(_)) => fields += 2,
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
 
@@ -143,11 +274,15 @@ impl Serialize for UndoOperation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
-            OpType::Set(value, datatype) => {
+            OpType::Set(Value::Timestamp(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &datatype)?;
+                op.serialize_field("datatype", &DataType::Timestamp)?;
             }
+            OpType::Set(Value::Counter(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Counter)?;
+            }
+            OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
         op.end()
@@ -166,8 +301,9 @@ impl Serialize for Operation {
         }
 
         match &self.action {
-            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_, DataType::Undefined) => fields += 1,
-            OpType::Set(_, _) => fields += 2,
+            OpType::Set(Value::Timestamp(_)) => fields += 2,
+            OpType::Set(Value::Counter(_)) => fields += 2,
+            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
 
@@ -181,11 +317,15 @@ impl Serialize for Operation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(value, DataType::Undefined) => op.serialize_field("value", &value)?,
-            OpType::Set(value, datatype) => {
+            OpType::Set(Value::Counter(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &datatype)?;
+                op.serialize_field("datatype", &DataType::Counter)?;
             }
+            OpType::Set(Value::Timestamp(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Timestamp)?;
+            }
+            OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -217,7 +357,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let mut pred: Option<Vec<OpID>> = None;
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<DataType> = None;
-                let mut value: Option<PrimitiveValue> = None;
+                let mut value: Option<Value> = None;
                 let mut child: Option<ObjectID> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
@@ -237,6 +377,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let key = key.ok_or_else(|| Error::missing_field("key"))?;
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
+                let value = Value::from(value, datatype);
                 let action = match action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
                     ReqOpType::MakeTable => OpType::Make(ObjType::Table),
@@ -247,18 +388,23 @@ impl<'de> Deserialize<'de> for Operation {
                         OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
                     }
                     ReqOpType::Set => OpType::Set(
-                        value.ok_or_else(|| Error::missing_field("value"))?,
-                        datatype.unwrap_or(DataType::Undefined),
+                        Value::from(value, datatype)
+                            .ok_or_else(|| Error::missing_field("value"))?,
                     ),
                     ReqOpType::Inc => match value {
-                        Some(PrimitiveValue::Number(f)) => Ok(OpType::Inc(f)),
-                        Some(PrimitiveValue::Str(s)) => {
+                        Some(Value::Int(n)) => Ok(OpType::Inc(n)),
+                        Some(Value::Uint(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(Value::F64(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(Value::F32(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(Value::Counter(n)) => Ok(OpType::Inc(n)),
+                        Some(Value::Timestamp(n)) => Ok(OpType::Inc(n)),
+                        Some(Value::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }
-                        Some(PrimitiveValue::Boolean(b)) => {
+                        Some(Value::Boolean(b)) => {
                             Err(Error::invalid_value(Unexpected::Bool(b), &"a number"))
                         }
-                        Some(PrimitiveValue::Null) => {
+                        Some(Value::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }
                         None => Err(Error::missing_field("value")),
@@ -274,63 +420,6 @@ impl<'de> Deserialize<'de> for Operation {
             }
         }
         deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
-    }
-}
-
-impl<'de> Deserialize<'de> for DiffLink {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct DiffLinkVisitor;
-        const FIELDS: &[&str] = &["edits", "objType", "objectId", "props", "value", "datatype"];
-
-        impl<'de> de::Visitor<'de> for DiffLinkVisitor {
-            type Value = DiffLink;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("A difflink")
-            }
-
-            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
-            where
-                V: MapAccess<'de>,
-            {
-                let mut edits: Option<Vec<DiffEdit>> = None;
-                let mut object_id: Option<ObjectID> = None;
-                let mut obj_type: Option<ObjType> = None;
-                let mut props: Option<HashMap<Key, HashMap<OpID, DiffLink>>> = None;
-                let mut value: Option<PrimitiveValue> = None;
-                let mut datatype: Option<DataType> = None;
-
-                while let Some(field) = map.next_key::<String>()? {
-                    match field.as_ref() {
-                        "edits" => read_field("edits", &mut edits, &mut map)?,
-                        "objectId" => read_field("objectId", &mut object_id, &mut map)?,
-                        "type" => read_field("type", &mut obj_type, &mut map)?,
-                        "props" => read_field("props", &mut props, &mut map)?,
-                        "value" => read_field("value", &mut value, &mut map)?,
-                        "datatype" => read_field("datatype", &mut datatype, &mut map)?,
-                        _ => return Err(Error::unknown_field(&field, FIELDS)),
-                    }
-                }
-                if value.is_some() || datatype.is_some() {
-                    let value = value.ok_or_else(|| Error::missing_field("value"))?;
-                    let datatype = datatype.unwrap_or(DataType::Undefined);
-                    Ok(DiffLink::Val(DiffValue { value, datatype }))
-                } else {
-                    let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
-                    let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
-                    Ok(DiffLink::Link(Diff {
-                        object_id,
-                        obj_type,
-                        edits,
-                        props,
-                    }))
-                }
-            }
-        }
-        deserializer.deserialize_struct("DiffLink", &FIELDS, DiffLinkVisitor)
     }
 }
 
@@ -351,42 +440,85 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{
-        DataType, Diff, DiffEdit, DiffLink, DiffValue, Key, ObjType, ObjectID, OpID, PrimitiveValue,
-    };
-    use std::collections::HashMap;
-    use std::str::FromStr;
+impl<'de> Deserialize<'de> for Diff {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct DiffVisitor;
+        const FIELDS: &[&str] = &["edits", "objType", "objectId", "props", "value", "datatype"];
 
-    #[test]
-    fn test_difflink_round_trip() {
-        let difflink = DiffLink::Link(Diff {
-            edits: Some(vec![
-                DiffEdit::Insert { index: 1 },
-                DiffEdit::Remove { index: 2 },
-            ]),
-            object_id: ObjectID::Root,
-            obj_type: ObjType::Map,
-            props: Some(
-                vec![(
-                    Key("somekey".into()),
-                    vec![(
-                        OpID::from_str("1@00d737c7-acf2-4447-bd99-57f4219e3bb2").unwrap(),
-                        DiffLink::Val(DiffValue {
-                            value: PrimitiveValue::Boolean(false),
-                            datatype: DataType::Undefined,
-                        }),
-                    )]
-                    .into_iter()
-                    .collect::<HashMap<OpID, DiffLink>>(),
-                )]
-                .into_iter()
-                .collect(),
-            ),
-        });
-        let json = serde_json::to_value(difflink.clone()).unwrap();
-        let deserialized_difflink: DiffLink = serde_json::from_value(json).unwrap();
-        assert_eq!(difflink, deserialized_difflink);
+        impl<'de> de::Visitor<'de> for DiffVisitor {
+            type Value = Diff;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("A diff")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+            where
+                V: MapAccess<'de>,
+            {
+                let mut edits: Option<Vec<DiffEdit>> = None;
+                let mut object_id: Option<String> = None;
+                let mut obj_type: Option<ObjType> = None;
+                let mut props: Option<HashMap<String, HashMap<String, Diff>>> = None;
+                let mut value: Option<Value> = None;
+                let mut datatype: Option<DataType> = None;
+
+                while let Some(field) = map.next_key::<String>()? {
+                    match field.as_ref() {
+                        "edits" => read_field("edits", &mut edits, &mut map)?,
+                        "objectId" => read_field("objectId", &mut object_id, &mut map)?,
+                        "type" => read_field("type", &mut obj_type, &mut map)?,
+                        "props" => read_field("props", &mut props, &mut map)?,
+                        "value" => read_field("value", &mut value, &mut map)?,
+                        "datatype" => read_field("datatype", &mut datatype, &mut map)?,
+                        _ => return Err(Error::unknown_field(&field, FIELDS)),
+                    }
+                }
+                if value.is_some() || datatype.is_some() {
+                    let datatype = datatype.unwrap_or(DataType::Undefined);
+                    let value = value
+                        .ok_or_else(|| Error::missing_field("value"))?
+                        .adjust(datatype);
+                    Ok(Diff::Value(value))
+                } else {
+                    let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
+                    let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
+                    if let Some(mut props) = props {
+                        if obj_type == ObjType::Text || obj_type == ObjType::List {
+                            let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
+                            let mut new_props = HashMap::new();
+                            for (k, v) in props.drain() {
+                                let index = k.parse().map_err(|_| {
+                                    Error::invalid_type(Unexpected::Str(&k), &"an integer")
+                                })?;
+                                new_props.insert(index, v);
+                            }
+                            Ok(Diff::Seq(SeqDiff {
+                                object_id,
+                                obj_type,
+                                edits,
+                                props: new_props,
+                            }))
+                        } else {
+                            Ok(Diff::Map(MapDiff {
+                                object_id,
+                                obj_type,
+                                props,
+                            }))
+                        }
+                    } else {
+                        Ok(Diff::Unchanged(ObjDiff {
+                            object_id,
+                            obj_type,
+                        }))
+                    }
+                }
+            }
+        }
+        deserializer.deserialize_struct("Diff", &FIELDS, DiffVisitor)
     }
 }
+

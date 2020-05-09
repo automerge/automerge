@@ -1,4 +1,5 @@
-use crate::protocol::{Key, ObjectID, OpID, OpRequest};
+//use crate::patch::DiffKey;
+use crate::protocol::{ObjectID, OpID, OpRequest};
 use std::error::Error;
 use std::fmt;
 
@@ -12,18 +13,27 @@ pub enum AutomergeError {
     CantExtractObject(ObjectID),
     LinkMissingChild(OpID),
     SkipListError(String),
-    GetChildFailed(ObjectID, Key),
+    //GetChildFailed(ObjectID, DiffKey),
     IndexOutOfBounds(usize),
     InvalidOpID(String),
     InvalidObjectID(String),
-    MissingPrimitiveValue,
+    NoRedo,
+    NoUndo,
+    MissingValue,
     GeneralError(String),
     MissingNumberValue(OpRequest),
     UnknownVersion(u64),
     DuplicateChange(String),
-    InvalidChange(String),
     DivergedState(String),
     ChangeDecompressError(String),
+    MapKeyInSeq,
+    //DiffKeyToOpID,
+    HeadToOpID,
+    DivergentChange(String),
+    EncodeFailed,
+    DecodeFailed,
+    InvalidChange,
+    ChangeBadFormat,
 }
 
 impl fmt::Display for AutomergeError {

@@ -421,95 +421,95 @@ fn test_create_lists() {
 fn test_includes_latests_state_of_list() {
     let change1: Change = serde_json::from_str(
         r#"
-        {
-           "actor": "6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "todos",
-                 "pred": []
-              },
-              {
-                 "action": "makeMap",
-                 "obj": "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-                 "key": "_head",
-                 "insert": true,
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-                 "key": "title",
-                 "value": "water plants",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-                 "key": "done",
-                 "value": false,
-                 "pred": []
-              }
-           ]
-        }
-    "#,
+            {
+               "actor": "6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+               "seq": 1,
+               "startOp": 1,
+               "time": 0,
+               "deps": {},
+               "ops": [
+                  {
+                     "action": "makeList",
+                     "obj": "00000000-0000-0000-0000-000000000000",
+                     "key": "todos",
+                     "pred": []
+                  },
+                  {
+                     "action": "makeMap",
+                     "obj": "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+                     "key": "_head",
+                     "insert": true,
+                     "pred": []
+                  },
+                  {
+                     "action": "set",
+                     "obj": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+                     "key": "title",
+                     "value": "water plants",
+                     "pred": []
+                  },
+                  {
+                     "action": "set",
+                     "obj": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+                     "key": "done",
+                     "value": false,
+                     "pred": []
+                  }
+               ]
+            }
+        "#,
     )
     .unwrap();
 
     let expected_patch: Patch = serde_json::from_str(
         r#"
-        {
-           "version": 0,
-           "clock": {
-              "6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "todos": {
-                    "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
-                       "objectId": "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-                       "type": "list",
-                       "edits": [
-                          {
-                             "action": "insert",
-                             "index": 0
-                          }
-                       ],
-                       "props": {
-                          "0": {
-                             "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
-                                "objectId": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
-                                "type": "map",
-                                "props": {
-                                   "title": {
-                                      "3@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
-                                         "value": "water plants"
-                                      }
-                                   },
-                                   "done": {
-                                      "4@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
-                                         "value": false
-                                      }
-                                   }
-                                }
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
+            {
+               "version": 0,
+               "clock": {
+                  "6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": 1
+               },
+               "canUndo": false,
+               "canRedo": false,
+               "diffs": {
+                  "objectId": "00000000-0000-0000-0000-000000000000",
+                  "type": "map",
+                  "props": {
+                     "todos": {
+                        "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
+                           "objectId": "1@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+                           "type": "list",
+                           "edits": [
+                              {
+                                 "action": "insert",
+                                 "index": 0
+                              }
+                           ],
+                           "props": {
+                              "0": {
+                                 "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
+                                    "objectId": "2@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e",
+                                    "type": "map",
+                                    "props": {
+                                       "title": {
+                                          "3@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
+                                             "value": "water plants"
+                                          }
+                                       },
+                                       "done": {
+                                          "4@6caaa2e4-33de-42ae-9c3f-a65c9ff3f03e": {
+                                             "value": false
+                                          }
+                                       }
+                                    }
+                                 }
+                              }
+                           }
+                        }
+                     }
+                  }
+               }
+            }
+        "#,
     )
     .unwrap();
 
@@ -523,50 +523,50 @@ fn test_includes_latests_state_of_list() {
 fn test_includes_date_objects_at_root() {
     let change1: Change = serde_json::from_str(
         r#"
-        {
-           "actor": "90f5dd5d-4f52-4e95-ad59-29e08d1194f1",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "now",
-                 "value": 1586541033457,
-                 "datatype": "timestamp",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
+            {
+               "actor": "90f5dd5d-4f52-4e95-ad59-29e08d1194f1",
+               "seq": 1,
+               "startOp": 1,
+               "time": 0,
+               "deps": {},
+               "ops": [
+                  {
+                     "action": "set",
+                     "obj": "00000000-0000-0000-0000-000000000000",
+                     "key": "now",
+                     "value": 1586541033457,
+                     "datatype": "timestamp",
+                     "pred": []
+                  }
+               ]
+            }
+        "#,
     )
     .unwrap();
 
     let expected_patch: Patch = serde_json::from_str(
         r#"
-        {
-           "version": 0,
-           "clock": {
-              "90f5dd5d-4f52-4e95-ad59-29e08d1194f1": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "now": {
-                    "1@90f5dd5d-4f52-4e95-ad59-29e08d1194f1": {
-                       "value": 1586541033457,
-                       "datatype": "timestamp"
-                    }
-                 }
-              }
-           }
-        }
-    "#,
+            {
+               "version": 0,
+               "clock": {
+                  "90f5dd5d-4f52-4e95-ad59-29e08d1194f1": 1
+               },
+               "canUndo": false,
+               "canRedo": false,
+               "diffs": {
+                  "objectId": "00000000-0000-0000-0000-000000000000",
+                  "type": "map",
+                  "props": {
+                     "now": {
+                        "1@90f5dd5d-4f52-4e95-ad59-29e08d1194f1": {
+                           "value": 1586541033457,
+                           "datatype": "timestamp"
+                        }
+                     }
+                  }
+               }
+            }
+        "#,
     )
     .unwrap();
 
@@ -580,71 +580,71 @@ fn test_includes_date_objects_at_root() {
 fn test_includes_date_objects_in_a_list() {
     let change1: Change = serde_json::from_str(
         r#"
-        {
-           "actor": "08b050f9-76a2-4934-9021-a2e63d99c8e8",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "list",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@08b050f9-76a2-4934-9021-a2e63d99c8e8",
-                 "key": "_head",
-                 "insert": true,
-                 "value": 1586541089595,
-                 "datatype": "timestamp",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
+            {
+               "actor": "08b050f9-76a2-4934-9021-a2e63d99c8e8",
+               "seq": 1,
+               "startOp": 1,
+               "time": 0,
+               "deps": {},
+               "ops": [
+                  {
+                     "action": "makeList",
+                     "obj": "00000000-0000-0000-0000-000000000000",
+                     "key": "list",
+                     "pred": []
+                  },
+                  {
+                     "action": "set",
+                     "obj": "1@08b050f9-76a2-4934-9021-a2e63d99c8e8",
+                     "key": "_head",
+                     "insert": true,
+                     "value": 1586541089595,
+                     "datatype": "timestamp",
+                     "pred": []
+                  }
+               ]
+            }
+        "#,
     )
     .unwrap();
 
     let expected_patch: Patch = serde_json::from_str(
         r#"
-        {
-           "version": 0,
-           "clock": {
-              "08b050f9-76a2-4934-9021-a2e63d99c8e8": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "list": {
-                    "1@08b050f9-76a2-4934-9021-a2e63d99c8e8": {
-                       "objectId": "1@08b050f9-76a2-4934-9021-a2e63d99c8e8",
-                       "type": "list",
-                       "edits": [
-                          {
-                             "action": "insert",
-                             "index": 0
-                          }
-                       ],
-                       "props": {
-                          "0": {
-                             "2@08b050f9-76a2-4934-9021-a2e63d99c8e8": {
-                                "value": 1586541089595,
-                                "datatype": "timestamp"
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
+            {
+               "version": 0,
+               "clock": {
+                  "08b050f9-76a2-4934-9021-a2e63d99c8e8": 1
+               },
+               "canUndo": false,
+               "canRedo": false,
+               "diffs": {
+                  "objectId": "00000000-0000-0000-0000-000000000000",
+                  "type": "map",
+                  "props": {
+                     "list": {
+                        "1@08b050f9-76a2-4934-9021-a2e63d99c8e8": {
+                           "objectId": "1@08b050f9-76a2-4934-9021-a2e63d99c8e8",
+                           "type": "list",
+                           "edits": [
+                              {
+                                 "action": "insert",
+                                 "index": 0
+                              }
+                           ],
+                           "props": {
+                              "0": {
+                                 "2@08b050f9-76a2-4934-9021-a2e63d99c8e8": {
+                                    "value": 1586541089595,
+                                    "datatype": "timestamp"
+                                 }
+                              }
+                           }
+                        }
+                     }
+                  }
+               }
+            }
+        "#,
     )
     .unwrap();
 

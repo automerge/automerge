@@ -4,16 +4,14 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::protocol::{
-    Change, DataType, Key, ObjectID, OpID, OpType, Operation, PrimitiveValue, UndoOperation,
-};
+use crate::protocol::{Change, Key, ObjectID, OpID, OpType, Operation, UndoOperation, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
     pub id: OpID,
     change: Rc<Change>,
     index: usize,
-    delta: f64,
+    delta: i64,
 }
 
 impl OpHandle {
@@ -23,12 +21,12 @@ impl OpHandle {
             .iter()
             .enumerate()
             .map(|(index, _)| {
-                let id = OpID::ID(change.start_op + (index as u64), change.actor_id.0.clone());
+                let id = OpID(change.start_op + (index as u64), change.actor_id.0.clone());
                 OpHandle {
                     id,
                     change: change.clone(),
                     index,
-                    delta: 0.0,
+                    delta: 0,
                 }
             })
             .collect()
@@ -62,10 +60,10 @@ impl OpHandle {
             key = field_key
         }
         if let OpType::Make(_) = base_op.action {
-            action = OpType::Link(self.id.to_object_id());
+            action = OpType::Link(ObjectID::from(&self.id));
         }
-        if let OpType::Set(_, DataType::Counter) = base_op.action {
-            action = OpType::Set(self.adjusted_value(), DataType::Counter);
+        if let OpType::Set(Value::Counter(_)) = base_op.action {
+            action = OpType::Set(self.adjusted_value());
         }
         UndoOperation {
             action,
@@ -74,19 +72,17 @@ impl OpHandle {
         }
     }
 
-    pub fn adjusted_value(&self) -> PrimitiveValue {
+    pub fn adjusted_value(&self) -> Value {
         match &self.action {
-            OpType::Set(PrimitiveValue::Number(a), DataType::Counter) => {
-                PrimitiveValue::Number(a + self.delta)
-            }
-            OpType::Set(val, _) => val.clone(),
-            _ => PrimitiveValue::Null,
+            OpType::Set(Value::Counter(a)) => Value::Counter(a + self.delta),
+            OpType::Set(val) => val.clone(),
+            _ => Value::Null,
         }
     }
 
     pub fn child(&self) -> Option<ObjectID> {
         match &self.action {
-            OpType::Make(_) => Some(self.id.to_object_id()),
+            OpType::Make(_) => Some(ObjectID::from(&self.id)),
             OpType::Link(obj) => Some(obj.clone()),
             _ => None,
         }
@@ -94,7 +90,7 @@ impl OpHandle {
 
     pub fn operation_key(&self) -> Key {
         if self.insert {
-            self.id.to_key()
+            self.id.clone().into()
         } else {
             self.key.clone()
         }
@@ -103,7 +99,7 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let OpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                if let OpType::Set(PrimitiveValue::Number(_), DataType::Counter) = self.action {
+                if let OpType::Set(Value::Counter(_)) = self.action {
                     self.delta += amount;
                 }
             }

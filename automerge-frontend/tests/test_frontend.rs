@@ -1,4 +1,4 @@
-use automerge_frontend::{Frontend, LocalChange, Path, Value, PrimitiveValue};
+use automerge_frontend::{Frontend, LocalChange, Path, Value};
 use automerge_backend as amb;
 
 const ROOT_ID: &str = "00000000-0000-0000-0000-000000000000";
@@ -47,15 +47,19 @@ fn test_set_root_object_properties() {
         .change(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
-                Value::Primitive(PrimitiveValue::Str("magpie".to_string())),
+                Value::Primitive(amb::Value::Str("magpie".to_string())),
             ))?;
             Ok(())
         })
-        .unwrap();
+        .unwrap()
+        // Remove timestamp which is irrelevant to test
+        .map(|mut cr| {cr.time = None; cr});
     let expected_change = amb::ChangeRequest{
         actor: doc.actor_id,
         seq: 1,
         version: 0,
+        time: None,
+        child: None,
         message: Some("set root object".into()),
         undoable: true,
         deps: None,
@@ -65,7 +69,7 @@ fn test_set_root_object_properties() {
                 obj: ROOT_ID.to_string(),
                 key: amb::RequestKey::Str("bird".to_string()),
                 child: None,
-                value: Some(amb::PrimitiveValue::Str("magpie".to_string())),
+                value: Some(amb::Value::Str("magpie".to_string())),
                 datatype: Some(amb::DataType::Undefined),
                 insert: false,
             }
