@@ -12,14 +12,14 @@ use crate::object_store::ObjState;
 use crate::actor_map::ActorMap;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, PendingDiff, SeqDiff};
+use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::AsRef;
 use std::rc::Rc;
-use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID, Key, OpType};
+use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID, Key, OpType, Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order

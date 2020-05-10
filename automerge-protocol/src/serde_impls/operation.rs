@@ -1,6 +1,7 @@
 use crate::{Operation, OpType, Value, DataType, ObjectID, ReqOpType, Key, OpID, ObjType};
 use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{Visitor, MapAccess, Unexpected, Error}};
 use serde::ser::SerializeStruct;
+use super::read_field;
 
 
 impl Serialize for Operation {
@@ -134,23 +135,6 @@ impl<'de> Deserialize<'de> for Operation {
             }
         }
         deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
-    }
-}
-
-fn read_field<'de, T, M>(
-    name: &'static str,
-    data: &mut Option<T>,
-    map: &mut M,
-) -> Result<(), M::Error>
-where
-    M: MapAccess<'de>,
-    T: Deserialize<'de>,
-{
-    if data.is_some() {
-        Err(Error::duplicate_field(name))
-    } else {
-        data.replace(map.next_value()?);
-        Ok(())
     }
 }
 
