@@ -1,6 +1,6 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 use crate::protocol::{
-    OpType, Operation, ReqOpType, RequestKey,
+    OpType, Operation, 
     UndoOperation
 };
 use serde::de;
@@ -9,7 +9,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
-use automerge_protocol::{ObjType, OpID, ObjectID, Key, DataType, Value};
+use automerge_protocol::{ObjType, OpID, ObjectID, Key, DataType, Value, ReqOpType};
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -40,37 +40,6 @@ impl Serialize for Diff {
                 }
             },
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for RequestKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct RequestKeyVisitor;
-        impl<'de> Visitor<'de> for RequestKeyVisitor {
-            type Value = RequestKey;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number or string")
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<RequestKey, E>
-            where
-                E: de::Error,
-            {
-                Ok(RequestKey::Num(value))
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<RequestKey, E>
-            where
-                E: de::Error,
-            {
-                Ok(RequestKey::Str(value.to_string()))
-            }
-        }
-        deserializer.deserialize_any(RequestKeyVisitor)
     }
 }
 

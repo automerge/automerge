@@ -5,9 +5,9 @@ use crate::actor_map::ActorMap;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{OpType, Operation, ReqOpType, UndoOperation, RequestKey, OpRequest};
+use crate::protocol::{OpType, Operation, UndoOperation};
 use crate::time;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key};
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest};
 use crate::{Change, ChangeRequest, ChangeRequestType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
@@ -131,7 +131,7 @@ impl Backend {
                     ReqOpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
                     ),
-                    ReqOpType::Inc => OpType::Inc(rop.to_i64()?),
+                    ReqOpType::Inc => OpType::Inc(rop.to_i64().ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?),
                     ReqOpType::Set => OpType::Set(rop.primitive_value()),
                 };
 

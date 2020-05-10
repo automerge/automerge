@@ -149,3 +149,62 @@ impl Value {
         }
     }
 }
+
+#[derive(Serialize, Debug, PartialEq, Clone)]
+pub enum RequestKey {
+    Str(String),
+    Num(u64),
+}
+
+#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub enum ReqOpType {
+    MakeMap,
+    MakeTable,
+    MakeList,
+    MakeText,
+    Del,
+    Link,
+    Inc,
+    Set,
+}
+
+#[derive(Deserialize, PartialEq, Debug, Clone)]
+pub struct OpRequest {
+    pub action: ReqOpType,
+    pub obj: String,
+    pub key: RequestKey,
+    pub child: Option<String>,
+    pub value: Option<Value>,
+    pub datatype: Option<DataType>,
+    #[serde(default = "serde_impls::make_false")]
+    pub insert: bool,
+}
+
+impl OpRequest {
+    pub fn primitive_value(&self) -> Value {
+        match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
+            (Some(n), Some(DataType::Counter)) => Value::Counter(n),
+            (Some(n), Some(DataType::Timestamp)) => Value::Timestamp(n),
+            _ => self.value.clone().unwrap_or(Value::Null),
+        }
+    }
+
+    pub fn obj_type(&self) -> Option<ObjType> {
+        match self.action {
+            ReqOpType::MakeMap => Some(ObjType::Map),
+            ReqOpType::MakeTable => Some(ObjType::Table),
+            ReqOpType::MakeList => Some(ObjType::List),
+            ReqOpType::MakeText => Some(ObjType::Text),
+            _ => None,
+        }
+    }
+
+    pub fn to_i64(&self) -> Option<i64> {
+        self.value
+            .as_ref()
+            .and_then(|v| v.to_i64())
+            //.ok_or_else(|| AutomergeError::MissingNumberValue(self.clone()))
+    }
+}
+
