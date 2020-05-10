@@ -1,10 +1,8 @@
 use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::error::AutomergeError;
-use crate::protocol::{
-    Change, Operation
-};
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, ElementID, Key, Value, OpType};
+use crate::protocol::Change;
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, ElementID, Key, Value, OpType, Operation};
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

@@ -30,12 +30,11 @@ mod serialize;
 mod time;
 mod actor_map;
 
-pub use automerge_protocol::{ActorID, ChangeHash, ObjType, ObjectID, ElementID, Key, DataType, Value, OpType};
+pub use automerge_protocol::{ActorID, ChangeHash, ObjType, ObjectID, ElementID, Key, DataType, Value, OpType, Operation};
 
 pub use crate::patch::{DiffEdit, Patch, Diff, MapDiff, SeqDiff, ObjDiff};
 pub use crate::protocol::{
     Change, ChangeRequest, ChangeRequestType,
-    Operation
 };
 pub use backend::Backend;
 pub use error::AutomergeError;

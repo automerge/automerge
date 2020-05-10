@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::helper;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, Value, OpRequest, OpType};
+use automerge_protocol::{ActorID, ChangeHash, OpID, ObjectID, Key, OpRequest, OpType, Operation};
 
 
 #[derive(PartialEq, Debug, Clone)]
@@ -29,83 +29,6 @@ impl UndoOperation {
             key: self.key,
             insert: false,
             pred,
-        }
-    }
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub struct Operation {
-    pub action: OpType,
-    pub obj: ObjectID,
-    pub key: Key,
-    pub pred: Vec<OpID>,
-    pub insert: bool,
-}
-
-impl Operation {
-    pub fn set(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Set(value),
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn insert(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Set(value),
-            obj,
-            key,
-            insert: true,
-            pred,
-        }
-    }
-
-    pub fn inc(obj: ObjectID, key: Key, value: i64, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Inc(value),
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn del(obj: ObjectID, key: Key, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Del,
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn is_make(&self) -> bool {
-        self.obj_type().is_some()
-    }
-
-    pub fn is_basic_assign(&self) -> bool {
-        !self.insert
-            && match self.action {
-                OpType::Del | OpType::Set(_) | OpType::Inc(_) | OpType::Link(_) => true,
-                _ => false,
-            }
-    }
-
-    pub fn is_inc(&self) -> bool {
-        match self.action {
-            OpType::Inc(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn obj_type(&self) -> Option<ObjType> {
-        match self.action {
-            OpType::Make(t) => Some(t),
-            _ => None,
         }
     }
 }

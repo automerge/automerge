@@ -6,6 +6,7 @@ mod key;
 mod value;
 mod request_key;
 mod op_type;
+mod operation;
 
 pub(crate) fn make_false() -> bool {
     return false
