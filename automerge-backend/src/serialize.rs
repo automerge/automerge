@@ -1,5 +1,5 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
-use crate::protocol::UndoOperation;
+use crate::undo_operation::UndoOperation;
 use serde::de;
 use serde::de::{Error, MapAccess, Unexpected};
 use serde::ser::SerializeStruct;

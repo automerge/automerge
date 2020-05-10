@@ -5,7 +5,7 @@ use crate::actor_map::ActorMap;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::UndoOperation;
+use crate::undo_operation::UndoOperation;
 use crate::time;
 use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest, OpType, Value, Operation};
 use crate::{Change, ChangeRequest, ChangeRequestType};

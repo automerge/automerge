@@ -13,7 +13,7 @@ use crate::actor_map::ActorMap;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, PendingDiff, SeqDiff};
-use crate::protocol::UndoOperation;
+use crate::undo_operation::UndoOperation;
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
