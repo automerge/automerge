@@ -92,5 +92,60 @@ impl Key {
 }
 
 
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
+pub enum DataType {
+    #[serde(rename = "counter")]
+    Counter,
+    #[serde(rename = "timestamp")]
+    Timestamp,
+    #[serde(rename = "undefined")]
+    Undefined,
+}
 
+impl DataType {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn is_undefined(d: &DataType) -> bool {
+        match d {
+            DataType::Undefined => true,
+            _ => false,
+        }
+    }
+}
 
+// TODO I feel like a clearer name for this enum would be `ScalarValue`
+#[derive(Serialize, PartialEq, Debug, Clone)]
+#[serde(untagged)]
+pub enum Value {
+    Str(String),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    F32(f32),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Null,
+}
+
+impl Value {
+    pub fn from(val: Option<Value>, datatype: Option<DataType>) -> Option<Value> {
+        match datatype {
+            Some(DataType::Counter) => Some(Value::Counter(val?.to_i64()?)),
+            Some(DataType::Timestamp) => Some(Value::Timestamp(val?.to_i64()?)),
+            _ => val,
+        }
+    }
+
+    /// If this value can be coerced to an i64, return the i64 value
+    pub fn to_i64(&self) -> Option<i64> {
+        match self {
+            Value::Int(n) => Some(*n),
+            Value::Uint(n) => Some(*n as i64),
+            Value::F32(n) => Some(*n as i64),
+            Value::F64(n) => Some(*n as i64),
+            Value::Counter(n) => Some(*n),
+            Value::Timestamp(n) => Some(*n),
+            _ => None,
+        }
+    }
+}

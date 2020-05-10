@@ -1,7 +1,7 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 use crate::protocol::{
-    DataType, OpType, Operation, ReqOpType, RequestKey,
-    UndoOperation, Value
+    OpType, Operation, ReqOpType, RequestKey,
+    UndoOperation
 };
 use serde::de;
 use serde::de::{Error, MapAccess, Unexpected, Visitor};
@@ -9,7 +9,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
-use automerge_protocol::{ObjType, OpID, ObjectID, Key};
+use automerge_protocol::{ObjType, OpID, ObjectID, Key, DataType, Value};
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -40,58 +40,6 @@ impl Serialize for Diff {
                 }
             },
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Value {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct ValueVisitor;
-        impl<'de> Visitor<'de> for ValueVisitor {
-            type Value = Value;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number, string, bool, or null")
-            }
-
-            fn visit_bool<E>(self, value: bool) -> Result<Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Value::Boolean(value))
-            }
-
-            fn visit_u64<E>(self, value: u64) -> Result<Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Value::Uint(value))
-            }
-
-            fn visit_i64<E>(self, value: i64) -> Result<Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Value::Int(value))
-            }
-
-            fn visit_f64<E>(self, value: f64) -> Result<Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Value::F64(value))
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(Value::Str(value.to_string()))
-            }
-        }
-        deserializer.deserialize_any(ValueVisitor)
     }
 }
 
@@ -372,9 +320,9 @@ impl<'de> Deserialize<'de> for Diff {
                 if value.is_some() || datatype.is_some() {
                     let datatype = datatype.unwrap_or(DataType::Undefined);
                     let value = value
-                        .ok_or_else(|| Error::missing_field("value"))?
-                        .adjust(datatype);
-                    Ok(Diff::Value(value))
+                        .ok_or_else(|| Error::missing_field("value"))?;
+                    let value_with_datatype = maybe_add_datatype_to_value(value, datatype);
+                    Ok(Diff::Value(value_with_datatype))
                 } else {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
                     let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
@@ -414,3 +362,22 @@ impl<'de> Deserialize<'de> for Diff {
     }
 }
 
+fn maybe_add_datatype_to_value(value: Value, datatype: DataType) -> Value {
+        match datatype {
+            DataType::Counter => {
+                if let Some(n) = value.to_i64() {
+                    Value::Counter(n)
+                } else {
+                    value
+                }
+            }
+            DataType::Timestamp => {
+                if let Some(n) = value.to_i64() {
+                    Value::Timestamp(n)
+                } else {
+                    value
+                }
+            }
+            _ => value,
+        }
+}
