@@ -155,7 +155,7 @@ impl Backend {
             start_op,
             message: request.message.clone(),
             actor_id: request.actor.clone(),
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             seq: request.seq,
             deps: request.deps.clone().unwrap_or_default(),
             time,
@@ -215,7 +215,7 @@ impl Backend {
         let change = change_to_change(Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
@@ -250,7 +250,7 @@ impl Backend {
         let change = change_to_change(Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),

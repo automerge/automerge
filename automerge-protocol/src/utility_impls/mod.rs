@@ -5,3 +5,4 @@ mod key;
 mod element_id;
 mod value;
 mod diff;
+mod change_hash;

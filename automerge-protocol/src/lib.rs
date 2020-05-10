@@ -1,10 +1,6 @@
-mod change_hash;
-
 mod serde_impls;
 mod utility_impls;
 mod error;
-
-pub use change_hash::ChangeHash;
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use std::collections::HashMap;
@@ -311,6 +307,16 @@ impl Operation {
             OpType::Make(t) => Some(t),
             _ => None,
         }
+    }
+}
+
+#[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
+pub struct ChangeHash(pub [u8; 32]);
+
+impl ChangeHash {
+    /// A ChangeHash which is all zeros
+    pub fn zero() -> Self {
+        ChangeHash([0; 32])
     }
 }
 
