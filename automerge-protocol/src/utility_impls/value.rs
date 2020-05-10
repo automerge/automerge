@@ -17,4 +17,3 @@ impl From<u64> for Value {
         Value::Uint(n)
     }
 }
-

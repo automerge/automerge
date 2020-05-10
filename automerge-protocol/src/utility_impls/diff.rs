@@ -29,4 +29,3 @@ impl From<&str> for Diff {
         Diff::Value(s.into())
     }
 }
-

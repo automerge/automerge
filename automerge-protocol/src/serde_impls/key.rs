@@ -1,5 +1,5 @@
-use crate::{Key, ElementID};
-use serde::{Deserializer, Deserialize};
+use crate::{ElementID, Key};
+use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 
 impl<'de> Deserialize<'de> for Key {
@@ -15,4 +15,3 @@ impl<'de> Deserialize<'de> for Key {
         }
     }
 }
-

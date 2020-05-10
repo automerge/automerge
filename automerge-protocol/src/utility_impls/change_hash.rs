@@ -1,5 +1,5 @@
-use crate::ChangeHash;
 use crate::error::InvalidChangeHashSlice;
+use crate::ChangeHash;
 use std::convert::TryFrom;
 
 impl TryFrom<&[u8]> for ChangeHash {

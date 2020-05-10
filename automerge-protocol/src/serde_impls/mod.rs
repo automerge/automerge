@@ -1,16 +1,18 @@
-use serde::{de::{MapAccess, Error}, Deserialize};
+use serde::{
+    de::{Error, MapAccess},
+    Deserialize,
+};
 
 mod change_hash;
-mod opid;
-mod object_id;
+mod diff;
 mod element_id;
 mod key;
-mod value;
-mod request_key;
+mod object_id;
 mod op_type;
 mod operation;
-mod diff;
-
+mod opid;
+mod request_key;
+mod value;
 
 // Factory method for use in #[serde(default=..)] annotations
 pub(crate) fn make_false() -> bool {
@@ -39,4 +41,3 @@ where
         Ok(())
     }
 }
-

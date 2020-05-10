@@ -1,5 +1,5 @@
 use crate::ElementID;
-use serde::{de, Serializer, Serialize, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
 impl Serialize for ElementID {
@@ -23,5 +23,3 @@ impl<'de> Deserialize<'de> for ElementID {
         ElementID::from_str(&s).map_err(|_| de::Error::custom("invalid element ID"))
     }
 }
-
-

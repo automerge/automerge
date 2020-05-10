@@ -1,8 +1,8 @@
 mod actor_id;
-mod opid;
-mod object_id;
-mod key;
-mod element_id;
-mod value;
-mod diff;
 mod change_hash;
+mod diff;
+mod element_id;
+mod key;
+mod object_id;
+mod opid;
+mod value;

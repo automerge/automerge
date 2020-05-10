@@ -1,11 +1,11 @@
+mod error;
 mod serde_impls;
 mod utility_impls;
-mod error;
 
-use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
+use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
-// TODO make this an opaque tuple struct. I'm waiting on hearing what the 
+// TODO make this an opaque tuple struct. I'm waiting on hearing what the
 // constraints are on the possible values of ActorIDs
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ActorID(pub String);
@@ -106,7 +106,6 @@ impl Key {
         }
     }
 }
-
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
 pub enum DataType {
@@ -217,9 +216,7 @@ impl OpRequest {
     }
 
     pub fn to_i64(&self) -> Option<i64> {
-        self.value
-            .as_ref()
-            .and_then(|v| v.to_i64())
+        self.value.as_ref().and_then(|v| v.to_i64())
     }
 }
 
@@ -231,7 +228,6 @@ pub enum OpType {
     Inc(i64),
     Set(Value),
 }
-
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Operation {
@@ -391,7 +387,6 @@ pub enum ChangeRequestType {
 //      }
 // }
 
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Diff {
     Map(MapDiff),
@@ -441,7 +436,7 @@ pub struct Patch {
     pub actor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
-    pub clock: HashMap<String,u64>,
+    pub clock: HashMap<String, u64>,
     pub deps: Vec<ChangeHash>,
     pub can_undo: bool,
     pub can_redo: bool,

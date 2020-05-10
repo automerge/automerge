@@ -1,8 +1,10 @@
-use crate::{Operation, OpType, Value, DataType, ObjectID, ReqOpType, Key, OpID, ObjType};
-use serde::{Serialize, Serializer, Deserialize, Deserializer, de::{Visitor, MapAccess, Unexpected, Error}};
-use serde::ser::SerializeStruct;
 use super::read_field;
-
+use crate::{DataType, Key, ObjType, ObjectID, OpID, OpType, Operation, ReqOpType, Value};
+use serde::ser::SerializeStruct;
+use serde::{
+    de::{Error, MapAccess, Unexpected, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 impl Serialize for Operation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -137,4 +139,3 @@ impl<'de> Deserialize<'de> for Operation {
         deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
     }
 }
-

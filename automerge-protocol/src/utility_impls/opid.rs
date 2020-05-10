@@ -1,8 +1,11 @@
-use crate::OpID;
 use crate::error::InvalidOpID;
-use std::{str::FromStr, cmp::{Ordering, PartialOrd}, convert::TryFrom};
+use crate::OpID;
 use core::fmt;
-
+use std::{
+    cmp::{Ordering, PartialOrd},
+    convert::TryFrom,
+    str::FromStr,
+};
 
 impl Ord for OpID {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -61,5 +64,3 @@ impl From<&OpID> for String {
         id.to_string()
     }
 }
-
-

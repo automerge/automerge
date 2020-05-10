@@ -1,5 +1,5 @@
 use crate::RequestKey;
-use serde::{de, Deserialize, Deserializer, de::Visitor};
+use serde::{de, de::Visitor, Deserialize, Deserializer};
 
 impl<'de> Deserialize<'de> for RequestKey {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -31,4 +31,3 @@ impl<'de> Deserialize<'de> for RequestKey {
         deserializer.deserialize_any(RequestKeyVisitor)
     }
 }
-

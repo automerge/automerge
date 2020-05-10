@@ -1,7 +1,6 @@
-use crate::{ElementID, OpID};
 use crate::error::InvalidElementID;
+use crate::{ElementID, OpID};
 use std::str::FromStr;
-
 
 impl From<OpID> for ElementID {
     fn from(o: OpID) -> Self {

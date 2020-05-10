@@ -1,5 +1,5 @@
-use crate::{ObjectID, OpID};
 use crate::error::InvalidObjectID;
+use crate::{ObjectID, OpID};
 use std::str::FromStr;
 
 impl From<&OpID> for ObjectID {
@@ -22,10 +22,8 @@ impl FromStr for ObjectID {
     }
 }
 
-
 impl From<OpID> for ObjectID {
     fn from(id: OpID) -> Self {
         ObjectID::ID(id)
     }
 }
-

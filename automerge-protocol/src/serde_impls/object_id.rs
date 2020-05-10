@@ -1,5 +1,5 @@
 use crate::{ObjectID, OpID};
-use serde::{de, Serialize, Serializer, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
 impl Serialize for ObjectID {

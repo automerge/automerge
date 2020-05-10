@@ -1,6 +1,6 @@
+use crate::OpID;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use crate::OpID;
 use std::str::FromStr;
 
 impl<'de> Deserialize<'de> for OpID {

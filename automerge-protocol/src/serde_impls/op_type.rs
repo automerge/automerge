@@ -1,5 +1,5 @@
+use crate::{ObjType, OpType};
 use serde::{Serialize, Serializer};
-use crate::{OpType, ObjType};
 
 impl Serialize for OpType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -19,4 +19,3 @@ impl Serialize for OpType {
         serializer.serialize_str(s)
     }
 }
-

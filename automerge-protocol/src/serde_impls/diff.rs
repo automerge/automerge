@@ -1,8 +1,13 @@
-use crate::{Diff, Value, DiffEdit, ObjType, DataType, MapDiff, SeqDiff, ObjDiff};
-use serde::{Serializer, Serialize, ser::SerializeStruct, Deserialize, Deserializer, de, de::{MapAccess, Error, Unexpected}};
-use std::fmt;
-use std::collections::HashMap;
 use super::read_field;
+use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, SeqDiff, Value};
+use serde::{
+    de,
+    de::{Error, MapAccess, Unexpected},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+use std::collections::HashMap;
+use std::fmt;
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -75,8 +80,7 @@ impl<'de> Deserialize<'de> for Diff {
                 }
                 if value.is_some() || datatype.is_some() {
                     let datatype = datatype.unwrap_or(DataType::Undefined);
-                    let value = value
-                        .ok_or_else(|| Error::missing_field("value"))?;
+                    let value = value.ok_or_else(|| Error::missing_field("value"))?;
                     let value_with_datatype = maybe_add_datatype_to_value(value, datatype);
                     Ok(Diff::Value(value_with_datatype))
                 } else {
@@ -119,21 +123,21 @@ impl<'de> Deserialize<'de> for Diff {
 }
 
 fn maybe_add_datatype_to_value(value: Value, datatype: DataType) -> Value {
-        match datatype {
-            DataType::Counter => {
-                if let Some(n) = value.to_i64() {
-                    Value::Counter(n)
-                } else {
-                    value
-                }
+    match datatype {
+        DataType::Counter => {
+            if let Some(n) = value.to_i64() {
+                Value::Counter(n)
+            } else {
+                value
             }
-            DataType::Timestamp => {
-                if let Some(n) = value.to_i64() {
-                    Value::Timestamp(n)
-                } else {
-                    value
-                }
-            }
-            _ => value,
         }
+        DataType::Timestamp => {
+            if let Some(n) = value.to_i64() {
+                Value::Timestamp(n)
+            } else {
+                value
+            }
+        }
+        _ => value,
+    }
 }

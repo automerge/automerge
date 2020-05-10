@@ -1,4 +1,4 @@
-use crate::{Key, ElementID, OpID};
+use crate::{ElementID, Key, OpID};
 
 impl From<&str> for Key {
     fn from(s: &str) -> Self {
@@ -17,4 +17,3 @@ impl From<&OpID> for Key {
         Key::Seq(ElementID::ID(id.clone()))
     }
 }
-
