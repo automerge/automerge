@@ -1,15 +1,34 @@
-mod actor_id;
 mod change_hash;
 
 mod serde_impls;
 mod utility_impls;
 mod error;
 
-pub use actor_id::ActorID;
 pub use change_hash::ChangeHash;
 
 use serde::{Deserialize, Serialize, Serializer, ser::SerializeMap};
 use std::collections::HashMap;
+
+// TODO make this an opaque tuple struct. I'm waiting on hearing what the 
+// constraints are on the possible values of ActorIDs
+#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+pub struct ActorID(pub String);
+
+impl ActorID {
+    pub fn to_bytes(&self) -> Vec<u8> {
+        // FIXME - I should be storing u8 internally - not strings
+        // i need proper error handling for non-hex strings
+        hex::decode(&self.0).unwrap()
+    }
+
+    pub fn to_string(&self) -> String {
+        self.0.clone()
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> ActorID {
+        ActorID(hex::encode(bytes))
+    }
+}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]

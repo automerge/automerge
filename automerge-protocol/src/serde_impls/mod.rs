@@ -14,12 +14,12 @@ mod diff;
 
 // Factory method for use in #[serde(default=..)] annotations
 pub(crate) fn make_false() -> bool {
-    return false
+    false
 }
 
 // Factory method for use in #[serde(default=..)] annotations
 pub(crate) fn make_true() -> bool {
-    return false
+    false
 }
 
 // Helper method for use in custom deserialize impls
