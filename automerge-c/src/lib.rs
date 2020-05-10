@@ -5,7 +5,7 @@ extern crate errno;
 extern crate serde;
 extern crate automerge_backend;
 
-use automerge_backend::{ChangeRequest, Patch, ActorID};
+use automerge_protocol::{ChangeRequest, Patch, ActorID};
 use std::ffi::{CStr, CString};
 use std::ops::{Deref, DerefMut};
 use std::ptr;

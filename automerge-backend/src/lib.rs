@@ -29,6 +29,5 @@ mod serialize;
 mod time;
 mod actor_map;
 
-pub use automerge_protocol::{ActorID, ChangeHash, ObjType, ObjectID, ElementID, Key, DataType, Value, OpType, Operation, Change, ChangeRequest, ChangeRequestType, DiffEdit, Patch, Diff, MapDiff, SeqDiff, ObjDiff};
 pub use backend::Backend;
 pub use error::AutomergeError;
