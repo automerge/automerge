@@ -204,7 +204,15 @@ impl OpRequest {
         self.value
             .as_ref()
             .and_then(|v| v.to_i64())
-            //.ok_or_else(|| AutomergeError::MissingNumberValue(self.clone()))
     }
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum OpType {
+    Make(ObjType),
+    Del,
+    Link(ObjectID),
+    Inc(i64),
+    Set(Value),
 }
 

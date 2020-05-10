@@ -12,17 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::helper;
 use crate::op_handle::OpHandle;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, Value, OpRequest};
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, Value, OpRequest, OpType};
 
-
-#[derive(PartialEq, Debug, Clone)]
-pub enum OpType {
-    Make(ObjType),
-    Del,
-    Link(ObjectID),
-    Inc(i64),
-    Set(Value),
-}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct UndoOperation {
