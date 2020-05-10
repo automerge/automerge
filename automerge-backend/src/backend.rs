@@ -7,7 +7,7 @@ use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
 use crate::protocol::{Operation, UndoOperation};
 use crate::time;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest, OpType};
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest, OpType, Value};
 use crate::{Change, ChangeRequest, ChangeRequestType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
@@ -594,3 +594,55 @@ fn resolve_key(
     }
 }
 
+
+/// Extension trait adding a few helper methods with backend specific logic 
+/// to `Operation`
+trait OpExt {
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation>;
+    fn can_merge(&self, other: &Operation) -> bool;
+    fn merge(&mut self, other: Operation);
+}
+
+impl OpExt for Operation {
+
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
+        let key = self.key.clone();
+
+        if let OpType::Inc(value) = self.action {
+            vec![UndoOperation {
+                action: OpType::Inc(-value),
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else if overwritten.is_empty() {
+            vec![UndoOperation {
+                action: OpType::Del,
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else {
+            overwritten.iter().map(|o| o.invert(&key)).collect()
+        }
+    }
+
+    fn can_merge(&self, other: &Operation) -> bool {
+        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
+    }
+
+    fn merge(&mut self, other: Operation) {
+        if let OpType::Inc(delta) = other.action {
+            match self.action {
+                OpType::Set(Value::Counter(number)) => {
+                    self.action = OpType::Set(Value::Counter(number + delta))
+                }
+                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
+                _ => {}
+            } // error?
+        } else {
+            match other.action {
+                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
+                _ => {}
+            }
+        }
+    }
+}

@@ -11,7 +11,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::helper;
-use crate::op_handle::OpHandle;
 use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, Value, OpRequest, OpType};
 
 
@@ -88,53 +87,12 @@ impl Operation {
         self.obj_type().is_some()
     }
 
-    pub(crate) fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
-        let key = self.key.clone();
-
-        if let OpType::Inc(value) = self.action {
-            vec![UndoOperation {
-                action: OpType::Inc(-value),
-                obj: self.obj.clone(),
-                key,
-            }]
-        } else if overwritten.is_empty() {
-            vec![UndoOperation {
-                action: OpType::Del,
-                obj: self.obj.clone(),
-                key,
-            }]
-        } else {
-            overwritten.iter().map(|o| o.invert(&key)).collect()
-        }
-    }
-
     pub fn is_basic_assign(&self) -> bool {
         !self.insert
             && match self.action {
                 OpType::Del | OpType::Set(_) | OpType::Inc(_) | OpType::Link(_) => true,
                 _ => false,
             }
-    }
-
-    pub fn can_merge(&self, other: &Operation) -> bool {
-        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
-    }
-
-    pub(crate) fn merge(&mut self, other: Operation) {
-        if let OpType::Inc(delta) = other.action {
-            match self.action {
-                OpType::Set(Value::Counter(number)) => {
-                    self.action = OpType::Set(Value::Counter(number + delta))
-                }
-                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
-                _ => {}
-            } // error?
-        } else {
-            match other.action {
-                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
-                _ => {}
-            }
-        }
     }
 
     pub fn is_inc(&self) -> bool {
