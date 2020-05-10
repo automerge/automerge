@@ -17,41 +17,7 @@ use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID};
-
-
-#[derive(Eq, PartialEq, Debug, Hash, Clone)]
-pub enum ObjectID {
-    ID(OpID),
-    Root,
-}
-
-impl From<&OpID> for ObjectID {
-    fn from(o: &OpID) -> Self {
-        ObjectID::ID(o.clone())
-    }
-}
-
-impl FromStr for ObjectID {
-    type Err = AutomergeError;
-
-    fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
-        if s == "00000000-0000-0000-0000-000000000000" {
-            Ok(ObjectID::Root)
-        } else if let Ok(id) = OpID::from_str(s) {
-            Ok(ObjectID::ID(id))
-        } else {
-            Err(AutomergeError::InvalidObjectID(s.to_string()))
-        }
-    }
-}
-
-
-impl From<OpID> for ObjectID {
-    fn from(id: OpID) -> Self {
-        ObjectID::ID(id)
-    }
-}
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID};
 
 impl From<&str> for Key {
     fn from(s: &str) -> Self {

@@ -31,3 +31,9 @@ impl OpID {
         self.0
     }
 }
+
+#[derive(Eq, PartialEq, Debug, Hash, Clone)]
+pub enum ObjectID {
+    ID(OpID),
+    Root,
+}
