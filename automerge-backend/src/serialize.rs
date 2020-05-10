@@ -1,6 +1,6 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 use crate::protocol::{
-    DataType, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, ReqOpType, RequestKey,
+    DataType, ElementID, Key, ObjectID, OpID, OpType, Operation, ReqOpType, RequestKey,
     UndoOperation, Value
 };
 use serde::de;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use automerge_protocol::ObjType;
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

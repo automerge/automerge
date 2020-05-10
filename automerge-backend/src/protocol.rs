@@ -20,16 +20,8 @@ use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use automerge_protocol::{ActorID, ChangeHash};
+use automerge_protocol::{ActorID, ChangeHash, ObjType};
 
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
-#[serde(rename_all = "camelCase")]
-pub enum ObjType {
-    Map,
-    Table,
-    Text,
-    List,
-}
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
 pub enum ObjectID {

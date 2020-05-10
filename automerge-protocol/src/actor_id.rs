@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, str::FromStr};
 
+// TODO make this an opaque tuple struct. I'm waiting on hearing what the 
+// constraints are on the possible values of ActorIDs
 #[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
 pub struct ActorID(pub String);
 

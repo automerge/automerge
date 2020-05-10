@@ -3,8 +3,9 @@ use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
 use crate::actor_map::ActorMap;
-use crate::protocol::{ElementID, Key, ObjType, OpID};
+use crate::protocol::{ElementID, Key, OpID};
 use im_rc::{HashMap, HashSet};
+use automerge_protocol::ObjType;
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
