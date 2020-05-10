@@ -5,9 +5,9 @@ use crate::actor_map::ActorMap;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{OpType, Operation, ReqOpType, UndoOperation};
+use crate::protocol::{OpType, Operation, ReqOpType, UndoOperation, RequestKey, OpRequest};
 use crate::time;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID};
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key};
 use crate::{Change, ChangeRequest, ChangeRequestType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
@@ -120,7 +120,7 @@ impl Backend {
                 });
                 let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
 
-                let key = rop.resolve_key(&id, elemids2)?;
+                let key = resolve_key(rop, &id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -563,3 +563,34 @@ struct Version {
     local_state: Option<Rc<OpSet>>,
     queue: Vec<Rc<Change>>,
 }
+
+fn resolve_key(
+    rop: &OpRequest,
+    id: &OpID,
+    ids: &mut dyn OrderedSet<OpID>,
+) -> Result<Key, AutomergeError> {
+    let key = &rop.key;
+    let insert = rop.insert;
+    let del = rop.action == ReqOpType::Del;
+    match key {
+        RequestKey::Str(s) => Ok(Key::Map(s.clone())),
+        RequestKey::Num(n) => {
+            let n: usize = *n as usize;
+            (if insert {
+                if n == 0 {
+                    ids.insert_index(0, id.clone());
+                    Some(Key::head())
+                } else {
+                    ids.insert_index(n, id.clone());
+                    ids.key_of(n - 1).map(|i| i.into())
+                }
+            } else if del {
+                ids.remove_index(n).map(|k| k.into())
+            } else {
+                ids.key_of(n).map(|i| i.into())
+            })
+            .ok_or(AutomergeError::IndexOutOfBounds(n))
+        }
+    }
+}
+

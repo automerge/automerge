@@ -13,7 +13,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
-use crate::ordered_set::OrderedSet;
 use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, DataType, Value};
 
 
@@ -22,14 +21,6 @@ pub enum RequestKey {
     Str(String),
     Num(u64),
 }
-
-/*
-impl RequestKey {
-    pub fn to_key(&self) -> Key {
-        Key(format!("{:?}", self))
-    }
-}
-*/
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -62,36 +53,6 @@ impl OpRequest {
             (Some(n), Some(DataType::Counter)) => Value::Counter(n),
             (Some(n), Some(DataType::Timestamp)) => Value::Timestamp(n),
             _ => self.value.clone().unwrap_or(Value::Null),
-        }
-    }
-
-    pub(crate) fn resolve_key(
-        &self,
-        id: &OpID,
-        ids: &mut dyn OrderedSet<OpID>,
-    ) -> Result<Key, AutomergeError> {
-        let key = &self.key;
-        let insert = self.insert;
-        let del = self.action == ReqOpType::Del;
-        match key {
-            RequestKey::Str(s) => Ok(Key::Map(s.clone())),
-            RequestKey::Num(n) => {
-                let n: usize = *n as usize;
-                (if insert {
-                    if n == 0 {
-                        ids.insert_index(0, id.clone());
-                        Some(Key::head())
-                    } else {
-                        ids.insert_index(n, id.clone());
-                        ids.key_of(n - 1).map(|i| i.into())
-                    }
-                } else if del {
-                    ids.remove_index(n).map(|k| k.into())
-                } else {
-                    ids.key_of(n).map(|i| i.into())
-                })
-                .ok_or(AutomergeError::IndexOutOfBounds(n))
-            }
         }
     }
 
