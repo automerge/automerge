@@ -20,7 +20,7 @@ use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use automerge_protocol::ActorID;
+use automerge_protocol::{ActorID, ChangeHash};
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -29,23 +29,6 @@ pub enum ObjType {
     Table,
     Text,
     List,
-}
-
-#[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
-pub struct ChangeHash(pub [u8; 32]);
-
-impl ChangeHash {
-    pub fn new() -> Self {
-        ChangeHash([0; 32])
-    }
-}
-
-impl From<&[u8]> for ChangeHash {
-    fn from(bytes: &[u8]) -> Self {
-        let mut array = [0; 32];
-        array.copy_from_slice(bytes);
-        ChangeHash(array)
-    }
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
