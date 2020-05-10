@@ -21,7 +21,7 @@ impl ActorID {
         hex::decode(&self.0).unwrap()
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn to_hex_string(&self) -> String {
         self.0.clone()
     }
 

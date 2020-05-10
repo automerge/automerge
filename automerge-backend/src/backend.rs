@@ -176,7 +176,7 @@ impl Backend {
             can_redo: self.can_redo(),
             diffs,
             deps,
-            clock: self.states.iter().map(|(k,v)| (k.to_string(),v.len() as u64)).collect(),
+            clock: self.states.iter().map(|(k,v)| (k.to_hex_string(),v.len() as u64)).collect(),
             actor: request.map(|r| r.actor.0.clone()),
             seq: request.map(|r| r.seq),
         })
