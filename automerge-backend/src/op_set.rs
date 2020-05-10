@@ -13,13 +13,13 @@ use crate::actor_map::ActorMap;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, PendingDiff, SeqDiff};
-use crate::protocol::{Key, OpType, UndoOperation};
+use crate::protocol::{OpType, UndoOperation};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::AsRef;
 use std::rc::Rc;
-use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID};
+use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID, Key};
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -99,7 +99,7 @@ impl OpSet {
 
         if object.is_seq() {
             if op.insert {
-                object.insert_after(op.key.as_element_id()?, op.clone(), actors);
+                object.insert_after(op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?, op.clone(), actors);
             }
 
             let ops = object.props.entry(op.operation_key()).or_default();
@@ -112,12 +112,12 @@ impl OpSet {
             let diff = match (before, after) {
                 (true, true) => Some(PendingDiff::Set(op.clone())),
                 (true, false) => {
-                    let opid = op.operation_key().to_opid()?;
+                    let opid = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     Some(PendingDiff::SeqRemove(op.clone(), index))
                 }
                 (false, true) => {
-                    let id = op.operation_key().to_opid()?;
+                    let id = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.index_of(&id)?;
                     object.seq.insert_index(index, id);
                     Some(PendingDiff::SeqInsert(op.clone(), index))
@@ -185,7 +185,7 @@ impl OpSet {
             Vec::new()
         } else if let Some(ops) = self.get_field_opids(&object_id, &key) {
             ops
-        } else if let Ok(opid) = key.to_opid() {
+        } else if let Some(opid) = key.to_opid() {
             vec![opid]
         } else {
             Vec::new()
@@ -318,7 +318,7 @@ impl OpSet {
                 };
                 opid_to_value.insert(String::from(&op.id), link);
             }
-            if let Some(index) = obj.seq.index_of(&key.to_opid()?) {
+            if let Some(index) = obj.seq.index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpID)?) {
                 props.insert(index, opid_to_value);
             }
         }

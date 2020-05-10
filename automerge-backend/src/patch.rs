@@ -1,8 +1,8 @@
 use crate::op_handle::OpHandle;
-use crate::protocol::{Key, Value};
+use crate::protocol::Value;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize, Serializer};
-use automerge_protocol::{ChangeHash, ObjType};
+use automerge_protocol::{ChangeHash, ObjType, Key};
 
 use std::collections::HashMap;
 

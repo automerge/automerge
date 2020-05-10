@@ -1,6 +1,6 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 use crate::protocol::{
-    DataType, ElementID, Key, OpType, Operation, ReqOpType, RequestKey,
+    DataType, OpType, Operation, ReqOpType, RequestKey,
     UndoOperation, Value
 };
 use serde::de;
@@ -9,8 +9,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
-use std::str::FromStr;
-use automerge_protocol::{ObjType, OpID, ObjectID};
+use automerge_protocol::{ObjType, OpID, ObjectID, Key};
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -43,20 +42,6 @@ impl Serialize for Diff {
         }
     }
 }
-
-impl Serialize for ElementID {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            ElementID::ID(id) => id.serialize(serializer),
-            ElementID::Head => serializer.serialize_str("_head"),
-        }
-    }
-}
-
-
 
 impl<'de> Deserialize<'de> for Value {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -107,30 +92,6 @@ impl<'de> Deserialize<'de> for Value {
             }
         }
         deserializer.deserialize_any(ValueVisitor)
-    }
-}
-
-impl<'de> Deserialize<'de> for ElementID {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        ElementID::from_str(&s).map_err(|_| de::Error::custom("invalid element ID"))
-    }
-}
-
-impl<'de> Deserialize<'de> for Key {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        if let Ok(eid) = ElementID::from_str(&s) {
-            Ok(Key::Seq(eid))
-        } else {
-            Ok(Key::Map(s))
-        }
     }
 }
 

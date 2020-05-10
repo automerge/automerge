@@ -8,3 +8,8 @@ pub struct InvalidOpID(pub String);
 #[error("Invalid object ID: {0}")]
 pub struct InvalidObjectID(pub String);
 
+#[derive(Error, Debug)]
+#[error("Invalid element ID: {0}")]
+pub struct InvalidElementID(pub String);
+
+

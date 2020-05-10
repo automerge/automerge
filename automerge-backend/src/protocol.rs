@@ -9,60 +9,12 @@
 //!
 
 use serde::{Deserialize, Serialize};
-use std::hash::Hash;
-use std::str::FromStr;
 
-use crate::error;
 use crate::error::AutomergeError;
 use crate::helper;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID};
-
-impl From<&str> for Key {
-    fn from(s: &str) -> Self {
-        Key::Map(s.into())
-    }
-}
-
-impl From<OpID> for Key {
-    fn from(id: OpID) -> Self {
-        Key::Seq(ElementID::ID(id))
-    }
-}
-
-impl From<&OpID> for Key {
-    fn from(id: &OpID) -> Self {
-        Key::Seq(ElementID::ID(id.clone()))
-    }
-}
-
-#[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
-#[serde(untagged)]
-pub enum Key {
-    Map(String),
-    Seq(ElementID),
-}
-
-impl Key {
-    pub fn head() -> Key {
-        Key::Seq(ElementID::Head)
-    }
-
-    pub fn as_element_id(&self) -> Result<ElementID, AutomergeError> {
-        match self {
-            Key::Map(_) => Err(AutomergeError::MapKeyInSeq),
-            Key::Seq(eid) => Ok(eid.clone()),
-        }
-    }
-
-    pub fn to_opid(&self) -> Result<OpID, AutomergeError> {
-        match self.as_element_id()? {
-            ElementID::ID(id) => Ok(id),
-            ElementID::Head => Err(AutomergeError::HeadToOpID),
-        }
-    }
-}
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key};
 
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
@@ -135,57 +87,6 @@ impl From<i64> for Value {
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Value::Uint(n)
-    }
-}
-
-#[derive(PartialEq, Eq, Debug, Hash, Clone)]
-pub enum ElementID {
-    Head,
-    ID(OpID),
-}
-
-impl ElementID {
-    pub fn as_opid(&self) -> Option<&OpID> {
-        match self {
-            ElementID::Head => None,
-            ElementID::ID(opid) => Some(opid),
-        }
-    }
-
-    pub fn into_key(self) -> Key {
-        Key::Seq(self)
-    }
-
-    pub fn not_head(&self) -> bool {
-        match self {
-            ElementID::Head => false,
-            ElementID::ID(_) => true,
-        }
-    }
-}
-
-impl From<OpID> for ElementID {
-    fn from(o: OpID) -> Self {
-        ElementID::ID(o)
-    }
-}
-
-impl From<&OpID> for ElementID {
-    fn from(o: &OpID) -> Self {
-        ElementID::ID(o.clone())
-    }
-}
-
-impl FromStr for ElementID {
-    type Err = error::InvalidElementID;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "_head" => Ok(ElementID::Head),
-            id => Ok(ElementID::ID(
-                OpID::from_str(id).map_err(|_| error::InvalidElementID(id.to_string()))?,
-            )),
-        }
     }
 }
 

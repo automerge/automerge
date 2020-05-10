@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::protocol::{Change, Key, OpType, Operation, UndoOperation, Value};
-use automerge_protocol::{OpID, ObjectID};
+use crate::protocol::{Change, OpType, Operation, UndoOperation, Value};
+use automerge_protocol::{OpID, ObjectID, Key};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {

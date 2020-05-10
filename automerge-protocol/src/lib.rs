@@ -37,3 +37,60 @@ pub enum ObjectID {
     ID(OpID),
     Root,
 }
+
+#[derive(PartialEq, Eq, Debug, Hash, Clone)]
+pub enum ElementID {
+    Head,
+    ID(OpID),
+}
+
+impl ElementID {
+    pub fn as_opid(&self) -> Option<&OpID> {
+        match self {
+            ElementID::Head => None,
+            ElementID::ID(opid) => Some(opid),
+        }
+    }
+
+    pub fn into_key(self) -> Key {
+        Key::Seq(self)
+    }
+
+    pub fn not_head(&self) -> bool {
+        match self {
+            ElementID::Head => false,
+            ElementID::ID(_) => true,
+        }
+    }
+}
+
+#[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
+#[serde(untagged)]
+pub enum Key {
+    Map(String),
+    Seq(ElementID),
+}
+
+impl Key {
+    pub fn head() -> Key {
+        Key::Seq(ElementID::Head)
+    }
+
+    pub fn as_element_id(&self) -> Option<ElementID> {
+        match self {
+            Key::Map(_) => None,
+            Key::Seq(eid) => Some(eid.clone()),
+        }
+    }
+
+    pub fn to_opid(&self) -> Option<OpID> {
+        match self.as_element_id()? {
+            ElementID::ID(id) => Some(id),
+            ElementID::Head => None,
+        }
+    }
+}
+
+
+
+
