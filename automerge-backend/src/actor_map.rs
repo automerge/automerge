@@ -1,6 +1,6 @@
-use crate::protocol::{OpID, ElementID, ObjectID, Key};
-use std::cmp::{Ordering};
-use automerge_protocol::ActorID;
+use crate::protocol::{ElementID, ObjectID, Key};
+use std::cmp::Ordering;
+use automerge_protocol::{ActorID, OpID};
 
 #[derive(PartialEq, Debug, Clone)]
 pub (crate) struct ActorMap(Vec<ActorID>);

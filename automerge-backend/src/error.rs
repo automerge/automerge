@@ -1,7 +1,8 @@
 //use crate::patch::DiffKey;
-use crate::protocol::{ObjectID, OpID, OpRequest};
+use crate::protocol::{ObjectID, OpRequest};
 use std::error::Error;
 use std::fmt;
+use automerge_protocol::OpID;
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeError {

@@ -1,6 +1,6 @@
 use crate::patch::{Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 use crate::protocol::{
-    DataType, ElementID, Key, ObjectID, OpID, OpType, Operation, ReqOpType, RequestKey,
+    DataType, ElementID, Key, ObjectID, OpType, Operation, ReqOpType, RequestKey,
     UndoOperation, Value
 };
 use serde::de;
@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use automerge_protocol::ObjType;
+use automerge_protocol::{ObjType, OpID};
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -137,26 +137,6 @@ impl<'de> Deserialize<'de> for Value {
             }
         }
         deserializer.deserialize_any(ValueVisitor)
-    }
-}
-
-impl<'de> Deserialize<'de> for OpID {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        OpID::from_str(&s)
-            .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid OpID"))
-    }
-}
-
-impl Serialize for OpID {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.to_string().as_str())
     }
 }
 
