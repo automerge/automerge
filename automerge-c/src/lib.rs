@@ -12,6 +12,7 @@ use std::ptr;
 use std::os::raw::{ c_void, c_char };
 use serde::ser::Serialize;
 use errno::{set_errno,Errno};
+use std::convert::TryInto;
 
 fn to_json<T: Serialize>(data: T) -> *const c_char {
     let json = serde_json::to_string(&data).unwrap();
@@ -274,7 +275,7 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(backend: *mut Backend, 
 pub unsafe extern "C" fn automerge_get_changes(backend: *mut Backend, len: usize, binary: *const u8) -> *const Changes {
     let mut have_deps = Vec::new();
     for i in 0..len {
-        have_deps.push(from_buf_raw(binary.offset(i as isize * 32),32).as_slice().into())
+        have_deps.push(from_buf_raw(binary.offset(i as isize * 32),32).as_slice().try_into().unwrap())
     }
     if let Ok(mut changes) = (*backend).get_changes(&have_deps) {
         let changes : Vec<Change> = changes.drain(..).map(|c| c.into()).collect();

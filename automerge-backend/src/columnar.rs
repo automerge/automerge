@@ -9,6 +9,7 @@ use std::io;
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::str;
+use std::convert::TryInto;
 
 const HASH_BYTES: usize = 32;
 
@@ -289,7 +290,8 @@ impl<'a> BinaryChange<'a> {
     }
 
     fn gen_deps(&self) -> Vec<ChangeHash> {
-        self.deps.iter().map(|&v| v.into()).collect()
+        // TODO Add error propagation
+        self.deps.iter().map(|&v| v.try_into().unwrap()).collect()
     }
 
     fn message(&self) -> Option<String> {
@@ -575,7 +577,7 @@ impl<'a> BinaryContainer<'a> {
 
         let mut hasher = Sha256::new();
         hasher.input(&body);
-        let hash = hasher.result()[..].into();
+        let hash = hasher.result()[..].try_into().map_err(|_| AutomergeError::DecodeFailed)?;
 
         Ok(BinaryContainer {
             magic,
@@ -1013,6 +1015,7 @@ mod tests {
             actor_id: ActorID("deadbeefdeadbeef".into()),
             deps: vec![],
             operations: vec![],
+            hash: ChangeHash::zero(),
         };
         let bin1 = change_to_bin(&change1).unwrap();
         let changes2 = bin_to_changes(&bin1).unwrap();
@@ -1042,6 +1045,7 @@ mod tests {
         let keyseq2 = Key::from(&opid2);
         let insert = false;
         let change1 = Change {
+            hash: ChangeHash::zero(),
             start_op: 123,
             seq: 29291,
             time: 12341231,

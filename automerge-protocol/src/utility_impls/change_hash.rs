@@ -1,11 +1,17 @@
 use crate::ChangeHash;
+use crate::error::InvalidChangeHashSlice;
+use std::convert::TryFrom;
 
-// TODO Should this by TryFrom? `copy_from_slice` will panic if the slice is not the
-// same length as the array
-impl From<&[u8]> for ChangeHash {
-    fn from(bytes: &[u8]) -> Self {
-        let mut array = [0; 32];
-        array.copy_from_slice(bytes);
-        ChangeHash(array)
+impl TryFrom<&[u8]> for ChangeHash {
+    type Error = InvalidChangeHashSlice;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() != 32 {
+            Err(InvalidChangeHashSlice(Vec::from(bytes)))
+        } else {
+            let mut array = [0; 32];
+            array.copy_from_slice(bytes);
+            Ok(ChangeHash(array))
+        }
     }
 }

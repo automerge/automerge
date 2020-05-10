@@ -1,6 +1,7 @@
+use crate::ChangeHash;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use crate::ChangeHash;
+use std::convert::TryInto;
 
 impl Serialize for ChangeHash {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -17,7 +18,11 @@ impl<'de> Deserialize<'de> for ChangeHash {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let vec = hex::decode(&s).map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid hex string"))?;
-        Ok(vec.as_slice().into())
+        let vec = hex::decode(&s).map_err(|_| {
+            de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid hex string")
+        })?;
+        vec.as_slice().try_into().map_err(|_| {
+            de::Error::invalid_value(de::Unexpected::Str(&s), &"A 32 byte hex encoded string")
+        })
     }
 }
