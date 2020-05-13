@@ -1,17 +1,36 @@
-use crate::protocol::ObjectID;
 use std::error::Error;
 use std::fmt;
+use automerge_protocol::{OpID, ObjectID, OpRequest};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum AutomergeError {
-    DuplicateObjectError,
     MissingObjectError(ObjectID),
-    InvalidObjectType(String),
-    InvalidLinkTarget,
+    MissingIndex(OpID),
+    MissingChildID(String),
+    MissingElement(ObjectID, OpID),
+    NoPathToObject(ObjectID),
+    CantExtractObject(ObjectID),
+    LinkMissingChild(OpID),
+    SkipListError(String),
+    IndexOutOfBounds(usize),
+    InvalidOpID(String),
+    InvalidObjectID(String),
+    NoRedo,
+    NoUndo,
+    MissingValue,
+    GeneralError(String),
+    MissingNumberValue(OpRequest),
+    UnknownVersion(u64),
     DuplicateChange(String),
-    NotImplemented(String),
-    InvalidChange(String),
     DivergedState(String),
+    ChangeDecompressError(String),
+    MapKeyInSeq,
+    HeadToOpID,
+    DivergentChange(String),
+    EncodeFailed,
+    DecodeFailed,
+    InvalidChange,
+    ChangeBadFormat,
 }
 
 impl fmt::Display for AutomergeError {
@@ -32,14 +51,3 @@ impl fmt::Display for InvalidElementID {
 }
 
 impl Error for InvalidElementID {}
-
-#[derive(Debug)]
-pub struct InvalidChangeRequest(pub String);
-
-impl Error for InvalidChangeRequest {}
-
-impl fmt::Display for InvalidChangeRequest {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}

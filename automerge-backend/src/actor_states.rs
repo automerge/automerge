@@ -1,5 +1,4 @@
 use crate::error::AutomergeError;
-use crate::operation_with_metadata::OperationWithMetadata;
 use crate::protocol::{ActorID, Change, Clock};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -12,7 +11,7 @@ use std::rc::Rc;
 // historic changes
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct ActorStates {
+pub(crate) struct ActorStates {
     pub history: Vec<Rc<Change>>,
     change_by_actor: HashMap<ActorID, Vec<Rc<Change>>>,
     deps_by_actor: HashMap<ActorID, Vec<Clock>>,
@@ -23,7 +22,7 @@ pub struct ActorStates {
 }
 
 impl ActorStates {
-    pub(crate) fn new() -> ActorStates {
+    pub fn new() -> ActorStates {
         ActorStates {
             change_by_actor: HashMap::new(),
             deps_by_actor: HashMap::new(),
@@ -32,37 +31,28 @@ impl ActorStates {
         }
     }
 
-    pub fn is_concurrent(&self, op1: &OperationWithMetadata, op2: &OperationWithMetadata) -> bool {
-        let clock1 = self.get_deps(&op1.actor_id, op1.sequence);
-        let clock2 = self.get_deps(&op2.actor_id, op2.sequence);
-        clock1.get(&op2.actor_id) < op2.sequence && clock2.get(&op1.actor_id) < op1.sequence
-    }
-
     pub fn get(&self, actor_id: &ActorID) -> Vec<&Change> {
         self.change_by_actor
             .get(actor_id)
-            .map(|vec| vec.iter().map(|c| c.as_ref()).collect() )
+            .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
             .unwrap_or_default()
     }
 
-    fn get_change(&self, actor_id: &ActorID, seq: u32) -> Option<&Rc<Change>> {
+    fn get_change(&self, actor_id: &ActorID, seq: u64) -> Option<&Rc<Change>> {
         self.change_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
     }
 
-    fn get_deps(&self, actor_id: &ActorID, seq: u32) -> &Clock {
-        self.get_deps_option(actor_id, seq)
-            .unwrap_or(&self.empty_clock)
-    }
-
-    fn get_deps_option(&self, actor_id: &ActorID, seq: u32) -> Option<&Clock> {
+    fn get_deps_option(&self, actor_id: &ActorID, seq: u64) -> Option<&Clock> {
         self.deps_by_actor
             .get(actor_id)
             .and_then(|v| v.get((seq as usize) - 1))
     }
 
-    fn transitive_deps(&self, clock: &Clock) -> Clock {
+    /*
+    fn transitive_deps(&self, change: &Change) -> Clock {
+        let clock = change.deps.with(&change.actor_id, change.seq - 1);
         let mut all_deps = clock.clone();
         clock
             .into_iter()
@@ -70,48 +60,52 @@ impl ActorStates {
             .for_each(|deps| all_deps.merge(deps));
         all_deps
     }
+            */
 
     // if the change is new - return Ok(true)
     // if the change is a duplicate - dont insert and return Ok(false)
     // if the change has a dup actor:seq but is different error
-    pub(crate) fn add_change(&mut self, change: Change) -> Result<bool, AutomergeError> {
+    pub fn add_change(&mut self, change: &Rc<Change>) -> Result<Option<Clock>, AutomergeError> {
+        unimplemented!();
+        /*
         if let Some(c) = self.get_change(&change.actor_id, change.seq) {
-            if &change == c.as_ref() {
-                return Ok(false);
+            if change.as_ref() == c.as_ref() {
+                return Ok(None);
             } else {
-                return Err(AutomergeError::InvalidChange(
+                return Err(AutomergeError::DivergentChange(
                     "Invalid reuse of sequence number for actor".to_string(),
                 ));
             }
         }
 
-        let deps = change.dependencies.with(&change.actor_id, change.seq - 1);
-        let all_deps = self.transitive_deps(&deps);
         let actor_id = change.actor_id.clone();
 
-        let rc = Rc::new(change);
-        self.history.push(rc.clone());
+        self.history.push(change.clone());
 
         let actor_changes = self
             .change_by_actor
             .entry(actor_id.clone())
             .or_insert_with(Vec::new);
 
-        if (rc.seq as usize) - 1 != actor_changes.len() {
+        if (change.seq as usize) - 1 != actor_changes.len() {
             panic!(
                 "cant push c={:?}:{:?} at ${:?}",
-                rc.actor_id,
-                rc.seq,
+                change.actor_id,
+                change.seq,
                 actor_changes.len()
             );
         }
 
-        actor_changes.push(rc);
+        actor_changes.push(change.clone());
 
-        let actor_deps = self.deps_by_actor.entry(actor_id).or_insert_with(Vec::new);
+        let all_deps = self.transitive_deps(change);
 
-        actor_deps.push(all_deps);
+        self.deps_by_actor
+            .entry(actor_id)
+            .or_insert_with(Vec::new)
+            .push(all_deps.clone());
 
-        Ok(true)
+        Ok(Some(all_deps))
+        */
     }
 }

@@ -1,132 +1,70 @@
-use crate::actor_states::ActorStates;
 use crate::error::AutomergeError;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::patch::{Conflict, ElementValue};
-use crate::{DataType, Operation, PrimitiveValue};
-use std::cmp::PartialOrd;
+use crate::op_handle::OpHandle;
+use std::ops::Deref;
+use automerge_protocol::OpType;
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
 #[derive(Debug, Clone, PartialEq)]
-pub struct ConcurrentOperations {
-    operations: Vec<OperationWithMetadata>,
+pub(crate) struct ConcurrentOperations {
+    pub ops: Vec<OpHandle>,
+}
+
+impl Deref for ConcurrentOperations {
+    type Target = Vec<OpHandle>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ops
+    }
+}
+
+impl Default for ConcurrentOperations {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConcurrentOperations {
-    pub(crate) fn new() -> ConcurrentOperations {
-        ConcurrentOperations {
-            operations: Vec::new(),
-        }
+    pub fn new() -> ConcurrentOperations {
+        ConcurrentOperations { ops: Vec::new() }
     }
 
-    pub fn active_op(&self) -> Option<&OperationWithMetadata> {
-        // operations are sorted in incorporate_new_op, so the first op is the
-        // active one
-        self.operations.first()
-    }
-
-    pub fn conflicts(&self) -> Vec<Conflict> {
-        self.operations
-            .split_first()
-            .map(|(_, tail)| {
-                tail.iter()
-                    .map(|op| match &op.operation {
-                        Operation::Set {
-                            value, datatype, ..
-                        } => Conflict {
-                            actor: op.actor_id.clone(),
-                            value: ElementValue::Primitive(value.clone()),
-                            datatype: datatype.clone(),
-                        },
-                        Operation::Link { value, .. } => Conflict {
-                            actor: op.actor_id.clone(),
-                            value: ElementValue::Link(value.clone()),
-                            datatype: None,
-                        },
-                        _ => panic!("Invalid operation in concurrent ops"),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+    pub fn is_empty(&self) -> bool {
+        self.ops.is_empty()
     }
 
     /// Updates this set of operations based on a new operation.
     ///
-    /// Returns the previous operations (multiple if concurrent) that this op
+    /// Returns the previous operations that this op
     /// replaces
-    pub(crate) fn incorporate_new_op(
+
+    pub fn incorporate_new_op(
         &mut self,
-        new_op: OperationWithMetadata,
-        actor_states: &ActorStates,
-    ) -> Result<Vec<Operation>, AutomergeError> {
-        let previous = self
-            .operations
-            .clone()
-            .into_iter()
-            .map(|o| o.operation)
-            .collect();
-        let mut concurrent: Vec<OperationWithMetadata> = match new_op.operation {
-            // If the operation is an increment op, then we are going to modify
-            // any Set operations to reflect the increment ops in the next
-            // part of this function
-            Operation::Increment { .. } => self.operations.clone(),
-            // Otherwise we filter out any operations that are not concurrent
-            // with the new one (i.e ones which causally precede the new one)
-            _ => self
-                .operations
-                .iter()
-                .filter(|op| actor_states.is_concurrent(&op, &new_op))
-                .cloned()
-                .collect(),
-        };
-        let this_op = new_op.clone();
-        match &new_op.operation {
-            // For Set or Link ops, we add them to the concurrent ops list, to
-            // be interpreted later as part of the document::walk
-            // implementation
-            Operation::Set { .. } | Operation::Link { .. } => {
-                concurrent.push(this_op);
-            }
-            // Increment ops are not stored in the op set, instead we update
-            // any Set operations which are a counter containing a number to
-            // reflect the increment operation
-            Operation::Increment {
-                value: inc_value, ..
-            } => concurrent.iter_mut().for_each(|op| {
-                let op_clone = op.clone();
-                if let Operation::Set {
-                    value: PrimitiveValue::Number(ref mut n),
-                    datatype: Some(DataType::Counter),
-                    ..
-                } = op.operation
-                {
-                    if !(actor_states.is_concurrent(&new_op, &op_clone)) {
-                        *n += inc_value
-                    }
+        new_op: &OpHandle,
+    ) -> Result<Vec<OpHandle>, AutomergeError> {
+        let mut overwritten_ops = Vec::new();
+        if new_op.is_inc() {
+            self.ops
+                .iter_mut()
+                .for_each(|other| other.maybe_increment(new_op))
+        } else {
+            let mut i = 0;
+            while i != self.ops.len() {
+                if new_op.pred.contains(&self.ops[i].id) {
+                    overwritten_ops.push(self.ops.swap_remove(i));
+                } else {
+                    i += 1;
                 }
-            }),
-            // All other operations are not relevant (e.g a concurrent
-            // operation set containing just a delete operation actually is an
-            // empty set, in document::walk we interpret this into a
-            // nonexistent part of the state)
+            }
+        }
+
+        match new_op.action {
+            OpType::Set(_) | OpType::Link(_) | OpType::Make(_) => {
+                self.ops.push(new_op.clone());
+            }
             _ => {}
         }
-        // the partial_cmp implementation for `OperationWithMetadata` ensures
-        // that the operations are in the deterministic order required by
-        // automerge.
-        //
-        // Note we can unwrap because the partial_cmp definition never returns
-        // None
-        concurrent.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        concurrent.reverse();
-        self.operations = concurrent;
-        Ok(previous)
-    }
 
-    pub fn pure_operations(&self) -> Vec<Operation> {
-        self.operations
-            .iter()
-            .map(|o| o.operation.clone())
-            .collect()
+        Ok(overwritten_ops)
     }
 }

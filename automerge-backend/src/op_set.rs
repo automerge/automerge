@@ -6,16 +6,20 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::actor_states::ActorStates;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::object_store::ObjectStore;
-use crate::operation_with_metadata::OperationWithMetadata;
-use crate::protocol::{Change, Clock, ElementID, ObjectID, Operation};
-use crate::{ActorID, Diff, DiffAction};
+use crate::object_store::ObjState;
+use crate::actor_map::ActorMap;
+use crate::op_handle::OpHandle;
+use crate::ordered_set::OrderedSet;
+use crate::pending_diff::PendingDiff;
+use crate::undo_operation::UndoOperation;
+use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::hash::BuildHasher;
+use std::convert::AsRef;
+use std::rc::Rc;
+use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID, Key, OpType, Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -30,311 +34,353 @@ use std::hash::BuildHasher;
 /// object store, starting with the root object ID and constructing the value
 /// at each node by examining the concurrent operationsi which are active for
 /// that node.
+///
+
 #[derive(Debug, PartialEq, Clone)]
-pub struct OpSet {
-    pub object_store: ObjectStore,
-    queue: Vec<Change>,
-    pub clock: Clock,
-    undo_pos: usize,
-    pub undo_stack: Vec<Vec<Operation>>,
-    pub redo_stack: Vec<Vec<Operation>>,
-    pub states: ActorStates,
+pub(crate) struct OpSet {
+    pub objs: im_rc::HashMap<ObjectID, Rc<ObjState>>,
+    pub deps: HashSet<ChangeHash>,
+    pub max_op: u64,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
+        let mut objs = im_rc::HashMap::new();
+        objs.insert(ObjectID::Root, Rc::new(ObjState::new(ObjType::Map)));
+
         OpSet {
-            object_store: ObjectStore::new(),
-            queue: Vec::new(),
-            clock: Clock::empty(),
-            undo_pos: 0,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
-            states: ActorStates::new(),
+            objs,
+            max_op: 0,
+            deps: HashSet::new(),
         }
     }
 
-    pub fn do_redo(
+    pub(crate) fn apply_ops(
         &mut self,
-        actor_id: ActorID,
-        seq: u32,
-        message: Option<String>,
-        dependencies: Clock,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        if let Some(redo_ops) = self.redo_stack.pop() {
-            let change = Change {
-                actor_id,
-                seq,
-                message,
-                dependencies,
-                operations: redo_ops,
+        mut ops: Vec<OpHandle>,
+        undoable: bool,
+        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
+        actors: &ActorMap
+    ) -> Result<Vec<UndoOperation>, AutomergeError> {
+        let mut all_undo_ops = Vec::new();
+        let mut new_objects: HashSet<ObjectID> = HashSet::new();
+        for op in ops.drain(..) {
+            if op.is_make() {
+                new_objects.insert(ObjectID::from(&op.id));
+            }
+            let use_undo = undoable && !(new_objects.contains(&op.obj));
+
+            let obj_id = op.obj.clone();
+
+            let (pending_diff, undo_ops) = self.apply_op(op, actors)?;
+
+            if let Some(d) = pending_diff {
+                diffs.entry(obj_id).or_default().push(d);
+            }
+
+            if use_undo {
+                all_undo_ops.extend(undo_ops);
+            }
+        }
+        Ok(all_undo_ops)
+    }
+
+    fn apply_op(
+        &mut self,
+        op: OpHandle,
+        actors: &ActorMap,
+    ) -> Result<(Option<PendingDiff>, Vec<UndoOperation>), AutomergeError> {
+        if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
+            self.objs.insert(child, Rc::new(ObjState::new(obj_type)));
+        }
+
+        let object_id = &op.obj;
+        let object = self.get_obj_mut(&object_id)?;
+
+        if object.is_seq() {
+            if op.insert {
+                object.insert_after(op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?, op.clone(), actors);
+            }
+
+            let ops = object.props.entry(op.operation_key()).or_default();
+            let before = !ops.is_empty();
+            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let after = !ops.is_empty();
+
+            let undo_ops = op.generate_undos(&overwritten_ops);
+
+            let diff = match (before, after) {
+                (true, true) => Some(PendingDiff::Set(op.clone())),
+                (true, false) => {
+                    let opid = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
+                    let index = object.seq.remove_key(&opid).unwrap();
+                    Some(PendingDiff::SeqRemove(op.clone(), index))
+                }
+                (false, true) => {
+                    let id = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
+                    let index = object.index_of(&id)?;
+                    object.seq.insert_index(index, id);
+                    Some(PendingDiff::SeqInsert(op.clone(), index))
+                }
+                (false, false) => None,
             };
-            self.undo_pos += 1;
-            self.apply_change(change, false)
+
+            self.unlink(&op, &overwritten_ops)?;
+
+            Ok((diff, undo_ops))
         } else {
-            Err(AutomergeError::InvalidChange("no redo ops".to_string()))
-        }
-    }
+            let ops = object.props.entry(op.key.clone()).or_default();
+            let before = !ops.is_empty();
+            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let after = !ops.is_empty();
+            let undo_ops = op.generate_undos(&overwritten_ops);
+            self.unlink(&op, &overwritten_ops)?;
 
-    pub fn do_undo(
-        &mut self,
-        actor_id: ActorID,
-        seq: u32,
-        message: Option<String>,
-        dependencies: Clock,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        if let Some(undo_ops) = self.undo_stack.get(self.undo_pos - 1) {
-            let redo_ops = undo_ops
-                .iter()
-                .filter_map(|op| match &op {
-                    Operation::Increment {
-                        object_id: oid,
-                        key,
-                        value,
-                    } => Some(vec![Operation::Increment {
-                        object_id: oid.clone(),
-                        key: key.clone(),
-                        value: -value,
-                    }]),
-                    Operation::Set { object_id, key, .. }
-                    | Operation::Link { object_id, key, .. }
-                    | Operation::Delete { object_id, key } => self
-                        .object_store
-                        .concurrent_operations_for_field(object_id, key)
-                        .map(|cops| {
-                            if cops.active_op().is_some() {
-                                cops.pure_operations()
-                            } else {
-                                vec![Operation::Delete {
-                                    object_id: object_id.clone(),
-                                    key: key.clone(),
-                                }]
-                            }
-                        }),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
-            self.redo_stack.push(redo_ops);
-            let change = Change {
-                actor_id,
-                seq,
-                message,
-                dependencies,
-                operations: undo_ops.clone(),
-            };
-            self.undo_pos -= 1;
-            self.apply_change(change, false)
-        } else {
-            Err(AutomergeError::InvalidChange(
-                "No undo ops to execute".to_string(),
-            ))
-        }
-    }
-
-    /// Adds a change to the internal queue of operations, then iteratively
-    /// applies all causally ready changes until there are none remaining
-    ///
-    /// If `make_undoable` is true, the op set will store a set of operations
-    /// which can be used to undo this change.
-    pub fn apply_change(
-        &mut self,
-        change: Change,
-        make_undoable: bool,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        self.queue.push(change);
-        let diffs = self.apply_causally_ready_changes(make_undoable)?;
-        Ok(diffs)
-    }
-
-    fn apply_causally_ready_changes(
-        &mut self,
-        make_undoable: bool,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        let mut diffs = Vec::new();
-        while let Some(next_change) = self.pop_next_causally_ready_change() {
-            let change_diffs = self.apply_causally_ready_change(next_change, make_undoable)?;
-            diffs.extend(change_diffs);
-        }
-        Ok(diffs)
-    }
-
-    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            let change = self.queue.get(index).unwrap();
-            let deps = change.dependencies.with(&change.actor_id, change.seq - 1);
-            if deps <= self.clock {
-                return Some(self.queue.remove(index));
-            }
-            index += 1
-        }
-        None
-    }
-
-    fn apply_causally_ready_change(
-        &mut self,
-        change: Change,
-        make_undoable: bool,
-    ) -> Result<Vec<Diff>, AutomergeError> {
-        // This method is a little more complicated than it intuitively should
-        // be due to the bookkeeping required for undo. If we're asked to make
-        // this operation undoable we have to store the undo operations for
-        // each operation and then add them to the undo stack at the end of the
-        // method. However, it's unnecessary to store undo operations for
-        // objects which are created by this change (e.g if there's an insert
-        // operation for a list which was created in this operation we only
-        // need the undo operation for the creation of the list to achieve
-        // the undo), so we track newly created objects and only store undo
-        // operations which don't operate on them.
-        let actor_id = change.actor_id.clone();
-        let seq = change.seq;
-        let operations = change.operations.clone();
-
-        if !self.states.add_change(change)? {
-            return Ok(Vec::new()); // its a duplicate - ignore
-        }
-
-        let mut diffs = Vec::new();
-        let mut undo_operations = Vec::new();
-        let mut new_object_ids: HashSet<ObjectID> = HashSet::new();
-        for operation in operations {
-            // Store newly created object IDs so we can decide whether we need
-            // undo ops later
-            match &operation {
-                Operation::MakeMap { object_id }
-                | Operation::MakeList { object_id }
-                | Operation::MakeText { object_id }
-                | Operation::MakeTable { object_id } => {
-                    new_object_ids.insert(object_id.clone());
-                }
-                _ => {}
-            }
-            let op_with_metadata = OperationWithMetadata {
-                sequence: seq,
-                actor_id: actor_id.clone(),
-                operation: operation.clone(),
-            };
-            let (diff, undo_ops_for_this_op) = self
-                .object_store
-                .apply_operation(&self.states, op_with_metadata)?;
-
-            // If this object is not created in this change then we need to
-            // store the undo ops for it (if we're storing undo ops at all)
-            if make_undoable && !(new_object_ids.contains(operation.object_id())) {
-                undo_operations.extend(undo_ops_for_this_op);
-            }
-            if let Some(d) = diff {
-                diffs.push(d)
-            }
-        }
-        self.clock = self.clock.with(&actor_id, seq);
-        if make_undoable {
-            let (new_undo_stack_slice, _) = self.undo_stack.split_at(self.undo_pos);
-            let mut new_undo_stack: Vec<Vec<Operation>> = new_undo_stack_slice.to_vec();
-            new_undo_stack.push(undo_operations);
-            self.undo_stack = new_undo_stack;
-            self.undo_pos += 1;
-        };
-        Ok(Self::simplify_diffs(diffs))
-    }
-
-    /// Remove any redundant diffs
-    fn simplify_diffs(diffs: Vec<Diff>) -> Vec<Diff> {
-        let mut result = Vec::new();
-        let mut known_maxelems: HashMap<ObjectID, u32> = HashMap::new();
-
-        for diff in diffs.into_iter().rev() {
-            if let DiffAction::MaxElem(ref oid, max_elem, _) = diff.action {
-                let current_max = known_maxelems.get(oid).unwrap_or(&0);
-                if *current_max < max_elem {
-                    known_maxelems.insert(oid.clone(), max_elem);
-                    result.push(diff);
-                }
-            } else if let DiffAction::InsertSequenceElement(
-                ref oid,
-                _,
-                _,
-                _,
-                _,
-                ElementID::SpecificElementID(_, max_elem),
-            ) = diff.action
-            {
-                let current_max = known_maxelems.get(oid).unwrap_or(&0);
-                if *current_max < max_elem {
-                    known_maxelems.insert(oid.clone(), max_elem);
-                }
-                result.push(diff);
+            if before || after {
+                Ok((Some(PendingDiff::Set(op)), undo_ops))
             } else {
-                result.push(diff);
+                Ok((None, undo_ops))
+            }
+        }
+    }
+
+    fn unlink(&mut self, op: &OpHandle, overwritten: &[OpHandle]) -> Result<(), AutomergeError> {
+        if let Some(child) = op.child() {
+            self.get_obj_mut(&child)?.inbound.insert(op.clone());
+        }
+
+        for old in overwritten.iter() {
+            if let Some(child) = old.child() {
+                self.get_obj_mut(&child)?.inbound.remove(&old);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_field_ops(&self, object_id: &ObjectID, key: &Key) -> Option<&ConcurrentOperations> {
+        self.objs.get(object_id).and_then(|obj| obj.props.get(key))
+    }
+
+    pub fn get_field_opids(&self, object_id: &ObjectID, key: &Key) -> Option<Vec<OpID>> {
+        self.get_field_ops(object_id, key)
+            .map(|con_ops| con_ops.iter().map(|op| op.id.clone()).collect())
+    }
+
+    pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
+        self.objs
+            .get(&object_id)
+            .map(|o| o.as_ref())
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
+    }
+
+    fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
+        self.objs
+            .get_mut(&object_id)
+            .map(|rc| Rc::make_mut(rc))
+            .ok_or_else(|| AutomergeError::MissingObjectError(object_id.clone()))
+    }
+
+    pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
+        if insert {
+            Vec::new()
+        } else if let Some(ops) = self.get_field_opids(&object_id, &key) {
+            ops
+        } else if let Some(opid) = key.to_opid() {
+            vec![opid]
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn construct_map(
+        &self,
+        object_id: &ObjectID,
+        object: &ObjState,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
+        let mut props = HashMap::new();
+
+        for (key, ops) in object.props.iter() {
+            if !ops.is_empty() {
+                let mut opid_to_value = HashMap::new();
+                for op in ops.iter() {
+                    let opid_string = String::from(&op.id);
+                    if let Some(child_id) = op.child() {
+                        opid_to_value.insert(opid_string, self.construct_object(&child_id, actors)?);
+                    } else {
+                        opid_to_value.insert(opid_string, (&op.adjusted_value()).into());
+                    }
+                }
+                props.insert(actors.key_to_string(key), opid_to_value);
+            }
+        }
+        Ok(MapDiff {
+            object_id: actors.object_to_string(object_id),
+            obj_type: object.obj_type,
+            props,
+        }
+        .into())
+    }
+
+    pub fn construct_list(
+        &self,
+        object_id: &ObjectID,
+        object: &ObjState,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
+        let mut edits = Vec::new();
+        let mut props = HashMap::new();
+        let mut index = 0;
+        let mut max_counter = 0;
+
+        for opid in object.seq.into_iter() {
+            max_counter = max(max_counter, opid.counter());
+            let key = opid.into(); // FIXME - something is wrong here
+            if let Some(ops) = object.props.get(&key) {
+                if !ops.is_empty() {
+                    edits.push(DiffEdit::Insert { index });
+                    let mut opid_to_value = HashMap::new();
+                    for op in ops.iter() {
+                        let opid_string = String::from(&op.id);
+                        if let Some(child_id) = op.child() {
+                            opid_to_value.insert(opid_string, self.construct_object(&child_id, actors)?);
+                        } else {
+                            opid_to_value.insert(opid_string, (&op.adjusted_value()).into());
+                        }
+                    }
+                    props.insert(index, opid_to_value);
+                    index += 1;
+                }
+            }
+        }
+        Ok(SeqDiff {
+            object_id: actors.object_to_string(object_id),
+            obj_type: object.obj_type,
+            edits,
+            props,
+        }
+        .into())
+    }
+
+    pub fn construct_object(&self, object_id: &ObjectID, actors: &ActorMap) -> Result<Diff, AutomergeError> {
+        let object = self.get_obj(&object_id)?;
+        if object.is_seq() {
+            self.construct_list(object_id, object, actors)
+        } else {
+            self.construct_map(object_id, object, actors)
+        }
+    }
+
+    // this recursivly walks through all the objects touched by the changes
+    // to generate a diff in a single pass
+    pub fn finalize_diffs(&self, mut pending: HashMap<ObjectID,Vec<PendingDiff>>, actors: &ActorMap) -> Result<Option<Diff>, AutomergeError> {
+        if pending.is_empty() {
+            return Ok(None);
+        }
+
+        let mut objs: Vec<_> = pending.keys().cloned().collect();
+        while let Some(obj_id) = objs.pop() {
+            let obj = self.get_obj(&obj_id)?;
+            if let Some(inbound) = obj.inbound.iter().next() {
+                if let Some(diffs) = pending.get_mut(&inbound.obj) {
+                    diffs.push(PendingDiff::Set(inbound.clone()))
+                } else {
+                    objs.push(inbound.obj.clone());
+                    pending.insert(inbound.obj.clone(), vec![PendingDiff::Set(inbound.clone())]);
+                }
             }
         }
 
-        result.reverse();
-        result
+        Ok(Some(self.gen_obj_diff(&ObjectID::Root, &mut pending, actors)?))
     }
 
-    pub fn can_undo(&self) -> bool {
-        self.undo_pos > 0
+    fn gen_seq_diff(
+        &self,
+        obj_id: &ObjectID,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
+        let mut props = HashMap::new();
+        let edits = pending.iter().filter_map(|p| p.edit()).collect();
+        // i may have duplicate keys - this makes sure I hit each one only once
+        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
+        for key in keys.iter() {
+            let mut opid_to_value = HashMap::new();
+            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+                let link = match op.action {
+                    OpType::Set(_) => (&op.adjusted_value()).into(),
+                    OpType::Make(_) => self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?,
+                    OpType::Link(ref child) => self.construct_object(&child, actors)?,
+                    _ => panic!("del or inc found in field_operations"),
+                };
+                opid_to_value.insert(String::from(&op.id), link);
+            }
+            if let Some(index) = obj.seq.index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpID)?) {
+                props.insert(index, opid_to_value);
+            }
+        }
+        Ok(SeqDiff {
+            object_id: actors.object_to_string(obj_id),
+            obj_type: obj.obj_type,
+            edits,
+            props,
+        }
+        .into())
     }
 
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
+    fn gen_map_diff(
+        &self,
+        obj_id: &ObjectID,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
+        let mut props = HashMap::new();
+        // I may have duplicate keys - I do this to make sure I visit each one only once
+        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
+        for key in keys.iter() {
+            let key_string = actors.key_to_string(key);
+            let mut opid_to_value = HashMap::new();
+            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+                let link = match op.action {
+                    OpType::Set(_) => (&op.adjusted_value()).into(),
+                    OpType::Make(_) => self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?,
+                    OpType::Link(ref child_id) => self.construct_object(&child_id, actors)?,
+                    _ => panic!("del or inc found in field_operations"),
+                };
+                opid_to_value.insert(String::from(&op.id), link);
+            }
+            props.insert(key_string, opid_to_value);
+        }
+        Ok(MapDiff {
+            object_id: actors.object_to_string(obj_id),
+            obj_type: obj.obj_type,
+            props,
+        }
+        .into())
     }
 
-    /// Get all the changes we have that are not in `since`
-    pub fn get_missing_changes(&self, since: &Clock) -> Vec<&Change> {
-        self.states
-            .history
-            .iter()
-            .map(|rc| rc.as_ref())
-            .filter(|change| change.seq > since.get(&change.actor_id))
-            .collect()
-    }
-
-    pub fn get_missing_deps(&self) -> Clock {
-        // TODO: there's a lot of internal copying going on in here for something kinda simple
-        self.queue.iter().fold(Clock::empty(), |clock, change| {
-            clock
-                .union(&change.dependencies)
-                .with(&change.actor_id, change.seq - 1)
-        })
-    }
-}
-
-pub fn list_ops_in_order<'a, S: BuildHasher>(
-    operations_by_elemid: &'a HashMap<ElementID, ConcurrentOperations, S>,
-    following: &HashMap<ElementID, Vec<ElementID>, S>,
-) -> Result<Vec<(ElementID, &'a ConcurrentOperations)>, AutomergeError> {
-    // First we construct a vector of operations to process in order based
-    // on the insertion orders of the operations we've received
-    let mut ops_in_order: Vec<(ElementID, &ConcurrentOperations)> = Vec::new();
-    // start with everything that was inserted after _head
-    let mut to_process: Vec<ElementID> = following
-        .get(&ElementID::Head)
-        .map(|heads| {
-            let mut sorted = heads.to_vec();
-            sorted.sort();
-            sorted
-        })
-        .unwrap_or_else(Vec::new);
-
-    // for each element ID, add the operation to the ops_in_order list,
-    // then find all the following element IDs, sort them and add them to
-    // the list of element IDs still to process.
-    while let Some(next_element_id) = to_process.pop() {
-        let ops = operations_by_elemid.get(&next_element_id).ok_or_else(|| {
-            AutomergeError::InvalidChange(format!(
-                "Missing element ID {:?} when interpreting list ops",
-                next_element_id
-            ))
-        })?;
-        ops_in_order.push((next_element_id.clone(), ops));
-        if let Some(followers) = following.get(&next_element_id) {
-            let mut sorted = followers.to_vec();
-            sorted.sort();
-            to_process.extend(sorted);
+    fn gen_obj_diff(
+        &self,
+        obj_id: &ObjectID,
+        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
+        let obj = self.get_obj(obj_id)?;
+        if let Some(pending) = pending_diffs.remove(obj_id) {
+            if obj.is_seq() {
+                self.gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors)
+            } else {
+                self.gen_map_diff(obj_id, obj, &pending, pending_diffs, actors)
+            }
+        } else {
+            Ok(Diff::Unchanged(ObjDiff {
+                object_id: actors.object_to_string(obj_id),
+                obj_type: obj.obj_type,
+            }))
         }
     }
-    Ok(ops_in_order)
 }

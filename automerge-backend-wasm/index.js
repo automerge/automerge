@@ -1,79 +1,93 @@
-let Backend = require("./pkg")
-let { fromJS, List } = require('immutable')
+let Backend = require('./pkg')
+let encodeChange, decodeChanges // initialized by initCodecFunctions
+const util = require('util');
 
-function toJS(obj) {
-  if (List.isList(obj)) {
-    return obj.toJS()
-  }
-  return obj
+function initCodecFunctions(functions) {
+  encodeChange = functions.encodeChange
+  decodeChanges = functions.decodeChanges
 }
 
-let init = () => {
-  return { state: Backend.State.new(), clock: {}, frozen: false };
+function init() {
+  return { state: Backend.State.new(), frozen: false }
 }
 
-let clean = (backend) => {
+function load(data) {
+  return { state: Backend.State.load(data), frozen: false }
+}
+
+function backendState(backend) {
   if (backend.frozen) {
-    let state = backend.state.forkAt(backend.clock)
-    backend.state = state
-    backend.clock = state.getClock()
-    backend.frozen = false
+    throw new Error(
+      'Attempting to use an outdated Automerge document that has already been updated. ' +
+      'Please use the latest document state, or call Automerge.clone() if you really ' +
+      'need to use this old document state.'
+    )
   }
   return backend.state
 }
 
-let mutate = (oldBackend,fn) => {
-  let state = clean(oldBackend)
-  let result = fn(state)
-  oldBackend.frozen = true
-  let newBackend = { state, clock: state.getClock(), frozen: false };
-  return [ newBackend, result ]
+function clone(backend) {
+  const state = backend.state.clone();
+  return { state, frozen: false }
 }
 
-let applyChanges = (backend,changes) => {
-  return mutate(backend, (b) => b.applyChanges(toJS(changes)));
+function free(backend) {
+  backend.state.free()
+  backend.state = null
+  backend.frozen = true
 }
 
-let applyLocalChange = (backend,change) => {
-  return mutate(backend, (b) => b.applyLocalChange(toJS(change)));
+function applyChanges(backend, changes) {
+  const state = backendState(backend)
+  const patch = state.applyChanges(changes)
+  backend.frozen = true
+  return [{ state, frozen: false }, patch]
 }
 
-let merge = (backend1,backend2) => {
-//  let changes = backend2.getMissingChanges(backend1.clock)
-//  backend1.applyChanges(changes)
-//  let missing_changes = remote.get_missing_changes(self.op_set.clock.clone());
-//  self.apply_changes(missing_changes)
-  return mutate(backend1, (b) => b.merge(clean(backend2)));
+function applyLocalChange(backend, request) {
+  const state = backendState(backend)
+  const patch = state.applyLocalChange(request)
+  backend.frozen = true
+  return [{ state, frozen: false }, patch]
 }
 
-let getClock = (backend) => {
-  return fromJS(backend.clock);
+function loadChanges(backend, changes) {
+  const state = backendState(backend)
+  state.loadChanges(changes)
+  backend.frozen = true
+  return { state, frozen: false }
 }
 
-let getHistory = (backend) => {
-  // TODO: I cant fromJS here b/c transit screws it up
-  let history = clean(backend).getHistory();
-  return history
+function getPatch(backend) {
+  return backendState(backend).getPatch()
 }
 
-let getUndoStack = (backend) => {
-  let stack = clean(backend).getUndoStack();
-  return fromJS(stack)
+function getChanges(backend, clock) {
+  return backendState(backend).getChanges(clock)
 }
 
-let getRedoStack = (backend) => {
-  let stack = clean(backend).getRedoStack();
-  return fromJS(stack)
+function getChangesForActor(backend, actor) {
+  return backendState(backend).getChangesForActor(actor)
 }
 
-let getPatch = (backend) => clean(backend).getPatch()
-let getChanges = (backend,other) => clean(backend).getChanges(clean(other))
-let getChangesForActor = (backend,actor) => clean(backend).getChangesForActor(actor)
-let getMissingChanges = (backend,clock) => clean(backend).getMissingChanges(clock)
-let getMissingDeps = (backend) => clean(backend).getMissingDeps()
+function getMissingDeps(backend) {
+  return backendState(backend).getMissingDeps()
+}
+
+function getUndoStack(backend) {
+  return backendState(backend).getUndoStack()
+}
+
+function getRedoStack(backend) {
+  return backendState(backend).getRedoStack()
+}
+
+function save(backend) {
+  return backendState(backend).save()
+}
 
 module.exports = {
-  init, applyChanges, applyLocalChange, getPatch,
-  getChanges, getChangesForActor, getMissingChanges, getMissingDeps, merge, getClock,
-  getHistory, getUndoStack, getRedoStack
+  initCodecFunctions,
+  init, clone, save, load, free, applyChanges, applyLocalChange, loadChanges, getPatch,
+  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
 }

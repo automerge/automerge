@@ -4,72 +4,48 @@
 [![crates](https://crates.io/crates/automerge)](https://crates.io/crates/automerge)
 [![Build Status](https://travis-ci.org/alexjg/automerge-rs.svg?branch=master)](https://travis-ci.org/alexjg/automerge-rs)
 
+This is a rust implementation of
+[automerge](https://github.com/automerge/automerge). Currently this repo
+contains an implementation of the "backend" of the Automerge library, designed
+to be used via FFI from many different platforms. Very soon there will also be
+a frontend which will be designed for Rust application developers to use.
 
-This is a very early, very much work in progress implementation of [automerge](https://github.com/automerge/automerge) in rust. At the moment it implements a simple interface for reading the state of an OpSet, and a really horrendous interface for generating new changes to the Opset. 
+## Using automerge-backend-wasm with automerge
 
-## Plans
+This backend is tracking the [performance branch of automerge](https://github.com/automerge/automerge/tree/performance)
 
-We're tentatively working on a plan to write a backend for the current javascript implementation of Automerge in Rust. The javascript Automerge library is split into two parts, a "frontend" and a "backend". The "backend" contains a lot of the more complex logic of the CRDT and also has a fairly small API. Given these facts we think we might be able to write a rust implementation of the backend, which compiles to WASM and can be used as a drop in replacement for the current backend. This same rust implementation could also be used via FFI on a lot of other platforms, which would make language interop much easier. This is all early days but it's very exciting.
-
-For now though, it's a mostly broken pure rust implementation
-
-## How to use
-
-Add this to your dependencies
+To build the wasm backend
 
 ```
-automerge = "0.0.2"
+  $ cd automerge-backend-wasm
+  $ yarn release
 ```
 
-You'll need to export changes from automerge as JSON rather than using the encoding that `Automerge.save` uses. So first do this (in javascript):
+Once it is built set the new default backend in your js application like this.
 
-```javascript
-const doc = <your automerge document>
-const changes = Automerge.getHistory(doc).map(h => h.change)
-console.log(JSON.stringify(changes, null, 4))
+```js
+  const wasmBackend = require(path.resolve(WASM_BACKEND_PATH))
+  Automerge.setDefaultBackend(wasmBackend)
 ```
 
-Now you can load these changes into automerge like so:
+## Backend? Frontend?
+
+Automerge is a JSON CRDT, in this sense it is just a data structure with a set
+of rules about how to merge two different versions of that data structure.
+However, in practice one often needs two separate roles when writing
+applications which use the CRDT: 
+
+- A very low latency process, usually running on some kind of UI thread, which
+  records changes made by the user and reflects them in the UI
+- A less latency sensitive process which executes the complex logic of merging changes
+  received from the UI and over the network and send diffs to the frontend to apply
+
+More details can be found [here](https://github.com/automerge/automerge/blob/performance/BINARY_FORMAT.md).
+
+Note that the performance branch of automerge is under active development and is changing quickly.
+
+## Community
+
+Development of automerge rust is currently beeing coordinated at our [slack channel](https://automerge.slack.com/archives/CTQARU3NZ).  Come say hi. =)
 
 
-```rust,no_run
-extern crate automerge;
-
-fn main() {
-    let changes: Vec<automerge::Change> = serde_json::from_str("<paste the changes JSON here>").unwrap();
-    let document = automerge::Document::load(changes).unwrap();
-    let state: serde_json::Value = document.state().unwrap();
-    println!("{:?}", state);
-}
-```
-
-You can create new changes to the document by doing things like this:
-
-```rust,no_run
-extern crate automerge;
-
-fn main() {
-    let mut doc = Document::init();
-    let json_value: serde_json::Value = serde_json::from_str(
-        r#"
-        {
-            "cards_by_id": {},
-            "size_of_cards": 12.0,
-            "numRounds": 11.0,
-            "cards": [1.0, false]
-        }
-    "#,
-    )
-    .unwrap();
-    doc.create_and_apply_change(
-        Some("Some change".to_string()),
-        vec![ChangeRequest::Set {
-            path: Path::root().key("the-state".to_string()),
-            value: Value::from_json(&json_value),
-        }],
-    )
-    .unwrap();
-}
-```
-
-Check the docs on `ChangeRequest` for more information on what you can do.

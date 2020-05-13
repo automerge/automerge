@@ -1,3 +1,10 @@
+extern crate hex;
+extern crate im_rc;
+extern crate leb128;
+extern crate maplit;
+extern crate rand;
+extern crate sha2;
+extern crate uuid;
 extern crate web_sys;
 
 #[allow(unused_macros)]
@@ -7,29 +14,20 @@ macro_rules! log {
     }
 }
 
-mod actor_states;
 mod backend;
+mod columnar;
 mod concurrent_operations;
+mod encoding;
 mod error;
 mod object_store;
+mod op_handle;
 mod op_set;
-mod operation_with_metadata;
-mod patch;
-mod patch_serialization;
-mod protocol;
-mod protocol_serialization;
-mod value;
+mod ordered_set;
+mod pending_diff;
+mod undo_operation;
+mod serialize;
+mod time;
+mod actor_map;
 
-pub use crate::protocol::{
-    ActorID, Change, ChangeRequest, ChangeRequestType, Clock, DataType, ElementID, Key, ObjectID,
-    Operation, PrimitiveValue,
-};
-pub use actor_states::ActorStates;
 pub use backend::Backend;
-pub use concurrent_operations::ConcurrentOperations;
 pub use error::AutomergeError;
-pub use object_store::{ListState, MapState, ObjectState, ObjectStore};
-pub use op_set::{list_ops_in_order, OpSet};
-pub use operation_with_metadata::OperationWithMetadata;
-pub use patch::{Conflict, Diff, DiffAction, ElementValue, MapType, Patch, SequenceType};
-pub use value::Value;
