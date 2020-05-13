@@ -1,5 +1,5 @@
 use automerge_frontend::{Frontend, LocalChange, Path, Value};
-use automerge_backend as amb;
+use automerge_protocol as amp;
 
 const ROOT_ID: &str = "00000000-0000-0000-0000-000000000000";
 
@@ -47,14 +47,14 @@ fn test_set_root_object_properties() {
         .change(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
-                Value::Primitive(amb::Value::Str("magpie".to_string())),
+                Value::Primitive(amp::Value::Str("magpie".to_string())),
             ))?;
             Ok(())
         })
         .unwrap()
         // Remove timestamp which is irrelevant to test
         .map(|mut cr| {cr.time = None; cr});
-    let expected_change = amb::ChangeRequest{
+    let expected_change = amp::ChangeRequest{
         actor: doc.actor_id,
         seq: 1,
         version: 0,
@@ -64,17 +64,17 @@ fn test_set_root_object_properties() {
         undoable: true,
         deps: None,
         ops: Some(vec![
-            amb::OpRequest{
-                action: amb::ReqOpType::Set,
+            amp::OpRequest{
+                action: amp::ReqOpType::Set,
                 obj: ROOT_ID.to_string(),
-                key: amb::RequestKey::Str("bird".to_string()),
+                key: amp::RequestKey::Str("bird".to_string()),
                 child: None,
-                value: Some(amb::Value::Str("magpie".to_string())),
-                datatype: Some(amb::DataType::Undefined),
+                value: Some(amp::Value::Str("magpie".to_string())),
+                datatype: Some(amp::DataType::Undefined),
                 insert: false,
             }
         ]),
-        request_type: amb::ChangeRequestType::Change,
+        request_type: amp::ChangeRequestType::Change,
     };
     assert_eq!(change_request, Some(expected_change));
 }
@@ -92,7 +92,7 @@ fn it_should_return_no_changes_if_nothing_was_changed() {
 #[test]
 fn it_should_create_nested_maps() {
     let mut doc = Frontend::new();
-    let change_request = doc.change(None, |doc| {
+    let _change_request = doc.change(None, |doc| {
         doc.add_change(LocalChange::set(Path::root().key("birds"), Value::from_json(&serde_json::json!({
             "wrens": 3
         }))))?;

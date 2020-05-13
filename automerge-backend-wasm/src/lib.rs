@@ -1,6 +1,7 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{ActorID, AutomergeError, Backend, ChangeRequest, ChangeHash};
+use automerge_protocol::{ActorID, ChangeRequest, ChangeHash};
+use automerge_backend::{AutomergeError, Backend};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;

@@ -1,5 +1,5 @@
 use crate::PathElement;
-use automerge_backend as amb;
+use automerge_protocol as amp;
 use serde::Serialize;
 use std::collections::HashMap;
 use maplit::hashmap;
@@ -11,10 +11,10 @@ pub enum MapType {
 }
 
 impl MapType {
-    pub(crate) fn to_obj_type(&self) -> amb::ObjType {
+    pub(crate) fn to_obj_type(&self) -> amp::ObjType {
         match self {
-            MapType::Map => amb::ObjType::Map,
-            MapType::Table => amb::ObjType::Table,
+            MapType::Map => amp::ObjType::Map,
+            MapType::Table => amp::ObjType::Table,
         }
     }
 }
@@ -26,19 +26,19 @@ pub enum SequenceType {
 }
 
 impl SequenceType {
-    pub(crate) fn to_obj_type(&self) -> amb::ObjType {
+    pub(crate) fn to_obj_type(&self) -> amp::ObjType {
         match self {
-            SequenceType::List => amb::ObjType::List,
-            SequenceType::Text => amb::ObjType::Text,
+            SequenceType::List => amp::ObjType::List,
+            SequenceType::Text => amp::ObjType::Text,
         }
     }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct Conflicts(HashMap<amb::OpID, Value>);
+pub struct Conflicts(HashMap<amp::OpID, Value>);
 
-impl From<HashMap<amb::OpID, Value>> for Conflicts {
-    fn from(hmap: HashMap<amb::OpID, Value>) -> Self {
+impl From<HashMap<amp::OpID, Value>> for Conflicts {
+    fn from(hmap: HashMap<amp::OpID, Value>) -> Self {
         Conflicts(hmap)
     }
 }
@@ -48,7 +48,7 @@ impl From<HashMap<amb::OpID, Value>> for Conflicts {
 pub enum Value {
     Map(HashMap<String, Value>, MapType),
     Sequence(Vec<Value>, SequenceType),
-    Primitive(amb::Value),
+    Primitive(amp::Value),
 }
 
 impl Value {
@@ -65,12 +65,12 @@ impl Value {
                 vs.iter().map(Value::from_json).collect(),
                 SequenceType::List,
             ),
-            serde_json::Value::String(s) => Value::Primitive(amb::Value::Str(s.clone())),
+            serde_json::Value::String(s) => Value::Primitive(amp::Value::Str(s.clone())),
             serde_json::Value::Number(n) => {
-                Value::Primitive(amb::Value::F64(n.as_f64().unwrap_or(0.0)))
+                Value::Primitive(amp::Value::F64(n.as_f64().unwrap_or(0.0)))
             }
-            serde_json::Value::Bool(b) => Value::Primitive(amb::Value::Boolean(*b)),
-            serde_json::Value::Null => Value::Primitive(amb::Value::Null),
+            serde_json::Value::Bool(b) => Value::Primitive(amp::Value::Boolean(*b)),
+            serde_json::Value::Null => Value::Primitive(amp::Value::Null),
         }
     }
 
@@ -88,29 +88,29 @@ impl Value {
                 elements
                     .iter()
                     .map(|v| match v {
-                        Value::Primitive(amb::Value::Str(c)) => c.as_str(),
+                        Value::Primitive(amp::Value::Str(c)) => c.as_str(),
                         _ => panic!("Non string element in text sequence"),
                     })
                     .collect(),
             ),
             Value::Primitive(v) => match v {
-                amb::Value::F64(n) => serde_json::Value::Number(
+                amp::Value::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amb::Value::F32(n) => serde_json::Value::Number(
+                amp::Value::F32(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(f64::from(*n)).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amb::Value::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-                amb::Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-                amb::Value::Str(s) => serde_json::Value::String(s.to_string()),
-                amb::Value::Boolean(b) => serde_json::Value::Bool(*b),
-                amb::Value::Counter(c) => {
+                amp::Value::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                amp::Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                amp::Value::Str(s) => serde_json::Value::String(s.to_string()),
+                amp::Value::Boolean(b) => serde_json::Value::Bool(*b),
+                amp::Value::Counter(c) => {
                     serde_json::Value::Number(serde_json::Number::from(*c))
                 }
-                amb::Value::Timestamp(t) => {
+                amp::Value::Timestamp(t) => {
                     serde_json::Value::Number(serde_json::Number::from(*t))
                 }
-                amb::Value::Null => serde_json::Value::Null,
+                amp::Value::Null => serde_json::Value::Null,
             },
         }
     }
@@ -133,15 +133,15 @@ pub(crate) fn value_to_op_requests(
     key: PathElement,
     v: &Value,
     insert: bool,
-) -> (Vec<amb::OpRequest>, amb::Diff) {
+) -> (Vec<amp::OpRequest>, amp::Diff) {
     match v {
         Value::Sequence(vs, seq_type) => {
             let make_action = match seq_type {
-                SequenceType::List => amb::ReqOpType::MakeList,
-                SequenceType::Text => amb::ReqOpType::MakeText,
+                SequenceType::List => amp::ReqOpType::MakeList,
+                SequenceType::Text => amp::ReqOpType::MakeText,
             };
             let list_id = new_object_id();
-            let make_op = amb::OpRequest {
+            let make_op = amp::OpRequest {
                 action: make_action,
                 obj: parent_object,
                 key: key.to_request_key(),
@@ -150,27 +150,27 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: Vec<(Vec<amb::OpRequest>, amb::Diff)> = vs
+            let child_requests_and_diffs: Vec<(Vec<amp::OpRequest>, amp::Diff)> = vs
                 .iter()
                 .enumerate()
                 .map(|(index, v)| {
                     value_to_op_requests(list_id.clone(), PathElement::Index(index), v, true)
                 })
                 .collect();
-            let child_requests: Vec<amb::OpRequest> = child_requests_and_diffs
+            let child_requests: Vec<amp::OpRequest> = child_requests_and_diffs
                 .iter()
                 .cloned()
                 .flat_map(|(o, _)| o)
                 .collect();
-            let child_diff = amb::SeqDiff {
+            let child_diff = amp::SeqDiff {
                 edits: vs.iter()
                         .enumerate()
-                        .map(|(index, _)| amb::DiffEdit::Insert { index })
+                        .map(|(index, _)| amp::DiffEdit::Insert { index })
                         .collect(),
-                object_id: amb::ObjectID::ID(amb::OpID(1, list_id)).to_string(),
+                object_id: amp::ObjectID::ID(amp::OpID(1, list_id)).to_string(),
                 obj_type: match seq_type {
-                    SequenceType::List => amb::ObjType::List,
-                    SequenceType::Text => amb::ObjType::Text,
+                    SequenceType::List => amp::ObjType::List,
+                    SequenceType::Text => amp::ObjType::Text,
                 },
                 props: child_requests_and_diffs
                     .into_iter()
@@ -182,15 +182,15 @@ pub(crate) fn value_to_op_requests(
             };
             let mut result = vec![make_op];
             result.extend(child_requests);
-            (result, amb::Diff::Seq(child_diff))
+            (result, amp::Diff::Seq(child_diff))
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {
-                MapType::Map => amb::ReqOpType::MakeMap,
-                MapType::Table => amb::ReqOpType::MakeTable,
+                MapType::Map => amp::ReqOpType::MakeMap,
+                MapType::Table => amp::ReqOpType::MakeTable,
             };
             let map_id = new_object_id();
-            let make_op = amb::OpRequest {
+            let make_op = amp::OpRequest {
                 action: make_action,
                 obj: parent_object,
                 key: key.to_request_key(),
@@ -199,7 +199,7 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: HashMap<String, (Vec<amb::OpRequest>, amb::Diff)> =
+            let child_requests_and_diffs: HashMap<String, (Vec<amp::OpRequest>, amp::Diff)> =
                 kvs.iter()
                     .map(|(k, v)| {
                         (
@@ -214,16 +214,16 @@ pub(crate) fn value_to_op_requests(
                     })
                     .collect();
             let mut result = vec![make_op];
-            let child_requests: Vec<amb::OpRequest> = child_requests_and_diffs
+            let child_requests: Vec<amp::OpRequest> = child_requests_and_diffs
                 .iter()
                 .flat_map(|(_, (o, _))| o)
                 .cloned()
                 .collect();
-            let child_diff = amb::MapDiff {
-                object_id: amb::ObjectID::ID(amb::OpID(1, map_id)).to_string(),
+            let child_diff = amp::MapDiff {
+                object_id: amp::ObjectID::ID(amp::OpID(1, map_id)).to_string(),
                 obj_type: match map_type {
-                    MapType::Map => amb::ObjType::Map,
-                    MapType::Table => amb::ObjType::Table,
+                    MapType::Map => amp::ObjType::Map,
+                    MapType::Table => amp::ObjType::Table,
                 },
                 props: child_requests_and_diffs
                     .into_iter()
@@ -233,19 +233,19 @@ pub(crate) fn value_to_op_requests(
                     .collect(),
             };
             result.extend(child_requests);
-            (result, amb::Diff::Map(child_diff))
+            (result, amp::Diff::Map(child_diff))
         }
         Value::Primitive(prim_value) => {
-            let ops = vec![amb::OpRequest {
-                action: amb::ReqOpType::Set,
+            let ops = vec![amp::OpRequest {
+                action: amp::ReqOpType::Set,
                 obj: parent_object,
                 key: key.to_request_key(),
                 child: None,
                 value: Some(prim_value.clone()),
-                datatype: Some(prim_value.datatype()),
+                datatype: Some(value_to_datatype(prim_value)),
                 insert,
             }];
-            let diff = amb::Diff::Value(prim_value.clone());
+            let diff = amp::Diff::Value(prim_value.clone());
             (ops, diff)
         }
     }
@@ -255,6 +255,15 @@ fn new_object_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-pub(crate) fn random_op_id() -> amb::OpID {
-    amb::OpID(1, amb::ActorID::random().0)
+pub(crate) fn random_op_id() -> amp::OpID {
+    amp::OpID(1, amp::ActorID::random().0)
+}
+
+
+fn value_to_datatype(value: &amp::Value) -> amp::DataType {
+    match value {
+        amp::Value::Counter(_) => amp::DataType::Counter,
+        amp::Value::Timestamp(_) => amp::DataType::Timestamp,
+        _ => amp::DataType::Undefined,
+    }
 }

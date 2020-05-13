@@ -1,4 +1,4 @@
-use automerge_backend::{
+use automerge_protocol::{
     Diff, MapDiff, SeqDiff, DiffEdit, ObjType, ObjectID, OpID
 };
 //use crate::AutomergeFrontendError;

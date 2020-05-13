@@ -10,6 +10,7 @@ crate-type = ["staticlib"]
 
 [dependencies]
 automerge-backend = { path = "../automerge-backend" }
+automerge-protocol = { path = "../automerge-protocol" }
 libc = "^0.2"
 serde = "^1.0"
 serde_json = "^1.0"

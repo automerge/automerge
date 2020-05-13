@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt;
-use automerge_backend::ObjectID;
+use automerge_protocol::ObjectID;
 use crate::mutation::Path;
 
 #[derive(Debug, PartialEq)]

@@ -18,6 +18,7 @@ hex = "^0.4.2"
 rand = { version = "^0.7.3", features=["wasm-bindgen"] }
 leb128 = "^0.2.4"
 maplit = "^1.0.2"
+automerge-protocol = { path = "../automerge-protocol" }
 
 [dependencies.web-sys]
 version = "0.3"

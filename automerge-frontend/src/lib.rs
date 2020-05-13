@@ -1,4 +1,4 @@
-use automerge_backend::{ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpRequest, Patch};
+use automerge_protocol::{ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpRequest, Patch};
 
 mod change_context;
 mod error;

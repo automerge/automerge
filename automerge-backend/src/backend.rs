@@ -4,10 +4,10 @@ use crate::op_handle::OpHandle;
 use crate::actor_map::ActorMap;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
-use crate::patch::{Diff, Patch, PendingDiff};
-use crate::protocol::{ObjType, ObjectID, OpType, Operation, ReqOpType, UndoOperation, OpID, ChangeHash};
+use crate::pending_diff::PendingDiff;
+use crate::undo_operation::UndoOperation;
 use crate::time;
-use crate::{ActorID, Change, ChangeRequest, ChangeRequestType};
+use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest, OpType, Value, Operation, Diff, Patch, Change, ChangeRequest, ChangeRequestType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::{HashMap,HashSet};
@@ -119,7 +119,7 @@ impl Backend {
                 });
                 let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
 
-                let key = rop.resolve_key(&id, elemids2)?;
+                let key = resolve_key(rop, &id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
                     ReqOpType::MakeMap => OpType::Make(ObjType::Map),
@@ -130,7 +130,7 @@ impl Backend {
                     ReqOpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
                     ),
-                    ReqOpType::Inc => OpType::Inc(rop.to_i64()?),
+                    ReqOpType::Inc => OpType::Inc(rop.to_i64().ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?),
                     ReqOpType::Set => OpType::Set(rop.primitive_value()),
                 };
 
@@ -155,7 +155,7 @@ impl Backend {
             start_op,
             message: request.message.clone(),
             actor_id: request.actor.clone(),
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             seq: request.seq,
             deps: request.deps.clone().unwrap_or_default(),
             time,
@@ -176,7 +176,7 @@ impl Backend {
             can_redo: self.can_redo(),
             diffs,
             deps,
-            clock: self.states.iter().map(|(k,v)| (k.to_string(),v.len() as u64)).collect(),
+            clock: self.states.iter().map(|(k,v)| (k.to_hex_string(),v.len() as u64)).collect(),
             actor: request.map(|r| r.actor.0.clone()),
             seq: request.map(|r| r.seq),
         })
@@ -215,7 +215,7 @@ impl Backend {
         let change = change_to_change(Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
@@ -250,7 +250,7 @@ impl Backend {
         let change = change_to_change(Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::new(),
+            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
@@ -561,4 +561,87 @@ struct Version {
     version: u64,
     local_state: Option<Rc<OpSet>>,
     queue: Vec<Rc<Change>>,
+}
+
+fn resolve_key(
+    rop: &OpRequest,
+    id: &OpID,
+    ids: &mut dyn OrderedSet<OpID>,
+) -> Result<Key, AutomergeError> {
+    let key = &rop.key;
+    let insert = rop.insert;
+    let del = rop.action == ReqOpType::Del;
+    match key {
+        RequestKey::Str(s) => Ok(Key::Map(s.clone())),
+        RequestKey::Num(n) => {
+            let n: usize = *n as usize;
+            (if insert {
+                if n == 0 {
+                    ids.insert_index(0, id.clone());
+                    Some(Key::head())
+                } else {
+                    ids.insert_index(n, id.clone());
+                    ids.key_of(n - 1).map(|i| i.into())
+                }
+            } else if del {
+                ids.remove_index(n).map(|k| k.into())
+            } else {
+                ids.key_of(n).map(|i| i.into())
+            })
+            .ok_or(AutomergeError::IndexOutOfBounds(n))
+        }
+    }
+}
+
+
+/// Extension trait adding a few helper methods with backend specific logic 
+/// to `Operation`
+trait OpExt {
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation>;
+    fn can_merge(&self, other: &Operation) -> bool;
+    fn merge(&mut self, other: Operation);
+}
+
+impl OpExt for Operation {
+
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
+        let key = self.key.clone();
+
+        if let OpType::Inc(value) = self.action {
+            vec![UndoOperation {
+                action: OpType::Inc(-value),
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else if overwritten.is_empty() {
+            vec![UndoOperation {
+                action: OpType::Del,
+                obj: self.obj.clone(),
+                key,
+            }]
+        } else {
+            overwritten.iter().map(|o| o.invert(&key)).collect()
+        }
+    }
+
+    fn can_merge(&self, other: &Operation) -> bool {
+        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
+    }
+
+    fn merge(&mut self, other: Operation) {
+        if let OpType::Inc(delta) = other.action {
+            match self.action {
+                OpType::Set(Value::Counter(number)) => {
+                    self.action = OpType::Set(Value::Counter(number + delta))
+                }
+                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
+                _ => {}
+            } // error?
+        } else {
+            match other.action {
+                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
+                _ => {}
+            }
+        }
+    }
 }
