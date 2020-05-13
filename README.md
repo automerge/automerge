@@ -10,6 +10,9 @@ contains an implementation of the "backend" of the Automerge library, designed
 to be used via FFI from many different platforms. Very soon there will also be
 a frontend which will be designed for Rust application developers to use.
 
+This project is tracking the `performance` branch of the javascript reference implementation of Automerge. The `performance` branch contains a lot of backwards incompatible changes and is intended to become a 1.0 release of the library, you can find more information about that [here](https://github.com/automerge/automerge/pull/253). Our goal is to release a pre 1.0 version of the rust library once the javascript library hits 1.0. As such we are keeping this project up to date with the frequent and often quite large changes in the `performance` branch of the javascript repo - that is to say, don't depend on anything in this repo to stay constant right now.
+
+
 ## Using automerge-backend-wasm with automerge
 
 This backend is tracking the [performance branch of automerge](https://github.com/automerge/automerge/tree/performance)
