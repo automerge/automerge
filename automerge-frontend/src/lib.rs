@@ -68,16 +68,13 @@ impl FrontendState {
             } => {
                 // Check that if the patch is for out actor ID then it is not
                 // out of order
-                match (&patch.actor, patch.seq) {
-                    (Some(patch_actor), Some(patch_seq)) => {
-                        if self_actor == &ActorID::from(patch_actor.as_str())
-                            && in_flight_requests[0] != patch_seq
-                        {
-                            return Err(AutomergeFrontendError::MismatchedSequenceNumber);
-                        }
+                if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
+                    if self_actor == &ActorID::from(patch_actor.as_str())
+                        && in_flight_requests[0] != patch_seq
+                    {
+                        return Err(AutomergeFrontendError::MismatchedSequenceNumber);
                     }
-                    _ => {}
-                };
+                }
                 let mut change_ctx = change_context::ChangeContext::new(&mut reconciled_objects);
                 if let Some(diff) = &patch.diffs {
                     change_ctx.apply_diff(&diff)?;
@@ -190,6 +187,12 @@ pub struct Frontend {
     cached_value: Value,
 }
 
+impl Default for Frontend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Frontend {
     pub fn new() -> Self {
         let mut objects = HashMap::new();
@@ -197,13 +200,13 @@ impl Frontend {
             ObjectID::Root,
             Rc::new(Object::Map(ObjectID::Root, HashMap::new(), MapType::Map)),
         );
-        return Frontend {
+        Frontend {
             actor_id: ActorID::random(),
             seq: 0,
             state: Some(FrontendState::Reconciled { objects }),
             version: 0,
             cached_value: Value::Map(HashMap::new(), MapType::Map),
-        };
+        }
     }
 
     pub fn new_with_initial_state(
@@ -309,7 +312,6 @@ impl Frontend {
         self.state
             .clone()
             .and_then(|s| s.get_object_id(path))
-            .map(|o| o.clone())
     }
 }
 

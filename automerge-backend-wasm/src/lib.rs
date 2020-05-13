@@ -117,6 +117,7 @@ impl State {
         rust_to_js(&self.backend.redo_stack)
     }
 
+    #[allow(clippy::should_implement_trait)]
     #[wasm_bindgen(js_name = clone)]
     pub fn clone(&self) -> Result<State, JsValue> {
         Ok(State { backend: self.backend.clone() })

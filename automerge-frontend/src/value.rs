@@ -167,7 +167,7 @@ pub(crate) fn value_to_op_requests(
                         .enumerate()
                         .map(|(index, _)| amp::DiffEdit::Insert { index })
                         .collect(),
-                object_id: list_id.to_string(),
+                object_id: list_id,
                 obj_type: match seq_type {
                     SequenceType::List => amp::ObjType::List,
                     SequenceType::Text => amp::ObjType::Text,
@@ -220,7 +220,7 @@ pub(crate) fn value_to_op_requests(
                 .cloned()
                 .collect();
             let child_diff = amp::MapDiff {
-                object_id: map_id.to_string(),
+                object_id: map_id,
                 obj_type: match map_type {
                     MapType::Map => amp::ObjType::Map,
                     MapType::Table => amp::ObjType::Table,

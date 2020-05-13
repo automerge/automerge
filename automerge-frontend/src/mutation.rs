@@ -52,7 +52,7 @@ impl Path {
     }
 
     pub fn parent(&self) -> Self {
-        if self.0.len() == 0 {
+        if self.0.is_empty() {
             Path(Vec::new())
         } else {
             let mut new_path = self.0.clone();
@@ -118,7 +118,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
     }
 
     pub fn ops(&self) -> Option<Vec<amp::OpRequest>> {
-        if self.ops.len() > 0 {
+        if !self.ops.is_empty() {
             Some(self.ops.clone())
         } else {
             None
@@ -286,7 +286,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
     fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), AutomergeFrontendError> {
         match value {
             Value::Map(kvs, MapType::Map) => {
-                for (k, v) in kvs.into_iter() {
+                for (k, v) in kvs.iter() {
                     self.add_change(LocalChange::set(Path::root().key(k), v.clone()))?;
                 }
                 Ok(())

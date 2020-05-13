@@ -159,7 +159,7 @@ impl<'a> ChangeContext<'a> {
                                         // types of diffs
                                         values.update_for_opid(OpID::from_str(opid).unwrap(), object);
                                     }
-                                    if prop_diffs.len() == 0 {
+                                    if prop_diffs.is_empty() {
                                         kvs.remove(key);
                                     }
                                 }
@@ -180,7 +180,7 @@ impl<'a> ChangeContext<'a> {
                                         .entry(key.clone())
                                         .or_insert_with(|| Values(HashMap::new()));
                                     let prop_diffs_vec: Vec<(&String, &Diff)> =
-                                        prop_diffs.into_iter().collect();
+                                        prop_diffs.iter().collect();
                                     match prop_diffs_vec[..] {
                                         [] => {
                                             kvs.remove(key);
@@ -339,7 +339,7 @@ impl<'a> ChangeContext<'a> {
             // and so instead we clone and wrap.
             return Some(Rc::new(updated.borrow().clone()))
         }
-        self.original_objects.get(object_id).map(|r| r.clone())
+        self.original_objects.get(object_id).cloned()
     }
 
     pub fn commit(self) -> Result<Value, AutomergeFrontendError> {

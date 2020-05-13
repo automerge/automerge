@@ -501,9 +501,9 @@ impl Backend {
 
     pub fn get_changes(
         &self,
-        have_deps: &Vec<ChangeHash>,
+        have_deps: &[ChangeHash],
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        let mut stack = have_deps.clone();
+        let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
             if let Some(change) = self.hashes.get(&hash) {
@@ -545,8 +545,7 @@ impl Backend {
 
     pub fn get_missing_deps(&self) -> Vec<ChangeHash> {
         let in_queue : Vec<_> = self.queue.iter().map(|change| &change.hash).collect();
-        let missing = self.queue.iter().flat_map(|change| change.deps.clone()).filter(|h| !in_queue.contains(&h)).collect();
-        missing
+        self.queue.iter().flat_map(|change| change.deps.clone()).filter(|h| !in_queue.contains(&h)).collect()
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {

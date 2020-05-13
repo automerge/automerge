@@ -16,7 +16,7 @@ impl Values {
         let mut op_ids: Vec<&amp::OpID> = self.0.keys().collect();
         op_ids.sort();
         let default_op_id = op_ids.first().unwrap();
-        self.0.get(default_op_id).map(|o| o.clone()).unwrap()
+        self.0.get(default_op_id).cloned().unwrap()
     }
 
     pub(crate) fn update_for_opid(&mut self, opid: amp::OpID, value: Rc<RefCell<Object>>) {
