@@ -239,7 +239,6 @@ impl OpSet {
             if let Some(ops) = object.props.get(&key) {
                 if !ops.is_empty() {
                     edits.push(DiffEdit::Insert { index });
-                    //let key = DiffKey::Seq(index);
                     let mut opid_to_value = HashMap::new();
                     for op in ops.iter() {
                         let opid_string = String::from(&op.id);
