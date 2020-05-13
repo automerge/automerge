@@ -1,5 +1,5 @@
 use crate::error::AutomergeError;
-use crate::protocol::ActorID;
+use automerge_protocol::ActorID;
 use core::fmt::Debug;
 use std::convert::TryFrom;
 use std::io;

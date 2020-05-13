@@ -1,7 +1,7 @@
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-use crate::protocol::OpType;
 use std::ops::Deref;
+use automerge_protocol::OpType;
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other

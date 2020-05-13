@@ -19,21 +19,15 @@ mod columnar;
 mod concurrent_operations;
 mod encoding;
 mod error;
-mod helper;
 mod object_store;
 mod op_handle;
 mod op_set;
 mod ordered_set;
-mod patch;
-mod protocol;
+mod pending_diff;
+mod undo_operation;
 mod serialize;
 mod time;
 mod actor_map;
 
-pub use crate::patch::{DiffEdit, Patch, Diff, MapDiff, SeqDiff, ObjDiff};
-pub use crate::protocol::{
-    ActorID, Change, ChangeRequest, ChangeRequestType, DataType, Key, ObjType, ObjectID,
-    OpType, Operation, Value, ChangeHash
-};
 pub use backend::Backend;
 pub use error::AutomergeError;
