@@ -426,9 +426,9 @@ impl Backend {
 
 //        self.clock.set(&change.actor_id, change.seq);
 
-        self.hashes.insert(change.hash.clone(), change.clone());
+        self.hashes.insert(change.hash, change.clone());
 
-        self.history.push(change.hash.clone());
+        self.history.push(change.hash);
 
         let op_set = Rc::make_mut(&mut self.op_set);
 
@@ -437,7 +437,7 @@ impl Backend {
         for d in change.deps.iter() {
             op_set.deps.remove(d);
         }
-        op_set.deps.insert(change.hash.clone());
+        op_set.deps.insert(change.hash);
 
         let undo_ops = op_set.apply_ops(OpHandle::extract(change), undoable, diffs, &self.actors)?;
 

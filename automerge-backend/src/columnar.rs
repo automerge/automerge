@@ -22,7 +22,7 @@ pub(crate) fn bin_to_changes(bindata: &[u8]) -> Result<Vec<Change>, AutomergeErr
 
 // FIXME - really I need a bin change constructor
 pub(crate) fn change_to_change(change: Change) -> Result<Rc<Change>, AutomergeError> {
-    let bin_change = changes_to_bin(&vec![&change])?;
+    let bin_change = changes_to_bin(&[&change])?;
     let mut changes = bin_to_changes(&bin_change[0])?;
     Ok(Rc::new(changes.remove(0)))
 }
@@ -598,7 +598,7 @@ impl<'a> BinaryContainer<'a> {
         if !self.is_valid() {
             return Err(AutomergeError::InvalidChange);
         }
-        self.chunk.to_change(self.hash.clone())
+        self.chunk.to_change(self.hash)
     }
 }
 
