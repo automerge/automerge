@@ -7,10 +7,6 @@
 /*
  * need to test: 
  *
-  automerge_apply_changes
-  automerge_load_changes
-  automerge_get_changes_for_actor
-  automerge_get_changes
   automerge_get_missing_deps
   automerge_error
 */
@@ -46,6 +42,16 @@ int main() {
   automerge_read_json(dbA, buff);
   printf("*** patchA2 ***\n\n%s\n\n",buff);
 
+  len = automerge_apply_local_change(dbB, requestB1);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbB, buff);
+  printf("*** patchB1 ***\n\n%s\n\n",buff);
+
+  len = automerge_apply_local_change(dbB, requestB2);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbB, buff);
+  printf("*** patchB2 ***\n\n%s\n\n",buff);
+
   printf("*** clone dbA -> dbC ***\n\n");
   Backend * dbC = automerge_clone(dbA);
 
@@ -69,7 +75,58 @@ int main() {
   len = automerge_get_patch(dbD);
   assert(len <= BUFSIZE);
   automerge_read_json(dbD, buff2);
+  // +1 because canUndo:true vs canUndo:false
   printf("*** get_patch of dbA & dbD -- equal? *** --> %s\n\n",strlen(buff) + 1 == strlen(buff2) ? "true" : "false");
+  assert(strlen(buff) + 1 == strlen(buff2));
+
+  printf("*** copy changes from dbA to B ***\n\n");
+  len = automerge_get_changes_for_actor(dbA,"111111");
+  while (len > 0) {
+    assert(len <= BUFSIZE);
+    int oldlen = len;
+    len = automerge_read_binary(dbA,buff);
+    automerge_write_change(dbB,oldlen,buff);
+  }
+  automerge_apply_changes(dbB);
+
+  printf("*** copy changes from dbB to A ***\n\n");
+  len = automerge_get_changes_for_actor(dbB,"222222");
+  while (len > 0) {
+    assert(len <= BUFSIZE);
+    int oldlen = len;
+    len = automerge_read_binary(dbB,buff);
+    automerge_write_change(dbA,oldlen,buff);
+  }
+  automerge_apply_changes(dbA);
+
+  len = automerge_get_patch(dbA);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbA, buff);
+  len = automerge_get_patch(dbB);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbB, buff2);
+  printf("*** get_patch of dbA & dbB -- equal? *** --> %s\n\n",strlen(buff) == strlen(buff2) ? "true" : "false");
+  assert(strlen(buff) == strlen(buff2));
+
+  printf("*** copy changes from dbB to E using load ***\n\n");
+  Backend * dbE = automerge_init();
+  len = automerge_get_changes(dbA,0,NULL);
+  while (len > 0) {
+    assert(len <= BUFSIZE);
+    int oldlen = len;
+    len = automerge_read_binary(dbA,buff);
+    automerge_write_change(dbE,oldlen,buff);
+  }
+  automerge_load_changes(dbE);
+
+  len = automerge_get_patch(dbA);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbA, buff);
+  len = automerge_get_patch(dbE);
+  assert(len <= BUFSIZE);
+  automerge_read_json(dbE, buff2);
+  // +1 because canUndo:true vs canUndo:false
+  printf("*** get_patch of dbA & dbE -- equal? *** --> %s\n\n",strlen(buff) + 1 == strlen(buff2) ? "true" : "false");
   assert(strlen(buff) + 1 == strlen(buff2));
 
   printf("free resources\n");
@@ -77,6 +134,7 @@ int main() {
   automerge_free(dbB);
   automerge_free(dbC);
   automerge_free(dbD);
+  automerge_free(dbE);
 
   printf("end\n");
 }
