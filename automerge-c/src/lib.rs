@@ -1,33 +1,32 @@
-#![feature(vec_into_raw_parts)]
-
-extern crate libc;
-extern crate errno;
-extern crate serde;
 extern crate automerge_backend;
+extern crate errno;
+extern crate libc;
+extern crate serde;
 
-use automerge_protocol::{ChangeRequest, Patch, ActorID};
+use automerge_backend::AutomergeError;
+use automerge_protocol::{ActorID, ChangeRequest};
+use errno::{set_errno, Errno};
+use serde::ser::Serialize;
+use std::convert::TryInto;
 use std::ffi::{CStr, CString};
 use std::ops::{Deref, DerefMut};
+use std::os::raw::c_char;
 use std::ptr;
-use std::os::raw::{ c_void, c_char };
-use serde::ser::Serialize;
-use errno::{set_errno,Errno};
-use std::convert::TryInto;
-
-fn to_json<T: Serialize>(data: T) -> *const c_char {
-    let json = serde_json::to_string(&data).unwrap();
-    let json = CString::new(json).unwrap();
-    json.into_raw()
-}
 
 #[derive(Clone)]
-pub struct Backend(automerge_backend::Backend);
+pub struct Backend {
+    handle: automerge_backend::Backend,
+    text: Option<String>,
+    binary: Vec<Vec<u8>>,
+    queue: Option<Vec<Vec<u8>>>,
+    error: Option<CString>,
+}
 
 impl Deref for Backend {
     type Target = automerge_backend::Backend;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.handle
     }
 }
 
@@ -38,88 +37,53 @@ unsafe fn from_buf_raw<T>(ptr: *const T, elts: usize) -> Vec<T> {
     dst
 }
 
+impl Backend {
+    fn init(handle: automerge_backend::Backend) -> Backend {
+        Backend {
+            handle,
+            text: None,
+            binary: Vec::new(),
+            queue: None,
+            error: None,
+        }
+    }
+
+    fn generate_json<T: Serialize>(&mut self, val: Result<T, AutomergeError>) -> isize {
+        if let Ok(val) = val {
+            if let Ok(text) = serde_json::to_string(&val) {
+                let len = (text.len() + 1) as isize;
+                self.text = Some(text);
+                return len;
+            }
+        }
+        -1
+    }
+
+    fn handle_binary(&mut self, b: Result<Vec<u8>, AutomergeError>) -> isize {
+        self.handle_binaries(b.map(|b| vec![b]))
+    }
+
+    fn handle_binaries(&mut self, b: Result<Vec<Vec<u8>>, AutomergeError>) -> isize {
+        if let Ok(bin) = b {
+            let len = bin[0].len();
+            self.binary = bin;
+            self.binary.reverse();
+            len as isize
+        } else {
+            -1
+        }
+    }
+}
+
 impl DerefMut for Backend {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.handle
     }
 }
 
-#[repr(C)]
-pub struct Value {
-    pub datatype: usize,
-    pub data: *mut c_void,
-}
-
-#[repr(C)]
-pub struct Document {
-    pub len: usize,
-    pub cap: usize,
-    pub ptr: *mut u8,
-}
-
-#[repr(C)]
-pub struct Change {
-    pub len: usize,
-    pub cap: usize,
-    pub ptr: *mut u8,
-}
-
-#[repr(C)]
-pub struct Changes {
-    pub len: usize,
-    pub cap: usize,
-    pub ptr: *mut Change,
-}
-
-impl From<*mut Backend> for Backend {
-    fn from(b: *mut Backend) -> Self {
-       unsafe {
-           *Box::from_raw(b)
-       }
-    }
-}
 impl From<Backend> for *mut Backend {
     fn from(b: Backend) -> Self {
         Box::into_raw(Box::new(b))
-    }
-}
-
-impl From<Vec<u8>> for Change {
-    fn from(v: Vec<u8>) -> Self {
-        let (ptr,len,cap) = v.into_raw_parts();
-        Change {
-            ptr, len, cap
-        }
-    }
-}
-
-impl From<Vec<Change>> for Changes {
-    fn from(v: Vec<Change>) -> Self {
-        let (ptr,len,cap) = v.into_raw_parts();
-        Changes {
-            ptr, len, cap
-        }
-    }
-}
-
-impl From<Changes> for *const Changes {
-    fn from(c: Changes) -> Self {
-        Box::into_raw(Box::new(c))
-    }
-}
-
-impl From<Vec<u8>> for Document {
-    fn from(v: Vec<u8>) -> Self {
-        let (ptr,len,cap) = v.into_raw_parts();
-        Document {
-            ptr, len, cap
-        }
-    }
-}
-
-impl From<Document> for *const Document {
-    fn from(c: Document) -> Self {
-        Box::into_raw(Box::new(c))
     }
 }
 
@@ -142,155 +106,200 @@ impl From<Document> for *const Document {
 
 #[no_mangle]
 pub extern "C" fn automerge_init() -> *mut Backend {
-    Backend(automerge_backend::Backend::init()).into()
+    Backend::init(automerge_backend::Backend::init()).into()
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
 pub unsafe extern "C" fn automerge_free(backend: *mut Backend) {
-    let backend : Backend = backend.into();
+    let backend: Backend = *Box::from_raw(backend);
     drop(backend)
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
+/// request must be a valid pointer pointing to a cstring
 #[no_mangle]
-pub unsafe extern "C" fn automerge_free_string(string: *const c_char) {
-    let string : CString = CString::from_raw(std::mem::transmute(string));
-    drop(string);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn automerge_free_changes(changes: *mut Changes) {
-    let changes = Box::from_raw(changes);
-    let changes : Vec<Change> = Vec::from_raw_parts(changes.ptr, changes.len, changes.cap);
-    let data : Vec<Vec<u8>> = changes.iter().map(|ch| Vec::from_raw_parts(ch.ptr, ch.len, ch.cap)).collect();
-    drop(data);
-    drop(changes);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn automerge_free_document(doc: *mut Document) {
-    let doc = Box::from_raw(doc);
-    let doc : Vec<u8> = Vec::from_raw_parts(doc.ptr, doc.len, doc.cap);
-    drop(doc)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn automerge_free_change(change: *mut Change) {
-    let change = Box::from_raw(change);
-    let change : Vec<u8> = Vec::from_raw_parts(change.ptr, change.len, change.cap);
-    drop(change)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn automerge_apply_local_change(backend: *mut Backend, request: *const c_char) -> *const c_char {
-    let request : &CStr = CStr::from_ptr(request);
+pub unsafe extern "C" fn automerge_apply_local_change(
+    backend: *mut Backend,
+    request: *const c_char,
+) -> isize {
+    let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request : ChangeRequest = serde_json::from_str(&request).unwrap();
-    let patch : Patch = (*backend).apply_local_change(request).unwrap();
-    to_json(patch)
+    let request: ChangeRequest = serde_json::from_str(&request).unwrap();
+    let patch = (*backend).apply_local_change(request);
+    (*backend).generate_json(patch)
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
+/// change must point to a valid memory location with at least len bytes
 #[no_mangle]
-pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend, num_changes: usize, changes: *const Change) -> *const c_char {
-    let mut c : Vec<Vec<u8>> = Vec::new();
-    for i in 0..num_changes {
-        let change = changes.offset(i as isize);
-        let bytes = from_buf_raw((*change).ptr, (*change).len);
-        c.push(bytes)
-    }
-    if let Ok(patch) = (*backend).apply_changes_binary(c) {
-        to_json(patch)
+pub unsafe extern "C" fn automerge_write_change(
+    backend: *mut Backend,
+    len: usize,
+    change: *const u8,
+) {
+    let bytes = from_buf_raw(change, len);
+    if let Some(ref mut queue) = (*backend).queue {
+        queue.push(bytes)
     } else {
-        set_errno(Errno(1));
-        ptr::null()
+        (*backend).queue = Some(vec![bytes])
     }
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend) -> *const c_char {
-    if let Ok(patch) = (*backend).get_patch() {
-        to_json(patch)
+pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize {
+    if let Some(changes) = (*backend).queue.take() {
+        let patch = (*backend).apply_changes_binary(changes);
+        (*backend).generate_json(patch)
     } else {
-        set_errno(Errno(1));
-        ptr::null_mut()
+        -1
     }
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
-pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend, num_changes: usize, changes: *const Change) {
-    let mut c : Vec<Vec<u8>> = Vec::new();
-    for i in 0..num_changes {
-        let change = changes.offset(i as isize);
-        let bytes = from_buf_raw((*change).ptr, (*change).len);
-        c.push(bytes)
-    }
-    if let Err(_) = (*backend).load_changes_binary(c) {
-        set_errno(Errno(1));
-    }
+pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend) -> isize {
+    let patch = (*backend).get_patch();
+    (*backend).generate_json(patch)
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
+#[no_mangle]
+pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize {
+    if let Some(changes) = (*backend).queue.take() {
+        if (*backend).load_changes_binary(changes).is_ok() {
+            return 0;
+        }
+    }
+    -1
+}
+
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
 pub unsafe extern "C" fn automerge_clone(backend: *mut Backend) -> *mut Backend {
     (*backend).clone().into()
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
-pub unsafe extern "C" fn automerge_save(backend: *mut Backend) -> *const Document {
-    let backend : Backend = backend.into();
-    if let Ok(data) = backend.save() {
-        let change : Document = data.into();
-        change.into()
-    } else {
-        set_errno(Errno(1));
-        ptr::null()
-    }
+pub unsafe extern "C" fn automerge_save(backend: *mut Backend) -> isize {
+    let data = (*backend).save();
+    (*backend).handle_binary(data)
 }
 
+/// # Safety
+/// data pointer must be a valid pointer to len bytes
 #[no_mangle]
-pub unsafe extern "C" fn automerge_load(len: usize, binary: *const u8) -> *mut Backend {
-    let bytes = from_buf_raw(binary, len);
-    if let Ok(backend) = automerge_backend::Backend::load(bytes) {
-        Backend(backend).into()
+pub unsafe extern "C" fn automerge_load(len: usize, data: *const u8) -> *mut Backend {
+    let bytes = from_buf_raw(data, len);
+    let result = automerge_backend::Backend::load(bytes);
+    if let Ok(backend) = result {
+        Backend::init(backend).into()
     } else {
         set_errno(Errno(1));
         ptr::null_mut()
     }
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_changes_for_actor(backend: *mut Backend, actor: *const c_char) -> *const Changes {
-    let actor : &CStr = CStr::from_ptr(actor);
+pub unsafe extern "C" fn automerge_get_changes_for_actor(
+    backend: *mut Backend,
+    actor: *const c_char,
+) -> isize {
+    let actor: &CStr = CStr::from_ptr(actor);
     let actor = actor.to_string_lossy();
-    let actor : ActorID = actor.as_ref().into();
-    if let Ok(mut changes) = (*backend).get_changes_for_actor_id(&actor) {
-        let changes : Vec<Change> = changes.drain(..).map(|c| c.into()).collect();
-        let changes : Changes = changes.into();
-        changes.into()
-    } else {
-        set_errno(Errno(1));
-        ptr::null()
-    }
+    let actor: ActorID = actor.as_ref().into();
+    let changes = (*backend).get_changes_for_actor_id(&actor);
+    (*backend).handle_binaries(changes)
 }
 
+/// # Safety
+/// This must me called with a valid backend pointer
+/// binary must be a valid pointer to len bytes
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_changes(backend: *mut Backend, len: usize, binary: *const u8) -> *const Changes {
+pub unsafe extern "C" fn automerge_get_changes(
+    backend: *mut Backend,
+    len: usize,
+    binary: *const u8,
+) -> isize {
     let mut have_deps = Vec::new();
     for i in 0..len {
-        have_deps.push(from_buf_raw(binary.offset(i as isize * 32),32).as_slice().try_into().unwrap())
+        have_deps.push(
+            from_buf_raw(binary.offset(i as isize * 32), 32)
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        )
     }
-    if let Ok(mut changes) = (*backend).get_changes(&have_deps) {
-        let changes : Vec<Change> = changes.drain(..).map(|c| c.into()).collect();
-        let changes : Changes = changes.into();
-        changes.into()
+    let changes = (*backend).get_changes(&have_deps);
+    (*backend).handle_binaries(changes)
+}
+
+/// # Safety
+/// This must me called with a valid backend pointer
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_missing_deps(backend: *mut Backend) -> isize {
+    let missing = (*backend).get_missing_deps();
+    (*backend).generate_json(Ok(missing))
+}
+
+/// # Safety
+/// This must me called with a valid backend pointer
+pub unsafe extern "C" fn automerge_error(backend: *mut Backend) -> *const c_char {
+    (*backend)
+        .error
+        .as_ref()
+        .map(|e| e.as_ptr())
+        .unwrap_or_else(|| ptr::null_mut())
+}
+
+/// # Safety
+/// This must me called with a valid backend pointer
+/// and buffer must be a valid pointer of at least the number of bytes returned by the previous
+/// call that generated a json result
+#[no_mangle]
+pub unsafe extern "C" fn automerge_read_json(backend: *mut Backend, buffer: *mut c_char) -> isize {
+    if let Some(text) = &(*backend).text {
+        let len = text.len();
+        buffer.copy_from(text.as_ptr().cast(), len);
+        (*buffer.add(len)) = 0; // null terminate
+        (*backend).text = None;
+        0
     } else {
-        set_errno(Errno(1));
-        ptr::null()
+        (*buffer) = 0;
+        -1
     }
 }
 
+/// # Safety
+///
+/// This must me called with a valid backend pointer
+/// the buffer must be a valid pointer pointing to at least as much space as was
+/// required by the previous binary result call
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_missing_deps(backend: *mut Backend) -> *const c_char {
-    let missing = (*backend).get_missing_deps();
-    to_json(missing)
+pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *mut u8) -> isize {
+    if let Some(bin) = (*backend).binary.pop() {
+        let len = bin.len();
+        buffer.copy_from(bin.as_ptr(), len);
+        if let Some(next) = (*backend).binary.last() {
+            next.len() as isize
+        } else {
+            0
+        }
+    } else {
+        -1
+    }
 }
 
 #[cfg(test)]

@@ -8,7 +8,7 @@ impl Serialize for UndoOperation {
     where
         S: Serializer,
     {
-        let mut fields = 3;
+        let mut fields = 4;
 
         match &self.action {
             OpType::Set(Value::Counter(_)) => fields += 2,
@@ -21,6 +21,7 @@ impl Serialize for UndoOperation {
         op.serialize_field("action", &self.action)?;
         op.serialize_field("obj", &self.obj)?;
         op.serialize_field("key", &self.key)?;
+        op.serialize_field("insert", &false)?;
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,

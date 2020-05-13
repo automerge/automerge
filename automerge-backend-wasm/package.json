@@ -21,6 +21,7 @@
     "release": "rm -rf pkg && wasm-pack build --target nodejs --release --out-name index",
     "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --out-name index",
     "mocha": "yarn build && mocha --bail --full-trace",
+    "webpack": "webpack",
     "test": "cargo test && wasm-pack test --node"
   },
   "dependencies": { },

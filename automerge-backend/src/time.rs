@@ -7,7 +7,7 @@ use wasm_bindgen::prelude::*;
 pub(crate) fn unix_timestamp() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_secs())
         .unwrap_or(0) as i64
 }
 
@@ -19,5 +19,6 @@ extern "C" {
 }
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn unix_timestamp() -> i64 {
-    date_now() as i64
+    // returns millis - we resolve to seconds
+    (date_now() / 1000.0) as i64
 }

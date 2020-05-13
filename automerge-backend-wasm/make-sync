@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -e
+rm -rf build dist
+wasm-pack build --target bundler --out-name index --out-dir build --release
+sed -i 's/import . as wasm from ...index_bg.wasm./let wasm = null;/' build/index.js
+echo 'const base64 = "'`base64 -w 0 build/index_bg.wasm`'"' >> build/index.js;
+cat <<EOT >> build/index.js
+import * as exports from './index'
+const buffer = Buffer.from(base64, 'base64');
+const module = new WebAssembly.Module(buffer);
+const wasmInstance = new WebAssembly.Instance(module,{ ['./index.js']: exports })
+wasm = wasmInstance.exports;
+export var __wasm = wasm;
+EOT
+cp index.js build/entry.js
+sed -i 's/pkg/index/' build/entry.js
+$(npm bin)/webpack
+cp README.md LICENSE dist
+cp package-sync.json dist/package.json

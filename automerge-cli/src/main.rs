@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 use clap::Clap;
 use std::{io, io::Read, fs::File,};
 
