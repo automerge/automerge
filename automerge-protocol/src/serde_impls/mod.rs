@@ -21,7 +21,7 @@ pub(crate) fn make_false() -> bool {
 
 // Factory method for use in #[serde(default=..)] annotations
 pub(crate) fn make_true() -> bool {
-    false
+    true
 }
 
 // Helper method for use in custom deserialize impls
