@@ -269,11 +269,11 @@ impl Frontend {
             .take()
             .unwrap()
             .optimistically_apply_change(change_closure, self.seq + 1)?;
+        self.state = Some(new_state);
         if ops.is_none() {
             return Ok(None);
         }
         self.seq += 1;
-        self.state = Some(new_state);
         self.cached_value = new_value;
         let change_request = ChangeRequest {
             actor: self.actor_id.clone(),

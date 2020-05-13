@@ -92,11 +92,43 @@ fn it_should_return_no_changes_if_nothing_was_changed() {
 #[test]
 fn it_should_create_nested_maps() {
     let mut doc = Frontend::new();
-    let _change_request = doc.change(None, |doc| {
+    let change_request = doc.change(None, |doc| {
         doc.add_change(LocalChange::set(Path::root().key("birds"), Value::from_json(&serde_json::json!({
             "wrens": 3
         }))))?;
         Ok(())
-    }).unwrap();
-
+    }).unwrap().unwrap();
+    let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+    let expected_change = amp::ChangeRequest{
+        actor: doc.actor_id.clone(),
+        seq: 1,
+        time: change_request.time,
+        message: None,
+        version: 0,
+        child: None,
+        undoable: true,
+        request_type: amp::ChangeRequestType::Change,
+        deps: None,
+        ops: Some(vec![
+            amp::OpRequest{
+                action: amp::ReqOpType::MakeMap,
+                obj: amp::ObjectID::Root.to_string(),
+                key: amp::RequestKey::Str("birds".into()),
+                child: Some(birds_id.to_string()),
+                datatype: None,
+                value: None,
+                insert: false,
+            },
+            amp::OpRequest{
+                action: amp::ReqOpType::Set,
+                obj: birds_id.to_string(),
+                key: amp::RequestKey::Str("wrens".into()),
+                child: None,
+                datatype: Some(amp::DataType::Undefined),
+                value: Some(amp::Value::F64(3.0)),
+                insert: false,
+            },
+        ]),
+    };
+    assert_eq!(change_request, expected_change);
 }
