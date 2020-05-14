@@ -237,7 +237,11 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
             match (&next_elem, &*current_obj) {
                 (PathElement::Key(ref k), Object::Map(oid, ref vals, map_type)) => {
                     if let Some(target) = vals.get(k) {
-                        intermediates.push(Intermediate::Map(oid.clone(), map_type.clone(), k.clone()));
+                        intermediates.push(Intermediate::Map(
+                            oid.clone(),
+                            map_type.clone(),
+                            k.clone(),
+                        ));
                         current_obj = Rc::new(target.default_value().borrow().clone());
                     } else {
                         return None;

@@ -14,6 +14,7 @@ macro_rules! log {
     }
 }
 
+mod actor_map;
 mod backend;
 mod columnar;
 mod concurrent_operations;
@@ -24,10 +25,9 @@ mod op_handle;
 mod op_set;
 mod ordered_set;
 mod pending_diff;
-mod undo_operation;
 mod serialize;
 mod time;
-mod actor_map;
+mod undo_operation;
 
 pub use backend::Backend;
 pub use error::AutomergeError;

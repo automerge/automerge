@@ -6,20 +6,22 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
+use crate::actor_map::ActorMap;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
-use crate::actor_map::ActorMap;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
+use automerge_protocol::{
+    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, OpType, SeqDiff,
+};
 use core::cmp::max;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::AsRef;
 use std::rc::Rc;
-use automerge_protocol::{ChangeHash, ObjType, OpID, ObjectID, Key, OpType, Diff, DiffEdit, MapDiff, ObjDiff, SeqDiff};
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -59,8 +61,8 @@ impl OpSet {
         &mut self,
         mut ops: Vec<OpHandle>,
         undoable: bool,
-        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
-        actors: &ActorMap
+        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        actors: &ActorMap,
     ) -> Result<Vec<UndoOperation>, AutomergeError> {
         let mut all_undo_ops = Vec::new();
         let mut new_objects: HashSet<ObjectID> = HashSet::new();
@@ -99,7 +101,11 @@ impl OpSet {
 
         if object.is_seq() {
             if op.insert {
-                object.insert_after(op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?, op.clone(), actors);
+                object.insert_after(
+                    op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?,
+                    op.clone(),
+                    actors,
+                );
             }
 
             let ops = object.props.entry(op.operation_key()).or_default();
@@ -112,12 +118,18 @@ impl OpSet {
             let diff = match (before, after) {
                 (true, true) => Some(PendingDiff::Set(op.clone())),
                 (true, false) => {
-                    let opid = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
+                    let opid = op
+                        .operation_key()
+                        .to_opid()
+                        .ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     Some(PendingDiff::SeqRemove(op.clone(), index))
                 }
                 (false, true) => {
-                    let id = op.operation_key().to_opid().ok_or(AutomergeError::HeadToOpID)?;
+                    let id = op
+                        .operation_key()
+                        .to_opid()
+                        .ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.index_of(&id)?;
                     object.seq.insert_index(index, id);
                     Some(PendingDiff::SeqInsert(op.clone(), index))
@@ -206,7 +218,8 @@ impl OpSet {
                 for op in ops.iter() {
                     let opid_string = String::from(&op.id);
                     if let Some(child_id) = op.child() {
-                        opid_to_value.insert(opid_string, self.construct_object(&child_id, actors)?);
+                        opid_to_value
+                            .insert(opid_string, self.construct_object(&child_id, actors)?);
                     } else {
                         opid_to_value.insert(opid_string, (&op.adjusted_value()).into());
                     }
@@ -243,7 +256,8 @@ impl OpSet {
                     for op in ops.iter() {
                         let opid_string = String::from(&op.id);
                         if let Some(child_id) = op.child() {
-                            opid_to_value.insert(opid_string, self.construct_object(&child_id, actors)?);
+                            opid_to_value
+                                .insert(opid_string, self.construct_object(&child_id, actors)?);
                         } else {
                             opid_to_value.insert(opid_string, (&op.adjusted_value()).into());
                         }
@@ -262,7 +276,11 @@ impl OpSet {
         .into())
     }
 
-    pub fn construct_object(&self, object_id: &ObjectID, actors: &ActorMap) -> Result<Diff, AutomergeError> {
+    pub fn construct_object(
+        &self,
+        object_id: &ObjectID,
+        actors: &ActorMap,
+    ) -> Result<Diff, AutomergeError> {
         let object = self.get_obj(&object_id)?;
         if object.is_seq() {
             self.construct_list(object_id, object, actors)
@@ -273,7 +291,11 @@ impl OpSet {
 
     // this recursivly walks through all the objects touched by the changes
     // to generate a diff in a single pass
-    pub fn finalize_diffs(&self, mut pending: HashMap<ObjectID,Vec<PendingDiff>>, actors: &ActorMap) -> Result<Option<Diff>, AutomergeError> {
+    pub fn finalize_diffs(
+        &self,
+        mut pending: HashMap<ObjectID, Vec<PendingDiff>>,
+        actors: &ActorMap,
+    ) -> Result<Option<Diff>, AutomergeError> {
         if pending.is_empty() {
             return Ok(None);
         }
@@ -291,7 +313,11 @@ impl OpSet {
             }
         }
 
-        Ok(Some(self.gen_obj_diff(&ObjectID::Root, &mut pending, actors)?))
+        Ok(Some(self.gen_obj_diff(
+            &ObjectID::Root,
+            &mut pending,
+            actors,
+        )?))
     }
 
     fn gen_seq_diff(
@@ -311,13 +337,18 @@ impl OpSet {
             for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
                     OpType::Set(_) => (&op.adjusted_value()).into(),
-                    OpType::Make(_) => self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?,
+                    OpType::Make(_) => {
+                        self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?
+                    }
                     OpType::Link(ref child) => self.construct_object(&child, actors)?,
                     _ => panic!("del or inc found in field_operations"),
                 };
                 opid_to_value.insert(String::from(&op.id), link);
             }
-            if let Some(index) = obj.seq.index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpID)?) {
+            if let Some(index) = obj
+                .seq
+                .index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpID)?)
+            {
                 props.insert(index, opid_to_value);
             }
         }
@@ -347,7 +378,9 @@ impl OpSet {
             for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
                     OpType::Set(_) => (&op.adjusted_value()).into(),
-                    OpType::Make(_) => self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?,
+                    OpType::Make(_) => {
+                        self.gen_obj_diff(&op.id.clone().into(), pending_diffs, actors)?
+                    }
                     OpType::Link(ref child_id) => self.construct_object(&child_id, actors)?,
                     _ => panic!("del or inc found in field_operations"),
                 };

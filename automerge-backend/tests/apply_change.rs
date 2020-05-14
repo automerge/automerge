@@ -1,6 +1,6 @@
 extern crate automerge_backend;
 use automerge_backend::{
-    AutomergeError, Backend, Change, Clock, ObjType, ObjectID, Operation, Patch, MapDiff, Value,
+    AutomergeError, Backend, Change, Clock, MapDiff, ObjType, ObjectID, Operation, Patch, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -85,7 +85,8 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
                     "1@cdee6963c1664645920be8b41a933c2b".into() =>  Value::Counter(3).into(),
                 }),
             }
-            .into()),
+            .into(),
+        ),
     };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -133,14 +134,17 @@ fn test_conflict_on_assignment_to_same_map_key() {
         clock: Clock::from(&vec![(&"ac11".into(), 1), (&"ac22".into(), 1)]),
         can_undo: false,
         can_redo: false,
-        diffs: Some(MapDiff {
-            object_id: String::from(&ObjectID::Root),
-            obj_type: ObjType::Map,
-            props: hashmap!( "bird".into() => hashmap!(
-                        "1@ac11".into() => "magpie".into(),
-                        "2@ac22".into() => "blackbird".into(),
-            )),
-        }.into()),
+        diffs: Some(
+            MapDiff {
+                object_id: String::from(&ObjectID::Root),
+                obj_type: ObjType::Map,
+                props: hashmap!( "bird".into() => hashmap!(
+                            "1@ac11".into() => "magpie".into(),
+                            "2@ac22".into() => "blackbird".into(),
+                )),
+            }
+            .into(),
+        ),
     };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();

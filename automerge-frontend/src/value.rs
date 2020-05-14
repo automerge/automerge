@@ -1,8 +1,8 @@
 use crate::PathElement;
 use automerge_protocol as amp;
+use maplit::hashmap;
 use serde::Serialize;
 use std::collections::HashMap;
-use maplit::hashmap;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub enum MapType {
@@ -98,18 +98,15 @@ impl Value {
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 amp::Value::F32(n) => serde_json::Value::Number(
-                    serde_json::Number::from_f64(f64::from(*n)).unwrap_or_else(|| serde_json::Number::from(0)),
+                    serde_json::Number::from_f64(f64::from(*n))
+                        .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 amp::Value::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
                 amp::Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
                 amp::Value::Str(s) => serde_json::Value::String(s.to_string()),
                 amp::Value::Boolean(b) => serde_json::Value::Bool(*b),
-                amp::Value::Counter(c) => {
-                    serde_json::Value::Number(serde_json::Number::from(*c))
-                }
-                amp::Value::Timestamp(t) => {
-                    serde_json::Value::Number(serde_json::Number::from(*t))
-                }
+                amp::Value::Counter(c) => serde_json::Value::Number(serde_json::Number::from(*c)),
+                amp::Value::Timestamp(t) => serde_json::Value::Number(serde_json::Number::from(*t)),
                 amp::Value::Null => serde_json::Value::Null,
             },
         }
@@ -163,10 +160,11 @@ pub(crate) fn value_to_op_requests(
                 .flat_map(|(o, _)| o)
                 .collect();
             let child_diff = amp::SeqDiff {
-                edits: vs.iter()
-                        .enumerate()
-                        .map(|(index, _)| amp::DiffEdit::Insert { index })
-                        .collect(),
+                edits: vs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| amp::DiffEdit::Insert { index })
+                    .collect(),
                 object_id: list_id,
                 obj_type: match seq_type {
                     SequenceType::List => amp::ObjType::List,
@@ -176,7 +174,7 @@ pub(crate) fn value_to_op_requests(
                     .into_iter()
                     .enumerate()
                     .map(|(index, (_, diff_link))| {
-                        (index, hashmap!{random_op_id().to_string() => diff_link})
+                        (index, hashmap! {random_op_id().to_string() => diff_link})
                     })
                     .collect(),
             };
@@ -199,20 +197,15 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: HashMap<String, (Vec<amp::OpRequest>, amp::Diff)> =
-                kvs.iter()
-                    .map(|(k, v)| {
-                        (
-                            k.clone(),
-                            value_to_op_requests(
-                                map_id.clone(),
-                                PathElement::Key(k.clone()),
-                                v,
-                                false,
-                            ),
-                        )
-                    })
-                    .collect();
+            let child_requests_and_diffs: HashMap<String, (Vec<amp::OpRequest>, amp::Diff)> = kvs
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        value_to_op_requests(map_id.clone(), PathElement::Key(k.clone()), v, false),
+                    )
+                })
+                .collect();
             let mut result = vec![make_op];
             let child_requests: Vec<amp::OpRequest> = child_requests_and_diffs
                 .iter()
@@ -228,7 +221,7 @@ pub(crate) fn value_to_op_requests(
                 props: child_requests_and_diffs
                     .into_iter()
                     .map(|(k, (_, diff_link))| {
-                        (k, hashmap!{random_op_id().to_string() => diff_link})
+                        (k, hashmap! {random_op_id().to_string() => diff_link})
                     })
                     .collect(),
             };
@@ -258,7 +251,6 @@ fn new_object_id() -> String {
 pub(crate) fn random_op_id() -> amp::OpID {
     amp::OpID(1, amp::ActorID::random().0)
 }
-
 
 fn value_to_datatype(value: &amp::Value) -> amp::DataType {
     match value {

@@ -1,16 +1,19 @@
-use crate::columnar::{bin_to_changes, changes_to_bin, change_to_change, changes_to_one_bin};
+use crate::actor_map::ActorMap;
+use crate::columnar::{bin_to_changes, change_to_change, changes_to_bin, changes_to_one_bin};
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
-use crate::actor_map::ActorMap;
 use crate::op_set::OpSet;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::pending_diff::PendingDiff;
-use crate::undo_operation::UndoOperation;
 use crate::time;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, Key, ReqOpType, RequestKey, OpRequest, OpType, Value, Operation, Diff, Patch, Change, ChangeRequest, ChangeRequestType};
+use crate::undo_operation::UndoOperation;
+use automerge_protocol::{
+    ActorID, Change, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID,
+    OpID, OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value,
+};
 use std::borrow::BorrowMut;
 use std::cmp::max;
-use std::collections::{HashMap,HashSet};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -20,11 +23,11 @@ pub struct Backend {
     queue: Vec<Rc<Change>>,
     op_set: Rc<OpSet>,
     //states: ActorStates,
-    states: HashMap<ActorID,Vec<Rc<Change>>>,
+    states: HashMap<ActorID, Vec<Rc<Change>>>,
     actors: ActorMap,
     obj_alias: HashMap<String, ObjectID>,
     undo_pos: usize,
-    hashes: HashMap<ChangeHash,Rc<Change>>,
+    hashes: HashMap<ChangeHash, Rc<Change>>,
     history: Vec<ChangeHash>,
     //clock: Clock,
     pub undo_stack: Vec<Vec<UndoOperation>>,
@@ -130,7 +133,10 @@ impl Backend {
                     ReqOpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
                     ),
-                    ReqOpType::Inc => OpType::Inc(rop.to_i64().ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?),
+                    ReqOpType::Inc => OpType::Inc(
+                        rop.to_i64()
+                            .ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?,
+                    ),
                     ReqOpType::Set => OpType::Set(rop.primitive_value()),
                 };
 
@@ -168,7 +174,7 @@ impl Backend {
         diffs: Option<Diff>,
         request: Option<&ChangeRequest>,
     ) -> Result<Patch, AutomergeError> {
-        let mut deps : Vec<_> = self.op_set.deps.iter().cloned().collect();
+        let mut deps: Vec<_> = self.op_set.deps.iter().cloned().collect();
         deps.sort_unstable();
         Ok(Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
@@ -176,7 +182,11 @@ impl Backend {
             can_redo: self.can_redo(),
             diffs,
             deps,
-            clock: self.states.iter().map(|(k,v)| (k.to_hex_string(),v.len() as u64)).collect(),
+            clock: self
+                .states
+                .iter()
+                .map(|(k, v)| (k.to_hex_string(), v.len() as u64))
+                .collect(),
             actor: request.map(|r| r.actor.0.clone()),
             seq: request.map(|r| r.seq),
         })
@@ -310,7 +320,12 @@ impl Backend {
             for change in v.queue.drain(0..) {
                 let mut m = HashMap::new();
                 Rc::make_mut(op_set)
-                    .apply_ops(OpHandle::extract(change.clone()), false, &mut m, &self.actors)
+                    .apply_ops(
+                        OpHandle::extract(change.clone()),
+                        false,
+                        &mut m,
+                        &self.actors,
+                    )
                     .unwrap();
             }
             return Ok(op_set.clone());
@@ -362,7 +377,9 @@ impl Backend {
 
         let ver = self.get_version(request.version)?;
 
-        request.deps.get_or_insert_with(|| ver.deps.iter().cloned().collect());
+        request
+            .deps
+            .get_or_insert_with(|| ver.deps.iter().cloned().collect());
 
         let start_op = ver.max_op + 1;
         let change = match request.request_type {
@@ -381,7 +398,13 @@ impl Backend {
     }
 
     fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
-        if self.states.get(&request.actor).map(|v| v.len() as u64).unwrap_or(0) >= request.seq {
+        if self
+            .states
+            .get(&request.actor)
+            .map(|v| v.len() as u64)
+            .unwrap_or(0)
+            >= request.seq
+        {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {}:{}",
                 request.actor.0, request.seq
@@ -395,7 +418,7 @@ impl Backend {
         change: Rc<Change>,
         local: bool,
         undoable: bool,
-        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
+        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, undoable, diffs)
@@ -405,7 +428,10 @@ impl Backend {
         }
     }
 
-    fn apply_queued_ops(&mut self, diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>) -> Result<(), AutomergeError> {
+    fn apply_queued_ops(
+        &mut self,
+        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+    ) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, false, diffs)?;
         }
@@ -416,15 +442,18 @@ impl Backend {
         &mut self,
         change: Rc<Change>,
         undoable: bool,
-        diffs: &mut HashMap<ObjectID,Vec<PendingDiff>>,
-    ) -> Result<(),AutomergeError> {
+        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+    ) -> Result<(), AutomergeError> {
         if self.hashes.contains_key(&change.hash) {
-            return Ok(())
+            return Ok(());
         }
 
-        self.states.entry(change.actor_id.clone()).or_default().push(change.clone());
+        self.states
+            .entry(change.actor_id.clone())
+            .or_default()
+            .push(change.clone());
 
-//        self.clock.set(&change.actor_id, change.seq);
+        //        self.clock.set(&change.actor_id, change.seq);
 
         self.hashes.insert(change.hash, change.clone());
 
@@ -439,7 +468,8 @@ impl Backend {
         }
         op_set.deps.insert(change.hash);
 
-        let undo_ops = op_set.apply_ops(OpHandle::extract(change), undoable, diffs, &self.actors)?;
+        let undo_ops =
+            op_set.apply_ops(OpHandle::extract(change), undoable, diffs, &self.actors)?;
 
         if undoable {
             self.push_undo_ops(undo_ops);
@@ -485,7 +515,9 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
-        let diffs = self.op_set.construct_object(&ObjectID::Root, &self.actors)?;
+        let diffs = self
+            .op_set
+            .construct_object(&ObjectID::Root, &self.actors)?;
         self.make_patch(Some(diffs), None)
     }
 
@@ -493,16 +525,15 @@ impl Backend {
         &self,
         actor_id: &ActorID,
     ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        let changes : Vec<&Change> = self.states.get(actor_id)
+        let changes: Vec<&Change> = self
+            .states
+            .get(actor_id)
             .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
             .unwrap_or_default();
         changes_to_bin(&changes)
     }
 
-    pub fn get_changes(
-        &self,
-        have_deps: &[ChangeHash],
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Vec<u8>>, AutomergeError> {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -512,7 +543,7 @@ impl Backend {
             has_seen.insert(hash);
         }
         let changes: Vec<&Change> = self
-//            .states
+            //            .states
             .history
             .iter()
             .filter(|hash| !has_seen.contains(hash))
@@ -530,13 +561,18 @@ impl Backend {
         !self.redo_stack.is_empty()
     }
 
-    pub fn save(&self) -> Result<Vec<u8>,AutomergeError> {
-        let changes : Vec<_> = self.history.iter().filter_map(|hash| self.hashes.get(&hash)).map(|ch| ch.as_ref()).collect();
+    pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
+        let changes: Vec<_> = self
+            .history
+            .iter()
+            .filter_map(|hash| self.hashes.get(&hash))
+            .map(|ch| ch.as_ref())
+            .collect();
         let data = changes_to_one_bin(&changes)?;
         Ok(data)
     }
 
-    pub fn load(data: Vec<u8>) -> Result<Self,AutomergeError> {
+    pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = bin_to_changes(&data)?;
         let mut backend = Self::init();
         backend.load_changes(changes)?;
@@ -544,8 +580,12 @@ impl Backend {
     }
 
     pub fn get_missing_deps(&self) -> Vec<ChangeHash> {
-        let in_queue : Vec<_> = self.queue.iter().map(|change| &change.hash).collect();
-        self.queue.iter().flat_map(|change| change.deps.clone()).filter(|h| !in_queue.contains(&h)).collect()
+        let in_queue: Vec<_> = self.queue.iter().map(|change| &change.hash).collect();
+        self.queue
+            .iter()
+            .flat_map(|change| change.deps.clone())
+            .filter(|h| !in_queue.contains(&h))
+            .collect()
     }
 
     fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
@@ -592,8 +632,7 @@ fn resolve_key(
     }
 }
 
-
-/// Extension trait adding a few helper methods with backend specific logic 
+/// Extension trait adding a few helper methods with backend specific logic
 /// to `Operation`
 trait OpExt {
     fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation>;
@@ -602,7 +641,6 @@ trait OpExt {
 }
 
 impl OpExt for Operation {
-
     fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
         let key = self.key.clone();
 

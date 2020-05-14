@@ -1,7 +1,7 @@
 //#![feature(set_stdio)]
 
-use automerge_protocol::{ActorID, ChangeRequest, ChangeHash};
 use automerge_backend::{AutomergeError, Backend};
+use automerge_protocol::{ActorID, ChangeHash, ChangeRequest};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -80,10 +80,13 @@ impl State {
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, have_deps: JsValue) -> Result<Array, JsValue> {
         let deps: Vec<ChangeHash> = js_to_rust(have_deps)?;
-        let changes = self.backend.get_changes(&deps).map_err(automerge_error_to_js)?;
+        let changes = self
+            .backend
+            .get_changes(&deps)
+            .map_err(automerge_error_to_js)?;
         let result = Array::new();
         for c in changes {
-            let bytes : Uint8Array = c.as_slice().into();
+            let bytes: Uint8Array = c.as_slice().into();
             result.push(bytes.as_ref());
         }
         Ok(result)
@@ -92,10 +95,13 @@ impl State {
     #[wasm_bindgen(js_name = getChangesForActor)]
     pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<Array, JsValue> {
         let a: ActorID = js_to_rust(actorid)?;
-        let changes = self.backend.get_changes_for_actor_id(&a).map_err(automerge_error_to_js)?;
+        let changes = self
+            .backend
+            .get_changes_for_actor_id(&a)
+            .map_err(automerge_error_to_js)?;
         let result = Array::new();
         for c in changes {
-            let bytes : Uint8Array = c.as_slice().into();
+            let bytes: Uint8Array = c.as_slice().into();
             result.push(bytes.as_ref());
         }
         Ok(result)
@@ -120,13 +126,15 @@ impl State {
     #[allow(clippy::should_implement_trait)]
     #[wasm_bindgen(js_name = clone)]
     pub fn clone(&self) -> Result<State, JsValue> {
-        Ok(State { backend: self.backend.clone() })
+        Ok(State {
+            backend: self.backend.clone(),
+        })
     }
 
     #[wasm_bindgen(js_name = save)]
     pub fn save(&self) -> Result<JsValue, JsValue> {
         let data = self.backend.save().map_err(automerge_error_to_js)?;
-        let js_bytes : Uint8Array = data.as_slice().into();
+        let js_bytes: Uint8Array = data.as_slice().into();
         Ok(js_bytes.into())
     }
 

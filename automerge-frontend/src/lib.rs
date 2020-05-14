@@ -26,7 +26,7 @@ pub use value::{Conflicts, MapType, SequenceType, Value};
 /// so have to high a latency to be acceptable on the UI thread.
 ///
 /// This frontend/backend split implies that we need to optimistically apply
-/// local changes somehow. In order to do this we immediately apply changes to 
+/// local changes somehow. In order to do this we immediately apply changes to
 /// a copy of the local state (state being the HashMap<ObjectID, Object>) and
 /// add the sequence number of the new change to a list of in flight requests.
 /// In detail the logic looks like this:
@@ -309,9 +309,7 @@ impl Frontend {
     pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
         // So gross, this is just a quick hack before refactoring to a proper
         // state machine
-        self.state
-            .clone()
-            .and_then(|s| s.get_object_id(path))
+        self.state.clone().and_then(|s| s.get_object_id(path))
     }
 }
 

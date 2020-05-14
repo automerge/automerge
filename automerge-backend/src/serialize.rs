@@ -1,7 +1,7 @@
 use crate::undo_operation::UndoOperation;
+use automerge_protocol::{DataType, OpType, Value};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
-use automerge_protocol::{Value, OpType, DataType};
 
 impl Serialize for UndoOperation {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

@@ -1,11 +1,7 @@
-use automerge_protocol::{
-    Diff, MapDiff, SeqDiff, DiffEdit, ObjType, ObjectID, OpID
-};
+use automerge_protocol::{Diff, DiffEdit, MapDiff, ObjType, ObjectID, OpID, SeqDiff};
 //use crate::AutomergeFrontendError;
 use crate::object::{Object, Values};
-use crate::{
-    AutomergeFrontendError, MapType, Value, SequenceType,
-};
+use crate::{AutomergeFrontendError, MapType, SequenceType, Value};
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -135,14 +131,20 @@ impl<'a> ChangeContext<'a> {
         diff: &Diff,
     ) -> Result<Rc<RefCell<Object>>, AutomergeFrontendError> {
         match diff {
-            Diff::Map(MapDiff{object_id: object_id_str, obj_type, props}) => {
+            Diff::Map(MapDiff {
+                object_id: object_id_str,
+                obj_type,
+                props,
+            }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
                     ObjType::Map => {
-                        let obj =
-                            Self::get_or_create_object(&object_id, original_objects, updated, || {
-                                Object::Map(object_id.clone(), HashMap::new(), MapType::Map)
-                            });
+                        let obj = Self::get_or_create_object(
+                            &object_id,
+                            original_objects,
+                            updated,
+                            || Object::Map(object_id.clone(), HashMap::new(), MapType::Map),
+                        );
                         match &mut *obj.borrow_mut() {
                             Object::Map(_, ref mut kvs, MapType::Map) => {
                                 for (key, prop_diffs) in props {
@@ -152,27 +154,30 @@ impl<'a> ChangeContext<'a> {
                                     for (opid, subdiff) in prop_diffs.iter() {
                                         let object = Self::apply_diff_helper(
                                             original_objects,
-                                            updated, 
-                                            subdiff
+                                            updated,
+                                            subdiff,
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values.update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values
+                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
                                     }
                                     if prop_diffs.is_empty() {
                                         kvs.remove(key);
                                     }
                                 }
-                            },
+                            }
                             _ => panic!("Invalid object type when applying diff"),
                         };
                         Ok(obj)
-                    },
+                    }
                     ObjType::Table => {
-                        let obj =
-                            Self::get_or_create_object(&object_id, original_objects, updated, || {
-                                Object::Map(object_id.clone(), HashMap::new(), MapType::Table)
-                            });
+                        let obj = Self::get_or_create_object(
+                            &object_id,
+                            original_objects,
+                            updated,
+                            || Object::Map(object_id.clone(), HashMap::new(), MapType::Table),
+                        );
                         match &mut *obj.borrow_mut() {
                             Object::Map(_, ref mut kvs, MapType::Table) => {
                                 for (key, prop_diffs) in props {
@@ -188,32 +193,46 @@ impl<'a> ChangeContext<'a> {
                                         [(opid, subdiff)] => {
                                             let object = Self::apply_diff_helper(
                                                 original_objects,
-                                                updated, 
-                                                subdiff
+                                                updated,
+                                                subdiff,
                                             )?;
                                             // This unwrap should be removed by using OpIDs in the
                                             // types of diffs
-                                            values.update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                            values.update_for_opid(
+                                                OpID::from_str(opid).unwrap(),
+                                                object,
+                                            );
                                         }
-                                        _ => return Err(AutomergeFrontendError::InvalidChangeRequest),
+                                        _ => {
+                                            return Err(
+                                                AutomergeFrontendError::InvalidChangeRequest,
+                                            )
+                                        }
                                     };
                                 }
                             }
                             _ => panic!("Invalid object type when applying diff"),
                         };
                         Ok(obj)
-                    },
+                    }
                     _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
-            },
-            Diff::Seq(SeqDiff{object_id: object_id_str, edits, obj_type, props}) => {
+            }
+            Diff::Seq(SeqDiff {
+                object_id: object_id_str,
+                edits,
+                obj_type,
+                props,
+            }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
                     ObjType::List => {
-                        let obj =
-                            Self::get_or_create_object(&object_id, original_objects, updated, || {
-                                Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
-                            });
+                        let obj = Self::get_or_create_object(
+                            &object_id,
+                            original_objects,
+                            updated,
+                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
+                        );
                         match &mut *obj.borrow_mut() {
                             Object::Sequence(_, ref mut elems, SequenceType::List) => {
                                 for edit in edits {
@@ -223,7 +242,7 @@ impl<'a> ChangeContext<'a> {
                                             elems.remove(*index);
                                         }
                                     };
-                                };
+                                }
                                 for (index, prop_diffs) in props {
                                     let values = match elems[*index].as_mut() {
                                         Some(v) => v,
@@ -236,24 +255,27 @@ impl<'a> ChangeContext<'a> {
                                     for (opid, subdiff) in prop_diffs.iter() {
                                         let object = Self::apply_diff_helper(
                                             original_objects,
-                                            updated, 
-                                            subdiff
+                                            updated,
+                                            subdiff,
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values.update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values
+                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
                                     }
-                                };
-                            },
+                                }
+                            }
                             _ => panic!("Invalid object type when applying diff"),
                         };
                         Ok(obj)
-                    },
+                    }
                     ObjType::Text => {
-                        let obj =
-                            Self::get_or_create_object(&object_id, original_objects, updated, || {
-                                Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
-                            });
+                        let obj = Self::get_or_create_object(
+                            &object_id,
+                            original_objects,
+                            updated,
+                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
+                        );
                         match &mut *obj.borrow_mut() {
                             Object::Sequence(_, ref mut elems, SequenceType::Text) => {
                                 for edit in edits {
@@ -263,7 +285,7 @@ impl<'a> ChangeContext<'a> {
                                             elems.remove(*index);
                                         }
                                     };
-                                };
+                                }
                                 for (index, prop_diffs) in props {
                                     let values = match elems[*index].as_mut() {
                                         Some(v) => v,
@@ -276,36 +298,45 @@ impl<'a> ChangeContext<'a> {
                                     for (opid, subdiff) in prop_diffs.iter() {
                                         let object = Self::apply_diff_helper(
                                             original_objects,
-                                            updated, 
-                                            subdiff
+                                            updated,
+                                            subdiff,
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values.update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values
+                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
                                     }
-                                };
+                                }
                             }
                             _ => panic!("Invalid object type when applying diff"),
                         };
                         Ok(obj)
-                    },
+                    }
                     _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
-            },
-            Diff::Value(v) => {
-                Ok(Rc::new(RefCell::new(Object::Primitive(v.clone()))))
-            },
+            }
+            Diff::Value(v) => Ok(Rc::new(RefCell::new(Object::Primitive(v.clone())))),
             Diff::Unchanged(subdiff) => {
                 let object_id = ObjectID::from_str(&subdiff.object_id).unwrap();
                 Ok(Self::get_or_create_object(
-                    &object_id, original_objects, updated, ||{
-                        match subdiff.obj_type {
-                            ObjType::Map => Object::Map(object_id.clone(), HashMap::new(), MapType::Map),
-                            ObjType::Table => Object::Map(object_id.clone(), HashMap::new(), MapType::Table),
-                            ObjType::List => Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
-                            ObjType::Text => Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text),
+                    &object_id,
+                    original_objects,
+                    updated,
+                    || match subdiff.obj_type {
+                        ObjType::Map => {
+                            Object::Map(object_id.clone(), HashMap::new(), MapType::Map)
                         }
-                    }))
+                        ObjType::Table => {
+                            Object::Map(object_id.clone(), HashMap::new(), MapType::Table)
+                        }
+                        ObjType::List => {
+                            Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
+                        }
+                        ObjType::Text => {
+                            Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text)
+                        }
+                    },
+                ))
             }
         }
     }
@@ -337,7 +368,7 @@ impl<'a> ChangeContext<'a> {
             // unfortunately the type checker won't allow returning different
             // types for the same impl (in this case Rc<T> and RefCell::Ref<T>)
             // and so instead we clone and wrap.
-            return Some(Rc::new(updated.borrow().clone()))
+            return Some(Rc::new(updated.borrow().clone()));
         }
         self.original_objects.get(object_id).cloned()
     }
@@ -353,4 +384,3 @@ impl<'a> ChangeContext<'a> {
         Ok(state)
     }
 }
-

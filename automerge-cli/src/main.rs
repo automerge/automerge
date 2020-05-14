@@ -1,9 +1,9 @@
 use clap::Clap;
-use std::{io, io::Read, fs::File,};
+use std::{fs::File, io, io::Read};
 
 #[derive(Debug, Clap)]
 struct Opts {
-    changes_file: String
+    changes_file: String,
 }
 
 fn main() -> io::Result<()> {
@@ -17,6 +17,9 @@ fn main() -> io::Result<()> {
     let patch = backend.get_patch().unwrap();
     let mut frontend = automerge_frontend::Frontend::new();
     frontend.apply_patch(patch).unwrap();
-    println!("{}", serde_json::to_string_pretty(&frontend.state().to_json()).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&frontend.state().to_json()).unwrap()
+    );
     Ok(())
 }

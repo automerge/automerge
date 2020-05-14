@@ -1,10 +1,10 @@
+use crate::actor_map::ActorMap;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
-use crate::actor_map::ActorMap;
+use automerge_protocol::{ElementID, Key, ObjType, OpID};
 use im_rc::{HashMap, HashSet};
-use automerge_protocol::{ObjType, OpID, ElementID, Key};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -94,7 +94,6 @@ impl ObjState {
         self.insertions.insert(eid.clone(), op);
         let following = self.following.entry(elem).or_default();
         following.push(eid);
-        following.sort_unstable_by(|a, b| actors.cmp(b,a));
+        following.sort_unstable_by(|a, b| actors.cmp(b, a));
     }
 }
-

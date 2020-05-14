@@ -1,7 +1,7 @@
+use crate::mutation::Path;
+use automerge_protocol::ObjectID;
 use std::error::Error;
 use std::fmt;
-use automerge_protocol::ObjectID;
-use crate::mutation::Path;
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeFrontendError {
@@ -21,7 +21,7 @@ impl Error for AutomergeFrontendError {}
 
 #[derive(Debug, PartialEq)]
 pub enum InvalidInitialStateError {
-    InitialStateMustBeMap
+    InitialStateMustBeMap,
 }
 
 impl fmt::Display for InvalidInitialStateError {
@@ -31,4 +31,3 @@ impl fmt::Display for InvalidInitialStateError {
 }
 
 impl Error for InvalidInitialStateError {}
-

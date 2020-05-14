@@ -1,6 +1,6 @@
-use crate::{Value, MapType, SequenceType};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use crate::{MapType, SequenceType, Value};
 use automerge_protocol as amp;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// Represents the set of conflicting values for a register in an automerge
 /// document.

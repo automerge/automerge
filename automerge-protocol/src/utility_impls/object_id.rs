@@ -1,7 +1,7 @@
 use crate::error::InvalidObjectID;
 use crate::{ObjectID, OpID};
-use std::str::FromStr;
 use std::fmt;
+use std::str::FromStr;
 
 impl From<&OpID> for ObjectID {
     fn from(o: &OpID) -> Self {

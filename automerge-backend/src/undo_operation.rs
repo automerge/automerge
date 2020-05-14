@@ -1,5 +1,4 @@
-use automerge_protocol::{OpID, ObjectID, Key, OpType, Operation};
-
+use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation};
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct UndoOperation {
@@ -19,4 +18,3 @@ impl UndoOperation {
         }
     }
 }
-

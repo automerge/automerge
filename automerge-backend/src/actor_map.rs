@@ -1,11 +1,10 @@
+use automerge_protocol::{ActorID, ElementID, Key, ObjectID, OpID};
 use std::cmp::Ordering;
-use automerge_protocol::{ActorID, OpID, ObjectID, ElementID, Key};
 
 #[derive(PartialEq, Debug, Clone)]
-pub (crate) struct ActorMap(Vec<ActorID>);
+pub(crate) struct ActorMap(Vec<ActorID>);
 
 impl ActorMap {
-
     pub fn new() -> ActorMap {
         ActorMap(Vec::new())
     }
@@ -13,7 +12,7 @@ impl ActorMap {
     #[allow(dead_code)]
     pub fn index_of(&mut self, actor: &ActorID) -> usize {
         if let Some(index) = self.0.iter().position(|a| a == actor) {
-            return index
+            return index;
         }
         self.0.push(actor.clone());
         self.0.len() - 1
@@ -29,12 +28,12 @@ impl ActorMap {
             (ElementID::Head, ElementID::Head) => Ordering::Equal,
             (ElementID::Head, _) => Ordering::Less,
             (_, ElementID::Head) => Ordering::Greater,
-            (ElementID::ID(opid1), ElementID::ID(opid2)) => self.cmp_opid(opid1,opid2),
+            (ElementID::ID(opid1), ElementID::ID(opid2)) => self.cmp_opid(opid1, opid2),
         }
     }
 
     pub fn opid_to_string(&self, id: &OpID) -> String {
-        format!("{}@{}",id.0,id.1)
+        format!("{}@{}", id.0, id.1)
     }
 
     pub fn elementid_to_string(&self, eid: &ElementID) -> String {
@@ -62,12 +61,10 @@ impl ActorMap {
         if op1.0 != op2.0 {
             op1.0.cmp(&op2.0)
         } else {
-//            let actor1 = self.actor_for(op1).unwrap();
-//            let actor2 = self.actor_for(op2).unwrap();
-//            actor1.cmp(&actor2)
+            //            let actor1 = self.actor_for(op1).unwrap();
+            //            let actor2 = self.actor_for(op2).unwrap();
+            //            actor1.cmp(&actor2)
             op1.1.cmp(&op2.1)
         }
     }
 }
-
-

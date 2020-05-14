@@ -1,15 +1,17 @@
 use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::error::AutomergeError;
-use automerge_protocol::{ActorID, ChangeHash, ObjType, OpID, ObjectID, ElementID, Key, Value, OpType, Operation, Change};
+use automerge_protocol::{
+    ActorID, Change, ChangeHash, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
+};
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::io;
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::str;
-use std::convert::TryInto;
 
 const HASH_BYTES: usize = 32;
 
@@ -70,7 +72,6 @@ fn encode_chunk(change: &Change) -> Result<Vec<u8>, AutomergeError> {
 fn encode<V: Encodable>(val: &V) -> Result<Vec<u8>, AutomergeError> {
     let mut actor_ids = Vec::new();
     Ok(val.encode_with_actors_to_vec(&mut actor_ids)?)
-
 }
 
 impl Encodable for Change {
@@ -89,7 +90,7 @@ impl Encodable for Change {
         len += self.time.encode(buf)?;
         len += self.message.encode(buf)?;
 
-//        let deps_buf = self.deps.encode_with_actors_to_vec(actors)?;
+        //        let deps_buf = self.deps.encode_with_actors_to_vec(actors)?;
 
         let ops_buf = ColumnEncoder::encode_ops(&self.operations, actors);
 
@@ -221,7 +222,6 @@ impl From<std::io::Error> for AutomergeError {
     }
 }
 
-
 #[derive(Debug, Clone)]
 struct BinaryContainer<'a> {
     magic: &'a [u8],
@@ -263,7 +263,7 @@ impl<'a> BinaryChange<'a> {
         let mut deps = Vec::new();
         let num_deps = read_slice(bytes)?;
         for _ in 0..num_deps {
-            let hash = slice_n_bytes(bytes,HASH_BYTES)?;
+            let hash = slice_n_bytes(bytes, HASH_BYTES)?;
             deps.push(hash);
         }
         let mut ops = HashMap::new();
@@ -271,7 +271,7 @@ impl<'a> BinaryChange<'a> {
         while !bytes.is_empty() {
             let id = read_slice(bytes)?;
             if id < last_id {
-                return Err(AutomergeError::ChangeBadFormat)
+                return Err(AutomergeError::ChangeBadFormat);
             }
             last_id = id;
             let column = slice_bytes(bytes)?;
@@ -577,7 +577,9 @@ impl<'a> BinaryContainer<'a> {
 
         let mut hasher = Sha256::new();
         hasher.input(&body);
-        let hash = hasher.result()[..].try_into().map_err(|_| AutomergeError::DecodeFailed)?;
+        let hash = hasher.result()[..]
+            .try_into()
+            .map_err(|_| AutomergeError::DecodeFailed)?;
 
         Ok(BinaryContainer {
             magic,
