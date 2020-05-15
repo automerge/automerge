@@ -17,3 +17,9 @@ impl From<u64> for Value {
         Value::Uint(n)
     }
 }
+
+impl From<bool> for Value {
+    fn from(b: bool) -> Self {
+        Value::Boolean(b)
+    }
+}

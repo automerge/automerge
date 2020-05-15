@@ -1,19 +1,23 @@
 extern crate automerge_backend;
-use automerge_backend::{
-    AutomergeError, Backend, Change, Clock, MapDiff, ObjType, ObjectID, Operation, Patch, Value,
+use automerge_backend::{change_hash, AutomergeError, Backend};
+use automerge_protocol::{
+    ActorID, Change, ChangeHash, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType,
+    ObjectID, OpType, Operation, Patch, SeqDiff, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
+use std::str::FromStr;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
-    let change = Change {
+    let mut change = Change {
         actor_id: "7b7723afd9e6480397a4d467b7693156".into(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
-        deps: Clock::empty(),
+        hash: ChangeHash::zero(),
+        deps: Vec::new(),
         operations: vec![Operation::set(
             ObjectID::Root,
             "bird".into(),
@@ -21,17 +25,19 @@ fn test_incremental_diffs_in_a_map() {
             vec![],
         )],
     };
+    change.hash = change_hash(change.clone()).unwrap();
     let mut backend = Backend::init();
-    let patch = backend.apply_changes(vec![change]).unwrap();
+    let patch = backend.apply_changes(vec![change.clone()]).unwrap();
     let expected_patch = Patch {
         version: 1,
         actor: None,
         seq: None,
-        clock: Clock::empty().with(&"7b7723afd9e6480397a4d467b7693156".into(), 1),
+        deps: vec![change.hash],
+        clock: hashmap!{"7b7723afd9e6480397a4d467b7693156".into() => 1},
         can_undo: false,
         can_redo: false,
         diffs: Some(MapDiff {
-            object_id: String::from(&ObjectID::Root),
+            object_id: ObjectID::Root.to_string(),
             obj_type: ObjType::Map,
             props: hashmap!( "bird".into() => hashmap!( "1@7b7723afd9e6480397a4d467b7693156".into() => "magpie".into() ))
         }.into()),
@@ -41,13 +47,14 @@ fn test_incremental_diffs_in_a_map() {
 
 #[test]
 fn test_increment_key_in_map() -> Result<(), AutomergeError> {
-    let change1 = Change {
+    let mut change1 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
-        deps: Clock::empty(),
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
         operations: vec![Operation::set(
             ObjectID::Root,
             "counter".into(),
@@ -55,30 +62,36 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             vec![],
         )],
     };
-    let change2 = Change {
+    change1.hash = change_hash(change1.clone()).unwrap();
+
+    let mut change2 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 2,
         start_op: 2,
         time: 2,
         message: None,
-        deps: Clock::empty(),
+        deps: vec![change1.hash],
+        hash: ChangeHash::zero(),
         operations: vec![Operation::inc(
             ObjectID::Root,
             "counter".into(),
             2,
-            vec!["1@cdee6963c1664645920be8b41a933c2b".try_into()?],
+            vec!["1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap()],
         )],
     };
+    change2.hash = change_hash(change2.clone()).unwrap();
+
     let expected_patch = Patch {
         version: 2,
         actor: None,
         seq: None,
-        clock: Clock::empty().with(&"cdee6963c1664645920be8b41a933c2b".into(), 2),
+        clock: hashmap! {"cdee6963c1664645920be8b41a933c2b".into() => 2},
         can_undo: false,
         can_redo: false,
+        deps: vec![change2.hash],
         diffs: Some(
             MapDiff {
-                object_id: String::from(&ObjectID::Root),
+                object_id: ObjectID::Root.to_string(),
                 obj_type: ObjType::Map,
                 props: hashmap!(
                 "counter".into() => hashmap!{
@@ -97,13 +110,14 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
 
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
-    let change1 = Change {
+    let mut change1 = Change {
         actor_id: "ac11".into(),
         seq: 1,
+        message: None,
         start_op: 1,
         time: 0,
-        message: None,
-        deps: Clock::empty(),
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
         operations: vec![Operation::set(
             ObjectID::Root,
             "bird".into(),
@@ -111,14 +125,16 @@ fn test_conflict_on_assignment_to_same_map_key() {
             vec![],
         )],
     };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2 = Change {
+    let mut change2 = Change {
         actor_id: "ac22".into(),
-        seq: 1,
         start_op: 2,
-        time: 0,
+        seq: 1,
         message: None,
-        deps: Clock::empty(),
+        hash: ChangeHash::zero(),
+        deps: vec![change1.hash],
+        time: 0,
         operations: vec![Operation::set(
             ObjectID::Root,
             "bird".into(),
@@ -126,17 +142,22 @@ fn test_conflict_on_assignment_to_same_map_key() {
             vec![],
         )],
     };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
     let expected_patch = Patch {
         version: 2,
         actor: None,
         seq: None,
-        clock: Clock::from(&vec![(&"ac11".into(), 1), (&"ac22".into(), 1)]),
+        clock: hashmap! {
+            "ac11".into() => 1,
+            "ac22".into() => 1,
+        },
+        deps: vec![change2.hash],
         can_undo: false,
         can_redo: false,
         diffs: Some(
             MapDiff {
-                object_id: String::from(&ObjectID::Root),
+                object_id: ObjectID::Root.to_string(),
                 obj_type: ObjType::Map,
                 props: hashmap!( "bird".into() => hashmap!(
                             "1@ac11".into() => "magpie".into(),
@@ -147,78 +168,67 @@ fn test_conflict_on_assignment_to_same_map_key() {
         ),
     };
     let mut backend = Backend::init();
-    backend.apply_changes(vec![change1]).unwrap();
-    let patch = backend.apply_changes(vec![change2]).unwrap();
-    assert_eq!(patch, expected_patch);
+    let _patch1 = backend.apply_changes(vec![change1]).unwrap();
+    let patch2 = backend.apply_changes(vec![change2]).unwrap();
+    //let patch = backend.get_patch().unwrap();
+    assert_eq!(patch2, expected_patch);
 }
 
 #[test]
 fn delete_key_from_map() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "cd86c07f-1093-48f4-94af-5be30fdc4c71",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "bird",
-                 "value": "magpie",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "cd86c07f109348f494af5be30fdc4c71".into();
+    let mut change1 = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Set(Value::Str("magpie".into())),
+            obj: ObjectID::Root,
+            key: Key::Map("bird".into()),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "cd86c07f-1093-48f4-94af-5be30fdc4c71",
-           "seq": 2,
-           "startOp": 2,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "del",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "bird",
-                 "pred": [
-                    "1@cd86c07f-1093-48f4-94af-5be30fdc4c71"
-                 ]
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 2,
+        time: 0,
+        message: None,
+        deps: vec![change1.hash],
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Del,
+            obj: ObjectID::Root,
+            key: Key::Map("bird".into()),
+            pred: vec!["1@cd86c07f109348f494af5be30fdc4c71".try_into().unwrap()],
+            insert: false,
+        }],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 2,
-           "clock": {
-              "cd86c07f-1093-48f4-94af-5be30fdc4c71": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "bird": {}
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        actor: None,
+        seq: None,
+        version: 2,
+        clock: hashmap! {actor.to_string() => 2},
+        deps: vec![change2.hash],
+        can_undo: false,
+        can_redo: false,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "bird".into() => hashmap!{}
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -228,66 +238,60 @@ fn delete_key_from_map() {
 
 #[test]
 fn create_nested_maps() {
-    let change: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "d6226fcd-5520-4b82-b396-f2473da3e26f",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeMap",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@d6226fcd-5520-4b82-b396-f2473da3e26f",
-                 "key": "wrens",
-                 "value": 3,
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "d6226fcd55204b82b396f2473da3e26f".try_into().unwrap();
+    let mut change = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        message: None,
+        hash: ChangeHash::zero(),
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::Map),
+                obj: ObjectID::Root,
+                key: Key::Map("birds".into()),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::F64(3.0)),
+                obj: "1@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap(),
+                key: Key::Map("wrens".into()),
+                pred: Vec::new(),
+                insert: false,
+            },
+        ],
+    };
+    change.hash = change_hash(change.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 1,
-           "clock": {
-              "d6226fcd-5520-4b82-b396-f2473da3e26f": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@d6226fcd-5520-4b82-b396-f2473da3e26f": {
-                       "objectId": "1@d6226fcd-5520-4b82-b396-f2473da3e26f",
-                       "type": "map",
-                       "props": {
-                          "wrens": {
-                             "2@d6226fcd-5520-4b82-b396-f2473da3e26f": {
-                                "value": 3
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch: Patch = Patch {
+        actor: None,
+        deps: vec![change.hash],
+        seq: None,
+        clock: hashmap! {actor.to_string() => 1},
+        can_undo: false,
+        can_redo: false,
+        version: 1,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@d6226fcd55204b82b396f2473da3e26f".into() => Diff::Map(MapDiff{
+                        object_id: "1@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap(),
+                        obj_type: ObjType::Map,
+                        props: hashmap!{
+                            "wrens".into() => hashmap!{
+                                 "2@d6226fcd55204b82b396f2473da3e26f".into() => Diff::Value(Value::F64(3.0))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
@@ -296,88 +300,80 @@ fn create_nested_maps() {
 
 #[test]
 fn test_assign_to_nested_keys_in_map() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "3c39c994-0390-4277-8f47-79a01a59a917",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeMap",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@3c39c994-0390-4277-8f47-79a01a59a917",
-                 "key": "wrens",
-                 "value": 3,
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "3c39c994039042778f4779a01a59a917".try_into().unwrap();
+    let mut change1 = Change {
+        actor_id: actor.clone(),
+        hash: ChangeHash::zero(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::Map),
+                obj: ObjectID::Root,
+                key: "birds".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::F64(3.0)),
+                obj: "1@3c39c994039042778f4779a01a59a917".try_into().unwrap(),
+                key: "wrens".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+        ],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "3c39c994-0390-4277-8f47-79a01a59a917",
-           "seq": 2,
-           "startOp": 3,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "1@3c39c994-0390-4277-8f47-79a01a59a917",
-                 "key": "sparrows",
-                 "value": 15,
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 3,
+        time: 0,
+        deps: vec![change1.hash],
+        message: None,
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Set(Value::F64(15.0)),
+            obj: "1@3c39c994039042778f4779a01a59a917".try_into().unwrap(),
+            key: "sparrows".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 2,
-           "clock": {
-              "3c39c994-0390-4277-8f47-79a01a59a917": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@3c39c994-0390-4277-8f47-79a01a59a917": {
-                       "objectId": "1@3c39c994-0390-4277-8f47-79a01a59a917",
-                       "type": "map",
-                       "props": {
-                          "sparrows": {
-                             "3@3c39c994-0390-4277-8f47-79a01a59a917": {
-                                "value": 15
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 2,
+        clock: hashmap! {
+            actor.to_string() => 2,
+        },
+        can_redo: false,
+        can_undo: false,
+        actor: None,
+        seq: None,
+        deps: vec![change2.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@3c39c994039042778f4779a01a59a917".into() => Diff::Map(MapDiff{
+                        object_id: "1@3c39c994039042778f4779a01a59a917".into(),
+                        obj_type: ObjType::Map,
+                        props: hashmap!{
+                            "sparrows".into() => hashmap!{
+                                "3@3c39c994039042778f4779a01a59a917".into() => Diff::Value(Value::F64(15.0))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -387,73 +383,62 @@ fn test_assign_to_nested_keys_in_map() {
 
 #[test]
 fn test_create_lists() {
-    let change: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "f82cb62d-abe6-4372-ab87-466b77792010",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@f82cb62d-abe6-4372-ab87-466b77792010",
-                 "key": "_head",
-                 "insert": true,
-                 "value": "chaffinch",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change = Change {
+        actor_id: "f82cb62dabe64372ab87466b77792010".try_into().unwrap(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::List),
+                obj: ObjectID::Root,
+                key: "birds".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::Str("chaffinch".into())),
+                obj: "1@f82cb62dabe64372ab87466b77792010".try_into().unwrap(),
+                key: ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+        ],
+    };
+    change.hash = change_hash(change.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 1,
-           "clock": {
-              "f82cb62d-abe6-4372-ab87-466b77792010": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@f82cb62d-abe6-4372-ab87-466b77792010": {
-                       "objectId": "1@f82cb62d-abe6-4372-ab87-466b77792010",
-                       "type": "list",
-                       "edits": [
-                          {
-                             "action": "insert",
-                             "index": 0
-                          }
-                       ],
-                       "props": {
-                          "0": {
-                             "2@f82cb62d-abe6-4372-ab87-466b77792010": {
-                                "value": "chaffinch"
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 1,
+        clock: hashmap! {
+            "f82cb62dabe64372ab87466b77792010".into() => 1,
+        },
+        can_undo: false,
+        can_redo: false,
+        actor: None,
+        seq: None,
+        deps: vec![change.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@f82cb62dabe64372ab87466b77792010".into() => Diff::Seq(SeqDiff{
+                        object_id: "1@f82cb62dabe64372ab87466b77792010".into(),
+                        obj_type: ObjType::List,
+                        edits: vec![DiffEdit::Insert{ index: 0 }],
+                        props: hashmap!{
+                            0 => hashmap!{
+                                "2@f82cb62dabe64372ab87466b77792010".into() => Diff::Value(Value::Str("chaffinch".into()))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
@@ -462,92 +447,81 @@ fn test_create_lists() {
 
 #[test]
 fn test_apply_updates_inside_lists() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-                 "key": "_head",
-                 "insert": true,
-                 "value": "chaffinch",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap();
+    let mut change1 = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::List),
+                obj: ObjectID::Root,
+                key: "birds".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::Str("chaffinch".into())),
+                obj: "1@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap(),
+                key: ElementID::Head.into(),
+                pred: Vec::new(),
+                insert: true,
+            },
+        ],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-           "seq": 2,
-           "startOp": 3,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "1@4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-                 "key": "2@4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-                 "value": "greenfinch",
-                 "pred": [
-                    "2@4ee4a0d0-33b8-41c4-b26d-73d70a879547"
-                 ]
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 3,
+        time: 0,
+        deps: vec![change1.hash],
+        message: None,
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Set(Value::Str("greenfinch".into())),
+            obj: "1@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap(),
+            key: Key::Seq("2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()),
+            pred: vec!["2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()],
+            insert: false,
+        }],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 2,
-           "clock": {
-              "4ee4a0d0-33b8-41c4-b26d-73d70a879547": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@4ee4a0d0-33b8-41c4-b26d-73d70a879547": {
-                       "objectId": "1@4ee4a0d0-33b8-41c4-b26d-73d70a879547",
-                       "type": "list",
-                       "edits": [],
-                       "props": {
-                          "0": {
-                             "3@4ee4a0d0-33b8-41c4-b26d-73d70a879547": {
-                                "value": "greenfinch"
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        actor: None,
+        version: 2,
+        deps: vec![change2.hash],
+        clock: hashmap! {
+            actor.to_string() => 2
+        },
+        can_undo: false,
+        can_redo: false,
+        seq: None,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@4ee4a0d033b841c4b26d73d70a879547".into() => Diff::Seq(SeqDiff{
+                        object_id: "1@4ee4a0d033b841c4b26d73d70a879547".into(),
+                        obj_type: ObjType::List,
+                        edits: Vec::new(),
+                        props: hashmap!{
+                            0 => hashmap!{
+                                "3@4ee4a0d033b841c4b26d73d70a879547".into() => Diff::Value(Value::Str("greenfinch".into()))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -557,90 +531,79 @@ fn test_apply_updates_inside_lists() {
 
 #[test]
 fn test_delete_list_elements() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "8a3d4716-fdca-49f4-aa58-35901f2034c7",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@8a3d4716-fdca-49f4-aa58-35901f2034c7",
-                 "key": "_head",
-                 "insert": true,
-                 "value": "chaffinch",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap();
+    let mut change1 = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::List),
+                obj: ObjectID::Root,
+                key: "birds".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::Str("chaffinch".into())),
+                obj: "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
+                key: ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+        ],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "8a3d4716-fdca-49f4-aa58-35901f2034c7",
-           "seq": 2,
-           "startOp": 3,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "del",
-                 "obj": "1@8a3d4716-fdca-49f4-aa58-35901f2034c7",
-                 "key": "2@8a3d4716-fdca-49f4-aa58-35901f2034c7",
-                 "pred": [
-                    "2@8a3d4716-fdca-49f4-aa58-35901f2034c7"
-                 ]
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 3,
+        time: 0,
+        message: None,
+        deps: vec![change1.hash],
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Del,
+            obj: "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
+            key: ElementID::from_str("2@8a3d4716fdca49f4aa5835901f2034c7")
+                .unwrap()
+                .into(),
+            pred: vec!["2@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap()],
+            insert: false,
+        }],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 2,
-           "clock": {
-              "8a3d4716-fdca-49f4-aa58-35901f2034c7": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@8a3d4716-fdca-49f4-aa58-35901f2034c7": {
-                       "objectId": "1@8a3d4716-fdca-49f4-aa58-35901f2034c7",
-                       "type": "list",
-                       "props": {},
-                       "edits": [
-                          {
-                             "action": "remove",
-                             "index": 0
-                          }
-                       ]
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 2,
+        seq: None,
+        actor: None,
+        can_undo: false,
+        can_redo: false,
+        clock: hashmap! {
+            actor.to_string() => 2
+        },
+        deps: vec![change2.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@8a3d4716fdca49f4aa5835901f2034c7".into() => Diff::Seq(SeqDiff{
+                        object_id:  "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
+                        obj_type: ObjType::List,
+                        props: hashmap!{},
+                        edits: vec![DiffEdit::Remove{index: 0}]
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -650,94 +613,82 @@ fn test_delete_list_elements() {
 
 #[test]
 fn test_handle_list_element_insertion_and_deletion_in_same_change() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "ca95bc75-9404-486b-be7b-9dd2be779fa8",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "birds",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap();
+    let mut change1 = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Make(ObjType::List),
+            obj: ObjectID::Root,
+            key: "birds".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "ca95bc75-9404-486b-be7b-9dd2be779fa8",
-           "seq": 2,
-           "startOp": 2,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "1@ca95bc75-9404-486b-be7b-9dd2be779fa8",
-                 "key": "_head",
-                 "insert": true,
-                 "value": "chaffinch",
-                 "pred": []
-              },
-              {
-                 "action": "del",
-                 "obj": "1@ca95bc75-9404-486b-be7b-9dd2be779fa8",
-                 "key": "2@ca95bc75-9404-486b-be7b-9dd2be779fa8",
-                 "pred": [
-                    "2@ca95bc75-9404-486b-be7b-9dd2be779fa8"
-                 ]
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 2,
+        time: 0,
+        message: None,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        operations: vec![
+            Operation {
+                action: OpType::Set(Value::Str("chaffinch".into())),
+                obj: "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap(),
+                key: ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            Operation {
+                action: OpType::Del,
+                obj: "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap(),
+                key: ElementID::from_str("2@ca95bc759404486bbe7b9dd2be779fa8")
+                    .unwrap()
+                    .into(),
+                pred: vec!["2@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap()],
+                insert: false,
+            },
+        ],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 2,
-           "clock": {
-              "ca95bc75-9404-486b-be7b-9dd2be779fa8": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "birds": {
-                    "1@ca95bc75-9404-486b-be7b-9dd2be779fa8": {
-                       "objectId": "1@ca95bc75-9404-486b-be7b-9dd2be779fa8",
-                       "type": "list",
-                       "edits": [
-                          {
-                             "action": "insert",
-                             "index": 0
-                          },
-                          {
-                             "action": "remove",
-                             "index": 0
-                          }
-                       ],
-                       "props": {}
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 2,
+        clock: hashmap! {
+            actor.to_string() => 2
+        },
+        can_redo: false,
+        can_undo: false,
+        seq: None,
+        actor: None,
+        deps: vec![change2.hash, change1.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap() => Diff::Seq(SeqDiff{
+                        object_id: "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap(),
+                        obj_type: ObjType::List,
+                        edits: vec![
+                            DiffEdit::Insert{index: 0},
+                            DiffEdit::Remove{index: 0},
+                        ],
+                        props: hashmap!{},
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -747,107 +698,95 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 
 #[test]
 fn test_handle_changes_within_conflicted_objects() {
-    let change1: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "9f175175-23e5-4ee8-88e9-cd51dfd7a572",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "conflict",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor1: ActorID = "9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap();
+    let actor2: ActorID = "83768a19a13842beb6dde8c68a662fad".try_into().unwrap();
+    let mut change1 = Change {
+        actor_id: actor1.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        hash: ChangeHash::zero(),
+        deps: Vec::new(),
+        operations: vec![Operation {
+            action: OpType::Make(ObjType::List),
+            obj: ObjectID::Root,
+            key: "conflict".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change1.hash = change_hash(change1.clone()).unwrap();
 
-    let change2: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "83768a19-a138-42be-b6dd-e8c68a662fad",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeMap",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "conflict",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change2 = Change {
+        actor_id: actor2.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        hash: ChangeHash::zero(),
+        deps: Vec::new(),
+        operations: vec![Operation {
+            action: OpType::Make(ObjType::Map),
+            obj: ObjectID::Root,
+            key: "conflict".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change2.hash = change_hash(change2.clone()).unwrap();
 
-    let change3: Change = serde_json::from_str(
-        r#"
-        {
-            "actor": "83768a19-a138-42be-b6dd-e8c68a662fad",
-            "seq": 2,
-            "startOp": 2,
-            "time": 0,
-            "deps": {},
-            "ops": [
-                {
-                    "action": "set",
-                    "obj": "1@83768a19-a138-42be-b6dd-e8c68a662fad",
-                    "key": "sparrows",
-                    "value": 12,
-                    "pred": []
-                }
-            ]
-        }
-    "#,
-    )
-    .unwrap();
+    let mut change3 = Change {
+        actor_id: actor2.clone(),
+        seq: 2,
+        start_op: 2,
+        time: 0,
+        message: None,
+        deps: vec![change2.hash],
+        hash: ChangeHash::zero(),
+        operations: vec![Operation {
+            action: OpType::Set(Value::F64(12.0)),
+            obj: "1@83768a19a13842beb6dde8c68a662fad".try_into().unwrap(),
+            key: "sparrow".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change3.hash = change_hash(change3.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 3,
-           "clock": {
-              "9f175175-23e5-4ee8-88e9-cd51dfd7a572": 1,
-              "83768a19-a138-42be-b6dd-e8c68a662fad": 2
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "conflict": {
-                    "1@9f175175-23e5-4ee8-88e9-cd51dfd7a572": {
-                       "objectId": "1@9f175175-23e5-4ee8-88e9-cd51dfd7a572",
-                       "type": "list"
-                    },
-                    "1@83768a19-a138-42be-b6dd-e8c68a662fad": {
-                       "objectId": "1@83768a19-a138-42be-b6dd-e8c68a662fad",
-                       "type": "map",
-                       "props": {
-                          "sparrows": {
-                             "2@83768a19-a138-42be-b6dd-e8c68a662fad": {
-                                "value": 12
-                             }
-                          }
+    let expected_patch = Patch {
+        version: 3,
+        actor: None,
+        seq: None,
+        clock: hashmap! {
+            actor1.to_string() => 1,
+            actor2.to_string() => 2,
+        },
+        can_redo: false,
+        can_undo: false,
+        deps: vec![change1.hash, change3.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "conflict".into() => hashmap!{
+                    "1@9f17517523e54ee888e9cd51dfd7a572".into() => Diff::Unchanged(ObjDiff{
+                       object_id: "1@9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap(),
+                       obj_type: ObjType::List,
+                    }),
+                    "1@83768a19a13842beb6dde8c68a662fad".into() => Diff::Map(MapDiff{
+                       object_id: "1@83768a19a13842beb6dde8c68a662fad".try_into().unwrap(),
+                       obj_type: ObjType::Map,
+                       props: hashmap!{
+                           "sparrow".into() => hashmap!{
+                             "2@83768a19a13842beb6dde8c68a662fad".into() => Diff::Value(Value::F64(12.0))
+                           }
                        }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -858,54 +797,45 @@ fn test_handle_changes_within_conflicted_objects() {
 
 #[test]
 fn test_support_date_objects_at_root() {
-    let change: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "955afa3b-bcc1-40b3-b4ba-c8836479d650",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "set",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "now",
-                 "value": 1586528122277,
-                 "datatype": "timestamp",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
+    let mut change = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        hash: ChangeHash::zero(),
+        deps: Vec::new(),
+        message: None,
+        operations: vec![Operation {
+            action: OpType::Set(Value::Timestamp(1_586_528_122_277)),
+            obj: ObjectID::Root,
+            key: "now".into(),
+            pred: Vec::new(),
+            insert: false,
+        }],
+    };
+    change.hash = change_hash(change.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 1,
-           "clock": {
-              "955afa3b-bcc1-40b3-b4ba-c8836479d650": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "now": {
-                    "1@955afa3b-bcc1-40b3-b4ba-c8836479d650": {
-                       "value": 1586528122277,
-                       "datatype": "timestamp"
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 1,
+        clock: hashmap! {
+            actor.to_string() => 1,
+        },
+        can_undo: false,
+        can_redo: false,
+        seq: None,
+        actor: None,
+        deps: vec![change.hash],
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "now".into() => hashmap!{
+                    "1@955afa3bbcc140b3b4bac8836479d650".into() => Diff::Value(Value::Timestamp(1_586_528_122_277))
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
@@ -914,75 +844,63 @@ fn test_support_date_objects_at_root() {
 
 #[test]
 fn test_support_date_objects_in_a_list() {
-    let change: Change = serde_json::from_str(
-        r#"
-        {
-           "actor": "27d467ec-b1a6-40fb-9bed-448ce7cf6a44",
-           "seq": 1,
-           "startOp": 1,
-           "time": 0,
-           "deps": {},
-           "ops": [
-              {
-                 "action": "makeList",
-                 "obj": "00000000-0000-0000-0000-000000000000",
-                 "key": "list",
-                 "pred": []
-              },
-              {
-                 "action": "set",
-                 "obj": "1@27d467ec-b1a6-40fb-9bed-448ce7cf6a44",
-                 "key": "_head",
-                 "insert": true,
-                 "value": 1586528191421,
-                 "datatype": "timestamp",
-                 "pred": []
-              }
-           ]
-        }
-    "#,
-    )
-    .unwrap();
+    let actor: ActorID = "27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap();
+    let mut change = Change {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        hash: ChangeHash::zero(),
+        message: None,
+        operations: vec![
+            Operation {
+                action: OpType::Make(ObjType::List),
+                obj: ObjectID::Root,
+                key: "list".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Operation {
+                action: OpType::Set(Value::Timestamp(1_586_528_191_421)),
+                obj: "1@27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap(),
+                key: ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+        ],
+    };
+    change.hash = change_hash(change.clone()).unwrap();
 
-    let expected_patch: Patch = serde_json::from_str(
-        r#"
-        {
-           "version": 1,
-           "clock": {
-              "27d467ec-b1a6-40fb-9bed-448ce7cf6a44": 1
-           },
-           "canUndo": false,
-           "canRedo": false,
-           "diffs": {
-              "objectId": "00000000-0000-0000-0000-000000000000",
-              "type": "map",
-              "props": {
-                 "list": {
-                    "1@27d467ec-b1a6-40fb-9bed-448ce7cf6a44": {
-                       "objectId": "1@27d467ec-b1a6-40fb-9bed-448ce7cf6a44",
-                       "type": "list",
-                       "edits": [
-                          {
-                             "action": "insert",
-                             "index": 0
-                          }
-                       ],
-                       "props": {
-                          "0": {
-                             "2@27d467ec-b1a6-40fb-9bed-448ce7cf6a44": {
-                                "value": 1586528191421,
-                                "datatype": "timestamp"
-                             }
-                          }
-                       }
-                    }
-                 }
-              }
-           }
-        }
-    "#,
-    )
-    .unwrap();
+    let expected_patch = Patch {
+        version: 1,
+        clock: hashmap! {
+            actor.to_string() => 1,
+        },
+        can_undo: false,
+        can_redo: false,
+        deps: vec![change.hash],
+        actor: None,
+        seq: None,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root.to_string(),
+            obj_type: ObjType::Map,
+            props: hashmap! {
+                "list".into() => hashmap!{
+                    "1@27d467ecb1a640fb9bed448ce7cf6a44".into() => Diff::Seq(SeqDiff{
+                        object_id: "1@27d467ecb1a640fb9bed448ce7cf6a44".into(),
+                        obj_type: ObjType::List,
+                        edits: vec![DiffEdit::Insert{index: 0}],
+                        props: hashmap!{
+                            0 => hashmap!{
+                                "2@27d467ecb1a640fb9bed448ce7cf6a44".into() => Diff::Value(Value::Timestamp(1_586_528_191_421))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();

@@ -1,7 +1,7 @@
 use crate::error::InvalidObjectID;
 use crate::{ObjectID, OpID};
 use std::fmt;
-use std::str::FromStr;
+use std::{convert::TryFrom, str::FromStr};
 
 impl From<&OpID> for ObjectID {
     fn from(o: &OpID) -> Self {
@@ -35,5 +35,13 @@ impl fmt::Display for ObjectID {
             ObjectID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
             ObjectID::ID(oid) => write!(f, "{}", oid),
         }
+    }
+}
+
+impl TryFrom<&str> for ObjectID {
+    type Error = InvalidObjectID;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        ObjectID::from_str(value)
     }
 }

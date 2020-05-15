@@ -1,6 +1,6 @@
 use crate::error::InvalidElementID;
 use crate::{ElementID, OpID};
-use std::str::FromStr;
+use std::{convert::TryFrom, str::FromStr};
 
 impl From<OpID> for ElementID {
     fn from(o: OpID) -> Self {
@@ -24,5 +24,13 @@ impl FromStr for ElementID {
                 OpID::from_str(id).map_err(|_| InvalidElementID(id.to_string()))?,
             )),
         }
+    }
+}
+
+impl TryFrom<&str> for ElementID {
+    type Error = InvalidElementID;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        ElementID::from_str(value)
     }
 }

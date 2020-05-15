@@ -38,6 +38,10 @@ pub(crate) fn changes_to_bin(changes: &[&Change]) -> Result<Vec<Vec<u8>>, Autome
     Ok(bins)
 }
 
+pub fn change_hash(change: Change) -> Result<ChangeHash, AutomergeError> {
+    change_to_change(change).map(|c| c.hash)
+}
+
 pub(crate) fn changes_to_one_bin(changes: &[&Change]) -> Result<Vec<u8>, AutomergeError> {
     let mut data = Vec::new();
     for c in changes {
@@ -1009,7 +1013,7 @@ mod tests {
 
     #[test]
     fn test_empty_change() {
-        let change1 = Change {
+        let mut change1 = Change {
             start_op: 1,
             seq: 2,
             time: 1234,
@@ -1022,6 +1026,7 @@ mod tests {
         let bin1 = change_to_bin(&change1).unwrap();
         let changes2 = bin_to_changes(&bin1).unwrap();
         let bin2 = change_to_bin(&changes2[0]).unwrap();
+        change1.hash = change_hash(change1.clone()).unwrap();
         assert_eq!(bin1, bin2);
         assert_eq!(vec![change1], changes2);
     }
@@ -1034,8 +1039,8 @@ mod tests {
         let opid1 = OpID(102, actor1.0.clone());
         let opid2 = OpID(391, actor1.0.clone());
         let opid3 = OpID(299, actor2.0.clone());
-        let opid4 = OpID(762, actor3.0.clone());
-        let opid5 = OpID(100203, actor2.0.clone());
+        let opid4 = OpID(762, actor3.0);
+        let opid5 = OpID(100_203, actor2.0);
         let obj1 = ObjectID::ID(opid1.clone());
         let obj2 = ObjectID::Root;
         let obj3 = ObjectID::ID(opid4.clone());
@@ -1046,13 +1051,13 @@ mod tests {
         let keyseq1 = Key::from(&opid1);
         let keyseq2 = Key::from(&opid2);
         let insert = false;
-        let change1 = Change {
+        let mut change1 = Change {
             hash: ChangeHash::zero(),
             start_op: 123,
             seq: 29291,
-            time: 12341231,
+            time: 12_341_231,
             message: Some("This is my message".into()),
-            actor_id: actor1.clone(),
+            actor_id: actor1,
             deps: vec![],
             operations: vec![
                 Operation {
@@ -1071,10 +1076,10 @@ mod tests {
                 },
                 Operation {
                     action: OpType::Set(Value::Timestamp(20)),
-                    key: key3.clone(),
+                    key: key3,
                     obj: obj1.clone(),
                     insert,
-                    pred: vec![opid1.clone(), opid2.clone()],
+                    pred: vec![opid1.clone(), opid2],
                 },
                 Operation {
                     action: OpType::Set(Value::Str("some value".into())),
@@ -1099,41 +1104,42 @@ mod tests {
                 },
                 Operation {
                     action: OpType::Set(Value::Str("val2".into())),
-                    key: head.clone(),
+                    key: head,
                     obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
                 Operation {
                     action: OpType::Inc(10),
-                    key: key2.clone(),
-                    obj: obj2.clone(),
+                    key: key2,
+                    obj: obj2,
                     insert,
                     pred: vec![opid1.clone(), opid5.clone()],
                 },
                 Operation {
                     action: OpType::Link(obj3.clone()),
-                    obj: obj1.clone(),
-                    key: key1.clone(),
+                    obj: obj1,
+                    key: key1,
                     insert,
-                    pred: vec![opid1.clone(), opid3.clone()],
+                    pred: vec![opid1, opid3],
                 },
                 Operation {
                     action: OpType::Del,
                     obj: obj3.clone(),
-                    key: keyseq1.clone(),
+                    key: keyseq1,
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
                 Operation {
                     action: OpType::Del,
-                    obj: obj3.clone(),
-                    key: keyseq2.clone(),
+                    obj: obj3,
+                    key: keyseq2,
                     insert: true,
-                    pred: vec![opid4.clone(), opid5.clone()],
+                    pred: vec![opid4, opid5],
                 },
             ],
         };
+        change1.hash = change_hash(change1.clone()).unwrap();
         let bin1 = change_to_bin(&change1)?;
         let changes2 = bin_to_changes(&bin1)?;
         let bin2 = change_to_bin(&changes2[0])?;

@@ -62,7 +62,6 @@ fn test_set_root_object_properties() {
         seq: 1,
         version: 0,
         time: None,
-        child: None,
         message: Some("set root object".into()),
         undoable: true,
         deps: None,
@@ -104,12 +103,11 @@ fn it_should_create_nested_maps() {
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
     let expected_change = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 1,
         time: change_request.time,
         message: None,
         version: 0,
-        child: None,
         undoable: true,
         request_type: amp::ChangeRequestType::Change,
         deps: None,

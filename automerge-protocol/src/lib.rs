@@ -354,7 +354,6 @@ pub struct ChangeRequest {
     pub time: Option<i64>,
     pub deps: Option<Vec<ChangeHash>>,
     pub ops: Option<Vec<OpRequest>>,
-    pub child: Option<String>,
     pub request_type: ChangeRequestType,
 }
 
@@ -433,7 +432,7 @@ pub enum DiffEdit {
     Remove { index: usize },
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]

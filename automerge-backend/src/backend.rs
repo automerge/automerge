@@ -281,7 +281,7 @@ impl Backend {
         self.load_changes(changes)
     }
 
-    fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, false)?;
         Ok(())
@@ -534,6 +534,11 @@ impl Backend {
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Vec<u8>>, AutomergeError> {
+        let changes = self.get_changes_unserialized(have_deps);
+        changes_to_bin(&changes)
+    }
+
+    pub fn get_changes_unserialized(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -542,15 +547,14 @@ impl Backend {
             }
             has_seen.insert(hash);
         }
-        let changes: Vec<&Change> = self
+        self
             //            .states
             .history
             .iter()
             .filter(|hash| !has_seen.contains(hash))
             .filter_map(|hash| self.hashes.get(hash))
             .map(|rc| rc.as_ref())
-            .collect();
-        changes_to_bin(&changes)
+            .collect()
     }
 
     fn can_undo(&self) -> bool {

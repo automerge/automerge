@@ -29,5 +29,7 @@ mod serialize;
 mod time;
 mod undo_operation;
 
+pub use automerge_protocol::Change;
 pub use backend::Backend;
+pub use columnar::change_hash;
 pub use error::AutomergeError;

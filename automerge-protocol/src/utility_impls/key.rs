@@ -17,3 +17,9 @@ impl From<&OpID> for Key {
         Key::Seq(ElementID::ID(id.clone()))
     }
 }
+
+impl From<ElementID> for Key {
+    fn from(id: ElementID) -> Self {
+        Key::Seq(id)
+    }
+}

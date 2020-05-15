@@ -231,7 +231,6 @@ impl Frontend {
                 let init_change_request = ChangeRequest {
                     actor: front.actor_id.clone(),
                     time: system_time(),
-                    child: None,
                     seq: 1,
                     version: 0,
                     message: Some("Initialization".to_string()),
@@ -282,7 +281,6 @@ impl Frontend {
             actor: self.actor_id.clone(),
             seq: self.seq,
             time: system_time(),
-            child: None,
             version: self.version,
             message,
             undoable: true,
