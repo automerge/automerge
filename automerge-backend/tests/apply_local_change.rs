@@ -2,8 +2,7 @@ extern crate automerge_backend;
 use automerge_backend::{change_hash, Backend};
 use automerge_protocol::{
     ActorID, Change, ChangeHash, ChangeRequest, ChangeRequestType, DataType, Diff, DiffEdit,
-    ElementID, MapDiff, ObjType, ObjectID, OpRequest, OpType, Operation, Patch, ReqOpType,
-    SeqDiff
+    ElementID, MapDiff, ObjType, ObjectID, OpRequest, OpType, Operation, Patch, ReqOpType, SeqDiff,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
