@@ -11,7 +11,7 @@ fn main() {
     let config = cbindgen::Config::from_file("cbindgen.toml")
         .expect("Unable to find cbindgen.toml configuration file");
 
-    cbindgen::generate_with_config(&crate_dir, config)
-        .expect("ohno")
-        .write_to_file(crate_dir.join("automerge.h"));
+    if let Ok(writer) = cbindgen::generate_with_config(&crate_dir, config) {
+        writer.write_to_file(crate_dir.join("automerge.h"));
+    }
 }
