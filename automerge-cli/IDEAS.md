@@ -15,10 +15,11 @@
     3.0,
     4.0
   ]
-  $ automerge merge foo.mpl bar.mpl --out baz.mpl
-  $ automerge merge foo.mpl bar.mpl - > baz.mpl
-  $ automerge merge - --out baz.mpl < foo.mpl bar.mpl
-  $ automerge merge - < foo.mpl bar.mpl > baz.mpl
+  $ automerge union foo.mpl bar.mpl --out baz.mpl
+  $ automerge intersect foo.mpl bar.mpl --out baz.mpl
+  $ automerge union foo.mpl bar.mpl - > baz.mpl
+  $ cat foo.mpl bar.mpl | automerge union - --out baz.mpl
+  $ automerge union - < foo.mpl bar.mpl > baz.mpl
   $ automerge status foo.mpl
     1022 changes, 10942 operations, 47 objects
     created: 2:31pm April 4, 2020
