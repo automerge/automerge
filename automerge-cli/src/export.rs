@@ -1,10 +1,10 @@
 use crate::error::AutomergeCliError;
 use automerge_backend::AutomergeError;
-use automerge_frontend::Value;
 use automerge_protocol::Patch;
 use std::fs::File;
 use std::path::Path;
 use std::{io, io::Read};
+use serde_json::Value;
 
 fn get_changes(changes_file: &Path) -> io::Result<Vec<u8>> {
     let mut input_data = Vec::new();
@@ -21,7 +21,7 @@ fn get_patch(changes_bytes: Vec<u8>) -> Result<Patch, AutomergeError> {
     backend.get_patch()
 }
 
-fn get_state(changes_file: &Path) -> Result<Value, AutomergeCliError> {
+fn get_state_json(changes_file: &Path) -> Result<Value, AutomergeCliError> {
     let input_data =
         get_changes(changes_file).map_err(|_| AutomergeCliError::InvalidChangesFile)?;
 
@@ -29,14 +29,14 @@ fn get_state(changes_file: &Path) -> Result<Value, AutomergeCliError> {
     let mut frontend = automerge_frontend::Frontend::new();
     frontend.apply_patch(patch).unwrap();
 
-    Ok(frontend.state().clone())
+    Ok(frontend.state().to_json())
 }
 
 pub fn export_json(changes_file: &Path) -> Result<(), AutomergeCliError> {
-    let state = get_state(changes_file)?;
+    let state_json = get_state_json(changes_file)?;
     println!(
         "{}",
-        serde_json::to_string_pretty(&state.to_json()).unwrap()
+        serde_json::to_string_pretty(&state_json).unwrap()
     );
     Ok(())
 }
