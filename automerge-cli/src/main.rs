@@ -32,9 +32,13 @@ impl FromStr for ExportFormat {
 
 #[derive(Debug, StructOpt)]
 enum Command {
+    /// Output current state of an Automerge document in a specified format
     Export {
+        /// Format for output: json, toml
         #[structopt(long, short, default_value = "json")]
         format: ExportFormat,
+
+        /// File that contains automerge changes
         changes_file: String,
     },
 }
@@ -47,7 +51,7 @@ fn main() -> Result<(), error::AutomergeCliError> {
             format,
         } => match format {
             ExportFormat::JSON => export::export_json(Path::new(&changes_file)),
-            ExportFormat::TOML => unimplemented!()
+            ExportFormat::TOML => unimplemented!(),
         },
     }
 }
