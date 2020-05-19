@@ -9,7 +9,7 @@ name = "automerge"
 path = "src/main.rs"
 
 [dependencies]
-structopt = "0.3"
+clap = "3.0.0-beta.1"
 automerge-backend = { path = "../automerge-backend" }
 automerge-frontend = { path = "../automerge-frontend" }
 automerge-protocol = { path = "../automerge-protocol" }

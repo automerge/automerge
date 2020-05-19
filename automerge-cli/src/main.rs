@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::str::FromStr;
-use structopt::StructOpt;
+use clap::Clap;
 
 mod error;
 mod export;
 
-#[derive(Debug, StructOpt)]
-#[structopt(about = "Automerge CLI")]
+#[derive(Debug, Clap)]
+#[clap(about = "Automerge CLI")]
 struct Opts {
-    #[structopt(subcommand)]
+    #[clap(subcommand)]
     cmd: Command,
 }
 
@@ -30,12 +30,12 @@ impl FromStr for ExportFormat {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Clap)]
 enum Command {
     /// Output current state of an Automerge document in a specified format
     Export {
         /// Format for output: json, toml
-        #[structopt(long, short, default_value = "json")]
+        #[clap(long, short, default_value = "json")]
         format: ExportFormat,
 
         /// File that contains automerge changes
@@ -44,7 +44,7 @@ enum Command {
 }
 
 fn main() -> Result<(), error::AutomergeCliError> {
-    let opts = Opts::from_args();
+    let opts = Opts::parse();
     match opts.cmd {
         Command::Export {
             changes_file,
