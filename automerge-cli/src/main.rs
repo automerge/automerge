@@ -1,5 +1,5 @@
-use std::str::FromStr;
 use std::path::Path;
+use std::str::FromStr;
 use structopt::StructOpt;
 
 mod error;
@@ -23,7 +23,7 @@ impl FromStr for ExportFormat {
     fn from_str(input: &str) -> Result<ExportFormat, error::AutomergeCliError> {
         match input {
             "json" => Ok(ExportFormat::JSON),
-            _ => Err(error::AutomergeCliError::InvalidCommand)
+            _ => Err(error::AutomergeCliError::InvalidCommand),
         }
     }
 }
@@ -40,10 +40,11 @@ enum Command {
 fn main() -> Result<(), error::AutomergeCliError> {
     let opts = Opts::from_args();
     match opts.cmd {
-        Command::Export { changes_file, format } => {
-            match format {
-                ExportFormat::JSON => export::export_json(Path::new(&changes_file))
-            }
+        Command::Export {
+            changes_file,
+            format,
+        } => match format {
+            ExportFormat::JSON => export::export_json(Path::new(&changes_file)),
         },
     }
 }
