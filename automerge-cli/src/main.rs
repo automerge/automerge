@@ -15,6 +15,7 @@ struct Opts {
 #[derive(Debug)]
 enum ExportFormat {
     JSON,
+    TOML,
 }
 
 impl FromStr for ExportFormat {
@@ -23,6 +24,7 @@ impl FromStr for ExportFormat {
     fn from_str(input: &str) -> Result<ExportFormat, error::AutomergeCliError> {
         match input {
             "json" => Ok(ExportFormat::JSON),
+            "toml" => Ok(ExportFormat::TOML),
             _ => Err(error::AutomergeCliError::InvalidCommand),
         }
     }
@@ -45,6 +47,7 @@ fn main() -> Result<(), error::AutomergeCliError> {
             format,
         } => match format {
             ExportFormat::JSON => export::export_json(Path::new(&changes_file)),
+            ExportFormat::TOML => unimplemented!()
         },
     }
 }
