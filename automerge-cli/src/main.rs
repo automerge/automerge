@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::str::FromStr;
 use clap::Clap;
+use anyhow::{Result, anyhow};
 
-mod error;
 mod export;
 
 #[derive(Debug, Clap)]
@@ -19,13 +19,13 @@ enum ExportFormat {
 }
 
 impl FromStr for ExportFormat {
-    type Err = error::AutomergeCliError;
+    type Err = anyhow::Error;
 
-    fn from_str(input: &str) -> Result<ExportFormat, error::AutomergeCliError> {
+    fn from_str(input: &str) -> Result<ExportFormat> {
         match input {
             "json" => Ok(ExportFormat::JSON),
             "toml" => Ok(ExportFormat::TOML),
-            _ => Err(error::AutomergeCliError::InvalidCommand),
+            _ => Err(anyhow!("Invalid export format: {}", input)),
         }
     }
 }
@@ -43,7 +43,7 @@ enum Command {
     },
 }
 
-fn main() -> Result<(), error::AutomergeCliError> {
+fn main() -> Result<()> {
     let opts = Opts::parse();
     match opts.cmd {
         Command::Export {

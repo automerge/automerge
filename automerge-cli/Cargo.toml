@@ -14,3 +14,4 @@ automerge-backend = { path = "../automerge-backend" }
 automerge-frontend = { path = "../automerge-frontend" }
 automerge-protocol = { path = "../automerge-protocol" }
 serde_json = "^1.0"
+anyhow = "1.0"
