@@ -5,6 +5,7 @@ use std::fmt;
 pub enum AutomergeCliError {
     InvalidChangesFile,
     BackendError,
+    InvalidCommand,
 }
 
 impl fmt::Display for AutomergeCliError {

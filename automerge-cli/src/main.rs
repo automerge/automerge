@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::path::Path;
 use structopt::StructOpt;
 
@@ -11,14 +12,38 @@ struct Opts {
     cmd: Command,
 }
 
+#[derive(Debug)]
+enum ExportFormat {
+    JSON,
+}
+
+impl FromStr for ExportFormat {
+    type Err = error::AutomergeCliError;
+
+    fn from_str(input: &str) -> Result<ExportFormat, error::AutomergeCliError> {
+        match input {
+            "json" => Ok(ExportFormat::JSON),
+            _ => Err(error::AutomergeCliError::InvalidCommand)
+        }
+    }
+}
+
 #[derive(Debug, StructOpt)]
 enum Command {
-    Export { changes_file: String },
+    Export {
+        #[structopt(long, short, default_value = "json")]
+        format: ExportFormat,
+        changes_file: String,
+    },
 }
 
 fn main() -> Result<(), error::AutomergeCliError> {
     let opts = Opts::from_args();
     match opts.cmd {
-        Command::Export { changes_file } => export::export_json(Path::new(&changes_file)),
+        Command::Export { changes_file, format } => {
+            match format {
+                ExportFormat::JSON => export::export_json(Path::new(&changes_file))
+            }
+        },
     }
 }
