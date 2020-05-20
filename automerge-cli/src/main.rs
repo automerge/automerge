@@ -50,7 +50,9 @@ fn main() -> Result<()> {
             changes_file,
             format,
         } => match format {
-            ExportFormat::JSON => export::export_json(Path::new(&changes_file)),
+            ExportFormat::JSON => {
+                export::export_json(Path::new(&changes_file), &mut std::io::stdout())
+            }
             ExportFormat::TOML => unimplemented!(),
         },
     }
