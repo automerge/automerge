@@ -4,7 +4,7 @@ use crate::value::{random_op_id, value_to_op_requests, MapType, SequenceType};
 use crate::{AutomergeFrontendError, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, fmt, rc::Rc};
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;
@@ -57,6 +57,15 @@ impl Path {
     /// Get the final component of the path, if any
     pub(crate) fn name(&self) -> Option<&PathElement> {
         self.0.last()
+    }
+}
+
+impl fmt::Display for PathElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PathElement::Key(k) => write!(f, "{}", k),
+            PathElement::Index(i) => write!(f, "{}", i),
+        }
     }
 }
 
@@ -367,7 +376,48 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     Err(AutomergeFrontendError::NoSuchPathError(change.path))
                 }
             }
-            LocalOperation::Delete => panic!("delete not implemented"),
+            LocalOperation::Delete => {
+                if self.value_for_path(&change.path).is_some() {
+                    // Unwrap is fine as we know the parent object exists from the above
+                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
+                    let op = amp::OpRequest {
+                        action: amp::ReqOpType::Del,
+                        // This unwrap is fine because we know the parent
+                        // is a container
+                        obj: parent_obj.id().unwrap().to_string(),
+                        key: change.path.name().unwrap().to_request_key(),
+                        child: None,
+                        insert: false,
+                        value: None,
+                        datatype: None,
+                    };
+                    let diff = match &*parent_obj {
+                        Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
+                            object_id: oid.to_string(),
+                            obj_type: map_type.to_obj_type(),
+                            props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
+                        }),
+                        Object::Sequence(oid, _, seq_type) => {
+                            if let Some(PathElement::Index(i)) = change.path.name() {
+                                amp::Diff::Seq(amp::SeqDiff {
+                                    object_id: oid.to_string(),
+                                    obj_type: seq_type.to_obj_type(),
+                                    edits: vec![amp::DiffEdit::Remove { index: *i }],
+                                    props: hashmap! {*i => HashMap::new()},
+                                })
+                            } else {
+                                return Err(AutomergeFrontendError::NoSuchPathError(change.path));
+                            }
+                        }
+                        Object::Primitive(..) => panic!("parent object was primitive"),
+                    };
+                    self.ops.push(op);
+                    self.change_context.apply_diff(&diff)?;
+                    Ok(())
+                } else {
+                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                }
+            }
         }
     }
 }
