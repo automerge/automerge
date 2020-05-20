@@ -12,7 +12,7 @@ pub struct ActorID(pub String);
 
 impl ActorID {
     pub fn random() -> ActorID {
-        ActorID(hex::encode(uuid::Uuid::new_v4().to_string()))
+        ActorID(hex::encode(uuid::Uuid::new_v4().as_bytes()))
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
