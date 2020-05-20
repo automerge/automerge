@@ -3,7 +3,7 @@ use automerge_backend::Backend;
 use automerge_frontend::{Frontend, Value};
 use std::io::{Read, Stdin};
 
-pub fn import_json(mut stdin: Stdin) -> Result<String> {
+pub fn import_json(mut stdin: Stdin) -> Result<Vec<u8>> {
     let mut buffer = String::new();
     stdin.read_to_string(&mut buffer)?;
 
@@ -14,7 +14,5 @@ pub fn import_json(mut stdin: Stdin) -> Result<String> {
     let mut backend = Backend::init();
     backend.apply_local_change(initial_change)?;
 
-    let saved = backend.save()?;
-
-    Ok(String::from_utf8(saved)?)
+    Ok(backend.save()?)
 }

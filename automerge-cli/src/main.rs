@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
 use clap::Clap;
+use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -51,7 +53,7 @@ enum Command {
         /// Path to write Automerge changes to
         // TODO: How to conditionally require outfile based on isatty?
         #[clap(long, short)]
-        out_file: Option<String>,
+        out_file: String,
     },
 }
 
@@ -68,14 +70,14 @@ fn main() -> Result<()> {
             ExportFormat::TOML => unimplemented!(),
         },
 
-        Command::Import {
-            format,
-            out_file: _,
-        } => match format {
+        Command::Import { format, out_file } => match format {
             // TODO: import_json returns a String, how do we pipe this correctly
             // either to a file or to stdout?
             ExportFormat::JSON => {
-                import::import_json(std::io::stdin())?;
+                let changes = import::import_json(std::io::stdin())?;
+                let mut buffer = File::create(out_file)?;
+
+                buffer.write_all(&changes)?;
                 Ok(())
             }
             ExportFormat::TOML => unimplemented!(),
