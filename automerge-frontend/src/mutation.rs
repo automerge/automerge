@@ -24,13 +24,6 @@ impl PathElement {
             PathElement::Index(i) => amp::RequestKey::Num(*i as u64),
         }
     }
-
-    pub fn as_key_string(&self) -> String {
-        match self {
-            PathElement::Key(k) => k.clone(),
-            PathElement::Index(i) => i.to_string(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -131,7 +124,6 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
     fn value_for_path<'c>(&'a self, path: &'c Path) -> Option<Rc<Object>> {
         let mut stack = path.clone().0;
-        stack.pop();
         stack.reverse();
         let mut current_obj: Rc<Object> = self
             .change_context
@@ -217,17 +209,15 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
         // We'll use these once we've reached the end of the path to generate
         // the enclosing diffs
+        #[derive(Debug)]
         enum Intermediate {
-            Map(amp::ObjectID, MapType, String),
-            Seq(amp::ObjectID, SequenceType, usize),
+            Map(amp::ObjectID, MapType, String, Option<amp::OpID>),
+            Seq(amp::ObjectID, SequenceType, usize, Option<amp::OpID>),
         };
         let mut intermediates: Vec<Intermediate> = Vec::new();
 
         // This is just the logic for reducing the path
         let mut stack = path.0.clone();
-        // We don't need the final element as that's where we're applying this
-        // diff (I think).
-        stack.pop();
         stack.reverse();
         let mut current_obj: Rc<Object> = self
             .change_context
@@ -241,18 +231,50 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                             oid.clone(),
                             map_type.clone(),
                             k.clone(),
+                            current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
                         ));
                         current_obj = Rc::new(target.default_value().borrow().clone());
                     } else {
-                        return None;
+                        // This key does not exist, but it's the last element in
+                        // the path, so we can still make a diff as we're
+                        // creating this key
+                        if stack.is_empty() {
+                            intermediates.push(Intermediate::Map(
+                                oid.clone(),
+                                map_type.clone(),
+                                k.clone(),
+                                current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
+                            ))
+                        } else {
+                            return None;
+                        }
                     }
                 }
                 (PathElement::Index(i), Object::Sequence(oid, vals, seq_type)) => {
                     if let Some(Some(target)) = vals.get(*i) {
-                        intermediates.push(Intermediate::Seq(oid.clone(), seq_type.clone(), *i));
+                        intermediates.push(Intermediate::Seq(
+                            oid.clone(),
+                            seq_type.clone(),
+                            *i,
+                            current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
+                        ));
                         current_obj = Rc::new(target.default_value().borrow().clone());
                     } else {
-                        return None;
+                        // This index does not exist, but it's the last element
+                        // in the path so we can create a diff for it as we're
+                        // setting this index
+                        // TODO should we check if this is an `insert` subdiff
+                        // first?
+                        if stack.is_empty() {
+                            intermediates.push(Intermediate::Seq(
+                                oid.clone(),
+                                seq_type.clone(),
+                                *i,
+                                current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
+                            ))
+                        } else {
+                            return None;
+                        }
                     }
                 }
                 _ => return None,
@@ -266,23 +288,19 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         let diff = intermediates
             .into_iter()
             .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
-                Intermediate::Map(oid, map_type, k) => amp::Diff::Map(amp::MapDiff {
+                Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
                     object_id: oid.to_string(),
                     obj_type: map_type.to_obj_type(),
-                    props: hashmap! {k => hashmap!{random_op_id().to_string() => diff_so_far}},
+                    props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
-                Intermediate::Seq(oid, seq_type, index) => amp::Diff::Seq(amp::SeqDiff {
+                Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
                     object_id: oid.to_string(),
                     obj_type: seq_type.to_obj_type(),
                     edits: Vec::new(),
-                    props: hashmap! {index => hashmap!{random_op_id().to_string() => diff_so_far}},
+                    props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
             });
-        Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map,
-            props: hashmap! {path.name().unwrap().as_key_string() => hashmap!{random_op_id().to_string() => diff}},
-        }))
+        Some(diff)
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
