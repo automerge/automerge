@@ -182,7 +182,7 @@ fn apply_updates_inside_nested_maps() {
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
