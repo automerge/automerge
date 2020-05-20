@@ -349,7 +349,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                 .path
                                 .name()
                                 .map(|elem| match elem {
-                                    PathElement::Index(i) => vals.len() > *i,
+                                    PathElement::Index(i) => *i > (vals.len() - 1),
                                     _ => false,
                                 })
                                 .unwrap_or(false),
@@ -385,6 +385,9 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                         // This unwrap is fine because we know the parent
                         // is a container
                         obj: parent_obj.id().unwrap().to_string(),
+                        // Is this unwrap fine? I think so as we intercept assignments
+                        // to the root path at the top of this function so we know 
+                        // this path has at least one element
                         key: change.path.name().unwrap().to_request_key(),
                         child: None,
                         insert: false,

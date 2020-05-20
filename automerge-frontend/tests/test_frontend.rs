@@ -1,4 +1,4 @@
-use automerge_frontend::{Frontend, LocalChange, Path, Value};
+use automerge_frontend::{Frontend, LocalChange, Path, Value, SequenceType};
 use automerge_protocol as amp;
 
 const ROOT_ID: &str = "00000000-0000-0000-0000-000000000000";
@@ -200,7 +200,8 @@ fn apply_updates_inside_nested_maps() {
         }]),
     };
 
-    assert_eq!(req2, expected_change_request)
+
+    assert_eq!(req2, expected_change_request);
 }
 
 #[test]
@@ -257,6 +258,127 @@ fn delete_keys_in_a_map() {
             insert: false,
             datatype: None,
         }]),
+    };
+
+    assert_eq!(req2, expected_change_request);
+}
+
+#[test]
+fn create_lists() {
+    let mut doc = Frontend::new();
+    let req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds"),
+                Value::Sequence(vec!["chaffinch".into()], SequenceType::List),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let _req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds").index(0),
+                "chaffinch".into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(doc.state(), &Value::from_json(&serde_json::json!({
+        "birds": ["chaffinch"],
+    })));
+
+    let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+
+    let expected_change_request = amp::ChangeRequest {
+        actor: doc.actor_id.clone(),
+        seq: 1,
+        version: 0,
+        time: req1.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::MakeList,
+                key: "birds".into(),
+                obj: amp::ObjectID::Root.to_string(),
+                child: Some(birds_id.to_string()),
+                value: None,
+                datatype: None,
+                insert: false,
+            },
+            amp::OpRequest {
+                action: amp::ReqOpType::Set,
+                obj: birds_id.to_string(),
+                key: 0.into(),
+                child: None,
+                value: Some("chaffinch".into()),
+                insert: true,
+                datatype: Some(amp::DataType::Undefined),
+            }
+        ]),
+    };
+
+    assert_eq!(req1, expected_change_request);
+}
+
+#[test]
+fn apply_updates_inside_lists() {
+    let mut doc = Frontend::new();
+    let _req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds"),
+                Value::Sequence(vec!["chaffinch".into()], SequenceType::List),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds").index(0),
+                "greenfinch".into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(doc.state(), &Value::from_json(&serde_json::json!({
+        "birds": ["greenfinch"],
+    })));
+
+    let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+
+    let expected_change_request = amp::ChangeRequest {
+        actor: doc.actor_id.clone(),
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::Set,
+                obj: birds_id.to_string(),
+                key: 0.into(),
+                child: None,
+                value: Some("greenfinch".into()),
+                insert: false,
+                datatype: Some(amp::DataType::Undefined),
+            }
+        ]),
     };
 
     assert_eq!(req2, expected_change_request);

@@ -51,9 +51,26 @@ pub enum Value {
     Primitive(amp::Value),
 }
 
+impl From<&amp::Value> for Value {
+    fn from(val: &amp::Value) -> Self {
+        Value::Primitive(val.clone())
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Primitive(amp::Value::Str(s.to_string()))
+    }
+}
+
+impl<T> From<Vec<T>> for Value where T: Into<Value> {
+    fn from(v: Vec<T>) -> Self {
+        Value::Sequence(v.into_iter().map(|t| t.into()).collect(), SequenceType::List)
+    }
+}
+
 impl Value {
-    pub fn from_json(json: &serde_json::Value) -> Value {
-        match json {
+    pub fn from_json(json: &serde_json::Value) -> Value { match json {
             serde_json::Value::Object(kvs) => {
                 let result: HashMap<String, Value> = kvs
                     .iter()
