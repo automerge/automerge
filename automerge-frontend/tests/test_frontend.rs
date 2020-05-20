@@ -240,7 +240,7 @@ fn delete_keys_in_a_map() {
     );
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
