@@ -134,3 +134,72 @@ fn it_should_create_nested_maps() {
     };
     assert_eq!(change_request, expected_change);
 }
+
+#[test]
+fn apply_updates_inside_nested_maps() {
+    let mut doc = Frontend::new();
+    let _req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds"),
+                Value::from_json(&serde_json::json!({
+                    "wrens": 3,
+                })),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_first_change = doc.state().clone();
+    println!("First update done");
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds").key("sparrows"),
+                Value::Primitive(amp::Value::F64(15.0)),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_second_change = doc.state().clone();
+
+    assert_eq!(
+        state_after_first_change,
+        Value::from_json(&serde_json::json!({
+            "birds": { "wrens": 3.0}
+        }))
+    );
+    assert_eq!(
+        state_after_second_change,
+        Value::from_json(&serde_json::json!({
+            "birds": {
+                "wrens": 3.0,
+                "sparrows": 15.0
+            }
+        }))
+    );
+    let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+
+    let expected_change_request = amp::ChangeRequest {
+        actor: doc.actor_id,
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![amp::OpRequest {
+            action: amp::ReqOpType::Set,
+            obj: birds_id.to_string(),
+            key: "sparrows".into(),
+            child: None,
+            value: Some(amp::Value::F64(15.0)),
+            insert: false,
+            datatype: Some(amp::DataType::Undefined),
+        }]),
+    };
+
+    assert_eq!(req2, expected_change_request)
+}

@@ -39,7 +39,7 @@ pub use value::{Conflicts, MapType, SequenceType, Value};
 /// 3. If there are no in flight requests remaining then transition from
 ///    the `WaitingForInFlightRequests` state to the `Reconciled` state,
 ///    moving the `reconciled_state` into the `Reconciled` enum branch
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 enum FrontendState {
     WaitingForInFlightRequests {
         in_flight_requests: Vec<u64>,
@@ -66,7 +66,7 @@ impl FrontendState {
                 mut reconciled_objects,
                 optimistically_updated_objects,
             } => {
-                // Check that if the patch is for out actor ID then it is not
+                // Check that if the patch is for our actor ID then it is not
                 // out of order
                 if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
                     if self_actor == &ActorID::from(patch_actor.as_str())
@@ -305,8 +305,8 @@ impl Frontend {
     }
 
     pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
-        // So gross, this is just a quick hack before refactoring to a proper
-        // state machine
+        // So gross, this is just a quick hack before refactoring to find
+        // some way to do this properly
         self.state.clone().and_then(|s| s.get_object_id(path))
     }
 }
