@@ -7,9 +7,7 @@ use std::path::Path;
 
 fn get_patch(changes_bytes: Vec<u8>) -> Result<Patch, AutomergeError> {
     let mut backend = automerge_backend::Backend::init();
-    backend.load_changes_binary(vec![changes_bytes]).unwrap();
-
-    backend.get_patch()
+    backend.apply_changes_binary(vec![changes_bytes])
 }
 
 fn get_state_json(changes_file: &Path) -> Result<Value> {
