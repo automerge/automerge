@@ -4,6 +4,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 mod export;
+mod import;
 
 #[derive(Debug, Clap)]
 #[clap(about = "Automerge CLI")]
@@ -41,6 +42,17 @@ enum Command {
         /// File that contains automerge changes
         changes_file: String,
     },
+
+    Import {
+        /// Format for input: json, toml
+        #[clap(long, short, default_value = "json")]
+        format: ExportFormat,
+
+        /// Path to write Automerge changes to
+        // TODO: How to conditionally require outfile based on isatty?
+        #[clap(long, short)]
+        out_file: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -52,6 +64,19 @@ fn main() -> Result<()> {
         } => match format {
             ExportFormat::JSON => {
                 export::export_json(Path::new(&changes_file), &mut std::io::stdout())
+            }
+            ExportFormat::TOML => unimplemented!(),
+        },
+
+        Command::Import {
+            format,
+            out_file: _,
+        } => match format {
+            // TODO: import_json returns a String, how do we pipe this correctly
+            // either to a file or to stdout?
+            ExportFormat::JSON => {
+                import::import_json(std::io::stdin())?;
+                Ok(())
             }
             ExportFormat::TOML => unimplemented!(),
         },
