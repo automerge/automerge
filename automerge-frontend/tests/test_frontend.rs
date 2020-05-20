@@ -151,7 +151,6 @@ fn apply_updates_inside_nested_maps() {
         .unwrap()
         .unwrap();
     let state_after_first_change = doc.state().clone();
-    println!("First update done");
     let req2 = doc
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -202,4 +201,63 @@ fn apply_updates_inside_nested_maps() {
     };
 
     assert_eq!(req2, expected_change_request)
+}
+
+#[test]
+fn delete_keys_in_a_map() {
+    let mut doc = Frontend::new();
+    let _req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root(),
+                Value::from_json(&serde_json::json!({
+                    "magpies": 2,
+                })),
+            ))?;
+            doc.add_change(LocalChange::set(
+                Path::root(),
+                Value::from_json(&serde_json::json!({
+                    "sparrows": 15,
+                })),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::delete(Path::root().key("magpies")))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        doc.state(),
+        &Value::from_json(&serde_json::json!({
+            "sparrows": 15.0
+        }))
+    );
+
+    let expected_change_request = amp::ChangeRequest {
+        actor: doc.actor_id.clone(),
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![amp::OpRequest {
+            action: amp::ReqOpType::Del,
+            obj: amp::ObjectID::Root.to_string(),
+            key: "magpies".into(),
+            child: None,
+            value: None,
+            insert: false,
+            datatype: None,
+        }]),
+    };
+
+    assert_eq!(req2, expected_change_request);
 }
