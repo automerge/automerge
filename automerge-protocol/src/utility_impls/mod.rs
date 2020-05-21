@@ -1,11 +1,11 @@
 mod actor_id;
 mod change_hash;
+pub(crate) mod columnar;
 mod diff;
 mod element_id;
+mod encoding;
 mod key;
 mod object_id;
 mod opid;
 mod request_key;
 mod value;
-pub(crate) mod columnar;
-mod encoding;

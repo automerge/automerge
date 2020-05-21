@@ -7,8 +7,8 @@ use crate::pending_diff::PendingDiff;
 use crate::time;
 use crate::undo_operation::UndoOperation;
 use automerge_protocol::{
-    ActorID, Change, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID,
-    OpID, OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value, BinChange,
+    ActorID, BinChange, Change, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType,
+    ObjectID, OpID, OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value,
 };
 use std::borrow::BorrowMut;
 use std::cmp::max;
@@ -153,15 +153,18 @@ impl Backend {
                 operations.push(op);
             }
         }
-        Ok(Rc::new(Change {
-            start_op,
-            message: request.message.clone(),
-            actor_id: request.actor.clone(),
-            seq: request.seq,
-            deps: request.deps.clone().unwrap_or_default(),
-            time,
-            operations,
-        }.into()))
+        Ok(Rc::new(
+            Change {
+                start_op,
+                message: request.message.clone(),
+                actor_id: request.actor.clone(),
+                seq: request.seq,
+                deps: request.deps.clone().unwrap_or_default(),
+                time,
+                operations,
+            }
+            .into(),
+        ))
     }
 
     fn make_patch(
@@ -225,7 +228,8 @@ impl Backend {
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations,
-        }.into();
+        }
+        .into();
 
         self.undo_pos -= 1;
         self.redo_stack.push(redo_ops);
@@ -259,7 +263,8 @@ impl Backend {
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations,
-        }.into();
+        }
+        .into();
 
         self.undo_pos += 1;
 
@@ -297,12 +302,7 @@ impl Backend {
             for change in v.queue.drain(0..) {
                 let mut m = HashMap::new();
                 Rc::make_mut(op_set)
-                    .apply_ops(
-                        OpHandle::extract(change),
-                        false,
-                        &mut m,
-                        &self.actors,
-                    )
+                    .apply_ops(OpHandle::extract(change), false, &mut m, &self.actors)
                     .unwrap();
             }
             return Ok(op_set.clone());
@@ -500,7 +500,8 @@ impl Backend {
         &self,
         actor_id: &ActorID,
     ) -> Result<Vec<&BinChange>, AutomergeError> {
-        Ok(self.states
+        Ok(self
+            .states
             .get(actor_id)
             .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
             .unwrap_or_default())
@@ -515,8 +516,7 @@ impl Backend {
             }
             has_seen.insert(hash);
         }
-        self
-            .history
+        self.history
             .iter()
             .filter(|hash| !has_seen.contains(hash))
             .filter_map(|hash| self.hashes.get(hash))

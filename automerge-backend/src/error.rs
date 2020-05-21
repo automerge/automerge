@@ -1,4 +1,4 @@
-use automerge_protocol::{ObjectID, OpID, OpRequest, EncodingError};
+use automerge_protocol::{EncodingError, ObjectID, OpID, OpRequest};
 use std::error::Error;
 use std::fmt;
 

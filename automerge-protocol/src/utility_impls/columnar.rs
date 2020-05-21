@@ -1,24 +1,28 @@
-use crate::utility_impls::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
-use crate::utility_impls::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
-use crate::error::{EncodingError};
+use crate::error::EncodingError;
+use crate::utility_impls::encoding::{
+    BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder,
+};
+use crate::utility_impls::encoding::{
+    BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder,
+};
 use crate::{
-    ActorID, Change, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value, BinChange,
+    ActorID, BinChange, Change, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
 };
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::convert::TryFrom;
-use std::ops::Range;
+use std::convert::TryInto;
 use std::io;
 use std::io::{Read, Write};
+use std::ops::Range;
 use std::str;
 
 const HASH_BYTES: usize = 32;
 
-pub (crate) fn encode_chunk(change: &Change) -> Vec<u8> {
+pub(crate) fn encode_chunk(change: &Change) -> Vec<u8> {
     let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
-    // unwrap - io errors cant happen when writing to an in memory vec
+                                      // unwrap - io errors cant happen when writing to an in memory vec
     let data = encode(change).unwrap();
     leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
     chunk.extend(&data);
@@ -118,14 +122,17 @@ impl Encodable for &[u8] {
     }
 }
 
-fn read_leb128(bytes: &mut &[u8]) -> Result<(usize,usize),EncodingError> {
+fn read_leb128(bytes: &mut &[u8]) -> Result<(usize, usize), EncodingError> {
     let mut buf = &bytes[..];
     let val = leb128::read::unsigned(&mut buf)? as usize;
     let leb128_bytes = bytes.len() - buf.len();
-    Ok((val,leb128_bytes))
+    Ok((val, leb128_bytes))
 }
 
-fn read_slice2<T: Decodable + Debug>(bytes: &[u8], cursor: &mut Range<usize>) -> Result<T, EncodingError> {
+fn read_slice2<T: Decodable + Debug>(
+    bytes: &[u8],
+    cursor: &mut Range<usize>,
+) -> Result<T, EncodingError> {
     let view = &bytes[cursor.clone()];
     let mut reader = &view[..];
     let val = T::decode::<&[u8]>(&mut reader).ok_or(EncodingError);
@@ -135,7 +142,7 @@ fn read_slice2<T: Decodable + Debug>(bytes: &[u8], cursor: &mut Range<usize>) ->
 }
 
 fn slice_bytes2(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, EncodingError> {
-    let (val,len) = read_leb128(&mut &bytes[cursor.clone()])?;
+    let (val, len) = read_leb128(&mut &bytes[cursor.clone()])?;
     let start = cursor.start + len;
     let end = start + val;
     *cursor = end..cursor.end;
@@ -369,8 +376,8 @@ impl BinChange {
         let mut changes = Vec::new();
         let mut cursor = &bytes[..];
         while !cursor.is_empty() {
-            let (val,len) = read_leb128(&mut &cursor[HEADER_BYTES..])?;
-            let (data,rest) = cursor.split_at(HEADER_BYTES + val + len);
+            let (val, len) = read_leb128(&mut &cursor[HEADER_BYTES..])?;
+            let (data, rest) = cursor.split_at(HEADER_BYTES + val + len);
             changes.push(Self::from_bytes(data.to_vec())?);
             cursor = rest;
         }
@@ -386,7 +393,7 @@ impl BinChange {
             return Err(EncodingError);
         }
 
-        let (val,len) = read_leb128(&mut &bytes[HEADER_BYTES..])?;
+        let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..])?;
         let body = (HEADER_BYTES + len)..(HEADER_BYTES + len + val);
         if bytes.len() != body.end {
             return Err(EncodingError);
@@ -404,8 +411,7 @@ impl BinChange {
 
         let mut hasher = Sha256::new();
         hasher.input(&bytes[PREAMBLE_BYTES..]);
-        let hash = hasher.result()[..]
-            .try_into()?;
+        let hash = hasher.result()[..].try_into()?;
 
         let mut cursor = body.clone();
         let actor = ActorID::from_bytes(&bytes[slice_bytes2(&bytes, &mut cursor)?]);
@@ -480,7 +486,7 @@ impl BinChange {
         }
     }
 
-    fn col_iter<'a,T>(&'a self, col_id: u32) -> T
+    fn col_iter<'a, T>(&'a self, col_id: u32) -> T
     where
         T: From<&'a [u8]>,
     {
@@ -921,8 +927,8 @@ const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
 //const COL_SUCC_CTR : u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
 
 pub(crate) const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
-const PREAMBLE_BYTES : usize = 8;
-const HEADER_BYTES : usize = PREAMBLE_BYTES + 1;
+const PREAMBLE_BYTES: usize = 8;
+const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 
 #[cfg(test)]
 mod tests {
@@ -1076,7 +1082,7 @@ impl From<Change> for BinChange {
 }
 
 impl From<&BinChange> for Change {
-    fn from(change: &BinChange) -> Change{
+    fn from(change: &BinChange) -> Change {
         change.to_change()
     }
 }

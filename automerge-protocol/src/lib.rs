@@ -4,12 +4,11 @@ mod utility_impls;
 
 pub use error::EncodingError;
 
-use utility_impls::columnar::{MAGIC_BYTES, encode_chunk};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
-use std::collections::HashMap;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::ops::Range;
-
+use utility_impls::columnar::{encode_chunk, MAGIC_BYTES};
 
 // TODO make this an opaque tuple struct. I'm waiting on hearing what the
 // constraints are on the possible values of ActorIDs
@@ -501,4 +500,3 @@ pub struct BinChange {
     pub deps: Vec<ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
 }
-

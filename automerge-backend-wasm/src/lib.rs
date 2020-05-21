@@ -5,9 +5,9 @@ use automerge_protocol::{ActorID, ChangeHash, ChangeRequest};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use std::fmt::Display;
 
 extern crate web_sys;
 #[allow(unused_macros)]
@@ -88,7 +88,10 @@ impl State {
     #[wasm_bindgen(js_name = getChangesForActor)]
     pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<Array, JsValue> {
         let a: ActorID = js_to_rust(actorid)?;
-        let changes = self.backend.get_changes_for_actor_id(&a).map_err(to_js_err)?;
+        let changes = self
+            .backend
+            .get_changes_for_actor_id(&a)
+            .map_err(to_js_err)?;
         let result = Array::new();
         for c in changes {
             let bytes: Uint8Array = c.bytes.as_slice().into();
@@ -116,7 +119,9 @@ impl State {
     #[allow(clippy::should_implement_trait)]
     #[wasm_bindgen(js_name = clone)]
     pub fn clone(&self) -> Result<State, JsValue> {
-        Ok(State { backend: self.backend.clone() })
+        Ok(State {
+            backend: self.backend.clone(),
+        })
     }
 
     #[wasm_bindgen(js_name = save)]
@@ -135,12 +140,14 @@ impl State {
 
     #[wasm_bindgen]
     pub fn new() -> State {
-        State { backend: Backend::init() }
+        State {
+            backend: Backend::init(),
+        }
     }
 }
 
-fn to_js_err<T:Display>(err: T) -> JsValue {
-   js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
+fn to_js_err<T: Display>(err: T) -> JsValue {
+    js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
 }
 
 fn json_error_to_js(err: serde_json::Error) -> JsValue {

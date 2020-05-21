@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend};
+use automerge_backend::Backend;
 use automerge_protocol::{
     ActorID, Change, ChangeHash, ChangeRequest, ChangeRequestType, DataType, Diff, DiffEdit,
     ElementID, MapDiff, ObjType, ObjectID, OpRequest, OpType, Operation, Patch, ReqOpType, SeqDiff,
@@ -49,7 +49,8 @@ fn test_apply_local_change() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
     assert_eq!(changes[0], &expected_change);
 
     let expected_patch = Patch {
@@ -181,7 +182,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let mut expected_change1 = Change {
         actor_id: actor.clone(),
@@ -273,7 +275,8 @@ fn test_transform_list_indexes_into_element_ids() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.to_bin();
+    }
+    .to_bin();
 
     let remote2 = Change {
         actor_id: remote_actor,
@@ -289,7 +292,8 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let local1 = ChangeRequest {
         actor: actor.clone(),
@@ -533,8 +537,6 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         })),
     };
 
-
-
     let mut backend = Backend::init();
     backend.apply_local_change(local1).unwrap();
     let patch = backend.apply_local_change(local2).unwrap();
@@ -560,7 +562,8 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             insert: false,
             pred: Vec::new(),
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_change2 = Change {
         actor_id: actor,
@@ -587,7 +590,8 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     assert_eq!(change1, expected_change1);
     assert_eq!(change2, expected_change2);

@@ -1,8 +1,8 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend};
+use automerge_backend::Backend;
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, OpType, Operation,
-    Patch, SeqDiff, Value, Change
+    ActorID, Change, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, OpType, Operation,
+    Patch, SeqDiff, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -24,8 +24,9 @@ fn test_include_most_recent_value_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
- 
+    }
+    .into_bin();
+
     let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
@@ -40,7 +41,8 @@ fn test_include_most_recent_value_for_key() {
             pred: vec!["1@ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap()],
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         actor: None,
@@ -87,7 +89,8 @@ fn test_includes_conflicting_values_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor2.clone(),
@@ -103,7 +106,8 @@ fn test_includes_conflicting_values_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -151,7 +155,8 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -167,7 +172,8 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             pred: vec!["1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap()],
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -222,7 +228,8 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -247,7 +254,8 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -310,7 +318,8 @@ fn test_create_lists() {
                 pred: Vec::new(),
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -388,7 +397,8 @@ fn test_includes_latests_state_of_list() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -454,7 +464,8 @@ fn test_includes_date_objects_at_root() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,
@@ -509,7 +520,8 @@ fn test_includes_date_objects_in_a_list() {
                 pred: Vec::new(),
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 0,

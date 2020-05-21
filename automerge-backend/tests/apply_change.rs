@@ -1,8 +1,8 @@
 extern crate automerge_backend;
 use automerge_backend::{AutomergeError, Backend};
 use automerge_protocol::{
-    ActorID, Change, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType,
-    ObjectID, OpType, Operation, Patch, SeqDiff, Value,
+    ActorID, Change, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpType,
+    Operation, Patch, SeqDiff, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -23,7 +23,8 @@ fn test_incremental_diffs_in_a_map() {
             "magpie".into(),
             vec![],
         )],
-    }.into_bin();
+    }
+    .into_bin();
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change.clone()]).unwrap();
@@ -59,7 +60,8 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             Value::Counter(1),
             vec![],
         )],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
@@ -74,7 +76,8 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             2,
             vec!["1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap()],
         )],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -118,7 +121,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
             "magpie".into(),
             vec![],
         )],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: "ac22".into(),
@@ -133,7 +137,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
             "blackbird".into(),
             vec![],
         )],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -182,7 +187,8 @@ fn delete_key_from_map() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -198,7 +204,8 @@ fn delete_key_from_map() {
             pred: vec!["1@cd86c07f109348f494af5be30fdc4c71".try_into().unwrap()],
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         actor: None,
@@ -249,7 +256,8 @@ fn create_nested_maps() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch: Patch = Patch {
         actor: None,
@@ -309,7 +317,8 @@ fn test_assign_to_nested_keys_in_map() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -325,7 +334,8 @@ fn test_assign_to_nested_keys_in_map() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -387,7 +397,8 @@ fn test_create_lists() {
                 pred: Vec::new(),
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 1,
@@ -450,7 +461,8 @@ fn test_apply_updates_inside_lists() {
                 insert: true,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -466,7 +478,8 @@ fn test_apply_updates_inside_lists() {
             pred: vec!["2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()],
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         actor: None,
@@ -530,7 +543,8 @@ fn test_delete_list_elements() {
                 pred: Vec::new(),
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -548,7 +562,8 @@ fn test_delete_list_elements() {
             pred: vec!["2@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap()],
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -599,7 +614,8 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -626,7 +642,8 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 insert: false,
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -681,7 +698,8 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change2 = Change {
         actor_id: actor2.clone(),
@@ -697,7 +715,8 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let change3 = Change {
         actor_id: actor2.clone(),
@@ -713,7 +732,8 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 3,
@@ -773,7 +793,8 @@ fn test_support_date_objects_at_root() {
             pred: Vec::new(),
             insert: false,
         }],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 1,
@@ -827,7 +848,8 @@ fn test_support_date_objects_in_a_list() {
                 pred: Vec::new(),
             },
         ],
-    }.into_bin();
+    }
+    .into_bin();
 
     let expected_patch = Patch {
         version: 1,

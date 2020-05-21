@@ -27,6 +27,6 @@ mod serialize;
 mod time;
 mod undo_operation;
 
-pub use automerge_protocol::{ Change, BinChange };
+pub use automerge_protocol::{BinChange, Change};
 pub use backend::Backend;
 pub use error::AutomergeError;

@@ -25,4 +25,3 @@ impl From<InvalidChangeHashSlice> for EncodingError {
         EncodingError
     }
 }
-

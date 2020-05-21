@@ -5,7 +5,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::undo_operation::UndoOperation;
-use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation, Value, BinChange};
+use automerge_protocol::{BinChange, Key, ObjectID, OpID, OpType, Operation, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
@@ -20,7 +20,7 @@ impl OpHandle {
     pub fn extract(change: Rc<BinChange>) -> Vec<OpHandle> {
         change
             .iter_ops()
-//            .iter()
+            //            .iter()
             .enumerate()
             .map(|(index, op)| {
                 let id = OpID(change.start_op + (index as u64), change.actor_id().0);
