@@ -99,9 +99,9 @@ impl LocalChange {
 
     /// Increment the counter at `path` by 1
     pub fn increment(path: Path) -> LocalChange {
-        LocalChange{
+        LocalChange {
             path,
-            operation: LocalOperation::Increment(1)
+            operation: LocalOperation::Increment(1),
         }
     }
 
@@ -109,7 +109,7 @@ impl LocalChange {
     pub fn increment_by(path: Path, by: i64) -> LocalChange {
         LocalChange {
             path,
-            operation: LocalOperation::Increment(by)
+            operation: LocalOperation::Increment(by),
         }
     }
 }
@@ -358,8 +358,8 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     return self.wrap_root_assignment(value);
                 }
                 if let Some(o) = self.value_for_path(&change.path) {
-                    if let Object::Primitive(amp::Value::Counter(_)) = &* o {
-                        return Err(AutomergeFrontendError::CannotOverwriteCounter)
+                    if let Object::Primitive(amp::Value::Counter(_)) = &*o {
+                        return Err(AutomergeFrontendError::CannotOverwriteCounter);
                     }
                 };
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
@@ -410,7 +410,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                         // is a container
                         obj: parent_obj.id().unwrap().to_string(),
                         // Is this unwrap fine? I think so as we intercept assignments
-                        // to the root path at the top of this function so we know 
+                        // to the root path at the top of this function so we know
                         // this path has at least one element
                         key: change.path.name().unwrap().to_request_key(),
                         child: None,

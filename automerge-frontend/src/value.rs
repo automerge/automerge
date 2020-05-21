@@ -63,14 +63,21 @@ impl From<&str> for Value {
     }
 }
 
-impl<T> From<Vec<T>> for Value where T: Into<Value> {
+impl<T> From<Vec<T>> for Value
+where
+    T: Into<Value>,
+{
     fn from(v: Vec<T>) -> Self {
-        Value::Sequence(v.into_iter().map(|t| t.into()).collect(), SequenceType::List)
+        Value::Sequence(
+            v.into_iter().map(|t| t.into()).collect(),
+            SequenceType::List,
+        )
     }
 }
 
 impl Value {
-    pub fn from_json(json: &serde_json::Value) -> Value { match json {
+    pub fn from_json(json: &serde_json::Value) -> Value {
+        match json {
             serde_json::Value::Object(kvs) => {
                 let result: HashMap<String, Value> = kvs
                     .iter()
