@@ -1,5 +1,5 @@
-use crate::error::AutomergeError;
-use automerge_protocol::ActorID;
+use crate::error::EncodingError;
+use crate::ActorID;
 use core::fmt::Debug;
 use std::convert::TryFrom;
 use std::io;
@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::mem;
 use std::str;
 
-fn err(s: &str) -> AutomergeError {
-    AutomergeError::ChangeDecompressError(s.to_string())
+fn err(_s: &str) -> EncodingError {
+    EncodingError
 }
 
 #[derive(Clone, Debug)]
@@ -27,9 +27,9 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, AutomergeError> {
+    pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, EncodingError> {
         let mut new_buf = &self.buf[..];
-        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::DecodeFailed)?;
+        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(EncodingError)?;
         let delta = self.buf.len() - new_buf.len();
         if delta == 0 {
             Err(err("buffer size didnt change..."))
@@ -41,10 +41,10 @@ impl<'a> Decoder<'a> {
         }
     }
 
-    pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], AutomergeError> {
+    pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], EncodingError> {
         let buf = &self.buf[..];
         if buf.len() < index {
-            Err(AutomergeError::DecodeFailed)
+            Err(EncodingError)
         } else {
             let head = &buf[0..index];
             self.buf = &buf[index..];

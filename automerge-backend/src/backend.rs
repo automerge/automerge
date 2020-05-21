@@ -1,5 +1,4 @@
 use crate::actor_map::ActorMap;
-use crate::columnar::{bin_to_changes, change_to_change, changes_to_bin, changes_to_one_bin};
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
@@ -9,7 +8,7 @@ use crate::time;
 use crate::undo_operation::UndoOperation;
 use automerge_protocol::{
     ActorID, Change, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID,
-    OpID, OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value,
+    OpID, OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value, BinChange,
 };
 use std::borrow::BorrowMut;
 use std::cmp::max;
@@ -20,16 +19,14 @@ use std::str::FromStr;
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
     versions: Vec<Version>,
-    queue: Vec<Rc<Change>>,
+    queue: Vec<Rc<BinChange>>,
     op_set: Rc<OpSet>,
-    //states: ActorStates,
-    states: HashMap<ActorID, Vec<Rc<Change>>>,
+    states: HashMap<ActorID, Vec<Rc<BinChange>>>,
     actors: ActorMap,
     obj_alias: HashMap<String, ObjectID>,
     undo_pos: usize,
-    hashes: HashMap<ChangeHash, Rc<Change>>,
+    hashes: HashMap<ChangeHash, Rc<BinChange>>,
     history: Vec<ChangeHash>,
-    //clock: Clock,
     pub undo_stack: Vec<Vec<UndoOperation>>,
     pub redo_stack: Vec<Vec<UndoOperation>>,
 }
@@ -49,8 +46,7 @@ impl Backend {
             queue: Vec::new(),
             actors: ActorMap::new(),
             obj_alias: HashMap::new(),
-            states: HashMap::new(), //ActorStates::new(),
-            //clock: Clock::empty(),
+            states: HashMap::new(),
             history: Vec::new(),
             hashes: HashMap::new(),
             undo_stack: Vec::new(),
@@ -73,7 +69,7 @@ impl Backend {
         request: &ChangeRequest,
         op_set: Rc<OpSet>,
         start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
+    ) -> Result<Rc<BinChange>, AutomergeError> {
         let time = request.time.unwrap_or_else(time::unix_timestamp);
         let actor_id = request.actor.clone();
         let mut operations: Vec<Operation> = Vec::new();
@@ -157,16 +153,15 @@ impl Backend {
                 operations.push(op);
             }
         }
-        Ok(change_to_change(Change {
+        Ok(Rc::new(Change {
             start_op,
             message: request.message.clone(),
             actor_id: request.actor.clone(),
-            hash: ChangeHash::zero(),
             seq: request.seq,
             deps: request.deps.clone().unwrap_or_default(),
             time,
             operations,
-        })?)
+        }.into()))
     }
 
     fn make_patch(
@@ -196,7 +191,7 @@ impl Backend {
         &mut self,
         request: &ChangeRequest,
         start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
+    ) -> Result<Rc<BinChange>, AutomergeError> {
         let undo_pos = self.undo_pos;
 
         if undo_pos < 1 || self.undo_stack.len() < undo_pos {
@@ -222,28 +217,27 @@ impl Backend {
             })
             .collect();
 
-        let change = change_to_change(Change {
+        let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations,
-        })?;
+        }.into();
 
         self.undo_pos -= 1;
         self.redo_stack.push(redo_ops);
 
-        Ok(change)
+        Ok(Rc::new(change))
     }
 
     fn redo(
         &mut self,
         request: &ChangeRequest,
         start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
+    ) -> Result<Rc<BinChange>, AutomergeError> {
         let mut redo_ops = self.redo_stack.pop().ok_or(AutomergeError::NoRedo)?;
 
         let operations = redo_ops
@@ -257,45 +251,28 @@ impl Backend {
             })
             .collect();
 
-        let change = change_to_change(Change {
+        let change = Change {
             actor_id: request.actor.clone(),
             seq: request.seq,
-            hash: ChangeHash::zero(),
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
             message: request.message.clone(),
             time: time::unix_timestamp(),
             operations,
-        })?;
+        }.into();
 
         self.undo_pos += 1;
 
-        Ok(change)
+        Ok(Rc::new(change))
     }
 
-    pub fn load_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<(), AutomergeError> {
-        let mut changes = Vec::new();
-        for d in data {
-            changes.extend(bin_to_changes(&d)?);
-        }
-        self.load_changes(changes)
-    }
-
-    pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn load_changes(&mut self, mut changes: Vec<BinChange>) -> Result<(), AutomergeError> {
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, false)?;
         Ok(())
     }
 
-    pub fn apply_changes_binary(&mut self, data: Vec<Vec<u8>>) -> Result<Patch, AutomergeError> {
-        let mut changes = Vec::new();
-        for d in data {
-            changes.extend(bin_to_changes(&d)?);
-        }
-        self.apply_changes(changes)
-    }
-
-    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, mut changes: Vec<BinChange>) -> Result<Patch, AutomergeError> {
         let op_set = Some(self.op_set.clone());
 
         self.versions.iter_mut().for_each(|v| {
@@ -321,7 +298,7 @@ impl Backend {
                 let mut m = HashMap::new();
                 Rc::make_mut(op_set)
                     .apply_ops(
-                        OpHandle::extract(change.clone()),
+                        OpHandle::extract(change),
                         false,
                         &mut m,
                         &self.actors,
@@ -335,7 +312,7 @@ impl Backend {
 
     fn apply(
         &mut self,
-        mut changes: Vec<Rc<Change>>,
+        mut changes: Vec<Rc<BinChange>>,
         request: Option<&ChangeRequest>,
         undoable: bool,
         incremental: bool,
@@ -415,7 +392,7 @@ impl Backend {
 
     fn add_change(
         &mut self,
-        change: Rc<Change>,
+        change: Rc<BinChange>,
         local: bool,
         undoable: bool,
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
@@ -440,7 +417,7 @@ impl Backend {
 
     fn apply_change(
         &mut self,
-        change: Rc<Change>,
+        change: Rc<BinChange>,
         undoable: bool,
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
@@ -449,11 +426,9 @@ impl Backend {
         }
 
         self.states
-            .entry(change.actor_id.clone())
+            .entry(change.actor_id())
             .or_default()
             .push(change.clone());
-
-        //        self.clock.set(&change.actor_id, change.seq);
 
         self.hashes.insert(change.hash, change.clone());
 
@@ -478,7 +453,7 @@ impl Backend {
         Ok(())
     }
 
-    fn pop_next_causally_ready_change(&mut self) -> Option<Rc<Change>> {
+    fn pop_next_causally_ready_change(&mut self) -> Option<Rc<BinChange>> {
         let mut index = 0;
         while index < self.queue.len() {
             let change = self.queue.get(index).unwrap();
@@ -493,7 +468,7 @@ impl Backend {
     fn finalize_version(
         &mut self,
         request_version: u64,
-        change: Rc<Change>,
+        change: Rc<BinChange>,
     ) -> Result<(), AutomergeError> {
         // remove all versions older than this one
         let mut i = 0;
@@ -524,21 +499,14 @@ impl Backend {
     pub fn get_changes_for_actor_id(
         &self,
         actor_id: &ActorID,
-    ) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        let changes: Vec<&Change> = self
-            .states
+    ) -> Result<Vec<&BinChange>, AutomergeError> {
+        Ok(self.states
             .get(actor_id)
             .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
-            .unwrap_or_default();
-        changes_to_bin(&changes)
+            .unwrap_or_default())
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Result<Vec<Vec<u8>>, AutomergeError> {
-        let changes = self.get_changes_unserialized(have_deps);
-        changes_to_bin(&changes)
-    }
-
-    pub fn get_changes_unserialized(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&BinChange> {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -548,7 +516,6 @@ impl Backend {
             has_seen.insert(hash);
         }
         self
-            //            .states
             .history
             .iter()
             .filter(|hash| !has_seen.contains(hash))
@@ -566,18 +533,17 @@ impl Backend {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let changes: Vec<_> = self
+        let bytes: Vec<&[u8]> = self
             .history
             .iter()
             .filter_map(|hash| self.hashes.get(&hash))
-            .map(|ch| ch.as_ref())
+            .map(|r| r.bytes.as_slice())
             .collect();
-        let data = changes_to_one_bin(&changes)?;
-        Ok(data)
+        Ok(bytes.concat())
     }
 
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
-        let changes = bin_to_changes(&data)?;
+        let changes = BinChange::extract(&data)?;
         let mut backend = Self::init();
         backend.load_changes(changes)?;
         Ok(backend)
@@ -603,7 +569,7 @@ impl Backend {
 struct Version {
     version: u64,
     local_state: Option<Rc<OpSet>>,
-    queue: Vec<Rc<Change>>,
+    queue: Vec<Rc<BinChange>>,
 }
 
 fn resolve_key(

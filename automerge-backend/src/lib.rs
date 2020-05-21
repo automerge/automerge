@@ -1,9 +1,7 @@
 extern crate hex;
 extern crate im_rc;
-extern crate leb128;
 extern crate maplit;
 extern crate rand;
-extern crate sha2;
 extern crate uuid;
 extern crate web_sys;
 
@@ -16,9 +14,9 @@ macro_rules! log {
 
 mod actor_map;
 mod backend;
-mod columnar;
+//mod columnar;
 mod concurrent_operations;
-mod encoding;
+//mod encoding;
 mod error;
 mod object_store;
 mod op_handle;
@@ -29,7 +27,6 @@ mod serialize;
 mod time;
 mod undo_operation;
 
-pub use automerge_protocol::Change;
+pub use automerge_protocol::{ Change, BinChange };
 pub use backend::Backend;
-pub use columnar::change_hash;
 pub use error::AutomergeError;

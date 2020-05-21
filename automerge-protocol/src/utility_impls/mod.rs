@@ -7,3 +7,5 @@ mod object_id;
 mod opid;
 mod request_key;
 mod value;
+pub(crate) mod columnar;
+mod encoding;

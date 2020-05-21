@@ -1,12 +1,13 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{AutomergeError, Backend};
+use automerge_backend::{Backend, BinChange};
 use automerge_protocol::{ActorID, ChangeHash, ChangeRequest};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use std::fmt::Display;
 
 extern crate web_sys;
 #[allow(unused_macros)]
@@ -39,54 +40,46 @@ pub struct State {
 impl State {
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
-        let ch: Vec<Vec<u8>> = changes
-            .iter()
-            .map(|c| c.dyn_into::<Uint8Array>().unwrap().to_vec())
-            .collect();
-        let patch = self
-            .backend
-            .apply_changes_binary(ch)
-            .map_err(automerge_error_to_js)?;
+        let mut ch = Vec::with_capacity(changes.length() as usize);
+        for c in changes.iter() {
+            let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
+            ch.push(BinChange::from_bytes(bytes).map_err(to_js_err)?);
+        }
+        let patch = self.backend.apply_changes(ch).map_err(to_js_err)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = loadChanges)]
     pub fn load_changes(&mut self, changes: Array) -> Result<(), JsValue> {
-        let ch: Vec<Vec<u8>> = changes
-            .iter()
-            .map(|c| c.dyn_into::<Uint8Array>().unwrap().to_vec())
-            .collect();
-        self.backend
-            .load_changes_binary(ch)
-            .map_err(automerge_error_to_js)
+        let mut ch = Vec::with_capacity(changes.length() as usize);
+        for c in changes.iter() {
+            let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
+            ch.push(BinChange::from_bytes(bytes).unwrap())
+        }
+        self.backend.load_changes(ch).map_err(to_js_err)?;
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<JsValue, JsValue> {
         let c: ChangeRequest = js_to_rust(change)?;
-        let patch = self
-            .backend
-            .apply_local_change(c)
-            .map_err(automerge_error_to_js)?;
+        let patch = self.backend.apply_local_change(c).map_err(to_js_err)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = getPatch)]
     pub fn get_patch(&self) -> Result<JsValue, JsValue> {
-        let patch = self.backend.get_patch().map_err(automerge_error_to_js)?;
+        let patch = self.backend.get_patch().map_err(to_js_err)?;
         rust_to_js(&patch)
     }
 
     #[wasm_bindgen(js_name = getChanges)]
     pub fn get_changes(&self, have_deps: JsValue) -> Result<Array, JsValue> {
         let deps: Vec<ChangeHash> = js_to_rust(have_deps)?;
-        let changes = self
-            .backend
-            .get_changes(&deps)
-            .map_err(automerge_error_to_js)?;
+        let changes = self.backend.get_changes(&deps);
         let result = Array::new();
         for c in changes {
-            let bytes: Uint8Array = c.as_slice().into();
+            let bytes: Uint8Array = c.bytes.as_slice().into();
             result.push(bytes.as_ref());
         }
         Ok(result)
@@ -95,13 +88,10 @@ impl State {
     #[wasm_bindgen(js_name = getChangesForActor)]
     pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<Array, JsValue> {
         let a: ActorID = js_to_rust(actorid)?;
-        let changes = self
-            .backend
-            .get_changes_for_actor_id(&a)
-            .map_err(automerge_error_to_js)?;
+        let changes = self.backend.get_changes_for_actor_id(&a).map_err(to_js_err)?;
         let result = Array::new();
         for c in changes {
-            let bytes: Uint8Array = c.as_slice().into();
+            let bytes: Uint8Array = c.bytes.as_slice().into();
             result.push(bytes.as_ref());
         }
         Ok(result)
@@ -126,14 +116,12 @@ impl State {
     #[allow(clippy::should_implement_trait)]
     #[wasm_bindgen(js_name = clone)]
     pub fn clone(&self) -> Result<State, JsValue> {
-        Ok(State {
-            backend: self.backend.clone(),
-        })
+        Ok(State { backend: self.backend.clone() })
     }
 
     #[wasm_bindgen(js_name = save)]
     pub fn save(&self) -> Result<JsValue, JsValue> {
-        let data = self.backend.save().map_err(automerge_error_to_js)?;
+        let data = self.backend.save().map_err(to_js_err)?;
         let js_bytes: Uint8Array = data.as_slice().into();
         Ok(js_bytes.into())
     }
@@ -141,20 +129,18 @@ impl State {
     #[wasm_bindgen(js_name = load)]
     pub fn load(data: JsValue) -> Result<State, JsValue> {
         let data = data.dyn_into::<Uint8Array>().unwrap().to_vec();
-        let backend = Backend::load(data).map_err(automerge_error_to_js)?;
+        let backend = Backend::load(data).map_err(to_js_err)?;
         Ok(State { backend })
     }
 
     #[wasm_bindgen]
     pub fn new() -> State {
-        State {
-            backend: Backend::init(),
-        }
+        State { backend: Backend::init() }
     }
 }
 
-fn automerge_error_to_js(err: AutomergeError) -> JsValue {
-    js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
+fn to_js_err<T:Display>(err: T) -> JsValue {
+   js_sys::Error::new(&std::format!("Automerge error: {}", err)).into()
 }
 
 fn json_error_to_js(err: serde_json::Error) -> JsValue {

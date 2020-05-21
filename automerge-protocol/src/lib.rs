@@ -1,9 +1,15 @@
-mod error;
+pub mod error;
 mod serde_impls;
 mod utility_impls;
 
+pub use error::EncodingError;
+
+use utility_impls::columnar::{MAGIC_BYTES, encode_chunk};
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::ops::Range;
+
 
 // TODO make this an opaque tuple struct. I'm waiting on hearing what the
 // constraints are on the possible values of ActorIDs
@@ -313,20 +319,13 @@ impl Operation {
 #[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
 
-impl ChangeHash {
-    /// A ChangeHash which is all zeros
-    pub fn zero() -> Self {
-        ChangeHash([0; 32])
-    }
-}
-
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "ops")]
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
-    pub hash: ChangeHash,
+    //pub hash: ChangeHash,
     pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
@@ -339,6 +338,26 @@ pub struct Change {
 impl Change {
     pub fn max_op(&self) -> u64 {
         self.start_op + (self.operations.len() as u64) - 1
+    }
+
+    pub fn to_bin(&self) -> BinChange {
+        let mut buf = Vec::new();
+        let mut hasher = Sha256::new();
+
+        let chunk = encode_chunk(&self);
+
+        hasher.input(&chunk);
+
+        buf.extend(&MAGIC_BYTES);
+        buf.extend(&hasher.result()[0..4]);
+        buf.extend(&chunk);
+
+        // we generated this binchange so there's no chance of bad format
+        BinChange::from_bytes(buf).unwrap()
+    }
+
+    pub fn into_bin(self) -> BinChange {
+        self.to_bin()
     }
 }
 
@@ -468,3 +487,18 @@ impl Patch {
         }
     }
 }
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct BinChange {
+    pub bytes: Vec<u8>,
+    pub hash: ChangeHash,
+    pub seq: u64,
+    pub start_op: u64,
+    pub time: i64,
+    body: Range<usize>,
+    message: Range<usize>,
+    actors: Vec<ActorID>,
+    pub deps: Vec<ChangeHash>,
+    ops: HashMap<u32, Range<usize>>,
+}
+

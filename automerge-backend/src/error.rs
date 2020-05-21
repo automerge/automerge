@@ -1,4 +1,4 @@
-use automerge_protocol::{ObjectID, OpID, OpRequest};
+use automerge_protocol::{ObjectID, OpID, OpRequest, EncodingError};
 use std::error::Error;
 use std::fmt;
 
@@ -26,11 +26,18 @@ pub enum AutomergeError {
     ChangeDecompressError(String),
     MapKeyInSeq,
     HeadToOpID,
+    DocFormatUnimplemented,
     DivergentChange(String),
     EncodeFailed,
     DecodeFailed,
     InvalidChange,
     ChangeBadFormat,
+}
+
+impl From<automerge_protocol::error::InvalidChangeHashSlice> for AutomergeError {
+    fn from(_: automerge_protocol::error::InvalidChangeHashSlice) -> AutomergeError {
+        AutomergeError::ChangeBadFormat
+    }
 }
 
 impl fmt::Display for AutomergeError {
@@ -51,3 +58,9 @@ impl fmt::Display for InvalidElementID {
 }
 
 impl Error for InvalidElementID {}
+
+impl From<EncodingError> for AutomergeError {
+    fn from(_: EncodingError) -> AutomergeError {
+        AutomergeError::ChangeBadFormat
+    }
+}

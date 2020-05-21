@@ -15,3 +15,14 @@ pub struct InvalidElementID(pub String);
 #[derive(Error, Debug)]
 #[error("Invalid change hash slice: {0:?}")]
 pub struct InvalidChangeHashSlice(pub Vec<u8>);
+
+#[derive(Error, Debug)]
+#[error("Columnar Encoding Error")]
+pub struct EncodingError;
+
+impl From<InvalidChangeHashSlice> for EncodingError {
+    fn from(_: InvalidChangeHashSlice) -> EncodingError {
+        EncodingError
+    }
+}
+

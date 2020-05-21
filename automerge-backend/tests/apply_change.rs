@@ -1,7 +1,7 @@
 extern crate automerge_backend;
-use automerge_backend::{change_hash, AutomergeError, Backend};
+use automerge_backend::{AutomergeError, Backend};
 use automerge_protocol::{
-    ActorID, Change, ChangeHash, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType,
+    ActorID, Change, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType,
     ObjectID, OpType, Operation, Patch, SeqDiff, Value,
 };
 use maplit::hashmap;
@@ -10,13 +10,12 @@ use std::str::FromStr;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
-    let mut change = Change {
+    let change = Change {
         actor_id: "7b7723afd9e6480397a4d467b7693156".into(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
-        hash: ChangeHash::zero(),
         deps: Vec::new(),
         operations: vec![Operation::set(
             ObjectID::Root,
@@ -24,8 +23,8 @@ fn test_incremental_diffs_in_a_map() {
             "magpie".into(),
             vec![],
         )],
-    };
-    change.hash = change_hash(change.clone()).unwrap();
+    }.into_bin();
+
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change.clone()]).unwrap();
     let expected_patch = Patch {
@@ -47,39 +46,35 @@ fn test_incremental_diffs_in_a_map() {
 
 #[test]
 fn test_increment_key_in_map() -> Result<(), AutomergeError> {
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![Operation::set(
             ObjectID::Root,
             "counter".into(),
             Value::Counter(1),
             vec![],
         )],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 2,
         start_op: 2,
         time: 2,
         message: None,
         deps: vec![change1.hash],
-        hash: ChangeHash::zero(),
         operations: vec![Operation::inc(
             ObjectID::Root,
             "counter".into(),
             2,
             vec!["1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap()],
         )],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -110,29 +105,26 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
 
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: "ac11".into(),
         seq: 1,
         message: None,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![Operation::set(
             ObjectID::Root,
             "bird".into(),
             "magpie".into(),
             vec![],
         )],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: "ac22".into(),
         start_op: 2,
         seq: 1,
         message: None,
-        hash: ChangeHash::zero(),
         deps: vec![change1.hash],
         time: 0,
         operations: vec![Operation::set(
@@ -141,8 +133,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             "blackbird".into(),
             vec![],
         )],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -177,14 +168,13 @@ fn test_conflict_on_assignment_to_same_map_key() {
 #[test]
 fn delete_key_from_map() {
     let actor: ActorID = "cd86c07f109348f494af5be30fdc4c71".into();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Set(Value::Str("magpie".into())),
             obj: ObjectID::Root,
@@ -192,17 +182,15 @@ fn delete_key_from_map() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
         time: 0,
         message: None,
         deps: vec![change1.hash],
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Del,
             obj: ObjectID::Root,
@@ -210,8 +198,7 @@ fn delete_key_from_map() {
             pred: vec!["1@cd86c07f109348f494af5be30fdc4c71".try_into().unwrap()],
             insert: false,
         }],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         actor: None,
@@ -239,14 +226,13 @@ fn delete_key_from_map() {
 #[test]
 fn create_nested_maps() {
     let actor: ActorID = "d6226fcd55204b82b396f2473da3e26f".try_into().unwrap();
-    let mut change = Change {
+    let change = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
         message: None,
-        hash: ChangeHash::zero(),
         operations: vec![
             Operation {
                 action: OpType::Make(ObjType::Map),
@@ -263,8 +249,7 @@ fn create_nested_maps() {
                 insert: false,
             },
         ],
-    };
-    change.hash = change_hash(change.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch: Patch = Patch {
         actor: None,
@@ -301,9 +286,8 @@ fn create_nested_maps() {
 #[test]
 fn test_assign_to_nested_keys_in_map() {
     let actor: ActorID = "3c39c994039042778f4779a01a59a917".try_into().unwrap();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor.clone(),
-        hash: ChangeHash::zero(),
         seq: 1,
         start_op: 1,
         time: 0,
@@ -325,17 +309,15 @@ fn test_assign_to_nested_keys_in_map() {
                 insert: false,
             },
         ],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
         time: 0,
         deps: vec![change1.hash],
         message: None,
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Set(Value::F64(15.0)),
             obj: "1@3c39c994039042778f4779a01a59a917".try_into().unwrap(),
@@ -343,8 +325,7 @@ fn test_assign_to_nested_keys_in_map() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -383,14 +364,13 @@ fn test_assign_to_nested_keys_in_map() {
 
 #[test]
 fn test_create_lists() {
-    let mut change = Change {
+    let change = Change {
         actor_id: "f82cb62dabe64372ab87466b77792010".try_into().unwrap(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![
             Operation {
                 action: OpType::Make(ObjType::List),
@@ -407,8 +387,7 @@ fn test_create_lists() {
                 pred: Vec::new(),
             },
         ],
-    };
-    change.hash = change_hash(change.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 1,
@@ -448,14 +427,13 @@ fn test_create_lists() {
 #[test]
 fn test_apply_updates_inside_lists() {
     let actor: ActorID = "4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![
             Operation {
                 action: OpType::Make(ObjType::List),
@@ -472,17 +450,15 @@ fn test_apply_updates_inside_lists() {
                 insert: true,
             },
         ],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
         time: 0,
         deps: vec![change1.hash],
         message: None,
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Set(Value::Str("greenfinch".into())),
             obj: "1@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap(),
@@ -490,8 +466,7 @@ fn test_apply_updates_inside_lists() {
             pred: vec!["2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()],
             insert: false,
         }],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         actor: None,
@@ -532,14 +507,13 @@ fn test_apply_updates_inside_lists() {
 #[test]
 fn test_delete_list_elements() {
     let actor: ActorID = "8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![
             Operation {
                 action: OpType::Make(ObjType::List),
@@ -556,17 +530,15 @@ fn test_delete_list_elements() {
                 pred: Vec::new(),
             },
         ],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
         time: 0,
         message: None,
         deps: vec![change1.hash],
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Del,
             obj: "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
@@ -576,8 +548,7 @@ fn test_delete_list_elements() {
             pred: vec!["2@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap()],
             insert: false,
         }],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -614,14 +585,13 @@ fn test_delete_list_elements() {
 #[test]
 fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     let actor: ActorID = "ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Make(ObjType::List),
             obj: ObjectID::Root,
@@ -629,17 +599,15 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
         time: 0,
         message: None,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         operations: vec![
             Operation {
                 action: OpType::Set(Value::Str("chaffinch".into())),
@@ -658,8 +626,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 insert: false,
             },
         ],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 2,
@@ -700,13 +667,12 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 fn test_handle_changes_within_conflicted_objects() {
     let actor1: ActorID = "9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap();
     let actor2: ActorID = "83768a19a13842beb6dde8c68a662fad".try_into().unwrap();
-    let mut change1 = Change {
+    let change1 = Change {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
-        hash: ChangeHash::zero(),
         deps: Vec::new(),
         operations: vec![Operation {
             action: OpType::Make(ObjType::List),
@@ -715,16 +681,14 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change1.hash = change_hash(change1.clone()).unwrap();
+    }.into_bin();
 
-    let mut change2 = Change {
+    let change2 = Change {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
-        hash: ChangeHash::zero(),
         deps: Vec::new(),
         operations: vec![Operation {
             action: OpType::Make(ObjType::Map),
@@ -733,17 +697,15 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change2.hash = change_hash(change2.clone()).unwrap();
+    }.into_bin();
 
-    let mut change3 = Change {
+    let change3 = Change {
         actor_id: actor2.clone(),
         seq: 2,
         start_op: 2,
         time: 0,
         message: None,
         deps: vec![change2.hash],
-        hash: ChangeHash::zero(),
         operations: vec![Operation {
             action: OpType::Set(Value::F64(12.0)),
             obj: "1@83768a19a13842beb6dde8c68a662fad".try_into().unwrap(),
@@ -751,8 +713,7 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change3.hash = change_hash(change3.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 3,
@@ -798,12 +759,11 @@ fn test_handle_changes_within_conflicted_objects() {
 #[test]
 fn test_support_date_objects_at_root() {
     let actor: ActorID = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
-    let mut change = Change {
+    let change = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
-        hash: ChangeHash::zero(),
         deps: Vec::new(),
         message: None,
         operations: vec![Operation {
@@ -813,8 +773,7 @@ fn test_support_date_objects_at_root() {
             pred: Vec::new(),
             insert: false,
         }],
-    };
-    change.hash = change_hash(change.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 1,
@@ -845,13 +804,12 @@ fn test_support_date_objects_at_root() {
 #[test]
 fn test_support_date_objects_in_a_list() {
     let actor: ActorID = "27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap();
-    let mut change = Change {
+    let change = Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
-        hash: ChangeHash::zero(),
         message: None,
         operations: vec![
             Operation {
@@ -869,8 +827,7 @@ fn test_support_date_objects_in_a_list() {
                 pred: Vec::new(),
             },
         ],
-    };
-    change.hash = change_hash(change.clone()).unwrap();
+    }.into_bin();
 
     let expected_patch = Patch {
         version: 1,

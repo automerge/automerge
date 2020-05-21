@@ -1,79 +1,31 @@
-use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
-use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
-use crate::error::AutomergeError;
-use automerge_protocol::{
-    ActorID, Change, ChangeHash, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
+use crate::utility_impls::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
+use crate::utility_impls::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
+use crate::error::{EncodingError};
+use crate::{
+    ActorID, Change, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value, BinChange,
 };
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::TryInto;
+use std::convert::TryFrom;
+use std::ops::Range;
 use std::io;
 use std::io::{Read, Write};
-use std::rc::Rc;
 use std::str;
 
 const HASH_BYTES: usize = 32;
 
-pub(crate) fn bin_to_changes(bindata: &[u8]) -> Result<Vec<Change>, AutomergeError> {
-    BinaryContainer::from(&bindata)?
-        .iter()
-        .map(|bin| bin.to_change())
-        .collect()
-}
-
-// FIXME - really I need a bin change constructor
-pub(crate) fn change_to_change(change: Change) -> Result<Rc<Change>, AutomergeError> {
-    let bin_change = changes_to_bin(&[&change])?;
-    let mut changes = bin_to_changes(&bin_change[0])?;
-    Ok(Rc::new(changes.remove(0)))
-}
-
-pub(crate) fn changes_to_bin(changes: &[&Change]) -> Result<Vec<Vec<u8>>, AutomergeError> {
-    let mut bins = Vec::new();
-    for c in changes {
-        let bin = change_to_bin(c)?;
-        bins.push(bin)
-    }
-    Ok(bins)
-}
-
-pub fn change_hash(change: Change) -> Result<ChangeHash, AutomergeError> {
-    change_to_change(change).map(|c| c.hash)
-}
-
-pub(crate) fn changes_to_one_bin(changes: &[&Change]) -> Result<Vec<u8>, AutomergeError> {
-    let mut data = Vec::new();
-    for c in changes {
-        let bin = change_to_bin(c)?;
-        data.extend(bin)
-    }
-    Ok(data)
-}
-
-fn change_to_bin(change: &Change) -> Result<Vec<u8>, AutomergeError> {
-    let mut buf = Vec::new();
-    let mut hasher = Sha256::new();
-
-    let chunk = encode_chunk(&change)?;
-
-    hasher.input(&chunk);
-
-    buf.extend(&MAGIC_BYTES);
-    buf.extend(&hasher.result()[0..4]);
-    buf.extend(&chunk);
-    Ok(buf)
-}
-
-fn encode_chunk(change: &Change) -> Result<Vec<u8>, AutomergeError> {
+pub (crate) fn encode_chunk(change: &Change) -> Vec<u8> {
     let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
-    let data = encode(change)?;
-    leb128::write::unsigned(&mut chunk, data.len() as u64)?;
+    // unwrap - io errors cant happen when writing to an in memory vec
+    let data = encode(change).unwrap();
+    leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
     chunk.extend(&data);
-    Ok(chunk)
+    chunk
 }
 
-fn encode<V: Encodable>(val: &V) -> Result<Vec<u8>, AutomergeError> {
+fn encode<V: Encodable>(val: &V) -> Result<Vec<u8>, EncodingError> {
     let mut actor_ids = Vec::new();
     Ok(val.encode_with_actors_to_vec(&mut actor_ids)?)
 }
@@ -94,8 +46,6 @@ impl Encodable for Change {
         len += self.time.encode(buf)?;
         len += self.message.encode(buf)?;
 
-        //        let deps_buf = self.deps.encode_with_actors_to_vec(actors)?;
-
         let ops_buf = ColumnEncoder::encode_ops(&self.operations, actors);
 
         len += actors[1..].encode(buf)?;
@@ -113,27 +63,6 @@ impl Encodable for Change {
         Ok(len)
     }
 }
-
-/*
-impl Encodable for Clock {
-    fn encode_with_actors<R: Write>(
-        &self,
-        buf: &mut R,
-        actors: &mut Vec<ActorID>,
-    ) -> io::Result<usize> {
-        let mut len = 0;
-        self.0.len().encode(buf)?;
-        let mut keys: Vec<&ActorID> = self.0.keys().collect();
-        keys.sort_unstable();
-        for actor in keys.iter() {
-            let val = self.get(actor);
-            len += actor.encode_with_actors(buf, actors)?;
-            len += val.encode(buf)?;
-        }
-        Ok(len)
-    }
-}
-*/
 
 impl Encodable for Action {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
@@ -189,181 +118,59 @@ impl Encodable for &[u8] {
     }
 }
 
-fn read_slice<T: Decodable + Debug>(buf: &mut &[u8]) -> Result<T, AutomergeError> {
-    T::decode::<&[u8]>(buf).ok_or(AutomergeError::ChangeBadFormat)
-}
-
-fn slice_bytes<'a>(bytes: &mut &'a [u8]) -> Result<&'a [u8], AutomergeError> {
+fn read_leb128(bytes: &mut &[u8]) -> Result<(usize,usize),EncodingError> {
     let mut buf = &bytes[..];
-    let len = leb128::read::unsigned(&mut buf)? as usize;
-    let result = &buf[0..len];
-    *bytes = &buf[len..];
-    Ok(result)
+    let val = leb128::read::unsigned(&mut buf)? as usize;
+    let leb128_bytes = bytes.len() - buf.len();
+    Ok((val,leb128_bytes))
 }
 
-fn slice_n_bytes<'a>(bytes: &mut &'a [u8], n: usize) -> Result<&'a [u8], AutomergeError> {
-    let result = &bytes[0..n];
-    *bytes = &bytes[n..];
-    Ok(result)
+fn read_slice2<T: Decodable + Debug>(bytes: &[u8], cursor: &mut Range<usize>) -> Result<T, EncodingError> {
+    let view = &bytes[cursor.clone()];
+    let mut reader = &view[..];
+    let val = T::decode::<&[u8]>(&mut reader).ok_or(EncodingError);
+    let len = view.len() - reader.len();
+    *cursor = (cursor.start + len)..cursor.end;
+    val
 }
 
-fn slice_bytes_len(bytes: &[u8]) -> Result<(&[u8], usize), AutomergeError> {
-    let mut view = &bytes[..];
-    let len = leb128::read::unsigned(&mut view)? as usize;
-    let len_bytes = bytes.len() - view.len();
-    Ok((&view[0..len], len + len_bytes))
+fn slice_bytes2(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, EncodingError> {
+    let (val,len) = read_leb128(&mut &bytes[cursor.clone()])?;
+    let start = cursor.start + len;
+    let end = start + val;
+    *cursor = end..cursor.end;
+    Ok(start..end)
 }
 
-impl From<leb128::read::Error> for AutomergeError {
+impl From<leb128::read::Error> for EncodingError {
     fn from(_err: leb128::read::Error) -> Self {
-        AutomergeError::ChangeBadFormat
+        EncodingError
     }
 }
 
-impl From<std::io::Error> for AutomergeError {
+impl From<std::io::Error> for EncodingError {
     fn from(_err: std::io::Error) -> Self {
-        AutomergeError::EncodeFailed
+        EncodingError
     }
 }
 
-#[derive(Debug, Clone)]
-struct BinaryContainer<'a> {
-    magic: &'a [u8],
-    checksum: &'a [u8],
-    hash: ChangeHash,
-    body: &'a [u8],
-    chunktype: u8,
-    chunk: BinaryChange<'a>,
-    len: usize,
+/*
+#[derive(PartialEq, Debug, Clone)]
+pub struct BinChange {
+    pub bytes: Vec<u8>,
+    pub hash: ChangeHash,
+    pub seq: u64,
+    pub start_op: u64,
+    pub time: i64,
+    body: Range<usize>,
+    message: Range<usize>,
+    actors: Vec<ActorID>,
+    pub deps: Vec<ChangeHash>,
+    ops: HashMap<u32, Range<usize>>,
 }
+*/
 
-#[derive(Debug, Clone)]
-struct BinaryChange<'a> {
-    all: &'a [u8],
-    seq: u64,
-    start_op: u64,
-    time: i64,
-    message: &'a [u8],
-    actors: Vec<&'a [u8]>,
-    deps: Vec<&'a [u8]>,
-    ops: HashMap<u32, &'a [u8]>,
-}
-
-impl<'a> BinaryChange<'a> {
-    fn from(bytes: &'a [u8]) -> Result<BinaryChange<'a>, AutomergeError> {
-        let bytes = &mut &bytes[..];
-        let all = &bytes[0..];
-        let actor = slice_bytes(bytes)?;
-        let seq = read_slice(bytes)?;
-        let start_op = read_slice(bytes)?;
-        let time = read_slice(bytes)?;
-        let message = slice_bytes(bytes)?;
-        let num_actors = read_slice(bytes)?;
-        let mut actors = vec![&actor[..]];
-        for _ in 0..num_actors {
-            let actor = slice_bytes(bytes)?;
-            actors.push(actor);
-        }
-        let mut deps = Vec::new();
-        let num_deps = read_slice(bytes)?;
-        for _ in 0..num_deps {
-            let hash = slice_n_bytes(bytes, HASH_BYTES)?;
-            deps.push(hash);
-        }
-        let mut ops = HashMap::new();
-        let mut last_id = 0;
-        while !bytes.is_empty() {
-            let id = read_slice(bytes)?;
-            if id < last_id {
-                return Err(AutomergeError::ChangeBadFormat);
-            }
-            last_id = id;
-            let column = slice_bytes(bytes)?;
-            ops.insert(id, column);
-        }
-        Ok(BinaryChange {
-            all,
-            seq,
-            start_op,
-            time,
-            actors,
-            message,
-            deps,
-            ops,
-        })
-    }
-
-    fn gen_deps(&self) -> Vec<ChangeHash> {
-        // TODO Add error propagation
-        self.deps.iter().map(|&v| v.try_into().unwrap()).collect()
-    }
-
-    fn message(&self) -> Option<String> {
-        if self.message.is_empty() {
-            None
-        } else {
-            str::from_utf8(&self.message).map(|s| s.to_string()).ok()
-        }
-    }
-
-    fn to_change(&self, hash: ChangeHash) -> Result<Change, AutomergeError> {
-        let change = Change {
-            start_op: self.start_op,
-            seq: self.seq,
-            hash,
-            time: self.time,
-            message: self.message(),
-            actor_id: ActorID::from_bytes(self.actors[0]),
-            deps: self.gen_deps(),
-            operations: self.iter_ops().collect(),
-        };
-        Ok(change)
-    }
-
-    fn col_iter<T>(&self, col_id: u32) -> T
-    where
-        T: From<&'a [u8]>,
-    {
-        let empty = &self.all[0..0];
-        let buf = self.ops.get(&col_id).unwrap_or(&empty);
-        T::from(&buf)
-    }
-
-    fn iter_ops(&self) -> OperationIterator {
-        OperationIterator {
-            objs: ObjIterator {
-                actors: &self.actors,
-                actor: self.col_iter(COL_OBJ_ACTOR),
-                ctr: self.col_iter(COL_OBJ_CTR),
-            },
-            chld: ObjIterator {
-                actors: &self.actors,
-                actor: self.col_iter(COL_CHILD_ACTOR),
-                ctr: self.col_iter(COL_CHILD_CTR),
-            },
-            keys: KeyIterator {
-                actors: &self.actors,
-                actor: self.col_iter(COL_KEY_ACTOR),
-                ctr: self.col_iter(COL_KEY_CTR),
-                str: self.col_iter(COL_KEY_STR),
-            },
-            value: ValueIterator {
-                val_len: self.col_iter(COL_VAL_LEN),
-                val_raw: self.col_iter(COL_VAL_RAW),
-            },
-            pred: PredIterator {
-                actors: &self.actors,
-                pred_num: self.col_iter(COL_PRED_NUM),
-                pred_actor: self.col_iter(COL_PRED_ACTOR),
-                pred_ctr: self.col_iter(COL_PRED_CTR),
-            },
-            insert: self.col_iter(COL_INSERT),
-            action: self.col_iter(COL_ACTION),
-        }
-    }
-}
-
-struct OperationIterator<'a> {
+pub struct OperationIterator<'a> {
     action: RLEDecoder<'a, Action>,
     objs: ObjIterator<'a>,
     chld: ObjIterator<'a>,
@@ -373,27 +180,28 @@ struct OperationIterator<'a> {
     pred: PredIterator<'a>,
 }
 
-struct ObjIterator<'a> {
-    actors: &'a Vec<&'a [u8]>,
+pub struct ObjIterator<'a> {
+    //actors: &'a Vec<&'a [u8]>,
+    actors: &'a Vec<ActorID>,
     actor: RLEDecoder<'a, usize>,
     ctr: RLEDecoder<'a, u64>,
 }
 
-struct PredIterator<'a> {
-    actors: &'a Vec<&'a [u8]>,
+pub struct PredIterator<'a> {
+    actors: &'a Vec<ActorID>,
     pred_num: RLEDecoder<'a, usize>,
     pred_actor: RLEDecoder<'a, usize>,
     pred_ctr: DeltaDecoder<'a>,
 }
 
-struct KeyIterator<'a> {
-    actors: &'a Vec<&'a [u8]>,
+pub struct KeyIterator<'a> {
+    actors: &'a Vec<ActorID>,
     actor: RLEDecoder<'a, usize>,
     ctr: DeltaDecoder<'a>,
     str: RLEDecoder<'a, String>,
 }
 
-struct ValueIterator<'a> {
+pub struct ValueIterator<'a> {
     val_len: RLEDecoder<'a, usize>,
     val_raw: Decoder<'a>,
 }
@@ -406,8 +214,7 @@ impl<'a> Iterator for PredIterator<'a> {
         for _ in 0..num {
             let actor = self.pred_actor.next()??;
             let ctr = self.pred_ctr.next()??;
-            let actor_bytes = self.actors.get(actor)?;
-            let actor_id = ActorID::from_bytes(actor_bytes);
+            let actor_id = self.actors.get(actor)?.clone();
             let op_id = OpID::new(ctr, &actor_id);
             p.push(op_id)
         }
@@ -503,8 +310,7 @@ impl<'a> Iterator for KeyIterator<'a> {
             (None, None, Some(string)) => Some(Key::Map(string)),
             (Some(0), Some(0), None) => Some(Key::head()),
             (Some(actor), Some(ctr), None) => {
-                let actor_bytes = self.actors.get(actor)?;
-                let actor_id = ActorID::from_bytes(actor_bytes);
+                let actor_id = self.actors.get(actor)?.clone();
                 Some(OpID(ctr, actor_id.0).into())
             }
             _ => None,
@@ -516,7 +322,7 @@ impl<'a> Iterator for ObjIterator<'a> {
     type Item = ObjectID;
     fn next(&mut self) -> Option<ObjectID> {
         if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
-            let actor_id = ActorID::from_bytes(self.actors.get(actor)?);
+            let actor_id = self.actors.get(actor)?.clone();
             Some(ObjectID::ID(OpID(ctr, actor_id.0)))
         } else {
             Some(ObjectID::Root)
@@ -554,57 +360,167 @@ impl<'a> Iterator for OperationIterator<'a> {
     }
 }
 
-impl<'a> BinaryContainer<'a> {
-    fn from(mut bytes: &'a [u8]) -> Result<Vec<BinaryContainer<'a>>, AutomergeError> {
+impl BinChange {
+    pub fn actor_id(&self) -> ActorID {
+        self.actors[0].clone()
+    }
+
+    pub fn extract(bytes: &[u8]) -> Result<Vec<BinChange>, EncodingError> {
         let mut changes = Vec::new();
-        while !bytes.is_empty() {
-            let change = Self::parse_single(bytes)?;
-            bytes = &bytes[change.len..];
-            changes.push(change);
+        let mut cursor = &bytes[..];
+        while !cursor.is_empty() {
+            let (val,len) = read_leb128(&mut &cursor[HEADER_BYTES..])?;
+            let (data,rest) = cursor.split_at(HEADER_BYTES + val + len);
+            changes.push(Self::from_bytes(data.to_vec())?);
+            cursor = rest;
         }
         Ok(changes)
     }
 
-    fn parse_single(bytes: &'a [u8]) -> Result<BinaryContainer<'a>, AutomergeError> {
-        if bytes.len() < 8 {
-            return Err(AutomergeError::ChangeBadFormat);
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<BinChange, EncodingError> {
+        if bytes.len() <= HEADER_BYTES {
+            return Err(EncodingError);
         }
-        let (header, rest) = &bytes.split_at(8);
-        let (magic, checksum) = &header.split_at(4);
-        if magic != &MAGIC_BYTES {
-            return Err(AutomergeError::ChangeBadFormat);
+
+        if bytes[0..4] != MAGIC_BYTES {
+            return Err(EncodingError);
         }
-        let (chunk_data, chunk_len) = slice_bytes_len(&rest[1..])?;
-        let body = &rest[0..(chunk_len + 1)]; // +1 for chunktype
-        let chunktype = body[0];
-        let len = body.len() + header.len();
+
+        let (val,len) = read_leb128(&mut &bytes[HEADER_BYTES..])?;
+        let body = (HEADER_BYTES + len)..(HEADER_BYTES + len + val);
+        if bytes.len() != body.end {
+            return Err(EncodingError);
+        }
+
+        let chunktype = bytes[PREAMBLE_BYTES];
+
+        if chunktype == 0 {
+            return Err(EncodingError); // Format not implemented
+        }
+
+        if chunktype > 1 {
+            return Err(EncodingError);
+        }
 
         let mut hasher = Sha256::new();
-        hasher.input(&body);
+        hasher.input(&bytes[PREAMBLE_BYTES..]);
         let hash = hasher.result()[..]
-            .try_into()
-            .map_err(|_| AutomergeError::DecodeFailed)?;
+            .try_into()?;
 
-        Ok(BinaryContainer {
-            magic,
-            checksum,
+        let mut cursor = body.clone();
+        let actor = ActorID::from_bytes(&bytes[slice_bytes2(&bytes, &mut cursor)?]);
+        let seq = read_slice2(&bytes, &mut cursor)?;
+        let start_op = read_slice2(&bytes, &mut cursor)?;
+        let time = read_slice2(&bytes, &mut cursor)?;
+        let message = slice_bytes2(&bytes, &mut cursor)?;
+        let num_actors = read_slice2(&bytes, &mut cursor)?;
+        let mut actors = vec![actor];
+        for _ in 0..num_actors {
+            let actor = ActorID::from_bytes(&bytes[slice_bytes2(&bytes, &mut cursor)?]);
+            actors.push(actor);
+        }
+        let mut deps = Vec::new();
+        let num_deps = read_slice2(&bytes, &mut cursor)?;
+        for _ in 0..num_deps {
+            let hash = cursor.start..(cursor.start + HASH_BYTES);
+            cursor = hash.end..cursor.end;
+            //let hash = slice_n_bytes(bytes, HASH_BYTES)?;
+            deps.push(bytes[hash].try_into()?);
+        }
+        let mut ops = HashMap::new();
+        let mut last_id = 0;
+        while !bytes[cursor.clone()].is_empty() {
+            let id = read_slice2(&bytes, &mut cursor)?;
+            if id < last_id {
+                return Err(EncodingError);
+            }
+            last_id = id;
+            let column = slice_bytes2(&bytes, &mut cursor)?;
+            ops.insert(id, column);
+        }
+
+        Ok(BinChange {
+            bytes,
             hash,
-            chunktype,
             body,
-            chunk: BinaryChange::from(chunk_data)?,
-            len,
+            seq,
+            start_op,
+            time,
+            actors,
+            message,
+            deps,
+            ops,
         })
     }
 
-    fn is_valid(&self) -> bool {
-        &self.hash.0[0..4] == self.checksum
+    pub fn max_op(&self) -> u64 {
+        // FIXME - this is crazy inefficent
+        let len = self.iter_ops().count();
+        self.start_op + (len as u64) - 1
     }
 
-    fn to_change(&self) -> Result<Change, AutomergeError> {
-        if !self.is_valid() {
-            return Err(AutomergeError::InvalidChange);
+    fn message(&self) -> Option<String> {
+        let m = &self.bytes[self.message.clone()];
+        if m.is_empty() {
+            None
+        } else {
+            str::from_utf8(&m).map(|s| s.to_string()).ok()
         }
-        self.chunk.to_change(self.hash)
+    }
+
+    pub fn to_change(&self) -> Change {
+        Change {
+            start_op: self.start_op,
+            seq: self.seq,
+            time: self.time,
+            message: self.message(),
+            actor_id: self.actors[0].clone(),
+            deps: self.deps.clone(),
+            operations: self.iter_ops().collect(),
+        }
+    }
+
+    fn col_iter<'a,T>(&'a self, col_id: u32) -> T
+    where
+        T: From<&'a [u8]>,
+    {
+        let empty = 0..0;
+        let range = self.ops.get(&col_id).unwrap_or(&empty);
+        let buf = &self.bytes[range.clone()];
+        T::from(&buf)
+    }
+
+    pub fn iter_ops(&self) -> OperationIterator {
+        OperationIterator {
+            objs: ObjIterator {
+                actors: &self.actors,
+                actor: self.col_iter(COL_OBJ_ACTOR),
+                ctr: self.col_iter(COL_OBJ_CTR),
+            },
+            chld: ObjIterator {
+                actors: &self.actors,
+                actor: self.col_iter(COL_CHILD_ACTOR),
+                ctr: self.col_iter(COL_CHILD_CTR),
+            },
+            keys: KeyIterator {
+                actors: &self.actors,
+                actor: self.col_iter(COL_KEY_ACTOR),
+                ctr: self.col_iter(COL_KEY_CTR),
+                str: self.col_iter(COL_KEY_STR),
+            },
+            value: ValueIterator {
+                val_len: self.col_iter(COL_VAL_LEN),
+                val_raw: self.col_iter(COL_VAL_RAW),
+            },
+            pred: PredIterator {
+                actors: &self.actors,
+                pred_num: self.col_iter(COL_PRED_NUM),
+                pred_actor: self.col_iter(COL_PRED_ACTOR),
+                pred_ctr: self.col_iter(COL_PRED_CTR),
+            },
+            insert: self.col_iter(COL_INSERT),
+            action: self.col_iter(COL_ACTION),
+        }
     }
 }
 
@@ -1004,7 +920,9 @@ const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
 //const COL_SUCC_ACTOR : u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
 //const COL_SUCC_CTR : u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
 
-const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
+pub(crate) const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
+const PREAMBLE_BYTES : usize = 8;
+const HEADER_BYTES : usize = PREAMBLE_BYTES + 1;
 
 #[cfg(test)]
 mod tests {
@@ -1013,7 +931,7 @@ mod tests {
 
     #[test]
     fn test_empty_change() {
-        let mut change1 = Change {
+        let change1 = Change {
             start_op: 1,
             seq: 2,
             time: 1234,
@@ -1021,18 +939,16 @@ mod tests {
             actor_id: ActorID("deadbeefdeadbeef".into()),
             deps: vec![],
             operations: vec![],
-            hash: ChangeHash::zero(),
         };
-        let bin1 = change_to_bin(&change1).unwrap();
-        let changes2 = bin_to_changes(&bin1).unwrap();
-        let bin2 = change_to_bin(&changes2[0]).unwrap();
-        change1.hash = change_hash(change1.clone()).unwrap();
+        let bin1 = change1.to_bin();
+        let change2 = bin1.to_change();
+        let bin2 = change2.to_bin();
         assert_eq!(bin1, bin2);
-        assert_eq!(vec![change1], changes2);
+        assert_eq!(change1, change2);
     }
 
     #[test]
-    fn test_complex_change() -> Result<(), AutomergeError> {
+    fn test_complex_change() -> Result<(), EncodingError> {
         let actor1 = ActorID("deadbeefdeadbeef".into());
         let actor2 = ActorID("feeddefaff".into());
         let actor3 = ActorID("00101010fafafafa".into());
@@ -1051,8 +967,7 @@ mod tests {
         let keyseq1 = Key::from(&opid1);
         let keyseq2 = Key::from(&opid2);
         let insert = false;
-        let mut change1 = Change {
-            hash: ChangeHash::zero(),
+        let change1 = Change {
             start_op: 123,
             seq: 29291,
             time: 12_341_231,
@@ -1139,12 +1054,36 @@ mod tests {
                 },
             ],
         };
-        change1.hash = change_hash(change1.clone()).unwrap();
-        let bin1 = change_to_bin(&change1)?;
-        let changes2 = bin_to_changes(&bin1)?;
-        let bin2 = change_to_bin(&changes2[0])?;
+        let bin1 = change1.to_bin();
+        let change2 = bin1.to_change();
+        let bin2 = change2.to_bin();
         assert_eq!(bin1, bin2);
-        assert_eq!(vec![change1], changes2);
+        assert_eq!(change1, change2);
         Ok(())
+    }
+}
+
+impl From<&Change> for BinChange {
+    fn from(change: &Change) -> BinChange {
+        change.to_bin()
+    }
+}
+
+impl From<Change> for BinChange {
+    fn from(change: Change) -> BinChange {
+        change.into_bin()
+    }
+}
+
+impl From<&BinChange> for Change {
+    fn from(change: &BinChange) -> Change{
+        change.to_change()
+    }
+}
+
+impl TryFrom<&[u8]> for BinChange {
+    type Error = EncodingError;
+    fn try_from(bytes: &[u8]) -> Result<Self, EncodingError> {
+        BinChange::from_bytes(bytes.to_vec())
     }
 }
