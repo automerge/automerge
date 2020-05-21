@@ -414,6 +414,8 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                         }
                         Object::Primitive(..) => panic!("parent object was primitive"),
                     };
+                    // TODO fix unwrap
+                    let diff = self.diff_at_path(&change.path.parent(), diff).unwrap();
                     self.ops.push(op);
                     self.change_context.apply_diff(&diff)?;
                     Ok(())

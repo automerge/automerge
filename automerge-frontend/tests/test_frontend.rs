@@ -383,3 +383,58 @@ fn apply_updates_inside_lists() {
 
     assert_eq!(req2, expected_change_request);
 }
+
+#[test]
+fn delete_list_elements() {
+    let mut doc = Frontend::new();
+    let _req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("birds"),
+                vec!["chaffinch", "goldfinch"].into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::delete(
+                Path::root().key("birds").index(0),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(doc.state(), &Value::from_json(&serde_json::json!({
+        "birds": ["goldfinch"],
+    })));
+
+    let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+
+    let expected_change_request = amp::ChangeRequest {
+        actor: doc.actor_id.clone(),
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::Del,
+                obj: birds_id.to_string(),
+                key: 0.into(),
+                child: None,
+                value: None,
+                insert: false,
+                datatype: None,
+            }
+        ]),
+    };
+
+    assert_eq!(req2, expected_change_request);
+}
