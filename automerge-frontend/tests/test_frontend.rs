@@ -518,3 +518,93 @@ fn handle_counters_inside_maps() {
     };
     assert_eq!(req2, expected_change_request_2);
 }
+
+#[test]
+fn handle_counters_inside_lists() {
+    let mut doc = Frontend::new();
+    let req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("counts"),
+                vec![Value::Primitive(amp::Value::Counter(1))].into()
+            ))?;
+            Ok(()) 
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_first_change = doc.state().clone();
+
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::increment_by(Path::root().key("counts").index(0), 2))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_second_change = doc.state().clone();
+
+    assert_eq!(state_after_first_change, Value::Map(hashmap!{
+        "counts".into() => vec![Value::Primitive(amp::Value::Counter(1))].into()
+    }, MapType::Map));
+
+    assert_eq!(state_after_second_change, Value::Map(hashmap!{
+        "counts".into() => vec![Value::Primitive(amp::Value::Counter(3))].into()
+    }, MapType::Map));
+
+    let counts_id = doc.get_object_id(&Path::root().key("counts")).unwrap();
+
+    let expected_change_request_1 = amp::ChangeRequest{
+        actor: doc.actor_id.clone(),
+        seq: 1,
+        version: 0,
+        time: req1.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::MakeList,
+                obj: amp::ObjectID::Root.to_string(),
+                key: "counts".into(),
+                child: Some(counts_id.to_string()),
+                insert: false,
+                value: None,
+                datatype: None,
+            },
+            amp::OpRequest {
+                action: amp::ReqOpType::Set,
+                obj: counts_id.to_string(),
+                key: 0.into(),
+                child: None,
+                value: Some(amp::Value::Counter(1)),
+                insert: true,
+                datatype: Some(amp::DataType::Counter),
+            }
+        ]),
+    };
+    assert_eq!(req1, expected_change_request_1);
+
+    let expected_change_request_2 = amp::ChangeRequest{
+        actor: doc.actor_id.clone(),
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::Inc,
+                obj: counts_id.to_string(),
+                key: 0.into(),
+                child: None,
+                value: Some(amp::Value::Int(2)),
+                insert: false,
+                datatype: Some(amp::DataType::Counter),
+            }
+        ]),
+    };
+    assert_eq!(req2, expected_change_request_2);
+}
