@@ -53,49 +53,58 @@ enum FrontendState {
 
 impl FrontendState {
     /// Apply a patch received from the backend to this frontend state,
-    /// returns the updated cached value and a new `FrontendState` which
-    /// replaces this one
+    /// returns the updated cached value (if it has changed) and a new
+    /// `FrontendState` which replaces this one
     fn apply_remote_patch(
         self,
         self_actor: &ActorID,
         patch: &Patch,
-    ) -> Result<(Value, Self), AutomergeFrontendError> {
+    ) -> Result<(Option<Value>, Self), AutomergeFrontendError> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
                 mut reconciled_objects,
                 optimistically_updated_objects,
             } => {
-                // Check that if the patch is for our actor ID then it is not
-                // out of order
+                let mut new_in_flight_requests = in_flight_requests;
+                // If the actor ID and seq exist then this is patch corresponds
+                // to a local change (i.e it came from Backend::apply_local_change
                 if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
-                    if self_actor == &ActorID::from(patch_actor.as_str())
-                        && in_flight_requests[0] != patch_seq
-                    {
-                        return Err(AutomergeFrontendError::MismatchedSequenceNumber);
+                    // If this is a local change corresponding to our actor then we
+                    // need to match it against in flight requests
+                    if self_actor == &ActorID::from(patch_actor.as_str()) {
+                        // Check that if the patch is for our actor ID then it is not
+                        // out of order
+                        if new_in_flight_requests[0] != patch_seq {
+                            return Err(AutomergeFrontendError::MismatchedSequenceNumber);
+                        }
+                        // unwrap should be fine here as `in_flight_requests` should never have zero length
+                        // because we transition to reconciled state when that happens
+                        let (_, remaining_requests) = new_in_flight_requests.split_first().unwrap();
+                        new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
                 let mut change_ctx = change_context::ChangeContext::new(&mut reconciled_objects);
                 if let Some(diff) = &patch.diffs {
                     change_ctx.apply_diff(&diff)?;
                 }
-                let new_state = change_ctx.commit()?;
-                // unwrap should be fine here as `in_flight_requests` should never have zero lenght
-                // given the following code
-                let (_, new_in_flight_requests) = in_flight_requests.split_first().unwrap();
-                Ok((
-                    new_state,
-                    match new_in_flight_requests[..] {
-                        [] => FrontendState::Reconciled {
+                let new_cached_state = change_ctx.commit()?;
+                Ok(match new_in_flight_requests[..] {
+                    [] => (
+                        Some(new_cached_state),
+                        FrontendState::Reconciled {
                             objects: reconciled_objects,
                         },
-                        _ => FrontendState::WaitingForInFlightRequests {
-                            in_flight_requests: new_in_flight_requests.into(),
+                    ),
+                    _ => (
+                        None,
+                        FrontendState::WaitingForInFlightRequests {
+                            in_flight_requests: new_in_flight_requests,
                             reconciled_objects,
                             optimistically_updated_objects,
                         },
-                    },
-                ))
+                    ),
+                })
             }
             FrontendState::Reconciled { mut objects } => {
                 let mut change_ctx = change_context::ChangeContext::new(&mut objects);
@@ -103,7 +112,7 @@ impl FrontendState {
                     change_ctx.apply_diff(&diff)?;
                 };
                 let new_state = change_ctx.commit()?;
-                Ok((new_state, FrontendState::Reconciled { objects }))
+                Ok((Some(new_state), FrontendState::Reconciled { objects }))
             }
         }
     }
@@ -172,6 +181,15 @@ impl FrontendState {
             }
         }
     }
+
+    fn in_flight_requests(&self) -> Vec<u64> {
+        match self {
+            FrontendState::WaitingForInFlightRequests {
+                in_flight_requests, ..
+            } => in_flight_requests.clone(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 pub struct Frontend {
@@ -182,7 +200,7 @@ pub struct Frontend {
     /// using Option::take whilst behind a mutable reference.
     state: Option<FrontendState>,
     /// The highest version number we've received from the backend
-    version: u64,
+    pub version: u64,
     /// A cache of the value of this frontend
     cached_value: Value,
 }
@@ -299,15 +317,27 @@ impl Frontend {
             .unwrap()
             .apply_remote_patch(&self.actor_id, &patch)?;
         self.state = Some(new_state);
-        self.cached_value = new_cached_value;
+        if let Some(new_cached_value) = new_cached_value {
+            self.cached_value = new_cached_value;
+        };
         self.version = std::cmp::max(self.version, patch.version);
+        if let Some(seq) = patch.clock.get(&self.actor_id.to_string()) {
+            if *seq > self.seq {
+                self.seq = *seq;
+            }
+        }
         Ok(())
     }
 
     pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
-        // So gross, this is just a quick hack before refactoring to find
-        // some way to do this properly
-        self.state.clone().and_then(|s| s.get_object_id(path))
+        self.state.as_ref().and_then(|s| s.get_object_id(path))
+    }
+
+    pub fn in_flight_requests(&self) -> Vec<u64> {
+        self.state
+            .as_ref()
+            .map(|s| s.in_flight_requests())
+            .unwrap_or_default()
     }
 }
 

@@ -51,9 +51,15 @@ pub enum Value {
     Primitive(amp::Value),
 }
 
+impl From<amp::Value> for Value {
+    fn from(val: amp::Value) -> Self {
+        Value::Primitive(val)
+    }
+}
+
 impl From<&amp::Value> for Value {
     fn from(val: &amp::Value) -> Self {
-        Value::Primitive(val.clone())
+        val.clone().into()
     }
 }
 
@@ -71,6 +77,18 @@ where
         Value::Sequence(
             v.into_iter().map(|t| t.into()).collect(),
             SequenceType::List,
+        )
+    }
+}
+
+impl<T> From<HashMap<String, T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(h: HashMap<String, T>) -> Self {
+        Value::Map(
+            h.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            MapType::Map,
         )
     }
 }
