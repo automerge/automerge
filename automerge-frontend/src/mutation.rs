@@ -72,6 +72,7 @@ impl fmt::Display for PathElement {
 pub(crate) enum LocalOperation {
     Set(Value),
     Delete,
+    Increment(i64),
 }
 
 pub struct LocalChange {
@@ -80,6 +81,7 @@ pub struct LocalChange {
 }
 
 impl LocalChange {
+    /// Set the value at `path` to `value`
     pub fn set(path: Path, value: Value) -> LocalChange {
         LocalChange {
             path,
@@ -87,10 +89,27 @@ impl LocalChange {
         }
     }
 
+    /// Delete the entry at `path`
     pub fn delete(path: Path) -> LocalChange {
         LocalChange {
             path,
             operation: LocalOperation::Delete,
+        }
+    }
+
+    /// Increment the counter at `path` by 1
+    pub fn increment(path: Path) -> LocalChange {
+        LocalChange{
+            path,
+            operation: LocalOperation::Increment(1)
+        }
+    }
+
+    /// Increment the counter at path by a (possibly negative) amount `by`
+    pub fn increment_by(path: Path, by: i64) -> LocalChange {
+        LocalChange {
+            path,
+            operation: LocalOperation::Increment(by)
         }
     }
 }
@@ -416,6 +435,34 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     };
                     // TODO fix unwrap
                     let diff = self.diff_at_path(&change.path.parent(), diff).unwrap();
+                    self.ops.push(op);
+                    self.change_context.apply_diff(&diff)?;
+                    Ok(())
+                } else {
+                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                }
+            }
+            LocalOperation::Increment(by) => {
+                if let Some(val) = self.value_for_path(&change.path) {
+                    let current_val = match &*val {
+                        Object::Primitive(amp::Value::Counter(i)) => i,
+                        _ => return Err(AutomergeFrontendError::PathIsNotCounter),
+                    };
+                    // Unwrap is fine as we know the parent object exists from the above
+                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
+                    let op = amp::OpRequest {
+                        action: amp::ReqOpType::Inc,
+                        // This unwrap is fine because we know the parent
+                        // is a container
+                        obj: parent_obj.id().unwrap().to_string(),
+                        key: change.path.name().unwrap().to_request_key(),
+                        child: None,
+                        insert: false,
+                        value: Some(amp::Value::Int(*by)),
+                        datatype: Some(amp::DataType::Counter),
+                    };
+                    let diff = amp::Diff::Value(amp::Value::Counter(current_val + by));
+                    let diff = self.diff_at_path(&change.path, diff).unwrap();
                     self.ops.push(op);
                     self.change_context.apply_diff(&diff)?;
                     Ok(())

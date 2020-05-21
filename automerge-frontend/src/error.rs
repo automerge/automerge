@@ -8,6 +8,7 @@ pub enum AutomergeFrontendError {
     InvalidChangeRequest,
     MissingObjectError(ObjectID),
     NoSuchPathError(Path),
+    PathIsNotCounter,
     MismatchedSequenceNumber,
 }
 

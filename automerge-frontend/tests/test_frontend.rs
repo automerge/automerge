@@ -1,5 +1,6 @@
-use automerge_frontend::{Frontend, LocalChange, Path, Value, SequenceType};
+use automerge_frontend::{Frontend, LocalChange, Path, Value, SequenceType, MapType};
 use automerge_protocol as amp;
+use maplit::hashmap;
 
 const ROOT_ID: &str = "00000000-0000-0000-0000-000000000000";
 
@@ -437,4 +438,83 @@ fn delete_list_elements() {
     };
 
     assert_eq!(req2, expected_change_request);
+}
+
+#[test]
+fn handle_counters_inside_maps() {
+    let mut doc = Frontend::new();
+    let req1 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("wrens"),
+                Value::Primitive(amp::Value::Counter(0))
+            ))?;
+            Ok(()) 
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_first_change = doc.state().clone();
+
+    let req2 = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::increment(Path::root().key("wrens")))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    let state_after_second_change = doc.state().clone();
+
+    assert_eq!(state_after_first_change, Value::Map(hashmap!{
+        "wrens".into() => Value::Primitive(amp::Value::Counter(0))
+    }, MapType::Map));
+
+    assert_eq!(state_after_second_change, Value::Map(hashmap!{
+        "wrens".into() => Value::Primitive(amp::Value::Counter(1))
+    }, MapType::Map));
+
+    let expected_change_request_1 = amp::ChangeRequest{
+        actor: doc.actor_id.clone(),
+        seq: 1,
+        version: 0,
+        time: req1.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::Set,
+                obj: amp::ObjectID::Root.to_string(),
+                key: "wrens".into(),
+                child: None,
+                value: Some(amp::Value::Counter(0)),
+                insert: false,
+                datatype: Some(amp::DataType::Counter),
+            }
+        ]),
+    };
+    assert_eq!(req1, expected_change_request_1);
+
+    let expected_change_request_2 = amp::ChangeRequest{
+        actor: doc.actor_id.clone(),
+        seq: 2,
+        version: 0,
+        time: req2.time,
+        message: None,
+        undoable: true,
+        deps: None,
+        request_type: amp::ChangeRequestType::Change,
+        ops: Some(vec![
+            amp::OpRequest {
+                action: amp::ReqOpType::Inc,
+                obj: amp::ObjectID::Root.to_string(),
+                key: "wrens".into(),
+                child: None,
+                value: Some(amp::Value::Int(1)),
+                insert: false,
+                datatype: Some(amp::DataType::Counter),
+            }
+        ]),
+    };
+    assert_eq!(req2, expected_change_request_2);
 }
