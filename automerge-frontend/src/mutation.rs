@@ -357,6 +357,11 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                 if change.path == Path::root() {
                     return self.wrap_root_assignment(value);
                 }
+                if let Some(o) = self.value_for_path(&change.path) {
+                    if let Object::Primitive(amp::Value::Counter(_)) = &* o {
+                        return Err(AutomergeFrontendError::CannotOverwriteCounter)
+                    }
+                };
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
                     // We are not inserting unless this path references an
                     // existing index in a sequence

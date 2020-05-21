@@ -1,4 +1,4 @@
-use automerge_frontend::{Frontend, LocalChange, Path, Value, SequenceType, MapType};
+use automerge_frontend::{Frontend, LocalChange, Path, Value, SequenceType, MapType, AutomergeFrontendError};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -607,4 +607,31 @@ fn handle_counters_inside_lists() {
         ]),
     };
     assert_eq!(req2, expected_change_request_2);
+}
+
+#[test]
+fn refuse_to_overwrite_counter_value() {
+    let mut doc = Frontend::new();
+    doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("counts"),
+                Value::Primitive(amp::Value::Counter(1))
+            ))?;
+            Ok(()) 
+        })
+        .unwrap()
+        .unwrap();
+
+    let result = doc
+        .change(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("counts"),
+                Value::Primitive("somethingelse".into()),
+            ))?;
+            Ok(())
+        });
+
+    assert_eq!(result, Err(AutomergeFrontendError::CannotOverwriteCounter));
+
 }

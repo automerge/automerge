@@ -9,6 +9,7 @@ pub enum AutomergeFrontendError {
     MissingObjectError(ObjectID),
     NoSuchPathError(Path),
     PathIsNotCounter,
+    CannotOverwriteCounter,
     MismatchedSequenceNumber,
 }
 
