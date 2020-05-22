@@ -3,7 +3,7 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
-use automerge_backend::{AutomergeError, BinChange};
+use automerge_backend::{AutomergeError, Change};
 use automerge_protocol::{ActorID, ChangeRequest};
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
@@ -69,7 +69,7 @@ impl Backend {
         }
     }
 
-    fn handle_binaries(&mut self, b: Result<Vec<&BinChange>, AutomergeError>) -> isize {
+    fn handle_binaries(&mut self, b: Result<Vec<&Change>, AutomergeError>) -> isize {
         if let Ok(bin) = b {
             let len = bin[0].bytes.len();
             self.binary = bin.iter().map(|b| b.bytes.clone()).collect();
@@ -163,7 +163,7 @@ pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize
         // FIXME
         let changes = changes
             .iter()
-            .map(|c| BinChange::from_bytes(c.to_vec()).unwrap())
+            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
             .collect();
         let patch = (*backend).apply_changes(changes);
         (*backend).generate_json(patch)
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize 
         // FIXME
         let changes = changes
             .iter()
-            .map(|c| BinChange::from_bytes(c.to_vec()).unwrap())
+            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
             .collect();
         if (*backend).load_changes(changes).is_ok() {
             return 0;

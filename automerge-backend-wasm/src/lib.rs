@@ -1,6 +1,6 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{Backend, BinChange};
+use automerge_backend::{Backend, Change};
 use automerge_protocol::{ActorID, ChangeHash, ChangeRequest};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
@@ -43,7 +43,7 @@ impl State {
         let mut ch = Vec::with_capacity(changes.length() as usize);
         for c in changes.iter() {
             let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
-            ch.push(BinChange::from_bytes(bytes).map_err(to_js_err)?);
+            ch.push(Change::from_bytes(bytes).map_err(to_js_err)?);
         }
         let patch = self.backend.apply_changes(ch).map_err(to_js_err)?;
         rust_to_js(&patch)
@@ -54,7 +54,7 @@ impl State {
         let mut ch = Vec::with_capacity(changes.length() as usize);
         for c in changes.iter() {
             let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
-            ch.push(BinChange::from_bytes(bytes).unwrap())
+            ch.push(Change::from_bytes(bytes).unwrap())
         }
         self.backend.load_changes(ch).map_err(to_js_err)?;
         Ok(())

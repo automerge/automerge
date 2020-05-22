@@ -1,7 +1,7 @@
+use crate::columnar;
 use crate::columnar::{
     ColumnEncoder, KeyIterator, ObjIterator, OperationIterator, PredIterator, ValueIterator,
 };
-use crate::columnar;
 use crate::encoding::{Decodable, Encodable};
 use crate::error::AutomergeError;
 use automerge_protocol::{ActorID, ChangeHash, Operation};
@@ -40,7 +40,7 @@ impl UnencodedChange {
         self.start_op + (self.operations.len() as u64) - 1
     }
 
-    pub fn encode(&self) -> BinChange {
+    pub fn encode(&self) -> Change {
         let mut buf = Vec::new();
         let mut hasher = Sha256::new();
 
@@ -58,7 +58,7 @@ impl UnencodedChange {
         // unwrap :: we generated this binchange so there's no chance of bad format
         // ---
 
-        BinChange::from_bytes(buf).unwrap()
+        Change::from_bytes(buf).unwrap()
     }
 
     fn encode_chunk(&self) -> Vec<u8> {
@@ -100,7 +100,7 @@ impl UnencodedChange {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct BinChange {
+pub struct Change {
     pub bytes: Vec<u8>,
     pub hash: ChangeHash,
     pub seq: u64,
@@ -113,12 +113,12 @@ pub struct BinChange {
     ops: HashMap<u32, Range<usize>>,
 }
 
-impl BinChange {
+impl Change {
     pub fn actor_id(&self) -> ActorID {
         self.actors[0].clone()
     }
 
-    pub fn extract(bytes: &[u8]) -> Result<Vec<BinChange>, AutomergeError> {
+    pub fn parse(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
         let mut changes = Vec::new();
         let mut cursor = &bytes[..];
         while !cursor.is_empty() {
@@ -130,7 +130,7 @@ impl BinChange {
         Ok(changes)
     }
 
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<BinChange, AutomergeError> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
         if bytes.len() <= HEADER_BYTES {
             return Err(AutomergeError::EncodingError);
         }
@@ -191,7 +191,7 @@ impl BinChange {
             ops.insert(id, column);
         }
 
-        Ok(BinChange {
+        Ok(Change {
             bytes,
             hash,
             body,
@@ -276,28 +276,28 @@ impl BinChange {
     }
 }
 
-impl From<&UnencodedChange> for BinChange {
-    fn from(change: &UnencodedChange) -> BinChange {
+impl From<&UnencodedChange> for Change {
+    fn from(change: &UnencodedChange) -> Change {
         change.encode()
     }
 }
 
-impl From<UnencodedChange> for BinChange {
-    fn from(change: UnencodedChange) -> BinChange {
+impl From<UnencodedChange> for Change {
+    fn from(change: UnencodedChange) -> Change {
         change.encode()
     }
 }
 
-impl From<&BinChange> for UnencodedChange {
-    fn from(change: &BinChange) -> UnencodedChange {
+impl From<&Change> for UnencodedChange {
+    fn from(change: &Change) -> UnencodedChange {
         change.decode()
     }
 }
 
-impl TryFrom<&[u8]> for BinChange {
+impl TryFrom<&[u8]> for Change {
     type Error = AutomergeError;
     fn try_from(bytes: &[u8]) -> Result<Self, AutomergeError> {
-        BinChange::from_bytes(bytes.to_vec())
+        Change::from_bytes(bytes.to_vec())
     }
 }
 

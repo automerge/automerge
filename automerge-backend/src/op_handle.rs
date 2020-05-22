@@ -5,20 +5,20 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::undo_operation::UndoOperation;
-use crate::BinChange;
+use crate::Change;
 use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
     pub id: OpID,
     op: Operation,
-    //change: Rc<BinChange>,
+    //change: Rc<Change>,
     //index: usize,
     delta: i64,
 }
 
 impl OpHandle {
-    pub fn extract(change: Rc<BinChange>) -> Vec<OpHandle> {
+    pub fn extract(change: Rc<Change>) -> Vec<OpHandle> {
         change
             .iter_ops()
             //            .iter()

@@ -13,7 +13,7 @@ fn main() -> io::Result<()> {
     input_file.read_to_end(&mut input_data)?;
 
     let mut backend = automerge_backend::Backend::init();
-    let changes = automerge_backend::BinChange::extract(&input_data).unwrap();
+    let changes = automerge_backend::Change::parse(&input_data).unwrap();
     backend.load_changes(changes).unwrap();
     let patch = backend.get_patch().unwrap();
     let mut frontend = automerge_frontend::Frontend::new();

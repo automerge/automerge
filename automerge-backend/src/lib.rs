@@ -29,5 +29,5 @@ mod time;
 mod undo_operation;
 
 pub use backend::Backend;
-pub use change::{BinChange, UnencodedChange};
+pub use change::{Change, UnencodedChange};
 pub use error::AutomergeError;
