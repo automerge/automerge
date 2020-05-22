@@ -2,7 +2,7 @@ use crate::PathElement;
 use automerge_protocol as amp;
 use maplit::hashmap;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub enum MapType {
@@ -81,13 +81,16 @@ where
     }
 }
 
-impl<T> From<HashMap<String, T>> for Value
+impl<T, K> From<HashMap<K, T>> for Value
 where
     T: Into<Value>,
+    K: Borrow<str>,
 {
-    fn from(h: HashMap<String, T>) -> Self {
+    fn from(h: HashMap<K, T>) -> Self {
         Value::Map(
-            h.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            h.into_iter()
+                .map(|(k, v)| (k.borrow().to_string(), v.into()))
+                .collect(),
             MapType::Map,
         )
     }

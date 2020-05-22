@@ -1,4 +1,6 @@
-use automerge_protocol::{ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpRequest, Patch};
+use automerge_protocol::{
+    ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpID, OpRequest, Patch,
+};
 
 mod change_context;
 mod error;
@@ -118,6 +120,10 @@ impl FrontendState {
     }
 
     fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
+        self.get_object(path).and_then(|o| o.id())
+    }
+
+    fn get_object(&self, path: &Path) -> Option<Rc<Object>> {
         let objects = match self {
             FrontendState::WaitingForInFlightRequests {
                 optimistically_updated_objects,
@@ -125,7 +131,7 @@ impl FrontendState {
             } => optimistically_updated_objects,
             FrontendState::Reconciled { objects, .. } => objects,
         };
-        mutation::resolve_path(path, objects).and_then(|o| o.id())
+        mutation::resolve_path(path, objects)
     }
 
     /// Apply a patch
@@ -338,6 +344,23 @@ impl Frontend {
             .as_ref()
             .map(|s| s.in_flight_requests())
             .unwrap_or_default()
+    }
+
+    /// Gets the set of values for `path`, returns None if the path does not
+    /// exist
+    pub fn get_conflicts(&self, path: &Path) -> Option<HashMap<OpID, Value>> {
+        self.state
+            .as_ref()
+            .and_then(|s| s.get_object(&path.parent()))
+            .and_then(|o| match (&*o, path.name()) {
+                (Object::Map(_, vals, _), Some(PathElement::Key(k))) => {
+                    vals.get(k.as_str()).map(|values| values.conflicts())
+                }
+                (Object::Sequence(_, vals, _), Some(PathElement::Index(i))) => vals
+                    .get(*i)
+                    .and_then(|mvalues| mvalues.as_ref().map(|values| values.conflicts())),
+                _ => None,
+            })
     }
 }
 

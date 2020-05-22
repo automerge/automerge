@@ -570,7 +570,7 @@ fn allow_interleacing_of_patches_and_changes() {
     assert_eq!(
         req3,
         amp::ChangeRequest {
-            actor: doc.actor_id.clone(),
+            actor: doc.actor_id,
             seq: 3,
             version: 1,
             message: None,

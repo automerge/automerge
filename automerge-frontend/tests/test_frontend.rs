@@ -243,7 +243,7 @@ fn delete_keys_in_a_map() {
     );
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
@@ -300,7 +300,7 @@ fn create_lists() {
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 1,
         version: 0,
         time: req1.time,
@@ -368,7 +368,7 @@ fn apply_updates_inside_lists() {
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
@@ -422,7 +422,7 @@ fn delete_list_elements() {
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
     let expected_change_request = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
@@ -510,7 +510,7 @@ fn handle_counters_inside_maps() {
     assert_eq!(req1, expected_change_request_1);
 
     let expected_change_request_2 = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
@@ -613,7 +613,7 @@ fn handle_counters_inside_lists() {
     assert_eq!(req1, expected_change_request_1);
 
     let expected_change_request_2 = amp::ChangeRequest {
-        actor: doc.actor_id.clone(),
+        actor: doc.actor_id,
         seq: 2,
         version: 0,
         time: req2.time,
