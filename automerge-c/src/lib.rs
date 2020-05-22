@@ -133,9 +133,14 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request: Request = serde_json::from_str(&request).unwrap();
-    let patch = (*backend).apply_local_change(request);
-    (*backend).generate_json(patch)
+    let request: Result<Request,_> = serde_json::from_str(&request);
+    if let Ok(request) = request {
+        let patch = (*backend).apply_local_change(request);
+        (*backend).generate_json(patch)
+    } else {
+        // json parse error
+        -1
+    }
 }
 
 /// # Safety
@@ -235,9 +240,13 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 ) -> isize {
     let actor: &CStr = CStr::from_ptr(actor);
     let actor = actor.to_string_lossy();
-    let actor = actor.as_ref().try_into().unwrap(); // FIXME
-    let changes = (*backend).get_changes_for_actor_id(&actor);
-    (*backend).handle_binaries(changes)
+    if let Ok(actor) = actor.as_ref().try_into() {
+        let changes = (*backend).get_changes_for_actor_id(&actor);
+        (*backend).handle_binaries(changes)
+    } else {
+        // bad actor error
+        -1
+    }
 }
 
 /// # Safety
