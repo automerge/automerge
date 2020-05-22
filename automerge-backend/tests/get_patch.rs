@@ -25,7 +25,7 @@ fn test_include_most_recent_value_for_key() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -42,7 +42,7 @@ fn test_include_most_recent_value_for_key() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         actor: None,
@@ -90,7 +90,7 @@ fn test_includes_conflicting_values_for_key() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor2.clone(),
@@ -107,7 +107,7 @@ fn test_includes_conflicting_values_for_key() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -156,7 +156,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -173,7 +173,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -229,7 +229,7 @@ fn test_creates_nested_maps() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -255,7 +255,7 @@ fn test_creates_nested_maps() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -319,7 +319,7 @@ fn test_create_lists() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -398,7 +398,7 @@ fn test_includes_latests_state_of_list() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -465,7 +465,7 @@ fn test_includes_date_objects_at_root() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,
@@ -521,7 +521,7 @@ fn test_includes_date_objects_in_a_list() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 0,

@@ -24,7 +24,7 @@ fn test_incremental_diffs_in_a_map() {
             vec![],
         )],
     }
-    .into_bin();
+    .encode();
 
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change.clone()]).unwrap();
@@ -61,7 +61,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             vec![],
         )],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
@@ -77,7 +77,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             vec!["1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap()],
         )],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 2,
@@ -122,7 +122,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             vec![],
         )],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: "ac22".into(),
@@ -138,7 +138,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             vec![],
         )],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 2,
@@ -188,7 +188,7 @@ fn delete_key_from_map() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -205,7 +205,7 @@ fn delete_key_from_map() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         actor: None,
@@ -257,7 +257,7 @@ fn create_nested_maps() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch: Patch = Patch {
         actor: None,
@@ -318,7 +318,7 @@ fn test_assign_to_nested_keys_in_map() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -335,7 +335,7 @@ fn test_assign_to_nested_keys_in_map() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 2,
@@ -398,7 +398,7 @@ fn test_create_lists() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 1,
@@ -462,7 +462,7 @@ fn test_apply_updates_inside_lists() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -479,7 +479,7 @@ fn test_apply_updates_inside_lists() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         actor: None,
@@ -544,7 +544,7 @@ fn test_delete_list_elements() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -563,7 +563,7 @@ fn test_delete_list_elements() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 2,
@@ -615,7 +615,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor.clone(),
@@ -643,7 +643,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 2,
@@ -699,7 +699,7 @@ fn test_handle_changes_within_conflicted_objects() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change2 = Change {
         actor_id: actor2.clone(),
@@ -716,7 +716,7 @@ fn test_handle_changes_within_conflicted_objects() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let change3 = Change {
         actor_id: actor2.clone(),
@@ -733,7 +733,7 @@ fn test_handle_changes_within_conflicted_objects() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 3,
@@ -794,7 +794,7 @@ fn test_support_date_objects_at_root() {
             insert: false,
         }],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 1,
@@ -849,7 +849,7 @@ fn test_support_date_objects_in_a_list() {
             },
         ],
     }
-    .into_bin();
+    .encode();
 
     let expected_patch = Patch {
         version: 1,

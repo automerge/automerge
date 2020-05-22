@@ -14,6 +14,7 @@ macro_rules! log {
 
 mod actor_map;
 mod backend;
+mod change;
 mod columnar;
 mod concurrent_operations;
 mod encoding;
@@ -28,5 +29,5 @@ mod time;
 mod undo_operation;
 
 pub use backend::Backend;
-pub use columnar::{BinChange, Change};
+pub use change::{BinChange, Change};
 pub use error::AutomergeError;

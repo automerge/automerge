@@ -2,8 +2,6 @@ pub mod error;
 mod serde_impls;
 mod utility_impls;
 
-pub use error::EncodingError;
-
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 

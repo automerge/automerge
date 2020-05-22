@@ -1,4 +1,4 @@
-use automerge_protocol::{EncodingError, ObjectID, OpID, OpRequest};
+use automerge_protocol::{ObjectID, OpID, OpRequest};
 use std::error::Error;
 use std::fmt;
 
@@ -60,8 +60,14 @@ impl fmt::Display for InvalidElementID {
 
 impl Error for InvalidElementID {}
 
-impl From<EncodingError> for AutomergeError {
-    fn from(_: EncodingError) -> AutomergeError {
-        AutomergeError::ChangeBadFormat
+impl From<leb128::read::Error> for AutomergeError {
+    fn from(_err: leb128::read::Error) -> Self {
+        AutomergeError::EncodingError
+    }
+}
+
+impl From<std::io::Error> for AutomergeError {
+    fn from(_err: std::io::Error) -> Self {
+        AutomergeError::EncodingError
     }
 }
