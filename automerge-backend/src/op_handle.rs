@@ -5,7 +5,8 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::undo_operation::UndoOperation;
-use automerge_protocol::{BinChange, Key, ObjectID, OpID, OpType, Operation, Value};
+use crate::BinChange;
+use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {

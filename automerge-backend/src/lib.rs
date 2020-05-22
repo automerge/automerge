@@ -14,9 +14,9 @@ macro_rules! log {
 
 mod actor_map;
 mod backend;
-//mod columnar;
+mod columnar;
 mod concurrent_operations;
-//mod encoding;
+mod encoding;
 mod error;
 mod object_store;
 mod op_handle;
@@ -27,6 +27,6 @@ mod serialize;
 mod time;
 mod undo_operation;
 
-pub use automerge_protocol::{BinChange, Change};
 pub use backend::Backend;
+pub use columnar::{BinChange, Change};
 pub use error::AutomergeError;

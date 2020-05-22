@@ -3,8 +3,8 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
-use automerge_backend::AutomergeError;
-use automerge_protocol::{ActorID, BinChange, ChangeRequest};
+use automerge_backend::{ BinChange, AutomergeError };
+use automerge_protocol::{ActorID, ChangeRequest};
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use std::convert::TryInto;

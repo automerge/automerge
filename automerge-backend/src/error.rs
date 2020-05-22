@@ -32,6 +32,7 @@ pub enum AutomergeError {
     DecodeFailed,
     InvalidChange,
     ChangeBadFormat,
+    EncodingError,
 }
 
 impl From<automerge_protocol::error::InvalidChangeHashSlice> for AutomergeError {

@@ -1,14 +1,11 @@
-use crate::error::EncodingError;
-use crate::utility_impls::encoding::{
-    BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder,
-};
-use crate::utility_impls::encoding::{
-    BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder,
-};
-use crate::{
-    ActorID, BinChange, Change, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
+use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
+use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
+use crate::error::AutomergeError;
+use automerge_protocol::{
+    ActorID, ChangeHash, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
 };
 use core::fmt::Debug;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -17,6 +14,20 @@ use std::io;
 use std::io::{Read, Write};
 use std::ops::Range;
 use std::str;
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct BinChange {
+    pub bytes: Vec<u8>,
+    pub hash: ChangeHash,
+    pub seq: u64,
+    pub start_op: u64,
+    pub time: i64,
+    body: Range<usize>,
+    message: Range<usize>,
+    actors: Vec<ActorID>,
+    pub deps: Vec<ChangeHash>,
+    ops: HashMap<u32, Range<usize>>,
+}
 
 const HASH_BYTES: usize = 32;
 
@@ -29,7 +40,7 @@ pub(crate) fn encode_chunk(change: &Change) -> Vec<u8> {
     chunk
 }
 
-fn encode<V: Encodable>(val: &V) -> Result<Vec<u8>, EncodingError> {
+fn encode<V: Encodable>(val: &V) -> Result<Vec<u8>, AutomergeError> {
     let mut actor_ids = Vec::new();
     Ok(val.encode_with_actors_to_vec(&mut actor_ids)?)
 }
@@ -122,7 +133,7 @@ impl Encodable for &[u8] {
     }
 }
 
-fn read_leb128(bytes: &mut &[u8]) -> Result<(usize, usize), EncodingError> {
+fn read_leb128(bytes: &mut &[u8]) -> Result<(usize, usize), AutomergeError> {
     let mut buf = &bytes[..];
     let val = leb128::read::unsigned(&mut buf)? as usize;
     let leb128_bytes = bytes.len() - buf.len();
@@ -132,16 +143,16 @@ fn read_leb128(bytes: &mut &[u8]) -> Result<(usize, usize), EncodingError> {
 fn read_slice2<T: Decodable + Debug>(
     bytes: &[u8],
     cursor: &mut Range<usize>,
-) -> Result<T, EncodingError> {
+) -> Result<T, AutomergeError> {
     let view = &bytes[cursor.clone()];
     let mut reader = &view[..];
-    let val = T::decode::<&[u8]>(&mut reader).ok_or(EncodingError);
+    let val = T::decode::<&[u8]>(&mut reader).ok_or(AutomergeError::EncodingError);
     let len = view.len() - reader.len();
     *cursor = (cursor.start + len)..cursor.end;
     val
 }
 
-fn slice_bytes2(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, EncodingError> {
+fn slice_bytes2(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, AutomergeError> {
     let (val, len) = read_leb128(&mut &bytes[cursor.clone()])?;
     let start = cursor.start + len;
     let end = start + val;
@@ -149,15 +160,15 @@ fn slice_bytes2(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>,
     Ok(start..end)
 }
 
-impl From<leb128::read::Error> for EncodingError {
+impl From<leb128::read::Error> for AutomergeError {
     fn from(_err: leb128::read::Error) -> Self {
-        EncodingError
+        AutomergeError::EncodingError
     }
 }
 
-impl From<std::io::Error> for EncodingError {
+impl From<std::io::Error> for AutomergeError {
     fn from(_err: std::io::Error) -> Self {
-        EncodingError
+        AutomergeError::EncodingError
     }
 }
 
@@ -372,7 +383,7 @@ impl BinChange {
         self.actors[0].clone()
     }
 
-    pub fn extract(bytes: &[u8]) -> Result<Vec<BinChange>, EncodingError> {
+    pub fn extract(bytes: &[u8]) -> Result<Vec<BinChange>, AutomergeError> {
         let mut changes = Vec::new();
         let mut cursor = &bytes[..];
         while !cursor.is_empty() {
@@ -384,29 +395,29 @@ impl BinChange {
         Ok(changes)
     }
 
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<BinChange, EncodingError> {
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<BinChange, AutomergeError> {
         if bytes.len() <= HEADER_BYTES {
-            return Err(EncodingError);
+            return Err(AutomergeError::EncodingError);
         }
 
         if bytes[0..4] != MAGIC_BYTES {
-            return Err(EncodingError);
+            return Err(AutomergeError::EncodingError);
         }
 
         let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..])?;
         let body = (HEADER_BYTES + len)..(HEADER_BYTES + len + val);
         if bytes.len() != body.end {
-            return Err(EncodingError);
+            return Err(AutomergeError::EncodingError);
         }
 
         let chunktype = bytes[PREAMBLE_BYTES];
 
         if chunktype == 0 {
-            return Err(EncodingError); // Format not implemented
+            return Err(AutomergeError::EncodingError); // Format not implemented
         }
 
         if chunktype > 1 {
-            return Err(EncodingError);
+            return Err(AutomergeError::EncodingError);
         }
 
         let mut hasher = Sha256::new();
@@ -438,7 +449,7 @@ impl BinChange {
         while !bytes[cursor.clone()].is_empty() {
             let id = read_slice2(&bytes, &mut cursor)?;
             if id < last_id {
-                return Err(EncodingError);
+                return Err(AutomergeError::EncodingError);
             }
             last_id = id;
             let column = slice_bytes2(&bytes, &mut cursor)?;
@@ -954,7 +965,7 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_change() -> Result<(), EncodingError> {
+    fn test_complex_change() -> Result<(), AutomergeError> {
         let actor1 = ActorID("deadbeefdeadbeef".into());
         let actor2 = ActorID("feeddefaff".into());
         let actor3 = ActorID("00101010fafafafa".into());
@@ -1088,8 +1099,50 @@ impl From<&BinChange> for Change {
 }
 
 impl TryFrom<&[u8]> for BinChange {
-    type Error = EncodingError;
-    fn try_from(bytes: &[u8]) -> Result<Self, EncodingError> {
+    type Error = AutomergeError;
+    fn try_from(bytes: &[u8]) -> Result<Self, AutomergeError> {
         BinChange::from_bytes(bytes.to_vec())
+    }
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct Change {
+    #[serde(rename = "ops")]
+    pub operations: Vec<Operation>,
+    #[serde(rename = "actor")]
+    pub actor_id: ActorID,
+    //pub hash: ChangeHash,
+    pub seq: u64,
+    #[serde(rename = "startOp")]
+    pub start_op: u64,
+    pub time: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub deps: Vec<ChangeHash>,
+}
+
+impl Change {
+    pub fn max_op(&self) -> u64 {
+        self.start_op + (self.operations.len() as u64) - 1
+    }
+
+    pub fn to_bin(&self) -> BinChange {
+        let mut buf = Vec::new();
+        let mut hasher = Sha256::new();
+
+        let chunk = encode_chunk(&self);
+
+        hasher.input(&chunk);
+
+        buf.extend(&MAGIC_BYTES);
+        buf.extend(&hasher.result()[0..4]);
+        buf.extend(&chunk);
+
+        // we generated this binchange so there's no chance of bad format
+        BinChange::from_bytes(buf).unwrap()
+    }
+
+    pub fn into_bin(self) -> BinChange {
+        self.to_bin()
     }
 }
