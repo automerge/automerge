@@ -6,7 +6,9 @@ use std::rc::Rc;
 
 use crate::undo_operation::UndoOperation;
 use crate::Change;
-use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation, Value};
+use crate::op::Operation;
+use crate::op_type::OpType;
+use automerge_protocol::{Key, ObjectID, OpID, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {

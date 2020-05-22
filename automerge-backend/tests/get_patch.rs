@@ -1,7 +1,8 @@
 extern crate automerge_backend;
 use automerge_backend::{Backend, UnencodedChange};
+use automerge_backend::{OpType, Operation};
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, OpType, Operation, Patch,
+    ActorID, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, Patch,
     SeqDiff, Value,
 };
 use maplit::hashmap;

@@ -6,10 +6,12 @@ use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::pending_diff::PendingDiff;
 use crate::time;
 use crate::undo_operation::UndoOperation;
+use crate::op::Operation;
+use crate::op_type::OpType;
 use crate::{Change, UnencodedChange};
 use automerge_protocol::{
     ActorID, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID, OpID,
-    OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value,
+    OpRequest, Patch, ReqOpType, RequestKey, Value,
 };
 use std::borrow::BorrowMut;
 use std::cmp::max;

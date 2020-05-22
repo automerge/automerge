@@ -4,7 +4,8 @@ use crate::columnar::{
 };
 use crate::encoding::{Decodable, Encodable};
 use crate::error::AutomergeError;
-use automerge_protocol::{ActorID, ChangeHash, Operation};
+use crate::op::Operation;
+use automerge_protocol::{ActorID, ChangeHash};
 use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -335,7 +336,8 @@ const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use automerge_protocol::{Key, ObjType, ObjectID, OpID, OpType, Value};
+    use crate::op_type::OpType;
+    use automerge_protocol::{Key, ObjType, ObjectID, OpID, Value};
 
     #[test]
     fn test_empty_change() {

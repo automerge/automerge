@@ -1,7 +1,9 @@
 use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
+use crate::op::Operation;
+use crate::op_type::OpType;
 use automerge_protocol::{
-    ActorID, ElementID, Key, ObjType, ObjectID, OpID, OpType, Operation, Value,
+    ActorID, ElementID, Key, ObjType, ObjectID, OpID, Value,
 };
 use core::fmt::Debug;
 use std::io;

@@ -14,8 +14,9 @@ use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
+use crate::op_type::OpType;
 use automerge_protocol::{
-    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, OpType, SeqDiff,
+    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff,
 };
 use core::cmp::max;
 use std::collections::HashMap;

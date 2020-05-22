@@ -27,7 +27,12 @@ mod pending_diff;
 mod serialize;
 mod time;
 mod undo_operation;
+mod op;
+mod op_type;
 
 pub use backend::Backend;
 pub use change::{Change, UnencodedChange};
+pub use op_type::OpType;
+pub use op::Operation;
 pub use error::AutomergeError;
+
