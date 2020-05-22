@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use automerge_backend::{AutomergeError, Backend, Change};
+use automerge_backend::{AutomergeError, Backend, UnencodedChange};
 use automerge_protocol::{
     ActorID, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpType,
     Operation, Patch, SeqDiff, Value,
@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
-    let change = Change {
+    let change = UnencodedChange {
         actor_id: "7b7723afd9e6480397a4d467b7693156".into(),
         seq: 1,
         start_op: 1,
@@ -47,7 +47,7 @@ fn test_incremental_diffs_in_a_map() {
 
 #[test]
 fn test_increment_key_in_map() -> Result<(), AutomergeError> {
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 1,
         start_op: 1,
@@ -63,7 +63,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
         seq: 2,
         start_op: 2,
@@ -108,7 +108,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
 
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: "ac11".into(),
         seq: 1,
         message: None,
@@ -124,7 +124,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: "ac22".into(),
         start_op: 2,
         seq: 1,
@@ -173,7 +173,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
 #[test]
 fn delete_key_from_map() {
     let actor: ActorID = "cd86c07f109348f494af5be30fdc4c71".into();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -190,7 +190,7 @@ fn delete_key_from_map() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -233,7 +233,7 @@ fn delete_key_from_map() {
 #[test]
 fn create_nested_maps() {
     let actor: ActorID = "d6226fcd55204b82b396f2473da3e26f".try_into().unwrap();
-    let change = Change {
+    let change = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -294,7 +294,7 @@ fn create_nested_maps() {
 #[test]
 fn test_assign_to_nested_keys_in_map() {
     let actor: ActorID = "3c39c994039042778f4779a01a59a917".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -320,7 +320,7 @@ fn test_assign_to_nested_keys_in_map() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -374,7 +374,7 @@ fn test_assign_to_nested_keys_in_map() {
 
 #[test]
 fn test_create_lists() {
-    let change = Change {
+    let change = UnencodedChange {
         actor_id: "f82cb62dabe64372ab87466b77792010".try_into().unwrap(),
         seq: 1,
         start_op: 1,
@@ -438,7 +438,7 @@ fn test_create_lists() {
 #[test]
 fn test_apply_updates_inside_lists() {
     let actor: ActorID = "4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -464,7 +464,7 @@ fn test_apply_updates_inside_lists() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -520,7 +520,7 @@ fn test_apply_updates_inside_lists() {
 #[test]
 fn test_delete_list_elements() {
     let actor: ActorID = "8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -546,7 +546,7 @@ fn test_delete_list_elements() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -600,7 +600,7 @@ fn test_delete_list_elements() {
 #[test]
 fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     let actor: ActorID = "ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -617,7 +617,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -684,7 +684,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 fn test_handle_changes_within_conflicted_objects() {
     let actor1: ActorID = "9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap();
     let actor2: ActorID = "83768a19a13842beb6dde8c68a662fad".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -701,7 +701,7 @@ fn test_handle_changes_within_conflicted_objects() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
@@ -718,7 +718,7 @@ fn test_handle_changes_within_conflicted_objects() {
     }
     .encode();
 
-    let change3 = Change {
+    let change3 = UnencodedChange {
         actor_id: actor2.clone(),
         seq: 2,
         start_op: 2,
@@ -779,7 +779,7 @@ fn test_handle_changes_within_conflicted_objects() {
 #[test]
 fn test_support_date_objects_at_root() {
     let actor: ActorID = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
-    let change = Change {
+    let change = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -825,7 +825,7 @@ fn test_support_date_objects_at_root() {
 #[test]
 fn test_support_date_objects_in_a_list() {
     let actor: ActorID = "27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap();
-    let change = Change {
+    let change = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,

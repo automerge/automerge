@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend, Change};
+use automerge_backend::{Backend, UnencodedChange};
 use automerge_protocol::{
     ActorID, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, OpType, Operation, Patch,
     SeqDiff, Value,
@@ -10,7 +10,7 @@ use std::convert::TryInto;
 #[test]
 fn test_include_most_recent_value_for_key() {
     let actor: ActorID = "ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -27,7 +27,7 @@ fn test_include_most_recent_value_for_key() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -75,7 +75,7 @@ fn test_include_most_recent_value_for_key() {
 fn test_includes_conflicting_values_for_key() {
     let actor1: ActorID = "111111".try_into().unwrap();
     let actor2: ActorID = "222222".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -92,7 +92,7 @@ fn test_includes_conflicting_values_for_key() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
@@ -141,7 +141,7 @@ fn test_includes_conflicting_values_for_key() {
 #[test]
 fn test_handles_counter_increment_at_keys_in_a_map() {
     let actor: ActorID = "46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -158,7 +158,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -205,7 +205,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
 #[test]
 fn test_creates_nested_maps() {
     let actor: ActorID = "06148f9422cb40579fd02f1975c34a51".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -231,7 +231,7 @@ fn test_creates_nested_maps() {
     }
     .encode();
 
-    let change2 = Change {
+    let change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -295,7 +295,7 @@ fn test_creates_nested_maps() {
 #[test]
 fn test_create_lists() {
     let actor: ActorID = "90bf7df682f747fa82ac604b35010906".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -360,7 +360,7 @@ fn test_create_lists() {
 #[test]
 fn test_includes_latests_state_of_list() {
     let actor: ActorID = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -450,7 +450,7 @@ fn test_includes_latests_state_of_list() {
 #[test]
 fn test_includes_date_objects_at_root() {
     let actor: ActorID = "90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -497,7 +497,7 @@ fn test_includes_date_objects_at_root() {
 #[test]
 fn test_includes_date_objects_in_a_list() {
     let actor: ActorID = "08b050f976a249349021a2e63d99c8e8".try_into().unwrap();
-    let change1 = Change {
+    let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,

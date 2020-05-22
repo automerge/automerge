@@ -6,7 +6,7 @@ use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::pending_diff::PendingDiff;
 use crate::time;
 use crate::undo_operation::UndoOperation;
-use crate::{BinChange, Change};
+use crate::{BinChange, UnencodedChange};
 use automerge_protocol::{
     ActorID, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID, OpID,
     OpRequest, OpType, Operation, Patch, ReqOpType, RequestKey, Value,
@@ -155,7 +155,7 @@ impl Backend {
             }
         }
         Ok(Rc::new(
-            Change {
+            UnencodedChange {
                 start_op,
                 message: request.message.clone(),
                 actor_id: request.actor.clone(),
@@ -221,7 +221,7 @@ impl Backend {
             })
             .collect();
 
-        let change = Change {
+        let change = UnencodedChange {
             actor_id: request.actor.clone(),
             seq: request.seq,
             start_op,
@@ -256,7 +256,7 @@ impl Backend {
             })
             .collect();
 
-        let change = Change {
+        let change = UnencodedChange {
             actor_id: request.actor.clone(),
             seq: request.seq,
             start_op,

@@ -1,6 +1,7 @@
 use crate::columnar::{
     ColumnEncoder, KeyIterator, ObjIterator, OperationIterator, PredIterator, ValueIterator,
 };
+use crate::columnar;
 use crate::encoding::{Decodable, Encodable};
 use crate::error::AutomergeError;
 use automerge_protocol::{ActorID, ChangeHash, Operation};
@@ -19,7 +20,7 @@ const HASH_BYTES: usize = 32;
 const CHUNK_TYPE: u8 = 1;
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-pub struct Change {
+pub struct UnencodedChange {
     #[serde(rename = "ops")]
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
@@ -34,7 +35,7 @@ pub struct Change {
     pub deps: Vec<ChangeHash>,
 }
 
-impl Change {
+impl UnencodedChange {
     pub fn max_op(&self) -> u64 {
         self.start_op + (self.operations.len() as u64) - 1
     }
@@ -205,7 +206,7 @@ impl BinChange {
     }
 
     pub fn max_op(&self) -> u64 {
-        // FIXME - this is crazy inefficent
+        // TODO - this could be a lot more efficient
         let len = self.iter_ops().count();
         self.start_op + (len as u64) - 1
     }
@@ -219,8 +220,8 @@ impl BinChange {
         }
     }
 
-    pub fn decode(&self) -> Change {
-        Change {
+    pub fn decode(&self) -> UnencodedChange {
+        UnencodedChange {
             start_op: self.start_op,
             seq: self.seq,
             time: self.time,
@@ -245,50 +246,50 @@ impl BinChange {
         OperationIterator {
             objs: ObjIterator {
                 actors: &self.actors,
-                actor: self.col_iter(COL_OBJ_ACTOR),
-                ctr: self.col_iter(COL_OBJ_CTR),
+                actor: self.col_iter(columnar::COL_OBJ_ACTOR),
+                ctr: self.col_iter(columnar::COL_OBJ_CTR),
             },
             chld: ObjIterator {
                 actors: &self.actors,
-                actor: self.col_iter(COL_CHILD_ACTOR),
-                ctr: self.col_iter(COL_CHILD_CTR),
+                actor: self.col_iter(columnar::COL_CHILD_ACTOR),
+                ctr: self.col_iter(columnar::COL_CHILD_CTR),
             },
             keys: KeyIterator {
                 actors: &self.actors,
-                actor: self.col_iter(COL_KEY_ACTOR),
-                ctr: self.col_iter(COL_KEY_CTR),
-                str: self.col_iter(COL_KEY_STR),
+                actor: self.col_iter(columnar::COL_KEY_ACTOR),
+                ctr: self.col_iter(columnar::COL_KEY_CTR),
+                str: self.col_iter(columnar::COL_KEY_STR),
             },
             value: ValueIterator {
-                val_len: self.col_iter(COL_VAL_LEN),
-                val_raw: self.col_iter(COL_VAL_RAW),
+                val_len: self.col_iter(columnar::COL_VAL_LEN),
+                val_raw: self.col_iter(columnar::COL_VAL_RAW),
             },
             pred: PredIterator {
                 actors: &self.actors,
-                pred_num: self.col_iter(COL_PRED_NUM),
-                pred_actor: self.col_iter(COL_PRED_ACTOR),
-                pred_ctr: self.col_iter(COL_PRED_CTR),
+                pred_num: self.col_iter(columnar::COL_PRED_NUM),
+                pred_actor: self.col_iter(columnar::COL_PRED_ACTOR),
+                pred_ctr: self.col_iter(columnar::COL_PRED_CTR),
             },
-            insert: self.col_iter(COL_INSERT),
-            action: self.col_iter(COL_ACTION),
+            insert: self.col_iter(columnar::COL_INSERT),
+            action: self.col_iter(columnar::COL_ACTION),
         }
     }
 }
 
-impl From<&Change> for BinChange {
-    fn from(change: &Change) -> BinChange {
+impl From<&UnencodedChange> for BinChange {
+    fn from(change: &UnencodedChange) -> BinChange {
         change.encode()
     }
 }
 
-impl From<Change> for BinChange {
-    fn from(change: Change) -> BinChange {
+impl From<UnencodedChange> for BinChange {
+    fn from(change: UnencodedChange) -> BinChange {
         change.encode()
     }
 }
 
-impl From<&BinChange> for Change {
-    fn from(change: &BinChange) -> Change {
+impl From<&BinChange> for UnencodedChange {
+    fn from(change: &BinChange) -> UnencodedChange {
         change.decode()
     }
 }
@@ -327,87 +328,6 @@ fn slice_bytes(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, 
     Ok(start..end)
 }
 
-/*
-const CHUNK_TYPE: u8 = 1;
-
-const VALUE_TYPE_NULL: usize = 0;
-const VALUE_TYPE_FALSE: usize = 1;
-const VALUE_TYPE_TRUE: usize = 2;
-const VALUE_TYPE_LEB128_UINT: usize = 3;
-const VALUE_TYPE_LEB128_INT: usize = 4;
-const VALUE_TYPE_IEEE754: usize = 5;
-const VALUE_TYPE_UTF8: usize = 6;
-const VALUE_TYPE_BYTES: usize = 7;
-const VALUE_TYPE_COUNTER: usize = 8;
-const VALUE_TYPE_TIMESTAMP: usize = 9;
-const VALUE_TYPE_MIN_UNKNOWN: usize = 10;
-const VALUE_TYPE_MAX_UNKNOWN: usize = 15;
-*/
-
-const COLUMN_TYPE_GROUP_CARD: u32 = 0;
-const COLUMN_TYPE_ACTOR_ID: u32 = 1;
-const COLUMN_TYPE_INT_RLE: u32 = 2;
-const COLUMN_TYPE_INT_DELTA: u32 = 3;
-const COLUMN_TYPE_BOOLEAN: u32 = 4;
-const COLUMN_TYPE_STRING_RLE: u32 = 5;
-const COLUMN_TYPE_VALUE_LEN: u32 = 6;
-const COLUMN_TYPE_VALUE_RAW: u32 = 7;
-/*
-
-#[derive(PartialEq, Debug, Clone, Copy)]
-#[repr(u32)]
-enum Action {
-    Set,
-    Del,
-    Inc,
-    Link,
-    MakeMap,
-    MakeList,
-    MakeText,
-    MakeTable,
-}
-const ACTIONS: [Action; 8] = [
-    Action::Set,
-    Action::Del,
-    Action::Inc,
-    Action::Link,
-    Action::MakeMap,
-    Action::MakeList,
-    Action::MakeText,
-    Action::MakeTable,
-];
-
-impl Decodable for Action {
-    fn decode<R>(bytes: &mut R) -> Option<Self>
-    where
-        R: Read,
-    {
-        let num = usize::decode::<R>(bytes)?;
-        ACTIONS.get(num).cloned()
-    }
-}
-*/
-
-const COL_OBJ_ACTOR: u32 = COLUMN_TYPE_ACTOR_ID;
-const COL_OBJ_CTR: u32 = COLUMN_TYPE_INT_RLE;
-const COL_KEY_ACTOR: u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_KEY_CTR: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_KEY_STR: u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
-//const COL_ID_ACTOR : u32 = 2 << 3 | COLUMN_TYPE_ACTOR_ID;
-//const COL_ID_CTR : u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
-const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
-const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
-const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
-const COL_CHILD_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_CHILD_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
-const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
-//const COL_SUCC_NUM : u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
-//const COL_SUCC_ACTOR : u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
-//const COL_SUCC_CTR : u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
-
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
 const PREAMBLE_BYTES: usize = 8;
 const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
@@ -419,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_empty_change() {
-        let change1 = Change {
+        let change1 = UnencodedChange {
             start_op: 1,
             seq: 2,
             time: 1234,
@@ -455,7 +375,7 @@ mod tests {
         let keyseq1 = Key::from(&opid1);
         let keyseq2 = Key::from(&opid2);
         let insert = false;
-        let change1 = Change {
+        let change1 = UnencodedChange {
             start_op: 123,
             seq: 29291,
             time: 12_341_231,

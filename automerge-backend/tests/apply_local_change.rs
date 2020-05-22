@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend, Change};
+use automerge_backend::{Backend, UnencodedChange};
 use automerge_protocol::{
     ActorID, ChangeHash, ChangeRequest, ChangeRequestType, DataType, Diff, DiffEdit, ElementID,
     MapDiff, ObjType, ObjectID, OpRequest, OpType, Operation, Patch, ReqOpType, SeqDiff,
@@ -35,7 +35,7 @@ fn test_apply_local_change() {
     let patch = backend.apply_local_change(change_request).unwrap();
 
     let changes = backend.get_changes(&[]);
-    let expected_change = Change {
+    let expected_change = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -168,7 +168,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         }]),
     };
     let remote_actor: ActorID = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
-    let remote1 = Change {
+    let remote1 = UnencodedChange {
         actor_id: remote_actor.clone(),
         seq: 1,
         start_op: 1,
@@ -185,7 +185,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
     }
     .encode();
 
-    let mut expected_change1 = Change {
+    let mut expected_change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -201,7 +201,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         }],
     };
 
-    let mut expected_change2 = Change {
+    let mut expected_change2 = UnencodedChange {
         actor_id: remote_actor,
         seq: 1,
         start_op: 1,
@@ -217,7 +217,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         }],
     };
 
-    let mut expected_change3 = Change {
+    let mut expected_change3 = UnencodedChange {
         actor_id: actor,
         seq: 2,
         start_op: 2,
@@ -261,7 +261,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 fn test_transform_list_indexes_into_element_ids() {
     let actor: ActorID = "8f389df8fecb4ddc989102321af3578e".try_into().unwrap();
     let remote_actor: ActorID = "9ba21574dc44411b8ce37bc6037a9687".try_into().unwrap();
-    let remote1 = Change {
+    let remote1 = UnencodedChange {
         actor_id: remote_actor.clone(),
         seq: 1,
         start_op: 1,
@@ -278,7 +278,7 @@ fn test_transform_list_indexes_into_element_ids() {
     }
     .encode();
 
-    let remote2 = Change {
+    let remote2 = UnencodedChange {
         actor_id: remote_actor,
         seq: 2,
         start_op: 2,
@@ -365,7 +365,7 @@ fn test_transform_list_indexes_into_element_ids() {
         ]),
     };
 
-    let mut expected_change1 = Change {
+    let mut expected_change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 2,
@@ -380,7 +380,7 @@ fn test_transform_list_indexes_into_element_ids() {
             pred: Vec::new(),
         }],
     };
-    let mut expected_change2 = Change {
+    let mut expected_change2 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -397,7 +397,7 @@ fn test_transform_list_indexes_into_element_ids() {
             pred: Vec::new(),
         }],
     };
-    let mut expected_change3 = Change {
+    let mut expected_change3 = UnencodedChange {
         actor_id: actor,
         seq: 3,
         start_op: 4,
@@ -548,7 +548,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     let change1 = changes[0].clone();
     let change2 = changes[1].clone();
 
-    let expected_change1 = Change {
+    let expected_change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -565,7 +565,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     }
     .encode();
 
-    let expected_change2 = Change {
+    let expected_change2 = UnencodedChange {
         actor_id: actor,
         seq: 2,
         start_op: 2,
@@ -599,7 +599,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
 /// Asserts that the changes are equal without respect to order of the hashes
 /// in the change dependencies
-fn assert_changes_equal(mut change1: Change, change2: Change) {
+fn assert_changes_equal(mut change1: UnencodedChange, change2: UnencodedChange) {
     let change2_clone = change2.clone();
     let deps1: HashSet<&ChangeHash> = change1.deps.iter().collect();
     let deps2: HashSet<&ChangeHash> = change2.deps.iter().collect();
