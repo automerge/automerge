@@ -133,7 +133,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request: Result<Request,_> = serde_json::from_str(&request);
+    let request: Result<Request, _> = serde_json::from_str(&request);
     if let Ok(request) = request {
         let patch = (*backend).apply_local_change(request);
         (*backend).generate_json(patch)
