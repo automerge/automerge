@@ -11,6 +11,7 @@ use mutation::PathElement;
 pub use mutation::{LocalChange, MutableDocument, Path};
 use object::Object;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::time;
 use std::{collections::HashMap, rc::Rc};
 pub use value::{Conflicts, MapType, SequenceType, Value};
@@ -69,7 +70,7 @@ impl FrontendState {
                 // Check that if the patch is for out actor ID then it is not
                 // out of order
                 if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
-                    if self_actor == &ActorID::from(patch_actor.as_str())
+                    if self_actor == &ActorID::from_str(patch_actor.as_str())?
                         && in_flight_requests[0] != patch_seq
                     {
                         return Err(AutomergeFrontendError::MismatchedSequenceNumber);

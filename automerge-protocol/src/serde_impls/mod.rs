@@ -3,6 +3,7 @@ use serde::{
     Deserialize,
 };
 
+mod actor_id;
 mod change_hash;
 mod diff;
 mod element_id;

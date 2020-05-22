@@ -161,7 +161,7 @@ impl Change {
         let hash = hasher.result()[..].try_into()?;
 
         let mut cursor = body.clone();
-        let actor = ActorID::from_bytes(&bytes[slice_bytes(&bytes, &mut cursor)?]);
+        let actor = ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
         let seq = read_slice(&bytes, &mut cursor)?;
         let start_op = read_slice(&bytes, &mut cursor)?;
         let time = read_slice(&bytes, &mut cursor)?;
@@ -169,8 +169,7 @@ impl Change {
         let num_actors = read_slice(&bytes, &mut cursor)?;
         let mut actors = vec![actor];
         for _ in 0..num_actors {
-            let actor = ActorID::from_bytes(&bytes[slice_bytes(&bytes, &mut cursor)?]);
-            actors.push(actor);
+            actors.push(ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]));
         }
         let mut deps = Vec::new();
         let num_deps = read_slice(&bytes, &mut cursor)?;
@@ -338,6 +337,7 @@ mod tests {
     use super::*;
     use crate::op_type::OpType;
     use automerge_protocol::{Key, ObjType, ObjectID, OpID, Value};
+    use std::str::FromStr;
 
     #[test]
     fn test_empty_change() {
@@ -346,7 +346,7 @@ mod tests {
             seq: 2,
             time: 1234,
             message: None,
-            actor_id: ActorID("deadbeefdeadbeef".into()),
+            actor_id: ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
         };
@@ -359,14 +359,14 @@ mod tests {
 
     #[test]
     fn test_complex_change() -> Result<(), AutomergeError> {
-        let actor1 = ActorID("deadbeefdeadbeef".into());
-        let actor2 = ActorID("feeddefaff".into());
-        let actor3 = ActorID("00101010fafafafa".into());
-        let opid1 = OpID(102, actor1.0.clone());
-        let opid2 = OpID(391, actor1.0.clone());
-        let opid3 = OpID(299, actor2.0.clone());
-        let opid4 = OpID(762, actor3.0);
-        let opid5 = OpID(100_203, actor2.0);
+        let actor1 = ActorID::from_str("deadbeefdeadbeef").unwrap();
+        let actor2 = ActorID::from_str("feeddefaff").unwrap();
+        let actor3 = ActorID::from_str("00101010fafafafa").unwrap();
+        let opid1 = OpID::new(102, &actor1);
+        let opid2 = OpID::new(391, &actor1);
+        let opid3 = OpID::new(299, &actor2);
+        let opid4 = OpID::new(762, &actor3);
+        let opid5 = OpID::new(100_203, &actor2);
         let obj1 = ObjectID::ID(opid1.clone());
         let obj2 = ObjectID::Root;
         let obj3 = ObjectID::ID(opid4.clone());

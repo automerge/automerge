@@ -249,7 +249,7 @@ fn new_object_id() -> String {
 }
 
 pub(crate) fn random_op_id() -> amp::OpID {
-    amp::OpID(1, amp::ActorID::random().0)
+    amp::OpID::new(1, &amp::ActorID::random())
 }
 
 fn value_to_datatype(value: &amp::Value) -> amp::DataType {

@@ -12,7 +12,7 @@ use std::str::FromStr;
 #[test]
 fn test_incremental_diffs_in_a_map() {
     let change = UnencodedChange {
-        actor_id: "7b7723afd9e6480397a4d467b7693156".into(),
+        actor_id: "7b7723afd9e6480397a4d467b7693156".try_into().unwrap(),
         seq: 1,
         start_op: 1,
         time: 0,
@@ -49,7 +49,7 @@ fn test_incremental_diffs_in_a_map() {
 #[test]
 fn test_increment_key_in_map() -> Result<(), AutomergeError> {
     let change1 = UnencodedChange {
-        actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
+        actor_id: "cdee6963c1664645920be8b41a933c2b".try_into().unwrap(),
         seq: 1,
         start_op: 1,
         time: 0,
@@ -65,7 +65,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
     .encode();
 
     let change2 = UnencodedChange {
-        actor_id: "cdee6963c1664645920be8b41a933c2b".into(),
+        actor_id: "cdee6963c1664645920be8b41a933c2b".try_into().unwrap(),
         seq: 2,
         start_op: 2,
         time: 2,
@@ -110,7 +110,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
     let change1 = UnencodedChange {
-        actor_id: "ac11".into(),
+        actor_id: ActorID::from_str("ac11").unwrap(),
         seq: 1,
         message: None,
         start_op: 1,
@@ -126,7 +126,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
     .encode();
 
     let change2 = UnencodedChange {
-        actor_id: "ac22".into(),
+        actor_id: ActorID::from_str("ac22").unwrap(),
         start_op: 2,
         seq: 1,
         message: None,
@@ -173,7 +173,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
 
 #[test]
 fn delete_key_from_map() {
-    let actor: ActorID = "cd86c07f109348f494af5be30fdc4c71".into();
+    let actor: ActorID = "cd86c07f109348f494af5be30fdc4c71".try_into().unwrap();
     let change1 = UnencodedChange {
         actor_id: actor.clone(),
         seq: 1,

@@ -26,7 +26,7 @@ impl OpHandle {
             //            .iter()
             .enumerate()
             .map(|(index, op)| {
-                let id = OpID(change.start_op + (index as u64), change.actor_id().0);
+                let id = OpID::new(change.start_op + (index as u64), &change.actor_id());
                 OpHandle {
                     id,
                     op,

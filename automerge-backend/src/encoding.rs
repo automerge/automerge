@@ -526,7 +526,7 @@ impl Decodable for ActorID {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        Some(ActorID::from_bytes(&buffer))
+        Some(buffer.into())
     }
 }
 

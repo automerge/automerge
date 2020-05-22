@@ -79,7 +79,7 @@ impl Backend {
         let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
-                let id = OpID(start_op + (operations.len() as u64), actor_id.0.clone());
+                let id = OpID::new(start_op + (operations.len() as u64), &actor_id);
                 let insert = rop.insert;
                 let object_id = self.str_to_object(&rop.obj)?;
 
@@ -186,7 +186,7 @@ impl Backend {
                 .iter()
                 .map(|(k, v)| (k.to_hex_string(), v.len() as u64))
                 .collect(),
-            actor: request.map(|r| r.actor.0.clone()),
+            actor: request.map(|r| r.actor.to_hex_string()),
             seq: request.map(|r| r.seq),
         })
     }
@@ -388,7 +388,8 @@ impl Backend {
         {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {}:{}",
-                request.actor.0, request.seq
+                request.actor.to_hex_string(),
+                request.seq
             )));
         }
         Ok(())

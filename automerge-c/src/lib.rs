@@ -4,7 +4,7 @@ extern crate libc;
 extern crate serde;
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{ActorID, Request};
+use automerge_protocol::Request;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use std::convert::TryInto;
@@ -235,7 +235,7 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 ) -> isize {
     let actor: &CStr = CStr::from_ptr(actor);
     let actor = actor.to_string_lossy();
-    let actor: ActorID = actor.as_ref().into();
+    let actor = actor.as_ref().try_into().unwrap(); // FIXME
     let changes = (*backend).get_changes_for_actor_id(&actor);
     (*backend).handle_binaries(changes)
 }

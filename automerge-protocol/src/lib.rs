@@ -5,28 +5,20 @@ mod utility_impls;
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
-// TODO make this an opaque tuple struct. I'm waiting on hearing what the
-// constraints are on the possible values of ActorIDs
-#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
-pub struct ActorID(pub String);
+#[derive(Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+pub struct ActorID(Vec<u8>);
 
 impl ActorID {
     pub fn random() -> ActorID {
-        ActorID(uuid::Uuid::new_v4().to_string())
+        ActorID(uuid::Uuid::new_v4().as_bytes().to_vec())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        // FIXME - I should be storing u8 internally - not strings
-        // i need proper error handling for non-hex strings
-        hex::decode(&self.0).unwrap()
-    }
-
-    pub fn to_hex_string(&self) -> String {
         self.0.clone()
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> ActorID {
-        ActorID(hex::encode(bytes))
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(&self.0)
     }
 }
 
@@ -44,7 +36,7 @@ pub struct OpID(pub u64, pub String);
 
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
-        OpID(seq, actor.0.clone())
+        OpID(seq, actor.to_hex_string())
     }
 
     pub fn counter(&self) -> u64 {

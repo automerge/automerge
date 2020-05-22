@@ -7,6 +7,7 @@ use core::fmt::Debug;
 use std::io;
 use std::io::{Read, Write};
 use std::str;
+use std::str::FromStr;
 
 impl Encodable for Action {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
@@ -25,7 +26,8 @@ impl Encodable for [ActorID] {
 }
 
 fn map_string(actor: &str, actors: &mut Vec<ActorID>) -> usize {
-    let a = ActorID(actor.to_string());
+    // FIXME - this can be fixed if OpID() contains an actorid instead of a String
+    let a = ActorID::from_str(actor).unwrap(); // this is only called on interal values
     map_actor(&a, actors)
 }
 
@@ -202,8 +204,8 @@ impl<'a> Iterator for KeyIterator<'a> {
             (None, None, Some(string)) => Some(Key::Map(string)),
             (Some(0), Some(0), None) => Some(Key::head()),
             (Some(actor), Some(ctr), None) => {
-                let actor_id = self.actors.get(actor)?.clone();
-                Some(OpID(ctr, actor_id.0).into())
+                let actor_id = self.actors.get(actor)?;
+                Some(OpID::new(ctr, actor_id).into())
             }
             _ => None,
         }
@@ -214,8 +216,8 @@ impl<'a> Iterator for ObjIterator<'a> {
     type Item = ObjectID;
     fn next(&mut self) -> Option<ObjectID> {
         if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
-            let actor_id = self.actors.get(actor)?.clone();
-            Some(ObjectID::ID(OpID(ctr, actor_id.0)))
+            let actor_id = self.actors.get(actor)?;
+            Some(ObjectID::ID(OpID::new(ctr, &actor_id)))
         } else {
             Some(ObjectID::Root)
         }
