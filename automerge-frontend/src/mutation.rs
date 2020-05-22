@@ -4,7 +4,7 @@ use crate::value::{random_op_id, value_to_op_requests, MapType, SequenceType};
 use crate::{AutomergeFrontendError, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, fmt, rc::Rc};
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;
@@ -22,13 +22,6 @@ impl PathElement {
         match self {
             PathElement::Key(s) => amp::RequestKey::Str(s.into()),
             PathElement::Index(i) => amp::RequestKey::Num(*i as u64),
-        }
-    }
-
-    pub fn as_key_string(&self) -> String {
-        match self {
-            PathElement::Key(k) => k.clone(),
-            PathElement::Index(i) => i.to_string(),
         }
     }
 }
@@ -67,9 +60,20 @@ impl Path {
     }
 }
 
+impl fmt::Display for PathElement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PathElement::Key(k) => write!(f, "{}", k),
+            PathElement::Index(i) => write!(f, "{}", i),
+        }
+    }
+}
+
 pub(crate) enum LocalOperation {
     Set(Value),
     Delete,
+    Increment(i64),
+    Insert(Value),
 }
 
 pub struct LocalChange {
@@ -78,6 +82,7 @@ pub struct LocalChange {
 }
 
 impl LocalChange {
+    /// Set the value at `path` to `value`
     pub fn set(path: Path, value: Value) -> LocalChange {
         LocalChange {
             path,
@@ -85,10 +90,34 @@ impl LocalChange {
         }
     }
 
+    /// Delete the entry at `path`
     pub fn delete(path: Path) -> LocalChange {
         LocalChange {
             path,
             operation: LocalOperation::Delete,
+        }
+    }
+
+    /// Increment the counter at `path` by 1
+    pub fn increment(path: Path) -> LocalChange {
+        LocalChange {
+            path,
+            operation: LocalOperation::Increment(1),
+        }
+    }
+
+    /// Increment the counter at path by a (possibly negative) amount `by`
+    pub fn increment_by(path: Path, by: i64) -> LocalChange {
+        LocalChange {
+            path,
+            operation: LocalOperation::Increment(by),
+        }
+    }
+
+    pub fn insert(path: Path, value: Value) -> LocalChange {
+        LocalChange {
+            path,
+            operation: LocalOperation::Insert(value),
         }
     }
 }
@@ -131,7 +160,6 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
     fn value_for_path<'c>(&'a self, path: &'c Path) -> Option<Rc<Object>> {
         let mut stack = path.clone().0;
-        stack.pop();
         stack.reverse();
         let mut current_obj: Rc<Object> = self
             .change_context
@@ -217,17 +245,15 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
         // We'll use these once we've reached the end of the path to generate
         // the enclosing diffs
+        #[derive(Debug)]
         enum Intermediate {
-            Map(amp::ObjectID, MapType, String),
-            Seq(amp::ObjectID, SequenceType, usize),
+            Map(amp::ObjectID, MapType, String, Option<amp::OpID>),
+            Seq(amp::ObjectID, SequenceType, usize, Option<amp::OpID>),
         };
         let mut intermediates: Vec<Intermediate> = Vec::new();
 
         // This is just the logic for reducing the path
         let mut stack = path.0.clone();
-        // We don't need the final element as that's where we're applying this
-        // diff (I think).
-        stack.pop();
         stack.reverse();
         let mut current_obj: Rc<Object> = self
             .change_context
@@ -241,18 +267,50 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                             oid.clone(),
                             map_type.clone(),
                             k.clone(),
+                            current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
                         ));
                         current_obj = Rc::new(target.default_value().borrow().clone());
                     } else {
-                        return None;
+                        // This key does not exist, but it's the last element in
+                        // the path, so we can still make a diff as we're
+                        // creating this key
+                        if stack.is_empty() {
+                            intermediates.push(Intermediate::Map(
+                                oid.clone(),
+                                map_type.clone(),
+                                k.clone(),
+                                current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
+                            ))
+                        } else {
+                            return None;
+                        }
                     }
                 }
                 (PathElement::Index(i), Object::Sequence(oid, vals, seq_type)) => {
                     if let Some(Some(target)) = vals.get(*i) {
-                        intermediates.push(Intermediate::Seq(oid.clone(), seq_type.clone(), *i));
+                        intermediates.push(Intermediate::Seq(
+                            oid.clone(),
+                            seq_type.clone(),
+                            *i,
+                            current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
+                        ));
                         current_obj = Rc::new(target.default_value().borrow().clone());
                     } else {
-                        return None;
+                        // This index does not exist, but it's the last element
+                        // in the path so we can create a diff for it as we're
+                        // setting this index
+                        // TODO should we check if this is an `insert` subdiff
+                        // first?
+                        if stack.is_empty() {
+                            intermediates.push(Intermediate::Seq(
+                                oid.clone(),
+                                seq_type.clone(),
+                                *i,
+                                current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
+                            ))
+                        } else {
+                            return None;
+                        }
                     }
                 }
                 _ => return None,
@@ -266,23 +324,19 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         let diff = intermediates
             .into_iter()
             .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
-                Intermediate::Map(oid, map_type, k) => amp::Diff::Map(amp::MapDiff {
+                Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
                     object_id: oid.to_string(),
                     obj_type: map_type.to_obj_type(),
-                    props: hashmap! {k => hashmap!{random_op_id().to_string() => diff_so_far}},
+                    props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
-                Intermediate::Seq(oid, seq_type, index) => amp::Diff::Seq(amp::SeqDiff {
+                Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
                     object_id: oid.to_string(),
                     obj_type: seq_type.to_obj_type(),
                     edits: Vec::new(),
-                    props: hashmap! {index => hashmap!{random_op_id().to_string() => diff_so_far}},
+                    props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
             });
-        Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map,
-            props: hashmap! {path.name().unwrap().as_key_string() => hashmap!{random_op_id().to_string() => diff}},
-        }))
+        Some(diff)
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
@@ -311,24 +365,12 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                 if change.path == Path::root() {
                     return self.wrap_root_assignment(value);
                 }
+                if let Some(o) = self.value_for_path(&change.path) {
+                    if let Object::Primitive(amp::Value::Counter(_)) = &*o {
+                        return Err(AutomergeFrontendError::CannotOverwriteCounter);
+                    }
+                };
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
-                    // We are not inserting unless this path references an
-                    // existing index in a sequence
-                    let insert = self
-                        .change_context
-                        .value_for_object_id(&oid)
-                        .map(|o| match o.as_ref() {
-                            Object::Sequence(_, vals, _) => change
-                                .path
-                                .name()
-                                .map(|elem| match elem {
-                                    PathElement::Index(i) => vals.len() > *i,
-                                    _ => false,
-                                })
-                                .unwrap_or(false),
-                            _ => false,
-                        })
-                        .unwrap_or(false);
                     let (ops, difflink) = value_to_op_requests(
                         oid.to_string(),
                         change
@@ -339,7 +381,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                             })?
                             .clone(),
                         &value,
-                        insert,
+                        false,
                     );
                     let diff = self.diff_at_path(&change.path, difflink).unwrap(); //TODO fix unwrap
                     self.change_context.apply_diff(&diff)?;
@@ -349,7 +391,130 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     Err(AutomergeFrontendError::NoSuchPathError(change.path))
                 }
             }
-            LocalOperation::Delete => panic!("delete not implemented"),
+            LocalOperation::Delete => {
+                if self.value_for_path(&change.path).is_some() {
+                    // Unwrap is fine as we know the parent object exists from the above
+                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
+                    let op = amp::Op {
+                        action: amp::OpType::Del,
+                        // This unwrap is fine because we know the parent
+                        // is a container
+                        obj: parent_obj.id().unwrap().to_string(),
+                        // Is this unwrap fine? I think so as we intercept assignments
+                        // to the root path at the top of this function so we know
+                        // this path has at least one element
+                        key: change.path.name().unwrap().to_request_key(),
+                        child: None,
+                        insert: false,
+                        value: None,
+                        datatype: None,
+                    };
+                    let diff = match &*parent_obj {
+                        Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
+                            object_id: oid.to_string(),
+                            obj_type: map_type.to_obj_type(),
+                            props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
+                        }),
+                        Object::Sequence(oid, _, seq_type) => {
+                            if let Some(PathElement::Index(i)) = change.path.name() {
+                                amp::Diff::Seq(amp::SeqDiff {
+                                    object_id: oid.to_string(),
+                                    obj_type: seq_type.to_obj_type(),
+                                    edits: vec![amp::DiffEdit::Remove { index: *i }],
+                                    props: hashmap! {*i => HashMap::new()},
+                                })
+                            } else {
+                                return Err(AutomergeFrontendError::NoSuchPathError(change.path));
+                            }
+                        }
+                        Object::Primitive(..) => panic!("parent object was primitive"),
+                    };
+                    // TODO fix unwrap
+                    let diff = self.diff_at_path(&change.path.parent(), diff).unwrap();
+                    self.ops.push(op);
+                    self.change_context.apply_diff(&diff)?;
+                    Ok(())
+                } else {
+                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                }
+            }
+            LocalOperation::Increment(by) => {
+                if let Some(val) = self.value_for_path(&change.path) {
+                    let current_val = match &*val {
+                        Object::Primitive(amp::Value::Counter(i)) => i,
+                        _ => return Err(AutomergeFrontendError::PathIsNotCounter),
+                    };
+                    // Unwrap is fine as we know the parent object exists from the above
+                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
+                    let op = amp::Op {
+                        action: amp::OpType::Inc,
+                        // This unwrap is fine because we know the parent
+                        // is a container
+                        obj: parent_obj.id().unwrap().to_string(),
+                        key: change.path.name().unwrap().to_request_key(),
+                        child: None,
+                        insert: false,
+                        value: Some(amp::Value::Int(*by)),
+                        datatype: Some(amp::DataType::Counter),
+                    };
+                    let diff = amp::Diff::Value(amp::Value::Counter(current_val + by));
+                    let diff = self.diff_at_path(&change.path, diff).unwrap();
+                    self.ops.push(op);
+                    self.change_context.apply_diff(&diff)?;
+                    Ok(())
+                } else {
+                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                }
+            }
+            LocalOperation::Insert(value) => {
+                let index = match change.path.name() {
+                    Some(PathElement::Index(i)) => i,
+                    // TODO make this error more descriptive, probably need
+                    // a specific branch for invalid insert paths
+                    _ => return Err(AutomergeFrontendError::InvalidChangeRequest),
+                };
+                if let Some(parent) = self.value_for_path(&change.path.parent()) {
+                    match &*parent {
+                        // TODO make this error more descriptive
+                        Object::Map(..) | Object::Primitive(..) => {
+                            Err(AutomergeFrontendError::InvalidChangeRequest)
+                        }
+                        Object::Sequence(oid, vals, seq_type) => {
+                            if vals.len() > index + 1 {
+                                return Err(AutomergeFrontendError::InvalidChangeRequest);
+                            }
+                            let (ops, diff) = value_to_op_requests(
+                                oid.to_string(),
+                                change
+                                    .path
+                                    .name()
+                                    .ok_or_else(|| {
+                                        AutomergeFrontendError::NoSuchPathError(change.path.clone())
+                                    })?
+                                    .clone(),
+                                &value,
+                                true,
+                            );
+                            let seqdiff = amp::Diff::Seq(amp::SeqDiff {
+                                object_id: oid.to_string(),
+                                obj_type: seq_type.to_obj_type(),
+                                edits: vec![amp::DiffEdit::Insert { index: *index }],
+                                props: hashmap! {
+                                    *index => hashmap!{
+                                        random_op_id().to_string() => diff,
+                                    }
+                                },
+                            });
+                            let diff = self.diff_at_path(&change.path.parent(), seqdiff).unwrap(); //TODO fix unwrap
+                            self.ops.extend(ops);
+                            self.change_context.apply_diff(&diff)?;
+                            Ok(())
+                        }
+                    }
+                } else {
+                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                }
+            }
         }
     }
 }

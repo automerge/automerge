@@ -145,6 +145,11 @@ impl<'a> ChangeContext<'a> {
                             updated,
                             || Object::Map(object_id.clone(), HashMap::new(), MapType::Map),
                         );
+                        // TODO at the moment if the operation uses an invalid
+                        // set of object ID (i.e reusing the same object ID
+                        // inside itself) this will panic as it ends up trying
+                        // to borrow the same refcell twice. We should detect
+                        // such invalid operations and throw and error.
                         match &mut *obj.borrow_mut() {
                             Object::Map(_, ref mut kvs, MapType::Map) => {
                                 for (key, prop_diffs) in props {

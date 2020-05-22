@@ -13,14 +13,29 @@ impl Values {
     }
 
     pub(crate) fn default_value(&self) -> Rc<RefCell<Object>> {
-        let mut op_ids: Vec<&amp::OpID> = self.0.keys().collect();
-        op_ids.sort();
-        let default_op_id = op_ids.first().unwrap();
-        self.0.get(default_op_id).cloned().unwrap()
+        // TODO this function should return an option instead of doing this
+        // unwrap
+        let default_op_id = self.default_op_id().unwrap();
+        self.0.get(&default_op_id).cloned().unwrap()
     }
 
     pub(crate) fn update_for_opid(&mut self, opid: amp::OpID, value: Rc<RefCell<Object>>) {
         self.0.insert(opid, value);
+    }
+
+    pub(crate) fn default_op_id(&self) -> Option<amp::OpID> {
+        let mut op_ids: Vec<&amp::OpID> = self.0.keys().collect();
+        op_ids.sort();
+        op_ids.reverse();
+        #[allow(clippy::map_clone)]
+        op_ids.first().map(|oid| *oid).cloned()
+    }
+
+    pub(crate) fn conflicts(&self) -> HashMap<amp::OpID, Value> {
+        self.0
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_ref().borrow().value()))
+            .collect()
     }
 }
 
@@ -48,6 +63,20 @@ impl Object {
                 map_type.clone(),
             ),
             Object::Primitive(v) => Value::Primitive(v.clone()),
+        }
+    }
+
+    // TODO RequestKey is probably out of place here, but it was convenient
+    pub(crate) fn default_op_id_for_key(&self, key: amp::RequestKey) -> Option<amp::OpID> {
+        match (key, self) {
+            // TODO this whole function feels off but this clone especially upsets me
+            (amp::RequestKey::Num(i), Object::Sequence(_, vals, _)) => vals
+                .get(i as usize)
+                .and_then(|v| v.clone().and_then(|inner| inner.default_op_id())),
+            (amp::RequestKey::Str(ref s), Object::Map(_, vals, _)) => {
+                vals.get(s.as_str()).and_then(|v| v.default_op_id())
+            }
+            _ => None,
         }
     }
 

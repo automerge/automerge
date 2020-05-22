@@ -17,8 +17,16 @@ impl ActorID {
         self.0.clone()
     }
 
+    pub fn from_bytes(bytes: &[u8]) -> ActorID {
+        ActorID(bytes.to_vec())
+    }
+
     pub fn to_hex_string(&self) -> String {
         hex::encode(&self.0)
+    }
+
+    pub fn op_id_at(&self, seq: u64) -> OpID {
+        OpID(seq, self.to_string())
     }
 }
 
