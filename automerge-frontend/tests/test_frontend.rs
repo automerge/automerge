@@ -57,7 +57,7 @@ fn test_set_root_object_properties() {
             cr.time = None;
             cr
         });
-    let expected_change = amp::ChangeRequest {
+    let expected_change = amp::Request {
         actor: doc.actor_id,
         seq: 1,
         version: 0,
@@ -65,8 +65,8 @@ fn test_set_root_object_properties() {
         message: Some("set root object".into()),
         undoable: true,
         deps: None,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: ROOT_ID.to_string(),
             key: amp::RequestKey::Str("bird".to_string()),
             child: None,
@@ -74,7 +74,7 @@ fn test_set_root_object_properties() {
             datatype: Some(amp::DataType::Undefined),
             insert: false,
         }]),
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
     };
     assert_eq!(change_request, Some(expected_change));
 }
@@ -102,18 +102,18 @@ fn it_should_create_nested_maps() {
         .unwrap()
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
-    let expected_change = amp::ChangeRequest {
+    let expected_change = amp::Request {
         actor: doc.actor_id,
         seq: 1,
         time: change_request.time,
         message: None,
         version: 0,
         undoable: true,
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
         deps: None,
         ops: Some(vec![
-            amp::OpRequest {
-                action: amp::ReqOpType::MakeMap,
+            amp::Op {
+                action: amp::OpType::MakeMap,
                 obj: amp::ObjectID::Root.to_string(),
                 key: amp::RequestKey::Str("birds".into()),
                 child: Some(birds_id.to_string()),
@@ -121,8 +121,8 @@ fn it_should_create_nested_maps() {
                 value: None,
                 insert: false,
             },
-            amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            amp::Op {
+                action: amp::OpType::Set,
                 obj: birds_id.to_string(),
                 key: amp::RequestKey::Str("wrens".into()),
                 child: None,

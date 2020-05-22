@@ -177,7 +177,7 @@ pub enum RequestKey {
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub enum ReqOpType {
+pub enum OpType {
     MakeMap,
     MakeTable,
     MakeList,
@@ -189,8 +189,8 @@ pub enum ReqOpType {
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
-pub struct OpRequest {
-    pub action: ReqOpType,
+pub struct Op {
+    pub action: OpType,
     pub obj: String,
     pub key: RequestKey,
     pub child: Option<String>,
@@ -200,7 +200,7 @@ pub struct OpRequest {
     pub insert: bool,
 }
 
-impl OpRequest {
+impl Op {
     pub fn primitive_value(&self) -> Value {
         match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
             (Some(n), Some(DataType::Counter)) => Value::Counter(n),
@@ -211,10 +211,10 @@ impl OpRequest {
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            ReqOpType::MakeMap => Some(ObjType::Map),
-            ReqOpType::MakeTable => Some(ObjType::Table),
-            ReqOpType::MakeList => Some(ObjType::List),
-            ReqOpType::MakeText => Some(ObjType::Text),
+            OpType::MakeMap => Some(ObjType::Map),
+            OpType::MakeTable => Some(ObjType::Table),
+            OpType::MakeList => Some(ObjType::List),
+            OpType::MakeText => Some(ObjType::Text),
             _ => None,
         }
     }
@@ -229,7 +229,7 @@ pub struct ChangeHash(pub [u8; 32]);
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct ChangeRequest {
+pub struct Request {
     pub actor: ActorID,
     pub seq: u64,
     pub version: u64,
@@ -238,13 +238,13 @@ pub struct ChangeRequest {
     pub undoable: bool,
     pub time: Option<i64>,
     pub deps: Option<Vec<ChangeHash>>,
-    pub ops: Option<Vec<OpRequest>>,
-    pub request_type: ChangeRequestType,
+    pub ops: Option<Vec<Op>>,
+    pub request_type: RequestType,
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub enum ChangeRequestType {
+pub enum RequestType {
     Change,
     Undo,
     Redo,

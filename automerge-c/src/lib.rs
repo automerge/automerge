@@ -4,7 +4,7 @@ extern crate libc;
 extern crate serde;
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{ActorID, ChangeRequest};
+use automerge_protocol::{ActorID, Request};
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use std::convert::TryInto;
@@ -133,7 +133,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request: ChangeRequest = serde_json::from_str(&request).unwrap();
+    let request: Request = serde_json::from_str(&request).unwrap();
     let patch = (*backend).apply_local_change(request);
     (*backend).generate_json(patch)
 }

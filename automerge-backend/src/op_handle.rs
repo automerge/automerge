@@ -4,10 +4,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
-use crate::undo_operation::UndoOperation;
-use crate::Change;
 use crate::op::Operation;
 use crate::op_type::OpType;
+use crate::undo_operation::UndoOperation;
+use crate::Change;
 use automerge_protocol::{Key, ObjectID, OpID, Value};
 
 #[derive(Clone)]

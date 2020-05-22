@@ -130,15 +130,15 @@ pub(crate) fn value_to_op_requests(
     key: PathElement,
     v: &Value,
     insert: bool,
-) -> (Vec<amp::OpRequest>, amp::Diff) {
+) -> (Vec<amp::Op>, amp::Diff) {
     match v {
         Value::Sequence(vs, seq_type) => {
             let make_action = match seq_type {
-                SequenceType::List => amp::ReqOpType::MakeList,
-                SequenceType::Text => amp::ReqOpType::MakeText,
+                SequenceType::List => amp::OpType::MakeList,
+                SequenceType::Text => amp::OpType::MakeText,
             };
             let list_id = new_object_id();
-            let make_op = amp::OpRequest {
+            let make_op = amp::Op {
                 action: make_action,
                 obj: parent_object,
                 key: key.to_request_key(),
@@ -147,14 +147,14 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: Vec<(Vec<amp::OpRequest>, amp::Diff)> = vs
+            let child_requests_and_diffs: Vec<(Vec<amp::Op>, amp::Diff)> = vs
                 .iter()
                 .enumerate()
                 .map(|(index, v)| {
                     value_to_op_requests(list_id.clone(), PathElement::Index(index), v, true)
                 })
                 .collect();
-            let child_requests: Vec<amp::OpRequest> = child_requests_and_diffs
+            let child_requests: Vec<amp::Op> = child_requests_and_diffs
                 .iter()
                 .cloned()
                 .flat_map(|(o, _)| o)
@@ -184,11 +184,11 @@ pub(crate) fn value_to_op_requests(
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {
-                MapType::Map => amp::ReqOpType::MakeMap,
-                MapType::Table => amp::ReqOpType::MakeTable,
+                MapType::Map => amp::OpType::MakeMap,
+                MapType::Table => amp::OpType::MakeTable,
             };
             let map_id = new_object_id();
-            let make_op = amp::OpRequest {
+            let make_op = amp::Op {
                 action: make_action,
                 obj: parent_object,
                 key: key.to_request_key(),
@@ -197,7 +197,7 @@ pub(crate) fn value_to_op_requests(
                 datatype: None,
                 insert,
             };
-            let child_requests_and_diffs: HashMap<String, (Vec<amp::OpRequest>, amp::Diff)> = kvs
+            let child_requests_and_diffs: HashMap<String, (Vec<amp::Op>, amp::Diff)> = kvs
                 .iter()
                 .map(|(k, v)| {
                     (
@@ -207,7 +207,7 @@ pub(crate) fn value_to_op_requests(
                 })
                 .collect();
             let mut result = vec![make_op];
-            let child_requests: Vec<amp::OpRequest> = child_requests_and_diffs
+            let child_requests: Vec<amp::Op> = child_requests_and_diffs
                 .iter()
                 .flat_map(|(_, (o, _))| o)
                 .cloned()
@@ -229,8 +229,8 @@ pub(crate) fn value_to_op_requests(
             (result, amp::Diff::Map(child_diff))
         }
         Value::Primitive(prim_value) => {
-            let ops = vec![amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            let ops = vec![amp::Op {
+                action: amp::OpType::Set,
                 obj: parent_object,
                 key: key.to_request_key(),
                 child: None,

@@ -20,19 +20,18 @@ mod concurrent_operations;
 mod encoding;
 mod error;
 mod object_store;
+mod op;
 mod op_handle;
 mod op_set;
+mod op_type;
 mod ordered_set;
 mod pending_diff;
 mod serialize;
 mod time;
 mod undo_operation;
-mod op;
-mod op_type;
 
 pub use backend::Backend;
 pub use change::{Change, UnencodedChange};
-pub use op_type::OpType;
-pub use op::Operation;
 pub use error::AutomergeError;
-
+pub use op::Operation;
+pub use op_type::OpType;

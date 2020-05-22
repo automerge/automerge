@@ -1,9 +1,10 @@
 extern crate automerge_backend;
 use automerge_backend::{Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
+use automerge_protocol as protocol;
 use automerge_protocol::{
-    ActorID, ChangeHash, ChangeRequest, ChangeRequestType, DataType, Diff, DiffEdit, ElementID,
-    MapDiff, ObjType, ObjectID, OpRequest, Patch, ReqOpType, SeqDiff,
+    ActorID, ChangeHash, DataType, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, Op,
+    Patch, Request, RequestType, SeqDiff,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -12,7 +13,7 @@ use std::{collections::HashSet, str::FromStr};
 #[test]
 fn test_apply_local_change() {
     let actor: ActorID = "eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap();
-    let change_request = ChangeRequest {
+    let change_request = Request {
         actor: actor.clone(),
         seq: 1,
         version: 0,
@@ -20,8 +21,8 @@ fn test_apply_local_change() {
         undoable: false,
         time: None,
         deps: None,
-        ops: Some(vec![OpRequest {
-            action: ReqOpType::Set,
+        ops: Some(vec![Op {
+            action: protocol::OpType::Set,
             value: Some("magpie".into()),
             datatype: Some(DataType::Undefined),
             key: "bird".into(),
@@ -29,7 +30,7 @@ fn test_apply_local_change() {
             child: None,
             insert: false,
         }]),
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
     };
 
     let mut backend = Backend::init();
@@ -80,7 +81,7 @@ fn test_apply_local_change() {
 #[test]
 fn test_error_on_duplicate_requests() {
     let actor: ActorID = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
-    let change_request1 = ChangeRequest {
+    let change_request1 = Request {
         actor: actor.clone(),
         seq: 1,
         version: 0,
@@ -88,8 +89,8 @@ fn test_error_on_duplicate_requests() {
         undoable: false,
         time: None,
         deps: None,
-        ops: Some(vec![OpRequest {
-            action: ReqOpType::Set,
+        ops: Some(vec![Op {
+            action: protocol::OpType::Set,
             obj: ObjectID::Root.to_string(),
             key: "bird".into(),
             child: None,
@@ -97,10 +98,10 @@ fn test_error_on_duplicate_requests() {
             datatype: Some(DataType::Undefined),
             insert: false,
         }]),
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
     };
 
-    let change_request2 = ChangeRequest {
+    let change_request2 = Request {
         actor,
         seq: 2,
         version: 0,
@@ -108,8 +109,8 @@ fn test_error_on_duplicate_requests() {
         undoable: false,
         time: None,
         deps: None,
-        ops: Some(vec![OpRequest {
-            action: ReqOpType::Set,
+        ops: Some(vec![Op {
+            action: protocol::OpType::Set,
             obj: ObjectID::Root.to_string(),
             key: "bird".into(),
             value: Some("jay".into()),
@@ -117,7 +118,7 @@ fn test_error_on_duplicate_requests() {
             insert: false,
             datatype: Some(DataType::Undefined),
         }]),
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
     };
     let mut backend = Backend::init();
     backend.apply_local_change(change_request1.clone()).unwrap();
@@ -129,7 +130,7 @@ fn test_error_on_duplicate_requests() {
 #[test]
 fn test_handle_concurrent_frontend_and_backend_changes() {
     let actor: ActorID = "cb55260e9d7e457886a4fc73fd949202".try_into().unwrap();
-    let local1 = ChangeRequest {
+    let local1 = Request {
         actor: actor.clone(),
         seq: 1,
         version: 0,
@@ -137,9 +138,9 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         deps: None,
         message: None,
         undoable: false,
-        request_type: ChangeRequestType::Change,
-        ops: Some(vec![OpRequest {
-            action: ReqOpType::Set,
+        request_type: RequestType::Change,
+        ops: Some(vec![Op {
+            action: protocol::OpType::Set,
             obj: ObjectID::Root.to_string(),
             key: "bird".into(),
             value: Some("magpie".into()),
@@ -149,17 +150,17 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         }]),
     };
 
-    let local2 = ChangeRequest {
+    let local2 = Request {
         actor: actor.clone(),
         seq: 2,
         version: 0,
         time: None,
         deps: None,
         message: None,
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
         undoable: false,
-        ops: Some(vec![OpRequest {
-            action: ReqOpType::Set,
+        ops: Some(vec![Op {
+            action: protocol::OpType::Set,
             obj: ObjectID::Root.to_string(),
             key: "bird".into(),
             value: Some("jay".into()),
@@ -296,7 +297,7 @@ fn test_transform_list_indexes_into_element_ids() {
     }
     .encode();
 
-    let local1 = ChangeRequest {
+    let local1 = Request {
         actor: actor.clone(),
         seq: 1,
         version: 1,
@@ -304,10 +305,10 @@ fn test_transform_list_indexes_into_element_ids() {
         time: None,
         deps: None,
         undoable: false,
-        request_type: ChangeRequestType::Change,
-        ops: Some(vec![OpRequest {
+        request_type: RequestType::Change,
+        ops: Some(vec![Op {
             obj: "1@9ba21574dc44411b8ce37bc6037a9687".into(),
-            action: ReqOpType::Set,
+            action: protocol::OpType::Set,
             value: Some("goldfinch".into()),
             key: 0.into(),
             datatype: Some(DataType::Undefined),
@@ -315,7 +316,7 @@ fn test_transform_list_indexes_into_element_ids() {
             child: None,
         }]),
     };
-    let local2 = ChangeRequest {
+    let local2 = Request {
         actor: actor.clone(),
         seq: 2,
         version: 1,
@@ -323,10 +324,10 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: None,
         time: None,
         undoable: false,
-        request_type: ChangeRequestType::Change,
-        ops: Some(vec![OpRequest {
+        request_type: RequestType::Change,
+        ops: Some(vec![Op {
             obj: "1@9ba21574dc44411b8ce37bc6037a9687".into(),
-            action: ReqOpType::Set,
+            action: protocol::OpType::Set,
             value: Some("wagtail".into()),
             key: 1.into(),
             insert: true,
@@ -335,7 +336,7 @@ fn test_transform_list_indexes_into_element_ids() {
         }]),
     };
 
-    let local3 = ChangeRequest {
+    let local3 = Request {
         actor: actor.clone(),
         seq: 3,
         version: 4,
@@ -343,20 +344,20 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: None,
         time: None,
         undoable: false,
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
         ops: Some(vec![
-            OpRequest {
+            Op {
                 obj: "1@9ba21574dc44411b8ce37bc6037a9687".into(),
-                action: ReqOpType::Set,
+                action: protocol::OpType::Set,
                 key: 0.into(),
                 value: Some("Magpie".into()),
                 insert: false,
                 child: None,
                 datatype: Some(DataType::Undefined),
             },
-            OpRequest {
+            Op {
                 obj: "1@9ba21574dc44411b8ce37bc6037a9687".into(),
-                action: ReqOpType::Set,
+                action: protocol::OpType::Set,
                 key: 1.into(),
                 value: Some("Goldfinch".into()),
                 child: None,
@@ -458,18 +459,18 @@ fn test_transform_list_indexes_into_element_ids() {
 #[test]
 fn test_handle_list_insertion_and_deletion_in_same_change() {
     let actor: ActorID = "0723d2a1940744868ffd6b294ada813f".try_into().unwrap();
-    let local1 = ChangeRequest {
+    let local1 = Request {
         actor: actor.clone(),
         seq: 1,
         version: 0,
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
         message: None,
         time: None,
         undoable: false,
         deps: None,
-        ops: Some(vec![OpRequest {
+        ops: Some(vec![Op {
             obj: ObjectID::Root.to_string(),
-            action: ReqOpType::MakeList,
+            action: protocol::OpType::MakeList,
             key: "birds".into(),
             child: None,
             datatype: None,
@@ -478,28 +479,28 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         }]),
     };
 
-    let local2 = ChangeRequest {
+    let local2 = Request {
         actor: actor.clone(),
         seq: 2,
         version: 0,
-        request_type: ChangeRequestType::Change,
+        request_type: RequestType::Change,
         message: None,
         time: None,
         undoable: false,
         deps: None,
         ops: Some(vec![
-            OpRequest {
+            Op {
                 obj: "1@0723d2a1940744868ffd6b294ada813f".into(),
-                action: ReqOpType::Set,
+                action: protocol::OpType::Set,
                 key: 0.into(),
                 insert: true,
                 value: Some("magpie".into()),
                 child: None,
                 datatype: Some(DataType::Undefined),
             },
-            OpRequest {
+            Op {
                 obj: "1@0723d2a1940744868ffd6b294ada813f".into(),
-                action: ReqOpType::Del,
+                action: protocol::OpType::Del,
                 key: 0.into(),
                 child: None,
                 insert: false,

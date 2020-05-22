@@ -1,18 +1,16 @@
 use crate::actor_map::ActorMap;
 use crate::error::AutomergeError;
+use crate::op::Operation;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
+use crate::op_type::OpType;
 use crate::ordered_set::{OrdDelta, OrderedSet};
 use crate::pending_diff::PendingDiff;
 use crate::time;
 use crate::undo_operation::UndoOperation;
-use crate::op::Operation;
-use crate::op_type::OpType;
 use crate::{Change, UnencodedChange};
-use automerge_protocol::{
-    ActorID, ChangeHash, ChangeRequest, ChangeRequestType, Diff, Key, ObjType, ObjectID, OpID,
-    OpRequest, Patch, ReqOpType, RequestKey, Value,
-};
+use automerge_protocol as amp;
+use automerge_protocol::{ActorID, Key, ObjType, ObjectID, OpID};
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -28,8 +26,8 @@ pub struct Backend {
     actors: ActorMap,
     obj_alias: HashMap<String, ObjectID>,
     undo_pos: usize,
-    hashes: HashMap<ChangeHash, Rc<Change>>,
-    history: Vec<ChangeHash>,
+    hashes: HashMap<amp::ChangeHash, Rc<Change>>,
+    history: Vec<amp::ChangeHash>,
     pub undo_stack: Vec<Vec<UndoOperation>>,
     pub redo_stack: Vec<Vec<UndoOperation>>,
 }
@@ -69,7 +67,7 @@ impl Backend {
 
     fn process_request(
         &mut self,
-        request: &ChangeRequest,
+        request: &amp::Request,
         op_set: Rc<OpSet>,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
@@ -124,19 +122,19 @@ impl Backend {
                 let key = resolve_key(rop, &id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
-                    ReqOpType::MakeMap => OpType::Make(ObjType::Map),
-                    ReqOpType::MakeTable => OpType::Make(ObjType::Table),
-                    ReqOpType::MakeList => OpType::Make(ObjType::List),
-                    ReqOpType::MakeText => OpType::Make(ObjType::Text),
-                    ReqOpType::Del => OpType::Del,
-                    ReqOpType::Link => OpType::Link(
+                    amp::OpType::MakeMap => OpType::Make(ObjType::Map),
+                    amp::OpType::MakeTable => OpType::Make(ObjType::Table),
+                    amp::OpType::MakeList => OpType::Make(ObjType::List),
+                    amp::OpType::MakeText => OpType::Make(ObjType::Text),
+                    amp::OpType::Del => OpType::Del,
+                    amp::OpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
                     ),
-                    ReqOpType::Inc => OpType::Inc(
+                    amp::OpType::Inc => OpType::Inc(
                         rop.to_i64()
                             .ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?,
                     ),
-                    ReqOpType::Set => OpType::Set(rop.primitive_value()),
+                    amp::OpType::Set => OpType::Set(rop.primitive_value()),
                 };
 
                 let op = Operation {
@@ -172,12 +170,12 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Option<Diff>,
-        request: Option<&ChangeRequest>,
-    ) -> Result<Patch, AutomergeError> {
+        diffs: Option<amp::Diff>,
+        request: Option<&amp::Request>,
+    ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = self.op_set.deps.iter().cloned().collect();
         deps.sort_unstable();
-        Ok(Patch {
+        Ok(amp::Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
             can_undo: self.can_undo(),
             can_redo: self.can_redo(),
@@ -195,7 +193,7 @@ impl Backend {
 
     fn undo(
         &mut self,
-        request: &ChangeRequest,
+        request: &amp::Request,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
         let undo_pos = self.undo_pos;
@@ -242,7 +240,7 @@ impl Backend {
 
     fn redo(
         &mut self,
-        request: &ChangeRequest,
+        request: &amp::Request,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
         let mut redo_ops = self.redo_stack.pop().ok_or(AutomergeError::NoRedo)?;
@@ -280,7 +278,10 @@ impl Backend {
         Ok(())
     }
 
-    pub fn apply_changes(&mut self, mut changes: Vec<Change>) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        mut changes: Vec<Change>,
+    ) -> Result<amp::Patch, AutomergeError> {
         let op_set = Some(self.op_set.clone());
 
         self.versions.iter_mut().for_each(|v| {
@@ -316,10 +317,10 @@ impl Backend {
     fn apply(
         &mut self,
         mut changes: Vec<Rc<Change>>,
-        request: Option<&ChangeRequest>,
+        request: Option<&amp::Request>,
         undoable: bool,
         incremental: bool,
-    ) -> Result<Patch, AutomergeError> {
+    ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
         for change in changes.drain(..) {
@@ -351,8 +352,8 @@ impl Backend {
 
     pub fn apply_local_change(
         &mut self,
-        mut request: ChangeRequest,
-    ) -> Result<Patch, AutomergeError> {
+        mut request: amp::Request,
+    ) -> Result<amp::Patch, AutomergeError> {
         self.check_for_duplicate(&request)?; // Change has already been applied
 
         let ver = self.get_version(request.version)?;
@@ -363,12 +364,12 @@ impl Backend {
 
         let start_op = ver.max_op + 1;
         let change = match request.request_type {
-            ChangeRequestType::Change => self.process_request(&request, ver, start_op)?,
-            ChangeRequestType::Undo => self.undo(&request, start_op)?,
-            ChangeRequestType::Redo => self.redo(&request, start_op)?,
+            amp::RequestType::Change => self.process_request(&request, ver, start_op)?,
+            amp::RequestType::Undo => self.undo(&request, start_op)?,
+            amp::RequestType::Redo => self.redo(&request, start_op)?,
         };
 
-        let undoable = request.request_type == ChangeRequestType::Change && request.undoable;
+        let undoable = request.request_type == amp::RequestType::Change && request.undoable;
 
         let patch = self.apply(vec![change.clone()], Some(&request), undoable, true)?;
 
@@ -377,7 +378,7 @@ impl Backend {
         Ok(patch)
     }
 
-    fn check_for_duplicate(&self, request: &ChangeRequest) -> Result<(), AutomergeError> {
+    fn check_for_duplicate(&self, request: &amp::Request) -> Result<(), AutomergeError> {
         if self
             .states
             .get(&request.actor)
@@ -492,7 +493,7 @@ impl Backend {
         Ok(())
     }
 
-    pub fn get_patch(&self) -> Result<Patch, AutomergeError> {
+    pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
         let diffs = self
             .op_set
             .construct_object(&ObjectID::Root, &self.actors)?;
@@ -510,7 +511,7 @@ impl Backend {
             .unwrap_or_default())
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -552,7 +553,7 @@ impl Backend {
         Ok(backend)
     }
 
-    pub fn get_missing_deps(&self) -> Vec<ChangeHash> {
+    pub fn get_missing_deps(&self) -> Vec<amp::ChangeHash> {
         let in_queue: Vec<_> = self.queue.iter().map(|change| &change.hash).collect();
         self.queue
             .iter()
@@ -576,16 +577,16 @@ struct Version {
 }
 
 fn resolve_key(
-    rop: &OpRequest,
+    rop: &amp::Op,
     id: &OpID,
     ids: &mut dyn OrderedSet<OpID>,
 ) -> Result<Key, AutomergeError> {
     let key = &rop.key;
     let insert = rop.insert;
-    let del = rop.action == ReqOpType::Del;
+    let del = rop.action == amp::OpType::Del;
     match key {
-        RequestKey::Str(s) => Ok(Key::Map(s.clone())),
-        RequestKey::Num(n) => {
+        amp::RequestKey::Str(s) => Ok(Key::Map(s.clone())),
+        amp::RequestKey::Num(n) => {
             let n: usize = *n as usize;
             (if insert {
                 if n == 0 {
@@ -641,8 +642,8 @@ impl OpExt for Operation {
     fn merge(&mut self, other: Operation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {
-                OpType::Set(Value::Counter(number)) => {
-                    self.action = OpType::Set(Value::Counter(number + delta))
+                OpType::Set(amp::Value::Counter(number)) => {
+                    self.action = OpType::Set(amp::Value::Counter(number + delta))
                 }
                 OpType::Inc(number) => self.action = OpType::Inc(number + delta),
                 _ => {}

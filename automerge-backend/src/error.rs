@@ -1,4 +1,4 @@
-use automerge_protocol::{ObjectID, OpID, OpRequest};
+use automerge_protocol::{ObjectID, Op, OpID};
 use std::error::Error;
 use std::fmt;
 
@@ -19,7 +19,7 @@ pub enum AutomergeError {
     NoUndo,
     MissingValue,
     GeneralError(String),
-    MissingNumberValue(OpRequest),
+    MissingNumberValue(Op),
     UnknownVersion(u64),
     DuplicateChange(String),
     DivergedState(String),
