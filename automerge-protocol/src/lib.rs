@@ -17,6 +17,10 @@ impl ActorID {
         self.0.clone()
     }
 
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> ActorID {
         ActorID(bytes.to_vec())
     }
@@ -286,26 +290,26 @@ pub enum Diff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MapDiff {
-    pub object_id: String,
+    pub object_id: ObjectID,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
-    pub props: HashMap<String, HashMap<String, Diff>>,
+    pub props: HashMap<String, HashMap<OpID, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SeqDiff {
-    pub object_id: String,
+    pub object_id: ObjectID,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
     pub edits: Vec<DiffEdit>,
-    pub props: HashMap<usize, HashMap<String, Diff>>,
+    pub props: HashMap<usize, HashMap<OpID, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjDiff {
-    pub object_id: String,
+    pub object_id: ObjectID,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
 }

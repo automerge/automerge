@@ -64,6 +64,27 @@ impl Operation {
         }
     }
 
+    pub(crate) fn can_merge(&self, other: &Operation) -> bool {
+        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
+    }
+
+    pub(crate) fn merge(&mut self, other: Operation) {
+        if let OpType::Inc(delta) = other.action {
+            match self.action {
+                OpType::Set(amp::Value::Counter(number)) => {
+                    self.action = OpType::Set(amp::Value::Counter(number + delta))
+                }
+                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
+                _ => {}
+            } // error?
+        } else {
+            match other.action {
+                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
+                _ => {}
+            }
+        }
+    }
+
     pub fn inc(obj: amp::ObjectID, key: amp::Key, value: i64, pred: Vec<amp::OpID>) -> Operation {
         Operation {
             action: OpType::Inc(value),

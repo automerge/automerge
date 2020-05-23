@@ -1,3 +1,4 @@
+use crate::internal::Key;
 use crate::op_handle::OpHandle;
 use automerge_protocol as amp;
 
@@ -9,7 +10,7 @@ pub(crate) enum PendingDiff {
 }
 
 impl PendingDiff {
-    pub fn operation_key(&self) -> amp::Key {
+    pub fn operation_key(&self) -> Key {
         match self {
             Self::SeqInsert(op, _) => op.operation_key(),
             Self::SeqRemove(op, _) => op.operation_key(),

@@ -1,5 +1,5 @@
 use super::read_field;
-use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, SeqDiff, Value};
+use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff, Value};
 use serde::{
     de,
     de::{Error, MapAccess, Unexpected},
@@ -61,9 +61,9 @@ impl<'de> Deserialize<'de> for Diff {
                 V: MapAccess<'de>,
             {
                 let mut edits: Option<Vec<DiffEdit>> = None;
-                let mut object_id: Option<String> = None;
+                let mut object_id: Option<ObjectID> = None;
                 let mut obj_type: Option<ObjType> = None;
-                let mut props: Option<HashMap<String, HashMap<String, Diff>>> = None;
+                let mut props: Option<HashMap<String, HashMap<OpID, Diff>>> = None;
                 let mut value: Option<Value> = None;
                 let mut datatype: Option<DataType> = None;
 

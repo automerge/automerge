@@ -4,7 +4,7 @@ use std::fmt;
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeError {
-    MissingObjectError(amp::ObjectID),
+    MissingObjectError,
     MissingIndex(amp::OpID),
     MissingChildID(String),
     MissingElement(amp::ObjectID, amp::OpID),
