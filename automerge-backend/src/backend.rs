@@ -10,7 +10,6 @@ use crate::time;
 use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
-use automerge_protocol::{ActorID, Key, ObjType, ObjectID, OpID};
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -22,9 +21,9 @@ pub struct Backend {
     versions: Vec<Version>,
     queue: Vec<Rc<Change>>,
     op_set: Rc<OpSet>,
-    states: HashMap<ActorID, Vec<Rc<Change>>>,
+    states: HashMap<amp::ActorID, Vec<Rc<Change>>>,
     actors: ActorMap,
-    obj_alias: HashMap<String, ObjectID>,
+    obj_alias: HashMap<String, amp::ObjectID>,
     undo_pos: usize,
     hashes: HashMap<amp::ChangeHash, Rc<Change>>,
     history: Vec<amp::ChangeHash>,
@@ -56,8 +55,8 @@ impl Backend {
         }
     }
 
-    fn str_to_object(&self, name: &str) -> Result<ObjectID, AutomergeError> {
-        ObjectID::from_str(name).or_else(|_| {
+    fn str_to_object(&self, name: &str) -> Result<amp::ObjectID, AutomergeError> {
+        amp::ObjectID::from_str(name).or_else(|_| {
             self.obj_alias
                 .get(name)
                 .cloned()
@@ -76,17 +75,18 @@ impl Backend {
         let mut operations: Vec<Operation> = Vec::new();
         // this is a local cache of elemids that I can manipulate as i insert and edit so the
         // index's stay consistent as I walk through the ops
-        let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
+        let mut elemid_cache: HashMap<amp::ObjectID, Box<dyn OrderedSet<amp::OpID>>> =
+            HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
-                let id = OpID::new(start_op + (operations.len() as u64), &actor_id);
+                let id = amp::OpID::new(start_op + (operations.len() as u64), &actor_id);
                 let insert = rop.insert;
                 let object_id = self.str_to_object(&rop.obj)?;
 
                 let child = match &rop.child {
                     Some(child) => {
                         self.obj_alias
-                            .insert(child.clone(), ObjectID::ID(id.clone()));
+                            .insert(child.clone(), amp::ObjectID::ID(id.clone()));
                         Some(self.str_to_object(&child)?)
                     }
                     None => None,
@@ -117,15 +117,15 @@ impl Backend {
                         ))
                     }
                 });
-                let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
+                let elemids2: &mut dyn OrderedSet<amp::OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
 
                 let key = resolve_key(rop, &id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
-                    amp::OpType::MakeMap => OpType::Make(ObjType::Map),
-                    amp::OpType::MakeTable => OpType::Make(ObjType::Table),
-                    amp::OpType::MakeList => OpType::Make(ObjType::List),
-                    amp::OpType::MakeText => OpType::Make(ObjType::Text),
+                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map),
+                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::Table),
+                    amp::OpType::MakeList => OpType::Make(amp::ObjType::List),
+                    amp::OpType::MakeText => OpType::Make(amp::ObjType::Text),
                     amp::OpType::Del => OpType::Del,
                     amp::OpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
@@ -400,7 +400,7 @@ impl Backend {
         change: Rc<Change>,
         local: bool,
         undoable: bool,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<amp::ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, undoable, diffs)
@@ -412,7 +412,7 @@ impl Backend {
 
     fn apply_queued_ops(
         &mut self,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<amp::ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, false, diffs)?;
@@ -424,7 +424,7 @@ impl Backend {
         &mut self,
         change: Rc<Change>,
         undoable: bool,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<amp::ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if self.hashes.contains_key(&change.hash) {
             return Ok(());
@@ -497,13 +497,13 @@ impl Backend {
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
         let diffs = self
             .op_set
-            .construct_object(&ObjectID::Root, &self.actors)?;
+            .construct_object(&amp::ObjectID::Root, &self.actors)?;
         self.make_patch(Some(diffs), None)
     }
 
     pub fn get_changes_for_actor_id(
         &self,
-        actor_id: &ActorID,
+        actor_id: &amp::ActorID,
     ) -> Result<Vec<&Change>, AutomergeError> {
         Ok(self
             .states
@@ -579,20 +579,20 @@ struct Version {
 
 fn resolve_key(
     rop: &amp::Op,
-    id: &OpID,
-    ids: &mut dyn OrderedSet<OpID>,
-) -> Result<Key, AutomergeError> {
+    id: &amp::OpID,
+    ids: &mut dyn OrderedSet<amp::OpID>,
+) -> Result<amp::Key, AutomergeError> {
     let key = &rop.key;
     let insert = rop.insert;
     let del = rop.action == amp::OpType::Del;
     match key {
-        amp::RequestKey::Str(s) => Ok(Key::Map(s.clone())),
+        amp::RequestKey::Str(s) => Ok(amp::Key::Map(s.clone())),
         amp::RequestKey::Num(n) => {
             let n: usize = *n as usize;
             (if insert {
                 if n == 0 {
                     ids.insert_index(0, id.clone());
-                    Some(Key::head())
+                    Some(amp::Key::head())
                 } else {
                     ids.insert_index(n, id.clone());
                     ids.key_of(n - 1).map(|i| i.into())

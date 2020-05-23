@@ -1,6 +1,6 @@
 use crate::op_type::OpType;
 use crate::undo_operation::UndoOperation;
-use automerge_protocol::{DataType, Value};
+use automerge_protocol as amp;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
@@ -12,8 +12,8 @@ impl Serialize for UndoOperation {
         let mut fields = 4;
 
         match &self.action {
-            OpType::Set(Value::Counter(_)) => fields += 2,
-            OpType::Set(Value::Timestamp(_)) => fields += 2,
+            OpType::Set(amp::Value::Counter(_)) => fields += 2,
+            OpType::Set(amp::Value::Timestamp(_)) => fields += 2,
             OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
@@ -26,13 +26,13 @@ impl Serialize for UndoOperation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(Value::Timestamp(value)) => {
+            OpType::Set(amp::Value::Timestamp(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Timestamp)?;
+                op.serialize_field("datatype", &amp::DataType::Timestamp)?;
             }
-            OpType::Set(Value::Counter(value)) => {
+            OpType::Set(amp::Value::Counter(value)) => {
                 op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Counter)?;
+                op.serialize_field("datatype", &amp::DataType::Counter)?;
             }
             OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}

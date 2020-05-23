@@ -2,7 +2,7 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::op::Operation;
 use crate::op_type::OpType;
-use automerge_protocol::{ActorID, ElementID, Key, ObjType, ObjectID, OpID, Value};
+use automerge_protocol as amp;
 use core::fmt::Debug;
 use std::io;
 use std::io::{Read, Write};
@@ -14,7 +14,7 @@ impl Encodable for Action {
     }
 }
 
-impl Encodable for [ActorID] {
+impl Encodable for [amp::ActorID] {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = self.len().encode(buf)?;
         for i in self {
@@ -24,7 +24,7 @@ impl Encodable for [ActorID] {
     }
 }
 
-fn map_actor(actor: &ActorID, actors: &mut Vec<ActorID>) -> usize {
+fn map_actor(actor: &amp::ActorID, actors: &mut Vec<amp::ActorID>) -> usize {
     if let Some(pos) = actors.iter().position(|a| a == actor) {
         pos
     } else {
@@ -33,11 +33,11 @@ fn map_actor(actor: &ActorID, actors: &mut Vec<ActorID>) -> usize {
     }
 }
 
-impl Encodable for ActorID {
+impl Encodable for amp::ActorID {
     fn encode_with_actors<R: Write>(
         &self,
         buf: &mut R,
-        actors: &mut Vec<ActorID>,
+        actors: &mut Vec<amp::ActorID>,
     ) -> io::Result<usize> {
         map_actor(self, actors).encode(buf)
     }
@@ -69,20 +69,20 @@ pub struct OperationIterator<'a> {
 
 pub struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
-    pub(crate) actors: &'a Vec<ActorID>,
+    pub(crate) actors: &'a Vec<amp::ActorID>,
     pub(crate) actor: RLEDecoder<'a, usize>,
     pub(crate) ctr: RLEDecoder<'a, u64>,
 }
 
 pub struct PredIterator<'a> {
-    pub(crate) actors: &'a Vec<ActorID>,
+    pub(crate) actors: &'a Vec<amp::ActorID>,
     pub(crate) pred_num: RLEDecoder<'a, usize>,
     pub(crate) pred_actor: RLEDecoder<'a, usize>,
     pub(crate) pred_ctr: DeltaDecoder<'a>,
 }
 
 pub struct KeyIterator<'a> {
-    pub(crate) actors: &'a Vec<ActorID>,
+    pub(crate) actors: &'a Vec<amp::ActorID>,
     pub(crate) actor: RLEDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
     pub(crate) str: RLEDecoder<'a, String>,
@@ -94,15 +94,15 @@ pub struct ValueIterator<'a> {
 }
 
 impl<'a> Iterator for PredIterator<'a> {
-    type Item = Vec<OpID>;
-    fn next(&mut self) -> Option<Vec<OpID>> {
+    type Item = Vec<amp::OpID>;
+    fn next(&mut self) -> Option<Vec<amp::OpID>> {
         let num = self.pred_num.next()??;
         let mut p = Vec::with_capacity(num);
         for _ in 0..num {
             let actor = self.pred_actor.next()??;
             let ctr = self.pred_ctr.next()??;
             let actor_id = self.actors.get(actor)?.clone();
-            let op_id = OpID::new(ctr, &actor_id);
+            let op_id = amp::OpID::new(ctr, &actor_id);
             p.push(op_id)
         }
         Some(p)
@@ -110,20 +110,20 @@ impl<'a> Iterator for PredIterator<'a> {
 }
 
 impl<'a> Iterator for ValueIterator<'a> {
-    type Item = Value;
-    fn next(&mut self) -> Option<Value> {
+    type Item = amp::Value;
+    fn next(&mut self) -> Option<amp::Value> {
         let val_type = self.val_len.next()??;
         match val_type {
-            VALUE_TYPE_NULL => Some(Value::Null),
-            VALUE_TYPE_FALSE => Some(Value::Boolean(false)),
-            VALUE_TYPE_TRUE => Some(Value::Boolean(true)),
+            VALUE_TYPE_NULL => Some(amp::Value::Null),
+            VALUE_TYPE_FALSE => Some(amp::Value::Boolean(false)),
+            VALUE_TYPE_TRUE => Some(amp::Value::Boolean(true)),
             v if v % 16 == VALUE_TYPE_COUNTER => {
                 let len = v >> 4;
                 let val = self.val_raw.read().ok()?;
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(Value::Counter(val))
+                Some(amp::Value::Counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
                 let len = v >> 4;
@@ -131,7 +131,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(Value::Timestamp(val))
+                Some(amp::Value::Timestamp(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_UINT => {
                 let len = v >> 4;
@@ -139,7 +139,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(Value::Uint(val))
+                Some(amp::Value::Uint(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_INT => {
                 let len = v >> 4;
@@ -147,36 +147,36 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(Value::Int(val))
+                Some(amp::Value::Int(val))
             }
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(&data).ok()?;
-                Some(Value::Str(s.to_string()))
+                Some(amp::Value::Str(s.to_string()))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
                 let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
-                //Some((Value::Bytes(data))
+                //Some((amp::Value::Bytes(data))
             }
             v if v % 16 >= VALUE_TYPE_MIN_UNKNOWN && v % 16 <= VALUE_TYPE_MAX_UNKNOWN => {
                 let len = v >> 4;
                 let _data = self.val_raw.read_bytes(len).ok()?;
                 unimplemented!()
-                //Some((Value::Bytes(data))
+                //Some((amp::Value::Bytes(data))
             }
             v if v % 16 == VALUE_TYPE_IEEE754 => {
                 let len = v >> 4;
                 if len == 4 {
                     // confirm only 4 bytes read
                     let num: f32 = self.val_raw.read().ok()?;
-                    Some(Value::F32(num))
+                    Some(amp::Value::F32(num))
                 } else if len == 8 {
                     // confirm only 8 bytes read
                     let num = self.val_raw.read().ok()?;
-                    Some(Value::F64(num))
+                    Some(amp::Value::F64(num))
                 } else {
                     // bad size of float
                     None
@@ -191,14 +191,14 @@ impl<'a> Iterator for ValueIterator<'a> {
 }
 
 impl<'a> Iterator for KeyIterator<'a> {
-    type Item = Key;
-    fn next(&mut self) -> Option<Key> {
+    type Item = amp::Key;
+    fn next(&mut self) -> Option<amp::Key> {
         match (self.actor.next()?, self.ctr.next()?, self.str.next()?) {
-            (None, None, Some(string)) => Some(Key::Map(string)),
-            (Some(0), Some(0), None) => Some(Key::head()),
+            (None, None, Some(string)) => Some(amp::Key::Map(string)),
+            (Some(0), Some(0), None) => Some(amp::Key::head()),
             (Some(actor), Some(ctr), None) => {
                 let actor_id = self.actors.get(actor)?;
-                Some(OpID::new(ctr, actor_id).into())
+                Some(amp::OpID::new(ctr, actor_id).into())
             }
             _ => None,
         }
@@ -206,13 +206,13 @@ impl<'a> Iterator for KeyIterator<'a> {
 }
 
 impl<'a> Iterator for ObjIterator<'a> {
-    type Item = ObjectID;
-    fn next(&mut self) -> Option<ObjectID> {
+    type Item = amp::ObjectID;
+    fn next(&mut self) -> Option<amp::ObjectID> {
         if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
             let actor_id = self.actors.get(actor)?;
-            Some(ObjectID::ID(OpID::new(ctr, &actor_id)))
+            Some(amp::ObjectID::ID(amp::OpID::new(ctr, &actor_id)))
         } else {
-            Some(ObjectID::Root)
+            Some(amp::ObjectID::Root)
         }
     }
 }
@@ -229,10 +229,10 @@ impl<'a> Iterator for OperationIterator<'a> {
         let child = self.chld.next()?;
         let action = match action {
             Action::Set => OpType::Set(value),
-            Action::MakeList => OpType::Make(ObjType::List),
-            Action::MakeText => OpType::Make(ObjType::Text),
-            Action::MakeMap => OpType::Make(ObjType::Map),
-            Action::MakeTable => OpType::Make(ObjType::Table),
+            Action::MakeList => OpType::Make(amp::ObjType::List),
+            Action::MakeText => OpType::Make(amp::ObjType::Text),
+            Action::MakeMap => OpType::Make(amp::ObjType::Map),
+            Action::MakeTable => OpType::Make(amp::ObjType::Table),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
             Action::Link => OpType::Link(child),
@@ -260,49 +260,49 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &Value) {
+    fn append_value(&mut self, val: &amp::Value) {
         match val {
-            Value::Null => self.len.append_value(VALUE_TYPE_NULL),
-            Value::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
-            Value::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            Value::Str(s) => {
+            amp::Value::Null => self.len.append_value(VALUE_TYPE_NULL),
+            amp::Value::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
+            amp::Value::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            amp::Value::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8)
             }
             /*
-            Value::Bytes(bytes) => {
+            amp::Value::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES)
             },
             */
-            Value::Counter(count) => {
+            amp::Value::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER)
             }
-            Value::Timestamp(time) => {
+            amp::Value::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP)
             }
-            Value::Int(n) => {
+            amp::Value::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
             }
-            Value::Uint(n) => {
+            amp::Value::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
             }
-            Value::F32(n) => {
+            amp::Value::F32(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             }
-            Value::F64(n) => {
+            amp::Value::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             } /*
-              Value::Unknown(num,bytes) => {
+              amp::Value::Unknown(num,bytes) => {
                   let len = bytes.len();
                   self.raw.extend(bytes);
                   self.len.append_value(len << 4 | num)
@@ -341,19 +341,19 @@ impl KeyEncoder {
         }
     }
 
-    fn append(&mut self, key: &Key, actors: &mut Vec<ActorID>) {
+    fn append(&mut self, key: &amp::Key, actors: &mut Vec<amp::ActorID>) {
         match &key {
-            Key::Map(s) => {
+            amp::Key::Map(s) => {
                 self.actor.append_null();
                 self.ctr.append_null();
                 self.str.append_value(s.clone());
             }
-            Key::Seq(ElementID::Head) => {
+            amp::Key::Seq(amp::ElementID::Head) => {
                 self.actor.append_value(0);
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Key::Seq(ElementID::ID(OpID(ctr, actor))) => {
+            amp::Key::Seq(amp::ElementID::ID(amp::OpID(ctr, actor))) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
                 self.str.append_null();
@@ -385,7 +385,7 @@ impl PredEncoder {
         }
     }
 
-    fn append(&mut self, pred: &[OpID], actors: &mut Vec<ActorID>) {
+    fn append(&mut self, pred: &[amp::OpID], actors: &mut Vec<amp::ActorID>) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
@@ -415,13 +415,13 @@ impl ObjEncoder {
         }
     }
 
-    fn append(&mut self, obj: &ObjectID, actors: &mut Vec<ActorID>) {
+    fn append(&mut self, obj: &amp::ObjectID, actors: &mut Vec<amp::ActorID>) {
         match obj {
-            ObjectID::Root => {
+            amp::ObjectID::Root => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
-            ObjectID::ID(OpID(ctr, actor)) => {
+            amp::ObjectID::ID(amp::OpID(ctr, actor)) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
             }
@@ -454,10 +454,10 @@ impl ChildEncoder {
         self.ctr.append_null();
     }
 
-    fn append(&mut self, obj: &ObjectID, actors: &mut Vec<ActorID>) {
+    fn append(&mut self, obj: &amp::ObjectID, actors: &mut Vec<amp::ActorID>) {
         match obj {
-            ObjectID::Root => self.append_null(),
-            ObjectID::ID(OpID(ctr, actor)) => {
+            amp::ObjectID::Root => self.append_null(),
+            amp::ObjectID::ID(amp::OpID(ctr, actor)) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
             }
@@ -483,7 +483,7 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops(ops: &[Operation], actors: &mut Vec<ActorID>) -> Vec<u8> {
+    pub fn encode_ops(ops: &[Operation], actors: &mut Vec<amp::ActorID>) -> Vec<u8> {
         let mut e = Self::new();
         e.encode(ops, actors);
         e.finish()
@@ -501,13 +501,13 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode(&mut self, ops: &[Operation], actors: &mut Vec<ActorID>) {
+    fn encode(&mut self, ops: &[Operation], actors: &mut Vec<amp::ActorID>) {
         for op in ops {
             self.append(op, actors)
         }
     }
 
-    fn append(&mut self, op: &Operation, actors: &mut Vec<ActorID>) {
+    fn append(&mut self, op: &Operation, actors: &mut Vec<amp::ActorID>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
@@ -519,7 +519,7 @@ impl ColumnEncoder {
                 Action::Set
             }
             OpType::Inc(val) => {
-                self.val.append_value(&Value::Int(*val));
+                self.val.append_value(&amp::Value::Int(*val));
                 self.chld.append_null();
                 Action::Inc
             }
@@ -537,10 +537,10 @@ impl ColumnEncoder {
                 self.val.append_null();
                 self.chld.append_null();
                 match kind {
-                    ObjType::List => Action::MakeList,
-                    ObjType::Map => Action::MakeMap,
-                    ObjType::Table => Action::MakeTable,
-                    ObjType::Text => Action::MakeText,
+                    amp::ObjType::List => Action::MakeList,
+                    amp::ObjType::Map => Action::MakeMap,
+                    amp::ObjType::Table => Action::MakeTable,
+                    amp::ObjType::Text => Action::MakeText,
                 }
             }
         };

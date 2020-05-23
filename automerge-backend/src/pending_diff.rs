@@ -1,5 +1,5 @@
 use crate::op_handle::OpHandle;
-use automerge_protocol::{DiffEdit, Key};
+use automerge_protocol as amp;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {
@@ -9,7 +9,7 @@ pub(crate) enum PendingDiff {
 }
 
 impl PendingDiff {
-    pub fn operation_key(&self) -> Key {
+    pub fn operation_key(&self) -> amp::Key {
         match self {
             Self::SeqInsert(op, _) => op.operation_key(),
             Self::SeqRemove(op, _) => op.operation_key(),
@@ -17,10 +17,10 @@ impl PendingDiff {
         }
     }
 
-    pub fn edit(&self) -> Option<DiffEdit> {
+    pub fn edit(&self) -> Option<amp::DiffEdit> {
         match *self {
-            Self::SeqInsert(_, index) => Some(DiffEdit::Insert { index }),
-            Self::SeqRemove(_, index) => Some(DiffEdit::Remove { index }),
+            Self::SeqInsert(_, index) => Some(amp::DiffEdit::Insert { index }),
+            Self::SeqRemove(_, index) => Some(amp::DiffEdit::Remove { index }),
             _ => None,
         }
     }

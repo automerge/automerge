@@ -8,11 +8,11 @@ use crate::op::Operation;
 use crate::op_type::OpType;
 use crate::undo_operation::UndoOperation;
 use crate::Change;
-use automerge_protocol::{Key, ObjectID, OpID, Value};
+use automerge_protocol as amp;
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
-    pub id: OpID,
+    pub id: amp::OpID,
     op: Operation,
     //change: Rc<Change>,
     //index: usize,
@@ -26,7 +26,7 @@ impl OpHandle {
             //            .iter()
             .enumerate()
             .map(|(index, op)| {
-                let id = OpID::new(change.start_op + (index as u64), &change.actor_id());
+                let id = amp::OpID::new(change.start_op + (index as u64), &change.actor_id());
                 OpHandle {
                     id,
                     op,
@@ -58,7 +58,7 @@ impl OpHandle {
         }
     }
 
-    pub fn invert(&self, field_key: &Key) -> UndoOperation {
+    pub fn invert(&self, field_key: &amp::Key) -> UndoOperation {
         let base_op = &self.op;
         let mut action = base_op.action.clone();
         let mut key = &base_op.key;
@@ -66,9 +66,9 @@ impl OpHandle {
             key = field_key
         }
         if let OpType::Make(_) = base_op.action {
-            action = OpType::Link(ObjectID::from(&self.id));
+            action = OpType::Link(amp::ObjectID::from(&self.id));
         }
-        if let OpType::Set(Value::Counter(_)) = base_op.action {
+        if let OpType::Set(amp::Value::Counter(_)) = base_op.action {
             action = OpType::Set(self.adjusted_value());
         }
         UndoOperation {
@@ -78,23 +78,23 @@ impl OpHandle {
         }
     }
 
-    pub fn adjusted_value(&self) -> Value {
+    pub fn adjusted_value(&self) -> amp::Value {
         match &self.action {
-            OpType::Set(Value::Counter(a)) => Value::Counter(a + self.delta),
+            OpType::Set(amp::Value::Counter(a)) => amp::Value::Counter(a + self.delta),
             OpType::Set(val) => val.clone(),
-            _ => Value::Null,
+            _ => amp::Value::Null,
         }
     }
 
-    pub fn child(&self) -> Option<ObjectID> {
+    pub fn child(&self) -> Option<amp::ObjectID> {
         match &self.action {
-            OpType::Make(_) => Some(ObjectID::from(&self.id)),
+            OpType::Make(_) => Some(amp::ObjectID::from(&self.id)),
             OpType::Link(obj) => Some(obj.clone()),
             _ => None,
         }
     }
 
-    pub fn operation_key(&self) -> Key {
+    pub fn operation_key(&self) -> amp::Key {
         if self.insert {
             self.id.clone().into()
         } else {
@@ -105,7 +105,7 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let OpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                if let OpType::Set(Value::Counter(_)) = self.action {
+                if let OpType::Set(amp::Value::Counter(_)) = self.action {
                     self.delta += amount;
                 }
             }

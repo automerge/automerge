@@ -3,7 +3,7 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
-use automerge_protocol::{ElementID, Key, ObjType, OpID};
+use automerge_protocol as amp;
 use im_rc::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
@@ -14,18 +14,18 @@ use im_rc::{HashMap, HashSet};
 /// Stores operations on map objects
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjState {
-    pub props: HashMap<Key, ConcurrentOperations>,
-    pub obj_type: ObjType,
+    pub props: HashMap<amp::Key, ConcurrentOperations>,
+    pub obj_type: amp::ObjType,
     pub inbound: HashSet<OpHandle>,
-    pub following: HashMap<ElementID, Vec<ElementID>>,
-    pub insertions: HashMap<ElementID, OpHandle>,
-    pub seq: SkipList<OpID>,
+    pub following: HashMap<amp::ElementID, Vec<amp::ElementID>>,
+    pub insertions: HashMap<amp::ElementID, OpHandle>,
+    pub seq: SkipList<amp::OpID>,
 }
 
 impl ObjState {
-    pub fn new(obj_type: ObjType) -> ObjState {
+    pub fn new(obj_type: amp::ObjType) -> ObjState {
         let mut following = HashMap::new();
-        following.insert(ElementID::Head, Vec::new());
+        following.insert(amp::ElementID::Head, Vec::new());
         ObjState {
             props: HashMap::new(),
             following,
@@ -38,38 +38,38 @@ impl ObjState {
 
     pub fn is_seq(&self) -> bool {
         match self.obj_type {
-            ObjType::Text | ObjType::List => true,
+            amp::ObjType::Text | amp::ObjType::List => true,
             _ => false,
         }
     }
 
-    fn get_parent(&self, id: &ElementID) -> Option<ElementID> {
+    fn get_parent(&self, id: &amp::ElementID) -> Option<amp::ElementID> {
         self.insertions.get(&id).and_then(|i| i.key.as_element_id())
     }
 
-    fn insertions_after(&self, parent: &ElementID) -> Vec<ElementID> {
+    fn insertions_after(&self, parent: &amp::ElementID) -> Vec<amp::ElementID> {
         self.following.get(parent).cloned().unwrap_or_default()
     }
 
     // this is the efficient way to do it for a SkipList
-    pub fn index_of(&self, id: &OpID) -> Result<usize, AutomergeError> {
+    pub fn index_of(&self, id: &amp::OpID) -> Result<usize, AutomergeError> {
         let mut prev_id = id.into();
         let mut index = None;
         // reverse walk through the following/insertions and looking for something that not deleted
         while index.is_none() {
             prev_id = self.get_previous(&prev_id)?;
             match &prev_id {
-                ElementID::ID(ref id) => {
+                amp::ElementID::ID(ref id) => {
                     // FIXME maybe I can speed this up with self.props.get before looking for
                     index = self.seq.index_of(id)
                 }
-                ElementID::Head => break,
+                amp::ElementID::Head => break,
             }
         }
         Ok(index.map(|i| i + 1).unwrap_or(0))
     }
 
-    fn get_previous(&self, element: &ElementID) -> Result<ElementID, AutomergeError> {
+    fn get_previous(&self, element: &amp::ElementID) -> Result<amp::ElementID, AutomergeError> {
         let parent_id = self.get_parent(element).unwrap();
         let children = self.insertions_after(&parent_id);
         let pos = children
@@ -89,8 +89,8 @@ impl ObjState {
         }
     }
 
-    pub fn insert_after(&mut self, elem: ElementID, op: OpHandle, actors: &ActorMap) {
-        let eid = ElementID::from(&op.id);
+    pub fn insert_after(&mut self, elem: amp::ElementID, op: OpHandle, actors: &ActorMap) {
+        let eid = amp::ElementID::from(&op.id);
         self.insertions.insert(eid.clone(), op);
         let following = self.following.entry(elem).or_default();
         following.push(eid);

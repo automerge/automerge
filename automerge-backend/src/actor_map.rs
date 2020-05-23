@@ -1,8 +1,8 @@
-use automerge_protocol::{ActorID, ElementID, Key, ObjectID, OpID};
+use automerge_protocol as amp;
 use std::cmp::Ordering;
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) struct ActorMap(Vec<ActorID>);
+pub(crate) struct ActorMap(Vec<amp::ActorID>);
 
 impl ActorMap {
     pub fn new() -> ActorMap {
@@ -10,7 +10,7 @@ impl ActorMap {
     }
 
     #[allow(dead_code)]
-    pub fn index_of(&mut self, actor: &ActorID) -> usize {
+    pub fn index_of(&mut self, actor: &amp::ActorID) -> usize {
         if let Some(index) = self.0.iter().position(|a| a == actor) {
             return index;
         }
@@ -19,45 +19,45 @@ impl ActorMap {
     }
 
     #[allow(dead_code)]
-    pub fn actor_for(&self, index: usize) -> Option<&ActorID> {
+    pub fn actor_for(&self, index: usize) -> Option<&amp::ActorID> {
         self.0.get(index)
     }
 
-    pub fn cmp(&self, eid1: &ElementID, eid2: &ElementID) -> Ordering {
+    pub fn cmp(&self, eid1: &amp::ElementID, eid2: &amp::ElementID) -> Ordering {
         match (eid1, eid2) {
-            (ElementID::Head, ElementID::Head) => Ordering::Equal,
-            (ElementID::Head, _) => Ordering::Less,
-            (_, ElementID::Head) => Ordering::Greater,
-            (ElementID::ID(opid1), ElementID::ID(opid2)) => self.cmp_opid(opid1, opid2),
+            (amp::ElementID::Head, amp::ElementID::Head) => Ordering::Equal,
+            (amp::ElementID::Head, _) => Ordering::Less,
+            (_, amp::ElementID::Head) => Ordering::Greater,
+            (amp::ElementID::ID(opid1), amp::ElementID::ID(opid2)) => self.cmp_opid(opid1, opid2),
         }
     }
 
-    pub fn opid_to_string(&self, id: &OpID) -> String {
+    pub fn opid_to_string(&self, id: &amp::OpID) -> String {
         format!("{}@{}", id.0, id.1)
     }
 
-    pub fn elementid_to_string(&self, eid: &ElementID) -> String {
+    pub fn elementid_to_string(&self, eid: &amp::ElementID) -> String {
         match eid {
-            ElementID::Head => "_head".into(),
-            ElementID::ID(id) => self.opid_to_string(id),
+            amp::ElementID::Head => "_head".into(),
+            amp::ElementID::ID(id) => self.opid_to_string(id),
         }
     }
 
-    pub fn key_to_string(&self, key: &Key) -> String {
+    pub fn key_to_string(&self, key: &amp::Key) -> String {
         match key {
-            Key::Map(s) => s.clone(),
-            Key::Seq(eid) => self.elementid_to_string(eid),
+            amp::Key::Map(s) => s.clone(),
+            amp::Key::Seq(eid) => self.elementid_to_string(eid),
         }
     }
 
-    pub fn object_to_string(&self, obj: &ObjectID) -> String {
+    pub fn object_to_string(&self, obj: &amp::ObjectID) -> String {
         match obj {
-            ObjectID::ID(opid) => self.opid_to_string(opid),
-            ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
+            amp::ObjectID::ID(opid) => self.opid_to_string(opid),
+            amp::ObjectID::Root => "00000000-0000-0000-0000-000000000000".into(),
         }
     }
 
-    fn cmp_opid(&self, op1: &OpID, op2: &OpID) -> Ordering {
+    fn cmp_opid(&self, op1: &amp::OpID, op2: &amp::OpID) -> Ordering {
         if op1.0 != op2.0 {
             op1.0.cmp(&op2.0)
         } else {
