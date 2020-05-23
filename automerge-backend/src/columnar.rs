@@ -7,7 +7,6 @@ use core::fmt::Debug;
 use std::io;
 use std::io::{Read, Write};
 use std::str;
-use std::str::FromStr;
 
 impl Encodable for Action {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
@@ -23,12 +22,6 @@ impl Encodable for [ActorID] {
         }
         Ok(len)
     }
-}
-
-fn map_string(actor: &str, actors: &mut Vec<ActorID>) -> usize {
-    // FIXME - this can be fixed if OpID() contains an actorid instead of a String
-    let a = ActorID::from_str(actor).unwrap(); // this is only called on interal values
-    map_actor(&a, actors)
 }
 
 fn map_actor(actor: &ActorID, actors: &mut Vec<ActorID>) -> usize {
@@ -361,7 +354,7 @@ impl KeyEncoder {
                 self.str.append_null();
             }
             Key::Seq(ElementID::ID(OpID(ctr, actor))) => {
-                self.actor.append_value(map_string(&actor, actors));
+                self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
                 self.str.append_null();
             }
@@ -396,7 +389,7 @@ impl PredEncoder {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
-            self.actor.append_value(map_string(&p.1, actors));
+            self.actor.append_value(map_actor(&p.1, actors));
         }
     }
 
@@ -429,7 +422,7 @@ impl ObjEncoder {
                 self.ctr.append_null();
             }
             ObjectID::ID(OpID(ctr, actor)) => {
-                self.actor.append_value(map_string(&actor, actors));
+                self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
             }
         }
@@ -465,7 +458,7 @@ impl ChildEncoder {
         match obj {
             ObjectID::Root => self.append_null(),
             ObjectID::ID(OpID(ctr, actor)) => {
-                self.actor.append_value(map_string(&actor, actors));
+                self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
             }
         }

@@ -26,7 +26,7 @@ impl ActorID {
     }
 
     pub fn op_id_at(&self, seq: u64) -> OpID {
-        OpID(seq, self.to_string())
+        OpID(seq, self.clone())
     }
 }
 
@@ -40,11 +40,11 @@ pub enum ObjType {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub struct OpID(pub u64, pub String);
+pub struct OpID(pub u64, pub ActorID);
 
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
-        OpID(seq, actor.to_hex_string())
+        OpID(seq, actor.clone())
     }
 
     pub fn counter(&self) -> u64 {
