@@ -2,7 +2,7 @@ use crate::PathElement;
 use automerge_protocol as amp;
 use maplit::hashmap;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::{borrow::Borrow, collections::HashMap};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub enum MapType {
@@ -49,6 +49,51 @@ pub enum Value {
     Map(HashMap<String, Value>, MapType),
     Sequence(Vec<Value>, SequenceType),
     Primitive(amp::Value),
+}
+
+impl From<amp::Value> for Value {
+    fn from(val: amp::Value) -> Self {
+        Value::Primitive(val)
+    }
+}
+
+impl From<&amp::Value> for Value {
+    fn from(val: &amp::Value) -> Self {
+        val.clone().into()
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Primitive(amp::Value::Str(s.to_string()))
+    }
+}
+
+impl<T> From<Vec<T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(v: Vec<T>) -> Self {
+        Value::Sequence(
+            v.into_iter().map(|t| t.into()).collect(),
+            SequenceType::List,
+        )
+    }
+}
+
+impl<T, K> From<HashMap<K, T>> for Value
+where
+    T: Into<Value>,
+    K: Borrow<str>,
+{
+    fn from(h: HashMap<K, T>) -> Self {
+        Value::Map(
+            h.into_iter()
+                .map(|(k, v)| (k.borrow().to_string(), v.into()))
+                .collect(),
+            MapType::Map,
+        )
+    }
 }
 
 impl Value {
