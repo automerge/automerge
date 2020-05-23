@@ -30,10 +30,7 @@ mod tests {
 
     #[test]
     fn cli_export_with_empty_input() {
-        assert_eq!(
-            get_state_json(vec![]).unwrap(),
-            serde_json::json!({})
-        )
+        assert_eq!(get_state_json(vec![]).unwrap(), serde_json::json!({}))
     }
 
     #[test]
