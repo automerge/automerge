@@ -13,7 +13,8 @@ fn main() -> io::Result<()> {
     input_file.read_to_end(&mut input_data)?;
 
     let mut backend = automerge_backend::Backend::init();
-    backend.load_changes_binary(vec![input_data]).unwrap();
+    let changes = automerge_backend::Change::parse(&input_data).unwrap();
+    backend.load_changes(changes).unwrap();
     let patch = backend.get_patch().unwrap();
     let mut frontend = automerge_frontend::Frontend::new();
     frontend.apply_patch(patch).unwrap();

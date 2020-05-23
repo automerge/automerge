@@ -4,7 +4,7 @@ use automerge_protocol as amp;
 use maplit::hashmap;
 
 fn random_op_id() -> String {
-    amp::OpID(1, amp::ActorID::random().0).to_string()
+    amp::OpID::new(1, &amp::ActorID::random()).to_string()
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn use_version_and_sequence_number_from_backend() {
         .unwrap()
         .unwrap();
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 5,
         time: req.time,
@@ -62,9 +62,9 @@ fn use_version_and_sequence_number_from_backend() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: amp::ObjectID::Root.to_string(),
             key: "partridges".into(),
             insert: false,
@@ -508,7 +508,7 @@ fn allow_interleacing_of_patches_and_changes() {
 
     assert_eq!(
         req1,
-        amp::ChangeRequest {
+        amp::Request {
             actor: doc.actor_id.clone(),
             seq: 1,
             version: 0,
@@ -516,9 +516,9 @@ fn allow_interleacing_of_patches_and_changes() {
             time: req1.time,
             undoable: true,
             deps: None,
-            request_type: amp::ChangeRequestType::Change,
-            ops: Some(vec![amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            request_type: amp::RequestType::Change,
+            ops: Some(vec![amp::Op {
+                action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
                 value: Some(amp::Value::Int(1)),
@@ -531,7 +531,7 @@ fn allow_interleacing_of_patches_and_changes() {
 
     assert_eq!(
         req2,
-        amp::ChangeRequest {
+        amp::Request {
             actor: doc.actor_id.clone(),
             seq: 2,
             version: 0,
@@ -539,9 +539,9 @@ fn allow_interleacing_of_patches_and_changes() {
             time: req2.time,
             undoable: true,
             deps: None,
-            request_type: amp::ChangeRequestType::Change,
-            ops: Some(vec![amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            request_type: amp::RequestType::Change,
+            ops: Some(vec![amp::Op {
+                action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
                 value: Some(amp::Value::Int(2)),
@@ -569,7 +569,7 @@ fn allow_interleacing_of_patches_and_changes() {
 
     assert_eq!(
         req3,
-        amp::ChangeRequest {
+        amp::Request {
             actor: doc.actor_id,
             seq: 3,
             version: 1,
@@ -577,9 +577,9 @@ fn allow_interleacing_of_patches_and_changes() {
             time: req3.time,
             undoable: true,
             deps: None,
-            request_type: amp::ChangeRequestType::Change,
-            ops: Some(vec![amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            request_type: amp::RequestType::Change,
+            ops: Some(vec![amp::Op {
+                action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
                 value: Some(amp::Value::Int(3)),

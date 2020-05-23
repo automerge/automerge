@@ -1,4 +1,6 @@
-use automerge_protocol::{Key, ObjectID, OpID, OpType, Operation};
+use crate::op::Operation;
+use crate::op_type::OpType;
+use automerge_protocol::{Key, ObjectID, OpID};
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct UndoOperation {

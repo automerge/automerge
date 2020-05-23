@@ -3,13 +3,12 @@ use serde::{
     Deserialize,
 };
 
+mod actor_id;
 mod change_hash;
 mod diff;
 mod element_id;
 mod key;
 mod object_id;
-mod op_type;
-mod operation;
 mod opid;
 mod request_key;
 mod value;

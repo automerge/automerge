@@ -1,5 +1,6 @@
+use crate::op_type::OpType;
 use crate::undo_operation::UndoOperation;
-use automerge_protocol::{DataType, OpType, Value};
+use automerge_protocol::{DataType, Value};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 

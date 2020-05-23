@@ -135,7 +135,7 @@ impl LocalChange {
 /// be applied using `ChangeContext::commit`
 pub struct MutationTracker<'a, 'b> {
     change_context: &'a mut ChangeContext<'b>,
-    ops: Vec<amp::OpRequest>,
+    ops: Vec<amp::Op>,
 }
 
 impl<'a, 'b> MutationTracker<'a, 'b> {
@@ -146,7 +146,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         }
     }
 
-    pub fn ops(&self) -> Option<Vec<amp::OpRequest>> {
+    pub fn ops(&self) -> Option<Vec<amp::Op>> {
         if !self.ops.is_empty() {
             Some(self.ops.clone())
         } else {
@@ -395,8 +395,8 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                 if self.value_for_path(&change.path).is_some() {
                     // Unwrap is fine as we know the parent object exists from the above
                     let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
-                    let op = amp::OpRequest {
-                        action: amp::ReqOpType::Del,
+                    let op = amp::Op {
+                        action: amp::OpType::Del,
                         // This unwrap is fine because we know the parent
                         // is a container
                         obj: parent_obj.id().unwrap().to_string(),
@@ -446,8 +446,8 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     };
                     // Unwrap is fine as we know the parent object exists from the above
                     let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
-                    let op = amp::OpRequest {
-                        action: amp::ReqOpType::Inc,
+                    let op = amp::Op {
+                        action: amp::OpType::Inc,
                         // This unwrap is fine because we know the parent
                         // is a container
                         obj: parent_obj.id().unwrap().to_string(),

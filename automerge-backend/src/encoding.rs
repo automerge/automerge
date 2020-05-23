@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::mem;
 use std::str;
 
-fn err(s: &str) -> AutomergeError {
-    AutomergeError::ChangeDecompressError(s.to_string())
+fn err(_s: &str) -> AutomergeError {
+    AutomergeError::EncodingError
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +29,7 @@ impl<'a> Decoder<'a> {
 
     pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, AutomergeError> {
         let mut new_buf = &self.buf[..];
-        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::DecodeFailed)?;
+        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::EncodingError)?;
         let delta = self.buf.len() - new_buf.len();
         if delta == 0 {
             Err(err("buffer size didnt change..."))
@@ -44,7 +44,7 @@ impl<'a> Decoder<'a> {
     pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], AutomergeError> {
         let buf = &self.buf[..];
         if buf.len() < index {
-            Err(AutomergeError::DecodeFailed)
+            Err(AutomergeError::EncodingError)
         } else {
             let head = &buf[0..index];
             self.buf = &buf[index..];
@@ -526,7 +526,7 @@ impl Decodable for ActorID {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        Some(ActorID::from_bytes(&buffer))
+        Some(buffer.into())
     }
 }
 

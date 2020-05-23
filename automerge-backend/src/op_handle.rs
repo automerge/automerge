@@ -4,29 +4,34 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::rc::Rc;
 
+use crate::op::Operation;
+use crate::op_type::OpType;
 use crate::undo_operation::UndoOperation;
-use automerge_protocol::{Change, Key, ObjectID, OpID, OpType, Operation, Value};
+use crate::Change;
+use automerge_protocol::{Key, ObjectID, OpID, Value};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
     pub id: OpID,
-    change: Rc<Change>,
-    index: usize,
+    op: Operation,
+    //change: Rc<Change>,
+    //index: usize,
     delta: i64,
 }
 
 impl OpHandle {
     pub fn extract(change: Rc<Change>) -> Vec<OpHandle> {
         change
-            .operations
-            .iter()
+            .iter_ops()
+            //            .iter()
             .enumerate()
-            .map(|(index, _)| {
-                let id = OpID(change.start_op + (index as u64), change.actor_id.0.clone());
+            .map(|(index, op)| {
+                let id = OpID::new(change.start_op + (index as u64), &change.actor_id());
                 OpHandle {
                     id,
-                    change: change.clone(),
-                    index,
+                    op,
+                    //change: change.clone(),
+                    //index,
                     delta: 0,
                 }
             })
@@ -54,7 +59,7 @@ impl OpHandle {
     }
 
     pub fn invert(&self, field_key: &Key) -> UndoOperation {
-        let base_op = &self.change.operations[self.index];
+        let base_op = &self.op;
         let mut action = base_op.action.clone();
         let mut key = &base_op.key;
         if self.insert {
@@ -149,6 +154,6 @@ impl Deref for OpHandle {
     type Target = Operation;
 
     fn deref(&self) -> &Self::Target {
-        &self.change.operations[self.index]
+        &self.op
     }
 }

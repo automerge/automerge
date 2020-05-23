@@ -13,5 +13,9 @@ pub struct InvalidObjectID(pub String);
 pub struct InvalidElementID(pub String);
 
 #[derive(Error, Debug)]
+#[error("Invalid actor ID: {0}")]
+pub struct InvalidActorID(pub String);
+
+#[derive(Error, Debug)]
 #[error("Invalid change hash slice: {0:?}")]
 pub struct InvalidChangeHashSlice(pub Vec<u8>);
