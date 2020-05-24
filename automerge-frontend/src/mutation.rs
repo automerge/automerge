@@ -326,12 +326,12 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
             .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
                 Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
                     object_id: oid.to_string(),
-                    obj_type: amp::ObjType::Map(map_type),
+                    obj_type: map_type,
                     props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
                 Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
                     object_id: oid.to_string(),
-                    obj_type: amp::ObjType::Sequence(seq_type),
+                    obj_type: seq_type,
                     edits: Vec::new(),
                     props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
@@ -412,14 +412,14 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     let diff = match &*parent_obj {
                         Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
                             object_id: oid.to_string(),
-                            obj_type: amp::ObjType::Map(*map_type),
+                            obj_type: *map_type,
                             props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
                         }),
                         Object::Sequence(oid, _, seq_type) => {
                             if let Some(PathElement::Index(i)) = change.path.name() {
                                 amp::Diff::Seq(amp::SeqDiff {
                                     object_id: oid.to_string(),
-                                    obj_type: amp::ObjType::Sequence(*seq_type),
+                                    obj_type: *seq_type,
                                     edits: vec![amp::DiffEdit::Remove { index: *i }],
                                     props: hashmap! {*i => HashMap::new()},
                                 })
@@ -497,7 +497,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                             );
                             let seqdiff = amp::Diff::Seq(amp::SeqDiff {
                                 object_id: oid.to_string(),
-                                obj_type: amp::ObjType::Sequence(*seq_type),
+                                obj_type: *seq_type,
                                 edits: vec![amp::DiffEdit::Insert { index: *index }],
                                 props: hashmap! {
                                     *index => hashmap!{

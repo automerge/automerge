@@ -31,19 +31,21 @@ impl ActorID {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     Map(MapType),
     Sequence(SequenceType),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = "camelCase")]
 pub enum MapType {
     Map,
     Table,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = "camelCase")]
 pub enum SequenceType {
     List,
     Text,
@@ -298,7 +300,7 @@ pub enum Diff {
 pub struct MapDiff {
     pub object_id: String,
     #[serde(rename = "type")]
-    pub obj_type: ObjType,
+    pub obj_type: MapType,
     pub props: HashMap<String, HashMap<String, Diff>>,
 }
 
@@ -307,7 +309,7 @@ pub struct MapDiff {
 pub struct SeqDiff {
     pub object_id: String,
     #[serde(rename = "type")]
-    pub obj_type: ObjType,
+    pub obj_type: SequenceType,
     pub edits: Vec<DiffEdit>,
     pub props: HashMap<usize, HashMap<String, Diff>>,
 }

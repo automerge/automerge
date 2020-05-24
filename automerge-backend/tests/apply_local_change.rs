@@ -67,7 +67,7 @@ fn test_apply_local_change() {
         deps: vec![changes[0].hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map(MapType::Map),
+            obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
                     "1@eb738e04ef8848ce8b77309b6c7f7e39".into() => Diff::Value("magpie".into())
@@ -522,12 +522,12 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map(MapType::Map),
+            obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@0723d2a1940744868ffd6b294ada813f".into() => Diff::Seq(SeqDiff{
                         object_id: "1@0723d2a1940744868ffd6b294ada813f".into(),
-                        obj_type: ObjType::Sequence(SequenceType::List),
+                        obj_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::Insert{index: 0},
                             DiffEdit::Remove{index: 0},

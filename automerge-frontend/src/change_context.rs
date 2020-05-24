@@ -140,7 +140,7 @@ impl<'a> ChangeContext<'a> {
             }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
-                    ObjType::Map(MapType::Map) => {
+                    MapType::Map => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -178,7 +178,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Map(MapType::Table) => {
+                    MapType::Table => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -222,7 +222,6 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
             }
             Diff::Seq(SeqDiff {
@@ -233,7 +232,7 @@ impl<'a> ChangeContext<'a> {
             }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
-                    ObjType::Sequence(SequenceType::List) => {
+                    SequenceType::List => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -276,7 +275,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Sequence(SequenceType::Text) => {
+                    SequenceType::Text => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -319,7 +318,6 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
             }
             Diff::Value(v) => Ok(Rc::new(RefCell::new(Object::Primitive(v.clone())))),

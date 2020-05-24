@@ -28,7 +28,7 @@ fn use_version_and_sequence_number_from_backend() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::F64(24.0))
@@ -120,7 +120,7 @@ fn remove_pending_requests_once_handled() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::Int(24))
@@ -154,7 +154,7 @@ fn remove_pending_requests_once_handled() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::Int(1))
@@ -214,7 +214,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "pheasants".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::Int(2))
@@ -248,7 +248,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::Int(24))
@@ -300,7 +300,7 @@ fn dont_allow_out_of_order_request_patches() {
         can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::Value::Int(1))
@@ -345,12 +345,12 @@ fn handle_concurrent_insertions_into_lists() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".to_string() => hashmap!{
                     doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.to_string(),
-                        obj_type: amp::ObjType::Sequence(amp::SequenceType::List),
+                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert{ index: 0 }],
                         props: hashmap!{
                             0 => hashmap!{
@@ -411,12 +411,12 @@ fn handle_concurrent_insertions_into_lists() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff{
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap!{
                 "birds".into() => hashmap!{
                     doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.to_string(),
-                        obj_type: amp::ObjType::Sequence(amp::SequenceType::List),
+                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert{ index: 1 }],
                         props: hashmap!{
                             1 => hashmap!{
@@ -451,12 +451,12 @@ fn handle_concurrent_insertions_into_lists() {
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff{
             object_id: amp::ObjectID::Root.to_string(),
-            obj_type: amp::ObjType::Map(amp::MapType::Map),
+            obj_type: amp::MapType::Map,
             props: hashmap!{
                 "birds".to_string() => hashmap!{
                     doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.to_string(),
-                        obj_type: amp::ObjType::Sequence(amp::SequenceType::List),
+                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert { index: 0 }, amp::DiffEdit::Insert{ index: 2 }],
                         props: hashmap!{
                             0 => hashmap!{

@@ -17,6 +17,7 @@ use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
 use automerge_protocol::{
     ChangeHash, Diff, DiffEdit, Key, MapDiff, MapType, ObjDiff, ObjType, ObjectID, OpID, SeqDiff,
+    SequenceType,
 };
 use core::cmp::max;
 use std::collections::HashMap;
@@ -213,6 +214,7 @@ impl OpSet {
         object_id: &ObjectID,
         object: &ObjState,
         actors: &ActorMap,
+        map_type: MapType,
     ) -> Result<Diff, AutomergeError> {
         let mut props = HashMap::new();
 
@@ -233,7 +235,7 @@ impl OpSet {
         }
         Ok(MapDiff {
             object_id: actors.object_to_string(object_id),
-            obj_type: object.obj_type,
+            obj_type: map_type,
             props,
         }
         .into())
@@ -244,6 +246,7 @@ impl OpSet {
         object_id: &ObjectID,
         object: &ObjState,
         actors: &ActorMap,
+        seq_type: SequenceType,
     ) -> Result<Diff, AutomergeError> {
         let mut edits = Vec::new();
         let mut props = HashMap::new();
@@ -273,7 +276,7 @@ impl OpSet {
         }
         Ok(SeqDiff {
             object_id: actors.object_to_string(object_id),
-            obj_type: object.obj_type,
+            obj_type: seq_type,
             edits,
             props,
         }
@@ -286,10 +289,9 @@ impl OpSet {
         actors: &ActorMap,
     ) -> Result<Diff, AutomergeError> {
         let object = self.get_obj(&object_id)?;
-        if object.is_seq() {
-            self.construct_list(object_id, object, actors)
-        } else {
-            self.construct_map(object_id, object, actors)
+        match object.obj_type {
+            ObjType::Map(map_type) => self.construct_map(object_id, object, actors, map_type),
+            ObjType::Sequence(seq_type) => self.construct_list(object_id, object, actors, seq_type),
         }
     }
 
@@ -331,6 +333,7 @@ impl OpSet {
         pending: &[PendingDiff],
         pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
         actors: &ActorMap,
+        seq_type: SequenceType,
     ) -> Result<Diff, AutomergeError> {
         let mut props = HashMap::new();
         let edits = pending.iter().filter_map(|p| p.edit()).collect();
@@ -358,7 +361,7 @@ impl OpSet {
         }
         Ok(SeqDiff {
             object_id: actors.object_to_string(obj_id),
-            obj_type: obj.obj_type,
+            obj_type: seq_type,
             edits,
             props,
         }
@@ -372,6 +375,7 @@ impl OpSet {
         pending: &[PendingDiff],
         pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
         actors: &ActorMap,
+        map_type: MapType,
     ) -> Result<Diff, AutomergeError> {
         let mut props = HashMap::new();
         // I may have duplicate keys - I do this to make sure I visit each one only once
@@ -394,7 +398,7 @@ impl OpSet {
         }
         Ok(MapDiff {
             object_id: actors.object_to_string(obj_id),
-            obj_type: obj.obj_type,
+            obj_type: map_type,
             props,
         }
         .into())
@@ -408,10 +412,13 @@ impl OpSet {
     ) -> Result<Diff, AutomergeError> {
         let obj = self.get_obj(obj_id)?;
         if let Some(pending) = pending_diffs.remove(obj_id) {
-            if obj.is_seq() {
-                self.gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors)
-            } else {
-                self.gen_map_diff(obj_id, obj, &pending, pending_diffs, actors)
+            match obj.obj_type {
+                ObjType::Sequence(seq_type) => {
+                    self.gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors, seq_type)
+                }
+                ObjType::Map(map_type) => {
+                    self.gen_map_diff(obj_id, obj, &pending, pending_diffs, actors, map_type)
+                }
             }
         } else {
             Ok(Diff::Unchanged(ObjDiff {
