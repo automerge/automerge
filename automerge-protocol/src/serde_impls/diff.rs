@@ -87,7 +87,7 @@ impl<'de> Deserialize<'de> for Diff {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
                     let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
                     if let Some(mut props) = props {
-                        if obj_type == ObjType::Text || obj_type == ObjType::List {
+                        if let ObjType::Sequence(_) = obj_type {
                             let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
                             let mut new_props = HashMap::new();
                             for (k, v) in props.drain() {

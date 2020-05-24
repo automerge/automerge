@@ -1,4 +1,4 @@
-use automerge_protocol::{ObjType, ObjectID, Value};
+use automerge_protocol::{MapType, ObjType, ObjectID, SequenceType, Value};
 use serde::{Serialize, Serializer};
 
 #[derive(PartialEq, Debug, Clone)]
@@ -16,10 +16,10 @@ impl Serialize for OpType {
         S: Serializer,
     {
         let s = match self {
-            OpType::Make(ObjType::Map) => "makeMap",
-            OpType::Make(ObjType::Table) => "makeTable",
-            OpType::Make(ObjType::List) => "makeList",
-            OpType::Make(ObjType::Text) => "makeText",
+            OpType::Make(ObjType::Map(MapType::Map)) => "makeMap",
+            OpType::Make(ObjType::Map(MapType::Table)) => "makeTable",
+            OpType::Make(ObjType::Sequence(SequenceType::List)) => "makeList",
+            OpType::Make(ObjType::Sequence(SequenceType::Text)) => "makeText",
             OpType::Del => "del",
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",

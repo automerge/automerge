@@ -201,10 +201,14 @@ impl<'de> Deserialize<'de> for Operation {
                 let insert = insert.unwrap_or(false);
                 let value = amp::Value::from(value, datatype);
                 let action = match action {
-                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map),
-                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::Table),
-                    amp::OpType::MakeList => OpType::Make(amp::ObjType::List),
-                    amp::OpType::MakeText => OpType::Make(amp::ObjType::Text),
+                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map(amp::MapType::Map)),
+                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::Map(amp::MapType::Table)),
+                    amp::OpType::MakeList => {
+                        OpType::Make(amp::ObjType::Sequence(amp::SequenceType::List))
+                    }
+                    amp::OpType::MakeText => {
+                        OpType::Make(amp::ObjType::Sequence(amp::SequenceType::Text))
+                    }
                     amp::OpType::Del => OpType::Del,
                     amp::OpType::Link => {
                         OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)

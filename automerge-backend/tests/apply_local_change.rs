@@ -3,8 +3,8 @@ use automerge_backend::{Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
 use automerge_protocol as protocol;
 use automerge_protocol::{
-    ActorID, ChangeHash, DataType, Diff, DiffEdit, ElementID, MapDiff, ObjType, ObjectID, Op,
-    Patch, Request, RequestType, SeqDiff,
+    ActorID, ChangeHash, DataType, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID,
+    Op, Patch, Request, RequestType, SeqDiff, SequenceType,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -67,7 +67,7 @@ fn test_apply_local_change() {
         deps: vec![changes[0].hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "bird".into() => hashmap!{
                     "1@eb738e04ef8848ce8b77309b6c7f7e39".into() => Diff::Value("magpie".into())
@@ -271,7 +271,7 @@ fn test_transform_list_indexes_into_element_ids() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Make(ObjType::List),
+            action: OpType::Make(ObjType::Sequence(SequenceType::List)),
             key: "birds".into(),
             obj: ObjectID::Root,
             pred: Vec::new(),
@@ -522,12 +522,12 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@0723d2a1940744868ffd6b294ada813f".into() => Diff::Seq(SeqDiff{
                         object_id: "1@0723d2a1940744868ffd6b294ada813f".into(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         edits: vec![
                             DiffEdit::Insert{index: 0},
                             DiffEdit::Remove{index: 0},
@@ -559,7 +559,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         operations: vec![Operation {
             obj: ObjectID::Root,
-            action: OpType::Make(ObjType::List),
+            action: OpType::Make(ObjType::Sequence(SequenceType::List)),
             key: "birds".into(),
             insert: false,
             pred: Vec::new(),

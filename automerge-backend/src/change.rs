@@ -336,7 +336,7 @@ const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 mod tests {
     use super::*;
     use crate::op_type::OpType;
-    use automerge_protocol::{Key, ObjType, ObjectID, OpID, Value};
+    use automerge_protocol::{Key, ObjType, ObjectID, OpID, SequenceType, Value};
     use std::str::FromStr;
 
     #[test]
@@ -414,7 +414,7 @@ mod tests {
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Make(ObjType::List),
+                    action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,

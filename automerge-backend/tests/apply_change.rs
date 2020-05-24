@@ -2,8 +2,8 @@ extern crate automerge_backend;
 use automerge_backend::{AutomergeError, Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, Key, MapDiff, ObjDiff, ObjType, ObjectID, Patch, SeqDiff,
-    Value,
+    ActorID, Diff, DiffEdit, ElementID, Key, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Patch,
+    SeqDiff, SequenceType, Value,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -39,7 +39,7 @@ fn test_incremental_diffs_in_a_map() {
         can_redo: false,
         diffs: Some(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap!( "bird".into() => hashmap!( "1@7b7723afd9e6480397a4d467b7693156".into() => "magpie".into() ))
         }.into()),
     };
@@ -91,7 +91,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
         diffs: Some(
             MapDiff {
                 object_id: ObjectID::Root.to_string(),
-                obj_type: ObjType::Map,
+                obj_type: ObjType::Map(MapType::Map),
                 props: hashmap!(
                 "counter".into() => hashmap!{
                     "1@cdee6963c1664645920be8b41a933c2b".into() =>  Value::Counter(3).into(),
@@ -155,7 +155,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
         diffs: Some(
             MapDiff {
                 object_id: ObjectID::Root.to_string(),
-                obj_type: ObjType::Map,
+                obj_type: ObjType::Map(MapType::Map),
                 props: hashmap!( "bird".into() => hashmap!(
                             "1@ac11".into() => "magpie".into(),
                             "2@ac22".into() => "blackbird".into(),
@@ -218,7 +218,7 @@ fn delete_key_from_map() {
         can_redo: false,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "bird".into() => hashmap!{}
             },
@@ -243,7 +243,7 @@ fn create_nested_maps() {
         message: None,
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::Map),
+                action: OpType::Make(ObjType::Map(MapType::Map)),
                 obj: ObjectID::Root,
                 key: Key::Map("birds".into()),
                 pred: Vec::new(),
@@ -270,12 +270,12 @@ fn create_nested_maps() {
         version: 1,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@d6226fcd55204b82b396f2473da3e26f".into() => Diff::Map(MapDiff{
                         object_id: "1@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap(),
-                        obj_type: ObjType::Map,
+                        obj_type: ObjType::Map(MapType::Map),
                         props: hashmap!{
                             "wrens".into() => hashmap!{
                                  "2@d6226fcd55204b82b396f2473da3e26f".into() => Diff::Value(Value::F64(3.0))
@@ -304,7 +304,7 @@ fn test_assign_to_nested_keys_in_map() {
         deps: Vec::new(),
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::Map),
+                action: OpType::Make(ObjType::Map(MapType::Map)),
                 obj: ObjectID::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -350,12 +350,12 @@ fn test_assign_to_nested_keys_in_map() {
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@3c39c994039042778f4779a01a59a917".into() => Diff::Map(MapDiff{
                         object_id: "1@3c39c994039042778f4779a01a59a917".into(),
-                        obj_type: ObjType::Map,
+                        obj_type: ObjType::Map(MapType::Map),
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
                                 "3@3c39c994039042778f4779a01a59a917".into() => Diff::Value(Value::F64(15.0))
@@ -384,7 +384,7 @@ fn test_create_lists() {
         deps: Vec::new(),
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::List),
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                 obj: ObjectID::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -413,12 +413,12 @@ fn test_create_lists() {
         deps: vec![change.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@f82cb62dabe64372ab87466b77792010".into() => Diff::Seq(SeqDiff{
                         object_id: "1@f82cb62dabe64372ab87466b77792010".into(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         edits: vec![DiffEdit::Insert{ index: 0 }],
                         props: hashmap!{
                             0 => hashmap!{
@@ -448,7 +448,7 @@ fn test_apply_updates_inside_lists() {
         deps: Vec::new(),
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::List),
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                 obj: ObjectID::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -494,12 +494,12 @@ fn test_apply_updates_inside_lists() {
         seq: None,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@4ee4a0d033b841c4b26d73d70a879547".into() => Diff::Seq(SeqDiff{
                         object_id: "1@4ee4a0d033b841c4b26d73d70a879547".into(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         edits: Vec::new(),
                         props: hashmap!{
                             0 => hashmap!{
@@ -530,7 +530,7 @@ fn test_delete_list_elements() {
         deps: Vec::new(),
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::List),
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                 obj: ObjectID::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -578,12 +578,12 @@ fn test_delete_list_elements() {
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@8a3d4716fdca49f4aa5835901f2034c7".into() => Diff::Seq(SeqDiff{
                         object_id:  "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         props: hashmap!{},
                         edits: vec![DiffEdit::Remove{index: 0}]
                     })
@@ -609,7 +609,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Make(ObjType::List),
+            action: OpType::Make(ObjType::Sequence(SequenceType::List)),
             obj: ObjectID::Root,
             key: "birds".into(),
             pred: Vec::new(),
@@ -658,12 +658,12 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         deps: vec![change2.hash, change1.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "birds".into() => hashmap!{
                     "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap() => Diff::Seq(SeqDiff{
                         object_id: "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         edits: vec![
                             DiffEdit::Insert{index: 0},
                             DiffEdit::Remove{index: 0},
@@ -693,7 +693,7 @@ fn test_handle_changes_within_conflicted_objects() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Make(ObjType::List),
+            action: OpType::Make(ObjType::Sequence(SequenceType::List)),
             obj: ObjectID::Root,
             key: "conflict".into(),
             pred: Vec::new(),
@@ -710,7 +710,7 @@ fn test_handle_changes_within_conflicted_objects() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Make(ObjType::Map),
+            action: OpType::Make(ObjType::Map(MapType::Map)),
             obj: ObjectID::Root,
             key: "conflict".into(),
             pred: Vec::new(),
@@ -749,16 +749,16 @@ fn test_handle_changes_within_conflicted_objects() {
         deps: vec![change1.hash, change3.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "conflict".into() => hashmap!{
                     "1@9f17517523e54ee888e9cd51dfd7a572".into() => Diff::Unchanged(ObjDiff{
                        object_id: "1@9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap(),
-                       obj_type: ObjType::List,
+                       obj_type: ObjType::Sequence(SequenceType::List),
                     }),
                     "1@83768a19a13842beb6dde8c68a662fad".into() => Diff::Map(MapDiff{
                        object_id: "1@83768a19a13842beb6dde8c68a662fad".try_into().unwrap(),
-                       obj_type: ObjType::Map,
+                       obj_type: ObjType::Map(MapType::Map),
                        props: hashmap!{
                            "sparrow".into() => hashmap!{
                              "2@83768a19a13842beb6dde8c68a662fad".into() => Diff::Value(Value::F64(12.0))
@@ -809,7 +809,7 @@ fn test_support_date_objects_at_root() {
         deps: vec![change.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "now".into() => hashmap!{
                     "1@955afa3bbcc140b3b4bac8836479d650".into() => Diff::Value(Value::Timestamp(1_586_528_122_277))
@@ -835,7 +835,7 @@ fn test_support_date_objects_in_a_list() {
         message: None,
         operations: vec![
             Operation {
-                action: OpType::Make(ObjType::List),
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                 obj: ObjectID::Root,
                 key: "list".into(),
                 pred: Vec::new(),
@@ -864,12 +864,12 @@ fn test_support_date_objects_in_a_list() {
         seq: None,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root.to_string(),
-            obj_type: ObjType::Map,
+            obj_type: ObjType::Map(MapType::Map),
             props: hashmap! {
                 "list".into() => hashmap!{
                     "1@27d467ecb1a640fb9bed448ce7cf6a44".into() => Diff::Seq(SeqDiff{
                         object_id: "1@27d467ecb1a640fb9bed448ce7cf6a44".into(),
-                        obj_type: ObjType::List,
+                        obj_type: ObjType::Sequence(SequenceType::List),
                         edits: vec![DiffEdit::Insert{index: 0}],
                         props: hashmap!{
                             0 => hashmap!{

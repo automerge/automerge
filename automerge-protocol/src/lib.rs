@@ -33,10 +33,20 @@ impl ActorID {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum ObjType {
+    Map(MapType),
+    Sequence(SequenceType),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+pub enum MapType {
     Map,
     Table,
-    Text,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+pub enum SequenceType {
     List,
+    Text,
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
@@ -211,10 +221,10 @@ impl Op {
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            OpType::MakeMap => Some(ObjType::Map),
-            OpType::MakeTable => Some(ObjType::Table),
-            OpType::MakeList => Some(ObjType::List),
-            OpType::MakeText => Some(ObjType::Text),
+            OpType::MakeMap => Some(ObjType::Map(MapType::Map)),
+            OpType::MakeTable => Some(ObjType::Map(MapType::Table)),
+            OpType::MakeList => Some(ObjType::Sequence(SequenceType::List)),
+            OpType::MakeText => Some(ObjType::Sequence(SequenceType::Text)),
             _ => None,
         }
     }

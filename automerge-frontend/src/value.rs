@@ -5,36 +5,6 @@ use serde::Serialize;
 use std::{borrow::Borrow, collections::HashMap};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub enum MapType {
-    Map,
-    Table,
-}
-
-impl MapType {
-    pub(crate) fn to_obj_type(&self) -> amp::ObjType {
-        match self {
-            MapType::Map => amp::ObjType::Map,
-            MapType::Table => amp::ObjType::Table,
-        }
-    }
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub enum SequenceType {
-    List,
-    Text,
-}
-
-impl SequenceType {
-    pub(crate) fn to_obj_type(&self) -> amp::ObjType {
-        match self {
-            SequenceType::List => amp::ObjType::List,
-            SequenceType::Text => amp::ObjType::Text,
-        }
-    }
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Conflicts(HashMap<amp::OpID, Value>);
 
 impl From<HashMap<amp::OpID, Value>> for Conflicts {
@@ -46,8 +16,8 @@ impl From<HashMap<amp::OpID, Value>> for Conflicts {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(untagged)]
 pub enum Value {
-    Map(HashMap<String, Value>, MapType),
-    Sequence(Vec<Value>, SequenceType),
+    Map(HashMap<String, Value>, amp::MapType),
+    Sequence(Vec<Value>, amp::SequenceType),
     Primitive(amp::Value),
 }
 
@@ -76,7 +46,7 @@ where
     fn from(v: Vec<T>) -> Self {
         Value::Sequence(
             v.into_iter().map(|t| t.into()).collect(),
-            SequenceType::List,
+            amp::SequenceType::List,
         )
     }
 }
@@ -91,7 +61,7 @@ where
             h.into_iter()
                 .map(|(k, v)| (k.borrow().to_string(), v.into()))
                 .collect(),
-            MapType::Map,
+            amp::MapType::Map,
         )
     }
 }
@@ -104,11 +74,11 @@ impl Value {
                     .iter()
                     .map(|(k, v)| (k.clone(), Value::from_json(v)))
                     .collect();
-                Value::Map(result, MapType::Map)
+                Value::Map(result, amp::MapType::Map)
             }
             serde_json::Value::Array(vs) => Value::Sequence(
                 vs.iter().map(Value::from_json).collect(),
-                SequenceType::List,
+                amp::SequenceType::List,
             ),
             serde_json::Value::String(s) => Value::Primitive(amp::Value::Str(s.clone())),
             serde_json::Value::Number(n) => {
@@ -126,10 +96,10 @@ impl Value {
                     map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
                 serde_json::Value::Object(result)
             }
-            Value::Sequence(elements, SequenceType::List) => {
+            Value::Sequence(elements, amp::SequenceType::List) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
             }
-            Value::Sequence(elements, SequenceType::Text) => serde_json::Value::String(
+            Value::Sequence(elements, amp::SequenceType::Text) => serde_json::Value::String(
                 elements
                     .iter()
                     .map(|v| match v {
@@ -179,8 +149,8 @@ pub(crate) fn value_to_op_requests(
     match v {
         Value::Sequence(vs, seq_type) => {
             let make_action = match seq_type {
-                SequenceType::List => amp::OpType::MakeList,
-                SequenceType::Text => amp::OpType::MakeText,
+                amp::SequenceType::List => amp::OpType::MakeList,
+                amp::SequenceType::Text => amp::OpType::MakeText,
             };
             let list_id = new_object_id();
             let make_op = amp::Op {
@@ -211,10 +181,7 @@ pub(crate) fn value_to_op_requests(
                     .map(|(index, _)| amp::DiffEdit::Insert { index })
                     .collect(),
                 object_id: list_id,
-                obj_type: match seq_type {
-                    SequenceType::List => amp::ObjType::List,
-                    SequenceType::Text => amp::ObjType::Text,
-                },
+                obj_type: amp::ObjType::Sequence(*seq_type),
                 props: child_requests_and_diffs
                     .into_iter()
                     .enumerate()
@@ -229,8 +196,8 @@ pub(crate) fn value_to_op_requests(
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {
-                MapType::Map => amp::OpType::MakeMap,
-                MapType::Table => amp::OpType::MakeTable,
+                amp::MapType::Map => amp::OpType::MakeMap,
+                amp::MapType::Table => amp::OpType::MakeTable,
             };
             let map_id = new_object_id();
             let make_op = amp::Op {
@@ -259,10 +226,7 @@ pub(crate) fn value_to_op_requests(
                 .collect();
             let child_diff = amp::MapDiff {
                 object_id: map_id,
-                obj_type: match map_type {
-                    MapType::Map => amp::ObjType::Map,
-                    MapType::Table => amp::ObjType::Table,
-                },
+                obj_type: amp::ObjType::Map(*map_type),
                 props: child_requests_and_diffs
                     .into_iter()
                     .map(|(k, (_, diff_link))| {

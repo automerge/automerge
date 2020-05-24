@@ -2,7 +2,9 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use crate::op::Operation;
 use crate::op_type::OpType;
-use automerge_protocol::{ActorID, ElementID, Key, ObjType, ObjectID, OpID, Value};
+use automerge_protocol::{
+    ActorID, ElementID, Key, MapType, ObjType, ObjectID, OpID, SequenceType, Value,
+};
 use core::fmt::Debug;
 use std::io;
 use std::io::{Read, Write};
@@ -229,10 +231,10 @@ impl<'a> Iterator for OperationIterator<'a> {
         let child = self.chld.next()?;
         let action = match action {
             Action::Set => OpType::Set(value),
-            Action::MakeList => OpType::Make(ObjType::List),
-            Action::MakeText => OpType::Make(ObjType::Text),
-            Action::MakeMap => OpType::Make(ObjType::Map),
-            Action::MakeTable => OpType::Make(ObjType::Table),
+            Action::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
+            Action::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
+            Action::MakeMap => OpType::Make(ObjType::Map(MapType::Map)),
+            Action::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
             Action::Link => OpType::Link(child),
@@ -537,10 +539,10 @@ impl ColumnEncoder {
                 self.val.append_null();
                 self.chld.append_null();
                 match kind {
-                    ObjType::List => Action::MakeList,
-                    ObjType::Map => Action::MakeMap,
-                    ObjType::Table => Action::MakeTable,
-                    ObjType::Text => Action::MakeText,
+                    ObjType::Sequence(SequenceType::List) => Action::MakeList,
+                    ObjType::Map(MapType::Map) => Action::MakeMap,
+                    ObjType::Map(MapType::Table) => Action::MakeTable,
+                    ObjType::Sequence(SequenceType::Text) => Action::MakeText,
                 }
             }
         };

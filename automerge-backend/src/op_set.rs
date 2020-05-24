@@ -16,7 +16,7 @@ use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
 use automerge_protocol::{
-    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff,
+    ChangeHash, Diff, DiffEdit, Key, MapDiff, MapType, ObjDiff, ObjType, ObjectID, OpID, SeqDiff,
 };
 use core::cmp::max;
 use std::collections::HashMap;
@@ -49,7 +49,10 @@ pub(crate) struct OpSet {
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = im_rc::HashMap::new();
-        objs.insert(ObjectID::Root, Rc::new(ObjState::new(ObjType::Map)));
+        objs.insert(
+            ObjectID::Root,
+            Rc::new(ObjState::new(ObjType::Map(MapType::Map))),
+        );
 
         OpSet {
             objs,

@@ -10,7 +10,7 @@ use crate::time;
 use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
-use automerge_protocol::{ActorID, Key, ObjType, ObjectID, OpID};
+use automerge_protocol::{ActorID, Key, MapType, ObjType, ObjectID, OpID, SequenceType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -122,10 +122,10 @@ impl Backend {
                 let key = resolve_key(rop, &id, elemids2)?;
                 let pred = op_set.get_pred(&object_id, &key, insert);
                 let action = match rop.action {
-                    amp::OpType::MakeMap => OpType::Make(ObjType::Map),
-                    amp::OpType::MakeTable => OpType::Make(ObjType::Table),
-                    amp::OpType::MakeList => OpType::Make(ObjType::List),
-                    amp::OpType::MakeText => OpType::Make(ObjType::Text),
+                    amp::OpType::MakeMap => OpType::Make(ObjType::Map(MapType::Map)),
+                    amp::OpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
+                    amp::OpType::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
+                    amp::OpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
                     amp::OpType::Del => OpType::Del,
                     amp::OpType::Link => OpType::Link(
                         child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,

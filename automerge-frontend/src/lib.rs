@@ -1,4 +1,4 @@
-use automerge_protocol::{ActorID, ObjectID, Op, OpID, Patch, Request, RequestType};
+use automerge_protocol::{ActorID, MapType, ObjectID, Op, OpID, Patch, Request, RequestType};
 
 mod change_context;
 mod error;
@@ -14,7 +14,7 @@ use std::convert::TryFrom;
 use std::str::FromStr;
 use std::time;
 use std::{collections::HashMap, rc::Rc};
-pub use value::{Conflicts, MapType, SequenceType, Value};
+pub use value::{Conflicts, Value};
 
 /// Tracks the possible states of the frontend
 ///

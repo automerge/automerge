@@ -38,7 +38,7 @@ impl ObjState {
 
     pub fn is_seq(&self) -> bool {
         match self.obj_type {
-            ObjType::Text | ObjType::List => true,
+            ObjType::Sequence(_) => true,
             _ => false,
         }
     }

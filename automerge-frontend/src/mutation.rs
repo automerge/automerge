@@ -1,6 +1,6 @@
 use crate::change_context::ChangeContext;
 use crate::object::Object;
-use crate::value::{random_op_id, value_to_op_requests, MapType, SequenceType};
+use crate::value::{random_op_id, value_to_op_requests};
 use crate::{AutomergeFrontendError, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -247,8 +247,8 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         // the enclosing diffs
         #[derive(Debug)]
         enum Intermediate {
-            Map(amp::ObjectID, MapType, String, Option<amp::OpID>),
-            Seq(amp::ObjectID, SequenceType, usize, Option<amp::OpID>),
+            Map(amp::ObjectID, amp::MapType, String, Option<amp::OpID>),
+            Seq(amp::ObjectID, amp::SequenceType, usize, Option<amp::OpID>),
         };
         let mut intermediates: Vec<Intermediate> = Vec::new();
 
@@ -265,7 +265,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                     if let Some(target) = vals.get(k) {
                         intermediates.push(Intermediate::Map(
                             oid.clone(),
-                            map_type.clone(),
+                            *map_type,
                             k.clone(),
                             current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
                         ));
@@ -277,7 +277,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                         if stack.is_empty() {
                             intermediates.push(Intermediate::Map(
                                 oid.clone(),
-                                map_type.clone(),
+                                *map_type,
                                 k.clone(),
                                 current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
                             ))
@@ -290,7 +290,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                     if let Some(Some(target)) = vals.get(*i) {
                         intermediates.push(Intermediate::Seq(
                             oid.clone(),
-                            seq_type.clone(),
+                            *seq_type,
                             *i,
                             current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
                         ));
@@ -304,7 +304,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                         if stack.is_empty() {
                             intermediates.push(Intermediate::Seq(
                                 oid.clone(),
-                                seq_type.clone(),
+                                *seq_type,
                                 *i,
                                 current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
                             ))
@@ -326,12 +326,12 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
             .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
                 Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
                     object_id: oid.to_string(),
-                    obj_type: map_type.to_obj_type(),
+                    obj_type: amp::ObjType::Map(map_type),
                     props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
                 Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
                     object_id: oid.to_string(),
-                    obj_type: seq_type.to_obj_type(),
+                    obj_type: amp::ObjType::Sequence(seq_type),
                     edits: Vec::new(),
                     props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
                 }),
@@ -343,7 +343,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
     /// the root object
     fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), AutomergeFrontendError> {
         match value {
-            Value::Map(kvs, MapType::Map) => {
+            Value::Map(kvs, amp::MapType::Map) => {
                 for (k, v) in kvs.iter() {
                     self.add_change(LocalChange::set(Path::root().key(k), v.clone()))?;
                 }
@@ -412,14 +412,14 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     let diff = match &*parent_obj {
                         Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
                             object_id: oid.to_string(),
-                            obj_type: map_type.to_obj_type(),
+                            obj_type: amp::ObjType::Map(*map_type),
                             props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
                         }),
                         Object::Sequence(oid, _, seq_type) => {
                             if let Some(PathElement::Index(i)) = change.path.name() {
                                 amp::Diff::Seq(amp::SeqDiff {
                                     object_id: oid.to_string(),
-                                    obj_type: seq_type.to_obj_type(),
+                                    obj_type: amp::ObjType::Sequence(*seq_type),
                                     edits: vec![amp::DiffEdit::Remove { index: *i }],
                                     props: hashmap! {*i => HashMap::new()},
                                 })
@@ -497,7 +497,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                             );
                             let seqdiff = amp::Diff::Seq(amp::SeqDiff {
                                 object_id: oid.to_string(),
-                                obj_type: seq_type.to_obj_type(),
+                                obj_type: amp::ObjType::Sequence(*seq_type),
                                 edits: vec![amp::DiffEdit::Insert { index: *index }],
                                 props: hashmap! {
                                     *index => hashmap!{

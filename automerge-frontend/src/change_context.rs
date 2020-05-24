@@ -1,7 +1,9 @@
-use automerge_protocol::{Diff, DiffEdit, MapDiff, ObjType, ObjectID, OpID, SeqDiff};
+use automerge_protocol::{
+    Diff, DiffEdit, MapDiff, MapType, ObjType, ObjectID, OpID, SeqDiff, SequenceType,
+};
 //use crate::AutomergeFrontendError;
 use crate::object::{Object, Values};
-use crate::{AutomergeFrontendError, MapType, SequenceType, Value};
+use crate::{AutomergeFrontendError, Value};
 use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -138,7 +140,7 @@ impl<'a> ChangeContext<'a> {
             }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
-                    ObjType::Map => {
+                    ObjType::Map(MapType::Map) => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -176,7 +178,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Table => {
+                    ObjType::Map(MapType::Table) => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -231,7 +233,7 @@ impl<'a> ChangeContext<'a> {
             }) => {
                 let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
-                    ObjType::List => {
+                    ObjType::Sequence(SequenceType::List) => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -274,7 +276,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Text => {
+                    ObjType::Sequence(SequenceType::Text) => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -328,16 +330,16 @@ impl<'a> ChangeContext<'a> {
                     original_objects,
                     updated,
                     || match subdiff.obj_type {
-                        ObjType::Map => {
+                        ObjType::Map(MapType::Map) => {
                             Object::Map(object_id.clone(), HashMap::new(), MapType::Map)
                         }
-                        ObjType::Table => {
+                        ObjType::Map(MapType::Table) => {
                             Object::Map(object_id.clone(), HashMap::new(), MapType::Table)
                         }
-                        ObjType::List => {
+                        ObjType::Sequence(SequenceType::List) => {
                             Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
                         }
-                        ObjType::Text => {
+                        ObjType::Sequence(SequenceType::Text) => {
                             Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text)
                         }
                     },
