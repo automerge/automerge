@@ -171,7 +171,7 @@ mod tests {
             },
         });
 
-        assert_eq!(json.clone(), serde_json::to_value(diff.clone()).unwrap());
+        assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());
         assert_eq!(serde_json::from_value::<Diff>(json).unwrap(), diff);
     }
 
@@ -200,7 +200,7 @@ mod tests {
             },
         });
 
-        assert_eq!(json.clone(), serde_json::to_value(diff.clone()).unwrap());
+        assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());
         assert_eq!(serde_json::from_value::<Diff>(json).unwrap(), diff);
     }
 }

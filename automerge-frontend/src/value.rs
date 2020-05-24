@@ -104,6 +104,7 @@ impl Value {
                     .iter()
                     .map(|v| match v {
                         Value::Primitive(amp::Value::Str(c)) => c.as_str(),
+                        // TODO fix panic
                         _ => panic!("Non string element in text sequence"),
                     })
                     .collect(),
