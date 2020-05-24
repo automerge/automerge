@@ -11,11 +11,12 @@ use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
+use crate::op_type::OpType;
 use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
 use crate::undo_operation::UndoOperation;
 use automerge_protocol::{
-    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, OpType, SeqDiff,
+    ChangeHash, Diff, DiffEdit, Key, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff,
 };
 use core::cmp::max;
 use std::collections::HashMap;

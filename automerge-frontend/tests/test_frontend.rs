@@ -60,7 +60,7 @@ fn test_set_root_object_properties() {
             cr.time = None;
             cr
         });
-    let expected_change = amp::ChangeRequest {
+    let expected_change = amp::Request {
         actor: doc.actor_id,
         seq: 1,
         version: 0,
@@ -68,8 +68,8 @@ fn test_set_root_object_properties() {
         message: Some("set root object".into()),
         undoable: true,
         deps: None,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: ROOT_ID.to_string(),
             key: amp::RequestKey::Str("bird".to_string()),
             child: None,
@@ -77,7 +77,7 @@ fn test_set_root_object_properties() {
             datatype: Some(amp::DataType::Undefined),
             insert: false,
         }]),
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
     };
     assert_eq!(change_request, Some(expected_change));
 }
@@ -105,18 +105,18 @@ fn it_should_create_nested_maps() {
         .unwrap()
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
-    let expected_change = amp::ChangeRequest {
+    let expected_change = amp::Request {
         actor: doc.actor_id,
         seq: 1,
         time: change_request.time,
         message: None,
         version: 0,
         undoable: true,
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
         deps: None,
         ops: Some(vec![
-            amp::OpRequest {
-                action: amp::ReqOpType::MakeMap,
+            amp::Op {
+                action: amp::OpType::MakeMap,
                 obj: amp::ObjectID::Root.to_string(),
                 key: amp::RequestKey::Str("birds".into()),
                 child: Some(birds_id.to_string()),
@@ -124,8 +124,8 @@ fn it_should_create_nested_maps() {
                 value: None,
                 insert: false,
             },
-            amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            amp::Op {
+                action: amp::OpType::Set,
                 obj: birds_id.to_string(),
                 key: amp::RequestKey::Str("wrens".into()),
                 child: None,
@@ -183,7 +183,7 @@ fn apply_updates_inside_nested_maps() {
     );
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -191,9 +191,9 @@ fn apply_updates_inside_nested_maps() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: birds_id.to_string(),
             key: "sparrows".into(),
             child: None,
@@ -242,7 +242,7 @@ fn delete_keys_in_a_map() {
         }))
     );
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -250,9 +250,9 @@ fn delete_keys_in_a_map() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Del,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Del,
             obj: amp::ObjectID::Root.to_string(),
             key: "magpies".into(),
             child: None,
@@ -299,7 +299,7 @@ fn create_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 1,
         version: 0,
@@ -307,10 +307,10 @@ fn create_lists() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
         ops: Some(vec![
-            amp::OpRequest {
-                action: amp::ReqOpType::MakeList,
+            amp::Op {
+                action: amp::OpType::MakeList,
                 key: "birds".into(),
                 obj: amp::ObjectID::Root.to_string(),
                 child: Some(birds_id.to_string()),
@@ -318,8 +318,8 @@ fn create_lists() {
                 datatype: None,
                 insert: false,
             },
-            amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            amp::Op {
+                action: amp::OpType::Set,
                 obj: birds_id.to_string(),
                 key: 0.into(),
                 child: None,
@@ -367,7 +367,7 @@ fn apply_updates_inside_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -375,9 +375,9 @@ fn apply_updates_inside_lists() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: birds_id.to_string(),
             key: 0.into(),
             child: None,
@@ -421,7 +421,7 @@ fn delete_list_elements() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::ChangeRequest {
+    let expected_change_request = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -429,9 +429,9 @@ fn delete_list_elements() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Del,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Del,
             obj: birds_id.to_string(),
             key: 0.into(),
             child: None,
@@ -488,7 +488,7 @@ fn handle_counters_inside_maps() {
         )
     );
 
-    let expected_change_request_1 = amp::ChangeRequest {
+    let expected_change_request_1 = amp::Request {
         actor: doc.actor_id.clone(),
         seq: 1,
         version: 0,
@@ -496,9 +496,9 @@ fn handle_counters_inside_maps() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Set,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Set,
             obj: amp::ObjectID::Root.to_string(),
             key: "wrens".into(),
             child: None,
@@ -509,7 +509,7 @@ fn handle_counters_inside_maps() {
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::ChangeRequest {
+    let expected_change_request_2 = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -517,9 +517,9 @@ fn handle_counters_inside_maps() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Inc,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Inc,
             obj: amp::ObjectID::Root.to_string(),
             key: "wrens".into(),
             child: None,
@@ -580,7 +580,7 @@ fn handle_counters_inside_lists() {
 
     let counts_id = doc.get_object_id(&Path::root().key("counts")).unwrap();
 
-    let expected_change_request_1 = amp::ChangeRequest {
+    let expected_change_request_1 = amp::Request {
         actor: doc.actor_id.clone(),
         seq: 1,
         version: 0,
@@ -588,10 +588,10 @@ fn handle_counters_inside_lists() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
+        request_type: amp::RequestType::Change,
         ops: Some(vec![
-            amp::OpRequest {
-                action: amp::ReqOpType::MakeList,
+            amp::Op {
+                action: amp::OpType::MakeList,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "counts".into(),
                 child: Some(counts_id.to_string()),
@@ -599,8 +599,8 @@ fn handle_counters_inside_lists() {
                 value: None,
                 datatype: None,
             },
-            amp::OpRequest {
-                action: amp::ReqOpType::Set,
+            amp::Op {
+                action: amp::OpType::Set,
                 obj: counts_id.to_string(),
                 key: 0.into(),
                 child: None,
@@ -612,7 +612,7 @@ fn handle_counters_inside_lists() {
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::ChangeRequest {
+    let expected_change_request_2 = amp::Request {
         actor: doc.actor_id,
         seq: 2,
         version: 0,
@@ -620,9 +620,9 @@ fn handle_counters_inside_lists() {
         message: None,
         undoable: true,
         deps: None,
-        request_type: amp::ChangeRequestType::Change,
-        ops: Some(vec![amp::OpRequest {
-            action: amp::ReqOpType::Inc,
+        request_type: amp::RequestType::Change,
+        ops: Some(vec![amp::Op {
+            action: amp::OpType::Inc,
             obj: counts_id.to_string(),
             key: 0.into(),
             child: None,

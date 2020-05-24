@@ -1,5 +1,5 @@
 use crate::error::InvalidOpID;
-use crate::OpID;
+use crate::{ActorID, OpID};
 use core::fmt;
 use std::{
     cmp::{Ordering, PartialOrd},
@@ -43,10 +43,12 @@ impl FromStr for OpID {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut i = s.split('@');
         match (i.next(), i.next(), i.next()) {
-            (Some(seq_str), Some(actor_str), None) => seq_str
-                .parse()
-                .map(|seq| OpID(seq, actor_str.to_string()))
-                .map_err(|_| InvalidOpID(s.to_string())),
+            (Some(counter_str), Some(actor_str), None) => {
+                match (counter_str.parse(), ActorID::from_str(actor_str)) {
+                    (Ok(counter), Ok(actor)) => Ok(OpID(counter, actor)),
+                    _ => Err(InvalidOpID(s.to_string())),
+                }
+            }
             _ => Err(InvalidOpID(s.to_string())),
         }
     }

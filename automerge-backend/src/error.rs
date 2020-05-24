@@ -1,4 +1,4 @@
-use automerge_protocol::{ObjectID, OpID, OpRequest};
+use automerge_protocol::{ObjectID, Op, OpID};
 use std::error::Error;
 use std::fmt;
 
@@ -19,18 +19,26 @@ pub enum AutomergeError {
     NoUndo,
     MissingValue,
     GeneralError(String),
-    MissingNumberValue(OpRequest),
+    MissingNumberValue(Op),
     UnknownVersion(u64),
     DuplicateChange(String),
     DivergedState(String),
     ChangeDecompressError(String),
     MapKeyInSeq,
     HeadToOpID,
+    DocFormatUnimplemented,
     DivergentChange(String),
     EncodeFailed,
     DecodeFailed,
     InvalidChange,
     ChangeBadFormat,
+    EncodingError,
+}
+
+impl From<automerge_protocol::error::InvalidChangeHashSlice> for AutomergeError {
+    fn from(_: automerge_protocol::error::InvalidChangeHashSlice) -> AutomergeError {
+        AutomergeError::ChangeBadFormat
+    }
 }
 
 impl fmt::Display for AutomergeError {
@@ -51,3 +59,15 @@ impl fmt::Display for InvalidElementID {
 }
 
 impl Error for InvalidElementID {}
+
+impl From<leb128::read::Error> for AutomergeError {
+    fn from(_err: leb128::read::Error) -> Self {
+        AutomergeError::EncodingError
+    }
+}
+
+impl From<std::io::Error> for AutomergeError {
+    fn from(_err: std::io::Error) -> Self {
+        AutomergeError::EncodingError
+    }
+}

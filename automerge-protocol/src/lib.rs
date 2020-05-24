@@ -1,36 +1,32 @@
-mod error;
+pub mod error;
 mod serde_impls;
 mod utility_impls;
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
-// TODO make this an opaque tuple struct. I'm waiting on hearing what the
-// constraints are on the possible values of ActorIDs
-#[derive(Deserialize, Serialize, Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
-pub struct ActorID(pub String);
+#[derive(Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+pub struct ActorID(Vec<u8>);
 
 impl ActorID {
     pub fn random() -> ActorID {
-        ActorID(hex::encode(uuid::Uuid::new_v4().as_bytes()))
+        ActorID(uuid::Uuid::new_v4().as_bytes().to_vec())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        // FIXME - I should be storing u8 internally - not strings
-        // i need proper error handling for non-hex strings
-        hex::decode(&self.0).unwrap()
-    }
-
-    pub fn to_hex_string(&self) -> String {
         self.0.clone()
     }
 
     pub fn from_bytes(bytes: &[u8]) -> ActorID {
-        ActorID(hex::encode(bytes))
+        ActorID(bytes.to_vec())
+    }
+
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(&self.0)
     }
 
     pub fn op_id_at(&self, seq: u64) -> OpID {
-        OpID(seq, self.to_string())
+        OpID(seq, self.clone())
     }
 }
 
@@ -44,11 +40,11 @@ pub enum ObjType {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub struct OpID(pub u64, pub String);
+pub struct OpID(pub u64, pub ActorID);
 
 impl OpID {
     pub fn new(seq: u64, actor: &ActorID) -> OpID {
-        OpID(seq, actor.0.clone())
+        OpID(seq, actor.clone())
     }
 
     pub fn counter(&self) -> u64 {
@@ -181,7 +177,7 @@ pub enum RequestKey {
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub enum ReqOpType {
+pub enum OpType {
     MakeMap,
     MakeTable,
     MakeList,
@@ -193,8 +189,8 @@ pub enum ReqOpType {
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
-pub struct OpRequest {
-    pub action: ReqOpType,
+pub struct Op {
+    pub action: OpType,
     pub obj: String,
     pub key: RequestKey,
     pub child: Option<String>,
@@ -204,7 +200,7 @@ pub struct OpRequest {
     pub insert: bool,
 }
 
-impl OpRequest {
+impl Op {
     pub fn primitive_value(&self) -> Value {
         match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
             (Some(n), Some(DataType::Counter)) => Value::Counter(n),
@@ -215,10 +211,10 @@ impl OpRequest {
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            ReqOpType::MakeMap => Some(ObjType::Map),
-            ReqOpType::MakeTable => Some(ObjType::Table),
-            ReqOpType::MakeList => Some(ObjType::List),
-            ReqOpType::MakeText => Some(ObjType::Text),
+            OpType::MakeMap => Some(ObjType::Map),
+            OpType::MakeTable => Some(ObjType::Table),
+            OpType::MakeList => Some(ObjType::List),
+            OpType::MakeText => Some(ObjType::Text),
             _ => None,
         }
     }
@@ -228,127 +224,12 @@ impl OpRequest {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum OpType {
-    Make(ObjType),
-    Del,
-    Link(ObjectID),
-    Inc(i64),
-    Set(Value),
-}
-
-#[derive(PartialEq, Debug, Clone)]
-pub struct Operation {
-    pub action: OpType,
-    pub obj: ObjectID,
-    pub key: Key,
-    pub pred: Vec<OpID>,
-    pub insert: bool,
-}
-
-impl Operation {
-    pub fn set(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Set(value),
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn insert(obj: ObjectID, key: Key, value: Value, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Set(value),
-            obj,
-            key,
-            insert: true,
-            pred,
-        }
-    }
-
-    pub fn inc(obj: ObjectID, key: Key, value: i64, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Inc(value),
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn del(obj: ObjectID, key: Key, pred: Vec<OpID>) -> Operation {
-        Operation {
-            action: OpType::Del,
-            obj,
-            key,
-            insert: false,
-            pred,
-        }
-    }
-
-    pub fn is_make(&self) -> bool {
-        self.obj_type().is_some()
-    }
-
-    pub fn is_basic_assign(&self) -> bool {
-        !self.insert
-            && match self.action {
-                OpType::Del | OpType::Set(_) | OpType::Inc(_) | OpType::Link(_) => true,
-                _ => false,
-            }
-    }
-
-    pub fn is_inc(&self) -> bool {
-        match self.action {
-            OpType::Inc(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn obj_type(&self) -> Option<ObjType> {
-        match self.action {
-            OpType::Make(t) => Some(t),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
 
-impl ChangeHash {
-    /// A ChangeHash which is all zeros
-    pub fn zero() -> Self {
-        ChangeHash([0; 32])
-    }
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-pub struct Change {
-    #[serde(rename = "ops")]
-    pub operations: Vec<Operation>,
-    #[serde(rename = "actor")]
-    pub actor_id: ActorID,
-    pub hash: ChangeHash,
-    pub seq: u64,
-    #[serde(rename = "startOp")]
-    pub start_op: u64,
-    pub time: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
-    pub deps: Vec<ChangeHash>,
-}
-
-impl Change {
-    pub fn max_op(&self) -> u64 {
-        self.start_op + (self.operations.len() as u64) - 1
-    }
-}
-
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct ChangeRequest {
+pub struct Request {
     pub actor: ActorID,
     pub seq: u64,
     pub version: u64,
@@ -357,13 +238,13 @@ pub struct ChangeRequest {
     pub undoable: bool,
     pub time: Option<i64>,
     pub deps: Option<Vec<ChangeHash>>,
-    pub ops: Option<Vec<OpRequest>>,
-    pub request_type: ChangeRequestType,
+    pub ops: Option<Vec<Op>>,
+    pub request_type: RequestType,
 }
 
 #[derive(Deserialize, PartialEq, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub enum ChangeRequestType {
+pub enum RequestType {
     Change,
     Undo,
     Redo,

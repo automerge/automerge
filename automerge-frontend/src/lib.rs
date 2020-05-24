@@ -1,6 +1,4 @@
-use automerge_protocol::{
-    ActorID, ChangeRequest, ChangeRequestType, ObjectID, OpID, OpRequest, Patch,
-};
+use automerge_protocol::{ActorID, ObjectID, Op, OpID, Patch, Request, RequestType};
 
 mod change_context;
 mod error;
@@ -13,6 +11,7 @@ use mutation::PathElement;
 pub use mutation::{LocalChange, MutableDocument, Path};
 use object::Object;
 use std::convert::TryFrom;
+use std::str::FromStr;
 use std::time;
 use std::{collections::HashMap, rc::Rc};
 pub use value::{Conflicts, MapType, SequenceType, Value};
@@ -74,7 +73,7 @@ impl FrontendState {
                 if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
                     // If this is a local change corresponding to our actor then we
                     // need to match it against in flight requests
-                    if self_actor == &ActorID::from(patch_actor.as_str()) {
+                    if self_actor == &ActorID::from_str(patch_actor.as_str())? {
                         // Check that if the patch is for our actor ID then it is not
                         // out of order
                         if new_in_flight_requests[0] != patch_seq {
@@ -139,7 +138,7 @@ impl FrontendState {
         self,
         change_closure: F,
         seq: u64,
-    ) -> Result<(Option<Vec<OpRequest>>, FrontendState, Value), AutomergeFrontendError>
+    ) -> Result<(Option<Vec<Op>>, FrontendState, Value), AutomergeFrontendError>
     where
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
@@ -235,7 +234,7 @@ impl Frontend {
 
     pub fn new_with_initial_state(
         initial_state: Value,
-    ) -> Result<(Self, ChangeRequest), InvalidInitialStateError> {
+    ) -> Result<(Self, Request), InvalidInitialStateError> {
         match &initial_state {
             Value::Map(kvs, MapType::Map) => {
                 let init_ops = kvs
@@ -252,7 +251,7 @@ impl Frontend {
                     .collect();
                 let mut front = Frontend::new();
 
-                let init_change_request = ChangeRequest {
+                let init_change_request = Request {
                     actor: front.actor_id.clone(),
                     time: system_time(),
                     seq: 1,
@@ -261,7 +260,7 @@ impl Frontend {
                     undoable: false,
                     deps: None,
                     ops: Some(init_ops),
-                    request_type: ChangeRequestType::Change,
+                    request_type: RequestType::Change,
                 };
                 // Unwrap here is fine because it should be impossible to
                 // cause an error applying a local change from a `Value`. If
@@ -285,7 +284,7 @@ impl Frontend {
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<Option<ChangeRequest>, AutomergeFrontendError>
+    ) -> Result<Option<Request>, AutomergeFrontendError>
     where
         F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
     {
@@ -301,7 +300,7 @@ impl Frontend {
         }
         self.seq += 1;
         self.cached_value = new_value;
-        let change_request = ChangeRequest {
+        let change_request = Request {
             actor: self.actor_id.clone(),
             seq: self.seq,
             time: system_time(),
@@ -310,7 +309,7 @@ impl Frontend {
             undoable: true,
             deps: None,
             ops,
-            request_type: ChangeRequestType::Change,
+            request_type: RequestType::Change,
         };
         Ok(Some(change_request))
     }

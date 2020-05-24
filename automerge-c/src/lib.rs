@@ -3,8 +3,8 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
-use automerge_backend::AutomergeError;
-use automerge_protocol::{ActorID, ChangeRequest};
+use automerge_backend::{AutomergeError, Change};
+use automerge_protocol::Request;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use std::convert::TryInto;
@@ -60,13 +60,19 @@ impl Backend {
     }
 
     fn handle_binary(&mut self, b: Result<Vec<u8>, AutomergeError>) -> isize {
-        self.handle_binaries(b.map(|b| vec![b]))
+        if let Ok(bin) = b {
+            let len = bin.len();
+            self.binary = vec![bin];
+            len as isize
+        } else {
+            -1
+        }
     }
 
-    fn handle_binaries(&mut self, b: Result<Vec<Vec<u8>>, AutomergeError>) -> isize {
+    fn handle_binaries(&mut self, b: Result<Vec<&Change>, AutomergeError>) -> isize {
         if let Ok(bin) = b {
-            let len = bin[0].len();
-            self.binary = bin;
+            let len = bin[0].bytes.len();
+            self.binary = bin.iter().map(|b| b.bytes.clone()).collect();
             self.binary.reverse();
             len as isize
         } else {
@@ -127,9 +133,14 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request: ChangeRequest = serde_json::from_str(&request).unwrap();
-    let patch = (*backend).apply_local_change(request);
-    (*backend).generate_json(patch)
+    let request: Result<Request, _> = serde_json::from_str(&request);
+    if let Ok(request) = request {
+        let patch = (*backend).apply_local_change(request);
+        (*backend).generate_json(patch)
+    } else {
+        // json parse error
+        -1
+    }
 }
 
 /// # Safety
@@ -154,7 +165,12 @@ pub unsafe extern "C" fn automerge_write_change(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize {
     if let Some(changes) = (*backend).queue.take() {
-        let patch = (*backend).apply_changes_binary(changes);
+        // FIXME
+        let changes = changes
+            .iter()
+            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
+            .collect();
+        let patch = (*backend).apply_changes(changes);
         (*backend).generate_json(patch)
     } else {
         -1
@@ -174,7 +190,12 @@ pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend) -> isize {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize {
     if let Some(changes) = (*backend).queue.take() {
-        if (*backend).load_changes_binary(changes).is_ok() {
+        // FIXME
+        let changes = changes
+            .iter()
+            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
+            .collect();
+        if (*backend).load_changes(changes).is_ok() {
             return 0;
         }
     }
@@ -219,9 +240,13 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 ) -> isize {
     let actor: &CStr = CStr::from_ptr(actor);
     let actor = actor.to_string_lossy();
-    let actor: ActorID = actor.as_ref().into();
-    let changes = (*backend).get_changes_for_actor_id(&actor);
-    (*backend).handle_binaries(changes)
+    if let Ok(actor) = actor.as_ref().try_into() {
+        let changes = (*backend).get_changes_for_actor_id(&actor);
+        (*backend).handle_binaries(changes)
+    } else {
+        // bad actor error
+        -1
+    }
 }
 
 /// # Safety
@@ -243,7 +268,7 @@ pub unsafe extern "C" fn automerge_get_changes(
         )
     }
     let changes = (*backend).get_changes(&have_deps);
-    (*backend).handle_binaries(changes)
+    (*backend).handle_binaries(Ok(changes))
 }
 
 /// # Safety

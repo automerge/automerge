@@ -4,7 +4,8 @@ use std::path::Path;
 
 fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
     let mut backend = automerge_backend::Backend::init();
-    let patch = backend.apply_changes_binary(vec![input_data])?;
+    let changes = automerge_backend::Change::parse(&input_data)?;
+    let patch = backend.apply_changes(changes)?;
 
     let mut frontend = automerge_frontend::Frontend::new();
     frontend.apply_patch(patch).unwrap();
