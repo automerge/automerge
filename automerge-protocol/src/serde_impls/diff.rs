@@ -1,5 +1,5 @@
 use super::read_field;
-use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, SeqDiff, Value};
+use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff, Value};
 use serde::{
     de,
     de::{Error, MapAccess, Unexpected},
@@ -61,9 +61,9 @@ impl<'de> Deserialize<'de> for Diff {
                 V: MapAccess<'de>,
             {
                 let mut edits: Option<Vec<DiffEdit>> = None;
-                let mut object_id: Option<String> = None;
+                let mut object_id: Option<ObjectID> = None;
                 let mut obj_type: Option<ObjType> = None;
-                let mut props: Option<HashMap<String, HashMap<String, Diff>>> = None;
+                let mut props: Option<HashMap<String, HashMap<OpID, Diff>>> = None;
                 let mut value: Option<Value> = None;
                 let mut datatype: Option<DataType> = None;
 
@@ -145,28 +145,29 @@ fn maybe_add_datatype_to_value(value: Value, datatype: DataType) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Diff, MapDiff, MapType, SeqDiff, SequenceType};
+    use crate::{Diff, MapDiff, MapType, ObjectID, OpID, SeqDiff, SequenceType};
     use maplit::hashmap;
+    use std::str::FromStr;
 
     #[test]
     fn map_diff_serialization_round_trip() {
         let json = serde_json::json!({
-            "objectId": "1@6121f875-7d5d-4660-9b66-5218b2b3a141",
+            "objectId": "1@6121f8757d5d46609b665218b2b3a141",
             "type": "map",
             "props": {
                 "key": {
-                    "1@4a093244-de2b-4fd0-a420-3724e15dfc16": {
+                    "1@4a093244de2b4fd0a4203724e15dfc16": {
                         "value": "value"
                     }
                 }
             }
         });
         let diff = Diff::Map(MapDiff {
-            object_id: "1@6121f875-7d5d-4660-9b66-5218b2b3a141".to_string(),
+            object_id: ObjectID::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             obj_type: MapType::Map,
             props: hashmap! {
                 "key".to_string() => hashmap!{
-                    "1@4a093244-de2b-4fd0-a420-3724e15dfc16".to_string() => "value".into()
+                    OpID::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
                 }
             },
         });
@@ -178,24 +179,24 @@ mod tests {
     #[test]
     fn seq_diff_serialization_round_trip() {
         let json = serde_json::json!({
-            "objectId": "1@6121f875-7d5d-4660-9b66-5218b2b3a141",
+            "objectId": "1@6121f8757d5d46609b665218b2b3a141",
             "type": "list",
             "edits": [],
             "props": {
                 "0": {
-                    "1@4a093244-de2b-4fd0-a420-3724e15dfc16": {
+                    "1@4a093244de2b4fd0a4203724e15dfc16": {
                         "value": "value"
                     }
                 }
             }
         });
         let diff = Diff::Seq(SeqDiff {
-            object_id: "1@6121f875-7d5d-4660-9b66-5218b2b3a141".to_string(),
+            object_id: ObjectID::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             obj_type: SequenceType::List,
             edits: Vec::new(),
             props: hashmap! {
                 0 => hashmap!{
-                    "1@4a093244-de2b-4fd0-a420-3724e15dfc16".to_string() => "value".into()
+                    OpID::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
                 }
             },
         });

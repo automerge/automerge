@@ -1,9 +1,10 @@
 use crate::actor_map::ActorMap;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
+use crate::internal::{ElementID, Key, OpID};
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
-use automerge_protocol::{ElementID, Key, ObjType, OpID};
+use automerge_protocol as amp;
 use im_rc::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
@@ -15,7 +16,7 @@ use im_rc::{HashMap, HashSet};
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ObjState {
     pub props: HashMap<Key, ConcurrentOperations>,
-    pub obj_type: ObjType,
+    pub obj_type: amp::ObjType,
     pub inbound: HashSet<OpHandle>,
     pub following: HashMap<ElementID, Vec<ElementID>>,
     pub insertions: HashMap<ElementID, OpHandle>,
@@ -23,7 +24,7 @@ pub(crate) struct ObjState {
 }
 
 impl ObjState {
-    pub fn new(obj_type: ObjType) -> ObjState {
+    pub fn new(obj_type: amp::ObjType) -> ObjState {
         let mut following = HashMap::new();
         following.insert(ElementID::Head, Vec::new());
         ObjState {
@@ -38,7 +39,7 @@ impl ObjState {
 
     pub fn is_seq(&self) -> bool {
         match self.obj_type {
-            ObjType::Sequence(_) => true,
+            amp::ObjType::Sequence(_) => true,
             _ => false,
         }
     }
@@ -52,16 +53,16 @@ impl ObjState {
     }
 
     // this is the efficient way to do it for a SkipList
-    pub fn index_of(&self, id: &OpID) -> Result<usize, AutomergeError> {
+    pub fn index_of(&self, id: OpID) -> Result<usize, AutomergeError> {
         let mut prev_id = id.into();
         let mut index = None;
         // reverse walk through the following/insertions and looking for something that not deleted
         while index.is_none() {
             prev_id = self.get_previous(&prev_id)?;
-            match &prev_id {
-                ElementID::ID(ref id) => {
+            match prev_id {
+                ElementID::ID(id) => {
                     // FIXME maybe I can speed this up with self.props.get before looking for
-                    index = self.seq.index_of(id)
+                    index = self.seq.index_of(&id)
                 }
                 ElementID::Head => break,
             }
@@ -79,19 +80,19 @@ impl ObjState {
         if pos == 0 {
             Ok(parent_id)
         } else {
-            let mut prev_id = children[pos - 1].clone(); // FIXME - use refs here
+            let mut prev_id = children[pos - 1]; // FIXME - use refs here
             loop {
                 match self.insertions_after(&prev_id).last() {
-                    Some(id) => prev_id = id.clone(),
-                    None => return Ok(prev_id.clone()),
+                    Some(id) => prev_id = *id,
+                    None => return Ok(prev_id),
                 }
             }
         }
     }
 
     pub fn insert_after(&mut self, elem: ElementID, op: OpHandle, actors: &ActorMap) {
-        let eid = ElementID::from(&op.id);
-        self.insertions.insert(eid.clone(), op);
+        let eid = op.id.into();
+        self.insertions.insert(eid, op);
         let following = self.following.entry(elem).or_default();
         following.push(eid);
         following.sort_unstable_by(|a, b| actors.cmp(b, a));

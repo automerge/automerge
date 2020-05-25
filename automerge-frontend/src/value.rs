@@ -142,7 +142,7 @@ impl Value {
 /// Returns a tuple of the op requests which will create this value, and a diff
 /// which corresponds to those ops.
 pub(crate) fn value_to_op_requests(
-    parent_object: String,
+    parent_object: amp::ObjectID,
     key: PathElement,
     v: &Value,
     insert: bool,
@@ -156,9 +156,9 @@ pub(crate) fn value_to_op_requests(
             let list_id = new_object_id();
             let make_op = amp::Op {
                 action: make_action,
-                obj: parent_object,
+                obj: parent_object.to_string(),
                 key: key.to_request_key(),
-                child: Some(list_id.clone()),
+                child: Some(list_id.to_string()),
                 value: None,
                 datatype: None,
                 insert,
@@ -186,9 +186,7 @@ pub(crate) fn value_to_op_requests(
                 props: child_requests_and_diffs
                     .into_iter()
                     .enumerate()
-                    .map(|(index, (_, diff_link))| {
-                        (index, hashmap! {random_op_id().to_string() => diff_link})
-                    })
+                    .map(|(index, (_, diff_link))| (index, hashmap! {random_op_id() => diff_link}))
                     .collect(),
             };
             let mut result = vec![make_op];
@@ -203,9 +201,9 @@ pub(crate) fn value_to_op_requests(
             let map_id = new_object_id();
             let make_op = amp::Op {
                 action: make_action,
-                obj: parent_object,
+                obj: parent_object.to_string(),
                 key: key.to_request_key(),
-                child: Some(map_id.clone()),
+                child: Some(map_id.to_string()),
                 value: None,
                 datatype: None,
                 insert,
@@ -230,9 +228,7 @@ pub(crate) fn value_to_op_requests(
                 obj_type: *map_type,
                 props: child_requests_and_diffs
                     .into_iter()
-                    .map(|(k, (_, diff_link))| {
-                        (k, hashmap! {random_op_id().to_string() => diff_link})
-                    })
+                    .map(|(k, (_, diff_link))| (k, hashmap! {random_op_id() => diff_link}))
                     .collect(),
             };
             result.extend(child_requests);
@@ -241,7 +237,7 @@ pub(crate) fn value_to_op_requests(
         Value::Primitive(prim_value) => {
             let ops = vec![amp::Op {
                 action: amp::OpType::Set,
-                obj: parent_object,
+                obj: parent_object.to_string(),
                 key: key.to_request_key(),
                 child: None,
                 value: Some(prim_value.clone()),
@@ -254,8 +250,8 @@ pub(crate) fn value_to_op_requests(
     }
 }
 
-fn new_object_id() -> String {
-    amp::ObjectID::ID(random_op_id()).to_string()
+fn new_object_id() -> amp::ObjectID {
+    amp::ObjectID::ID(random_op_id())
 }
 
 pub(crate) fn random_op_id() -> amp::OpID {

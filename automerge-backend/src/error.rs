@@ -1,16 +1,16 @@
-use automerge_protocol::{ObjectID, Op, OpID};
+use automerge_protocol as amp;
 use std::error::Error;
 use std::fmt;
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeError {
-    MissingObjectError(ObjectID),
-    MissingIndex(OpID),
+    MissingObjectError,
+    MissingIndex(amp::OpID),
     MissingChildID(String),
-    MissingElement(ObjectID, OpID),
-    NoPathToObject(ObjectID),
-    CantExtractObject(ObjectID),
-    LinkMissingChild(OpID),
+    MissingElement(amp::ObjectID, amp::OpID),
+    NoPathToObject(amp::ObjectID),
+    CantExtractObject(amp::ObjectID),
+    LinkMissingChild(amp::OpID),
     SkipListError(String),
     IndexOutOfBounds(usize),
     InvalidOpID(String),
@@ -19,7 +19,7 @@ pub enum AutomergeError {
     NoUndo,
     MissingValue,
     GeneralError(String),
-    MissingNumberValue(Op),
+    MissingNumberValue(amp::Op),
     UnknownVersion(u64),
     DuplicateChange(String),
     DivergedState(String),
@@ -35,8 +35,8 @@ pub enum AutomergeError {
     EncodingError,
 }
 
-impl From<automerge_protocol::error::InvalidChangeHashSlice> for AutomergeError {
-    fn from(_: automerge_protocol::error::InvalidChangeHashSlice) -> AutomergeError {
+impl From<amp::error::InvalidChangeHashSlice> for AutomergeError {
+    fn from(_: amp::error::InvalidChangeHashSlice) -> AutomergeError {
         AutomergeError::ChangeBadFormat
     }
 }

@@ -1,13 +1,13 @@
-use automerge_protocol::{MapType, ObjType, ObjectID, SequenceType, Value};
+use automerge_protocol as amp;
 use serde::{Serialize, Serializer};
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
-    Make(ObjType),
+    Make(amp::ObjType),
     Del,
-    Link(ObjectID),
+    Link(amp::ObjectID),
     Inc(i64),
-    Set(Value),
+    Set(amp::Value),
 }
 
 impl Serialize for OpType {
@@ -16,10 +16,10 @@ impl Serialize for OpType {
         S: Serializer,
     {
         let s = match self {
-            OpType::Make(ObjType::Map(MapType::Map)) => "makeMap",
-            OpType::Make(ObjType::Map(MapType::Table)) => "makeTable",
-            OpType::Make(ObjType::Sequence(SequenceType::List)) => "makeList",
-            OpType::Make(ObjType::Sequence(SequenceType::Text)) => "makeText",
+            OpType::Make(amp::ObjType::Map(amp::MapType::Map)) => "makeMap",
+            OpType::Make(amp::ObjType::Map(amp::MapType::Table)) => "makeTable",
+            OpType::Make(amp::ObjType::Sequence(amp::SequenceType::List)) => "makeList",
+            OpType::Make(amp::ObjType::Sequence(amp::SequenceType::Text)) => "makeText",
             OpType::Del => "del",
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",

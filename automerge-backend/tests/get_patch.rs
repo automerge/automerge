@@ -56,11 +56,11 @@ fn test_include_most_recent_value_for_key() {
         can_redo: false,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    "2@ec28cfbcdb9e4f32ad24b3c776e651b0".into() => Diff::Value("blackbird".into())
+                    "2@ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap() => Diff::Value("blackbird".into())
                 }
             },
         })),
@@ -122,12 +122,12 @@ fn test_includes_conflicting_values_for_key() {
         can_redo: false,
         deps: vec![change1.hash, change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    "1@111111".into() => Diff::Value("magpie".into()),
-                    "1@222222".into() => Diff::Value("blackbird".into()),
+                    "1@111111".try_into().unwrap() => Diff::Value("magpie".into()),
+                    "1@222222".try_into().unwrap() => Diff::Value("blackbird".into()),
                 },
             },
         })),
@@ -187,11 +187,11 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         can_redo: false,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "counter".into() => hashmap!{
-                    "1@46c92088e4484ae5945dc63bf606a4a5".into() => Diff::Value(Value::Counter(3))
+                    "1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap() => Diff::Value(Value::Counter(3))
                 }
             },
         })),
@@ -269,16 +269,16 @@ fn test_creates_nested_maps() {
         can_redo: false,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    "1@06148f9422cb40579fd02f1975c34a51".into() => Diff::Map(MapDiff{
-                        object_id: "1@06148f9422cb40579fd02f1975c34a51".into(),
+                    "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Map(MapDiff{
+                        object_id: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                "4@06148f9422cb40579fd02f1975c34a51".into() => Diff::Value(Value::F64(15.0))
+                                "4@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Value(Value::F64(15.0))
                             }
                         }
                     })
@@ -333,17 +333,17 @@ fn test_create_lists() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    "1@90bf7df682f747fa82ac604b35010906".into() => Diff::Seq(SeqDiff{
-                        object_id: "1@90bf7df682f747fa82ac604b35010906".into(),
+                    "1@90bf7df682f747fa82ac604b35010906".try_into().unwrap() => Diff::Seq(SeqDiff{
+                        object_id: "1@90bf7df682f747fa82ac604b35010906".try_into().unwrap(),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert { index :0 }],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@90bf7df682f747fa82ac604b35010906".into() => Diff::Value("chaffinch".into())
+                                "2@90bf7df682f747fa82ac604b35010906".try_into().unwrap() => Diff::Value("chaffinch".into())
                             }
                         }
                     })
@@ -412,25 +412,25 @@ fn test_includes_latests_state_of_list() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "todos".into() => hashmap!{
-                    "1@6caaa2e433de42ae9c3fa65c9ff3f03e".into() => Diff::Seq(SeqDiff{
-                        object_id: "1@6caaa2e433de42ae9c3fa65c9ff3f03e".into(),
+                    "1@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Seq(SeqDiff{
+                        object_id: "1@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert{index: 0}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@6caaa2e433de42ae9c3fa65c9ff3f03e".into() => Diff::Map(MapDiff{
-                                    object_id: "2@6caaa2e433de42ae9c3fa65c9ff3f03e".into(),
+                                "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Map(MapDiff{
+                                    object_id: "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
                                     obj_type: MapType::Map,
                                     props: hashmap!{
                                         "title".into() => hashmap!{
-                                            "3@6caaa2e433de42ae9c3fa65c9ff3f03e".into() => Diff::Value("water plants".into()),
+                                            "3@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Value("water plants".into()),
                                         },
                                         "done".into() => hashmap!{
-                                            "4@6caaa2e433de42ae9c3fa65c9ff3f03e".into() => Diff::Value(false.into())
+                                            "4@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Value(false.into())
                                         }
                                     }
                                 })
@@ -479,11 +479,11 @@ fn test_includes_date_objects_at_root() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "now".into() => hashmap!{
-                    "1@90f5dd5d4f524e95ad5929e08d1194f1".into() => Diff::Value(Value::Timestamp(1_586_541_033_457))
+                    "1@90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_541_033_457))
                 }
             },
         })),
@@ -535,17 +535,17 @@ fn test_includes_date_objects_in_a_list() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root.to_string(),
+            object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "list".into() => hashmap!{
-                    "1@08b050f976a249349021a2e63d99c8e8".into() => Diff::Seq(SeqDiff{
-                        object_id: "1@08b050f976a249349021a2e63d99c8e8".into(),
+                    "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Seq(SeqDiff{
+                        object_id: "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap(),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert {index: 0}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@08b050f976a249349021a2e63d99c8e8".into() => Diff::Value(Value::Timestamp(1_586_541_089_595))
+                                "2@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_541_089_595))
                             }
                         }
                     })

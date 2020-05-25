@@ -3,8 +3,8 @@ use automerge_frontend::{AutomergeFrontendError, Frontend, LocalChange, Path, Va
 use automerge_protocol as amp;
 use maplit::hashmap;
 
-fn random_op_id() -> String {
-    amp::OpID::new(1, &amp::ActorID::random()).to_string()
+fn random_op_id() -> amp::OpID {
+    amp::OpID::new(1, &amp::ActorID::random())
 }
 
 #[test]
@@ -27,7 +27,7 @@ fn use_version_and_sequence_number_from_backend() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -119,7 +119,7 @@ fn remove_pending_requests_once_handled() {
         version: 1,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -153,7 +153,7 @@ fn remove_pending_requests_once_handled() {
         version: 2,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".into() => hashmap!{
@@ -213,7 +213,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "pheasants".into() => hashmap!{
@@ -247,7 +247,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         version: 2,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -299,7 +299,7 @@ fn dont_allow_out_of_order_request_patches() {
         can_undo: true,
         can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
@@ -344,12 +344,12 @@ fn handle_concurrent_insertions_into_lists() {
         can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".to_string() => hashmap!{
-                    doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
-                        object_id: birds_id.to_string(),
+                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert{ index: 0 }],
                         props: hashmap!{
@@ -398,9 +398,9 @@ fn handle_concurrent_insertions_into_lists() {
 
     // Apply a patch which does not take effect because we're still waiting
     // for the in flight requests to be responded to
-    doc.apply_patch(amp::Patch{
+    doc.apply_patch(amp::Patch {
         version: 3,
-        clock: hashmap!{
+        clock: hashmap! {
             doc.actor_id.to_string() => 1,
             remote.to_string() => 1,
         },
@@ -409,25 +409,26 @@ fn handle_concurrent_insertions_into_lists() {
         actor: None,
         seq: None,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff{
-            object_id: amp::ObjectID::Root.to_string(),
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
-            props: hashmap!{
+            props: hashmap! {
                 "birds".into() => hashmap!{
-                    doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
-                        object_id: birds_id.to_string(),
+                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert{ index: 1 }],
                         props: hashmap!{
                             1 => hashmap!{
-                                remote.op_id_at(1).to_string() => amp::Diff::Value("bullfinch".into())
+                                remote.op_id_at(1) => amp::Diff::Value("bullfinch".into())
                             }
                         }
                     })
                 }
-            }
-        }))
-    }).unwrap();
+            },
+        })),
+    })
+    .unwrap();
 
     // Check that the doc state hasn't been updated yet
     assert_eq!(
@@ -450,20 +451,20 @@ fn handle_concurrent_insertions_into_lists() {
         can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff{
-            object_id: amp::ObjectID::Root.to_string(),
+            object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
             props: hashmap!{
                 "birds".to_string() => hashmap!{
-                    doc.actor_id.op_id_at(1).to_string() => amp::Diff::Seq(amp::SeqDiff{
-                        object_id: birds_id.to_string(),
+                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: birds_id,
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Insert { index: 0 }, amp::DiffEdit::Insert{ index: 2 }],
                         props: hashmap!{
                             0 => hashmap!{
-                                doc.actor_id.op_id_at(2).to_string() => amp::Diff::Value("chaffinch".into()),
+                                doc.actor_id.op_id_at(2) => amp::Diff::Value("chaffinch".into()),
                             },
                             2 => hashmap!{
-                                doc.actor_id.op_id_at(3).to_string() => amp::Diff::Value("greenfinch".into()),
+                                doc.actor_id.op_id_at(3) => amp::Diff::Value("greenfinch".into()),
                             }
                         }
                     })

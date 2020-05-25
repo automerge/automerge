@@ -325,15 +325,15 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
             .into_iter()
             .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
                 Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
-                    object_id: oid.to_string(),
+                    object_id: oid,
                     obj_type: map_type,
-                    props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
+                    props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id) => diff_so_far}},
                 }),
                 Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
-                    object_id: oid.to_string(),
+                    object_id: oid,
                     obj_type: seq_type,
                     edits: Vec::new(),
-                    props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id).to_string() => diff_so_far}},
+                    props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id) => diff_so_far}},
                 }),
             });
         Some(diff)
@@ -372,7 +372,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                 };
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
                     let (ops, difflink) = value_to_op_requests(
-                        oid.to_string(),
+                        oid,
                         change
                             .path
                             .name()
@@ -411,14 +411,14 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     };
                     let diff = match &*parent_obj {
                         Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
-                            object_id: oid.to_string(),
+                            object_id: oid.clone(),
                             obj_type: *map_type,
                             props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
                         }),
                         Object::Sequence(oid, _, seq_type) => {
                             if let Some(PathElement::Index(i)) = change.path.name() {
                                 amp::Diff::Seq(amp::SeqDiff {
-                                    object_id: oid.to_string(),
+                                    object_id: oid.clone(),
                                     obj_type: *seq_type,
                                     edits: vec![amp::DiffEdit::Remove { index: *i }],
                                     props: hashmap! {*i => HashMap::new()},
@@ -484,7 +484,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                 return Err(AutomergeFrontendError::InvalidChangeRequest);
                             }
                             let (ops, diff) = value_to_op_requests(
-                                oid.to_string(),
+                                oid.clone(),
                                 change
                                     .path
                                     .name()
@@ -496,12 +496,12 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                 true,
                             );
                             let seqdiff = amp::Diff::Seq(amp::SeqDiff {
-                                object_id: oid.to_string(),
+                                object_id: oid.clone(),
                                 obj_type: *seq_type,
                                 edits: vec![amp::DiffEdit::Insert { index: *index }],
                                 props: hashmap! {
                                     *index => hashmap!{
-                                        random_op_id().to_string() => diff,
+                                        random_op_id() => diff,
                                     }
                                 },
                             });

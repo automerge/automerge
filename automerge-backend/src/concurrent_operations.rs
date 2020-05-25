@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
+use crate::internal::InternalOpType;
 use crate::op_handle::OpHandle;
-use crate::op_type::OpType;
 use std::ops::Deref;
 
 /// Represents a set of operations which are relevant to either an element ID
@@ -59,7 +59,7 @@ impl ConcurrentOperations {
         }
 
         match new_op.action {
-            OpType::Set(_) | OpType::Link(_) | OpType::Make(_) => {
+            InternalOpType::Set(_) | InternalOpType::Link(_) | InternalOpType::Make(_) => {
                 self.ops.push(new_op.clone());
             }
             _ => {}

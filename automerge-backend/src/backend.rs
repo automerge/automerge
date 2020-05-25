@@ -1,16 +1,16 @@
 use crate::actor_map::ActorMap;
 use crate::error::AutomergeError;
+use crate::internal::{InternalOpType, InternalOperation, InternalUndoOperation, ObjectID, OpID};
 use crate::op::Operation;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::op_type::OpType;
-use crate::ordered_set::{OrdDelta, OrderedSet};
+use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
 use crate::time;
 use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
-use automerge_protocol::{ActorID, Key, MapType, ObjType, ObjectID, OpID, SequenceType};
 use std::borrow::BorrowMut;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -22,14 +22,14 @@ pub struct Backend {
     versions: Vec<Version>,
     queue: Vec<Rc<Change>>,
     op_set: Rc<OpSet>,
-    states: HashMap<ActorID, Vec<Rc<Change>>>,
+    states: HashMap<amp::ActorID, Vec<Rc<Change>>>,
     actors: ActorMap,
-    obj_alias: HashMap<String, ObjectID>,
+    obj_alias: HashMap<String, amp::ObjectID>,
     undo_pos: usize,
     hashes: HashMap<amp::ChangeHash, Rc<Change>>,
     history: Vec<amp::ChangeHash>,
-    pub undo_stack: Vec<Vec<UndoOperation>>,
-    pub redo_stack: Vec<Vec<UndoOperation>>,
+    internal_undo_stack: Vec<Vec<InternalUndoOperation>>,
+    internal_redo_stack: Vec<Vec<InternalUndoOperation>>,
 }
 
 impl Backend {
@@ -50,14 +50,14 @@ impl Backend {
             states: HashMap::new(),
             history: Vec::new(),
             hashes: HashMap::new(),
-            undo_stack: Vec::new(),
+            internal_undo_stack: Vec::new(),
             undo_pos: 0,
-            redo_stack: Vec::new(),
+            internal_redo_stack: Vec::new(),
         }
     }
 
-    fn str_to_object(&self, name: &str) -> Result<ObjectID, AutomergeError> {
-        ObjectID::from_str(name).or_else(|_| {
+    fn str_to_object(&self, name: &str) -> Result<amp::ObjectID, AutomergeError> {
+        amp::ObjectID::from_str(name).or_else(|_| {
             self.obj_alias
                 .get(name)
                 .cloned()
@@ -79,14 +79,16 @@ impl Backend {
         let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
         if let Some(ops) = &request.ops {
             for rop in ops.iter() {
-                let id = OpID::new(start_op + (operations.len() as u64), &actor_id);
+                let external_id = amp::OpID::new(start_op + (operations.len() as u64), &actor_id);
+                let internal_id = self.actors.import_opid(external_id.clone());
                 let insert = rop.insert;
                 let object_id = self.str_to_object(&rop.obj)?;
+                let internal_object_id = self.actors.import_obj(object_id.clone());
 
                 let child = match &rop.child {
                     Some(child) => {
                         self.obj_alias
-                            .insert(child.clone(), ObjectID::ID(id.clone()));
+                            .insert(child.clone(), amp::ObjectID::ID(external_id.clone()));
                         Some(self.str_to_object(&child)?)
                     }
                     None => None,
@@ -102,33 +104,37 @@ impl Backend {
                 // Idea - maybe the correct fast path here is feed the ops into op_set
                 // as they are generated so I dont need to make these list ops twice
                 // and when the version is out of date - i need to apply ops to that anyway...
-                let elemids = elemid_cache.entry(object_id.clone()).or_insert_with(|| {
-                    if ops.len() > 2000 {
-                        Box::new(
-                            op_set
-                                .get_obj(&object_id)
-                                .map(|o| o.seq.clone())
-                                .ok()
-                                .unwrap_or_default(),
-                        )
+                let elemids = elemid_cache.entry(internal_object_id).or_insert_with(|| {
+                    //if ops.len() > 2000 {
+                    Box::new(
+                        op_set
+                            .get_obj(&internal_object_id)
+                            .map(|o| o.seq.clone())
+                            .ok()
+                            .unwrap_or_default(),
+                    )
+                    /*
                     } else {
                         Box::new(OrdDelta::new(
-                            op_set.get_obj(&object_id).map(|o| &o.seq).ok(),
+                            op_set.get_obj(&internal_object_id).map(|o| &o.seq).ok(),
                         ))
                     }
+                    */
                 });
                 let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
 
-                let key = resolve_key(rop, &id, elemids2)?;
-                let pred = op_set.get_pred(&object_id, &key, insert);
+                let external_key = resolve_key(rop, &internal_id, &self.actors, elemids2)?;
+                let internal_key = self.actors.import_key(external_key.clone());
+                let pred = op_set.get_pred(&internal_object_id, &internal_key, insert);
                 let action = match rop.action {
-                    amp::OpType::MakeMap => OpType::Make(ObjType::Map(MapType::Map)),
-                    amp::OpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
-                    amp::OpType::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
-                    amp::OpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
+                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::map()),
+                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::table()),
+                    amp::OpType::MakeList => OpType::Make(amp::ObjType::list()),
+                    amp::OpType::MakeText => OpType::Make(amp::ObjType::text()),
                     amp::OpType::Del => OpType::Del,
                     amp::OpType::Link => OpType::Link(
-                        child.ok_or_else(|| AutomergeError::LinkMissingChild(id.clone()))?,
+                        child
+                            .ok_or_else(|| AutomergeError::LinkMissingChild(external_id.clone()))?,
                     ),
                     amp::OpType::Inc => OpType::Inc(
                         rop.to_i64()
@@ -140,8 +146,8 @@ impl Backend {
                 let op = Operation {
                     action,
                     obj: object_id.clone(),
-                    key: key.clone(),
-                    pred: pred.clone(),
+                    key: external_key,
+                    pred: pred.iter().map(|id| self.actors.export_opid(&id)).collect(),
                     insert,
                 };
 
@@ -198,18 +204,18 @@ impl Backend {
     ) -> Result<Rc<Change>, AutomergeError> {
         let undo_pos = self.undo_pos;
 
-        if undo_pos < 1 || self.undo_stack.len() < undo_pos {
+        if undo_pos < 1 || self.internal_undo_stack.len() < undo_pos {
             return Err(AutomergeError::NoUndo);
         }
 
-        let mut undo_ops = self.undo_stack.get(undo_pos - 1).unwrap().clone();
+        let mut undo_ops = self.internal_undo_stack.get(undo_pos - 1).unwrap().clone();
         let mut redo_ops = Vec::new();
 
         let operations = undo_ops
             .drain(0..)
             .map(|undo_op| {
                 if let Some(field_ops) = self.op_set.get_field_ops(&undo_op.obj, &undo_op.key) {
-                    let pred = field_ops.iter().map(|op| op.id.clone()).collect();
+                    let pred = field_ops.iter().map(|op| op.id).collect();
                     let op = undo_op.into_operation(pred);
                     redo_ops.extend(op.generate_redos(&field_ops));
                     op
@@ -219,6 +225,7 @@ impl Backend {
                     op
                 }
             })
+            .map(|op| self.actors.export_op(&op)) // FIXME
             .collect();
 
         let change = UnencodedChange {
@@ -233,7 +240,7 @@ impl Backend {
         .into();
 
         self.undo_pos -= 1;
-        self.redo_stack.push(redo_ops);
+        self.internal_redo_stack.push(redo_ops);
 
         Ok(Rc::new(change))
     }
@@ -243,17 +250,21 @@ impl Backend {
         request: &amp::Request,
         start_op: u64,
     ) -> Result<Rc<Change>, AutomergeError> {
-        let mut redo_ops = self.redo_stack.pop().ok_or(AutomergeError::NoRedo)?;
+        let mut redo_ops = self
+            .internal_redo_stack
+            .pop()
+            .ok_or(AutomergeError::NoRedo)?;
 
         let operations = redo_ops
             .drain(0..)
             .map(|redo_op| {
                 if let Some(field_ops) = self.op_set.get_field_ops(&redo_op.obj, &redo_op.key) {
-                    redo_op.into_operation(field_ops.iter().map(|op| op.id.clone()).collect())
+                    redo_op.into_operation(field_ops.iter().map(|op| op.id).collect())
                 } else {
                     redo_op.into_operation(Vec::new())
                 }
             })
+            .map(|op| self.actors.export_op(&op)) // FIXME
             .collect();
 
         let change = UnencodedChange {
@@ -306,7 +317,12 @@ impl Backend {
             for change in v.queue.drain(0..) {
                 let mut m = HashMap::new();
                 Rc::make_mut(op_set)
-                    .apply_ops(OpHandle::extract(change), false, &mut m, &self.actors)
+                    .apply_ops(
+                        OpHandle::extract(change, &mut self.actors),
+                        false,
+                        &mut m,
+                        &self.actors,
+                    )
                     .unwrap();
             }
             return Ok(op_set.clone());
@@ -448,8 +464,12 @@ impl Backend {
         }
         op_set.deps.insert(change.hash);
 
-        let undo_ops =
-            op_set.apply_ops(OpHandle::extract(change), undoable, diffs, &self.actors)?;
+        let undo_ops = op_set.apply_ops(
+            OpHandle::extract(change, &mut self.actors),
+            undoable,
+            diffs,
+            &self.actors,
+        )?;
 
         if undoable {
             self.push_undo_ops(undo_ops);
@@ -503,7 +523,7 @@ impl Backend {
 
     pub fn get_changes_for_actor_id(
         &self,
-        actor_id: &ActorID,
+        actor_id: &amp::ActorID,
     ) -> Result<Vec<&Change>, AutomergeError> {
         Ok(self
             .states
@@ -534,7 +554,7 @@ impl Backend {
     }
 
     fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
+        !self.internal_redo_stack.is_empty()
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
@@ -563,10 +583,24 @@ impl Backend {
             .collect()
     }
 
-    fn push_undo_ops(&mut self, undo_ops: Vec<UndoOperation>) {
-        self.undo_stack.truncate(self.undo_pos);
-        self.undo_stack.push(undo_ops);
+    fn push_undo_ops(&mut self, undo_ops: Vec<InternalUndoOperation>) {
+        self.internal_undo_stack.truncate(self.undo_pos);
+        self.internal_undo_stack.push(undo_ops);
         self.undo_pos += 1;
+    }
+
+    pub fn undo_stack(&self) -> Vec<Vec<UndoOperation>> {
+        self.internal_undo_stack
+            .iter()
+            .map(|ops| ops.iter().map(|op| self.actors.export_undo(op)).collect())
+            .collect()
+    }
+
+    pub fn redo_stack(&self) -> Vec<Vec<UndoOperation>> {
+        self.internal_redo_stack
+            .iter()
+            .map(|ops| ops.iter().map(|op| self.actors.export_undo(op)).collect())
+            .collect()
     }
 }
 
@@ -580,27 +614,28 @@ struct Version {
 fn resolve_key(
     rop: &amp::Op,
     id: &OpID,
+    actors: &ActorMap,
     ids: &mut dyn OrderedSet<OpID>,
-) -> Result<Key, AutomergeError> {
+) -> Result<amp::Key, AutomergeError> {
     let key = &rop.key;
     let insert = rop.insert;
     let del = rop.action == amp::OpType::Del;
     match key {
-        amp::RequestKey::Str(s) => Ok(Key::Map(s.clone())),
+        amp::RequestKey::Str(s) => Ok(amp::Key::Map(s.clone())),
         amp::RequestKey::Num(n) => {
             let n: usize = *n as usize;
             (if insert {
                 if n == 0 {
-                    ids.insert_index(0, id.clone());
-                    Some(Key::head())
+                    ids.insert_index(0, *id);
+                    Some(amp::Key::head())
                 } else {
-                    ids.insert_index(n, id.clone());
-                    ids.key_of(n - 1).map(|i| i.into())
+                    ids.insert_index(n, *id);
+                    ids.key_of(n - 1).map(|i| actors.export_opid(&i).into())
                 }
             } else if del {
-                ids.remove_index(n).map(|k| k.into())
+                ids.remove_index(n).map(|k| actors.export_opid(&k).into())
             } else {
-                ids.key_of(n).map(|i| i.into())
+                ids.key_of(n).map(|i| actors.export_opid(&i).into())
             })
             .ok_or(AutomergeError::IndexOutOfBounds(n))
         }
@@ -610,25 +645,25 @@ fn resolve_key(
 /// Extension trait adding a few helper methods with backend specific logic
 /// to `Operation`
 trait OpExt {
-    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation>;
-    fn can_merge(&self, other: &Operation) -> bool;
-    fn merge(&mut self, other: Operation);
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation>;
+    //fn can_merge(&self, other: &InternalOperation) -> bool;
+    //fn merge(&mut self, other: InternalOperation);
 }
 
-impl OpExt for Operation {
-    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<UndoOperation> {
+impl OpExt for InternalOperation {
+    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation> {
         let key = self.key.clone();
 
-        if let OpType::Inc(value) = self.action {
-            vec![UndoOperation {
-                action: OpType::Inc(-value),
-                obj: self.obj.clone(),
+        if let InternalOpType::Inc(value) = self.action {
+            vec![InternalUndoOperation {
+                action: InternalOpType::Inc(-value),
+                obj: self.obj,
                 key,
             }]
         } else if overwritten.is_empty() {
-            vec![UndoOperation {
-                action: OpType::Del,
-                obj: self.obj.clone(),
+            vec![InternalUndoOperation {
+                action: InternalOpType::Del,
+                obj: self.obj,
                 key,
             }]
         } else {
@@ -636,11 +671,12 @@ impl OpExt for Operation {
         }
     }
 
-    fn can_merge(&self, other: &Operation) -> bool {
+    /*
+    fn can_merge(&self, other: &InternalOperation) -> bool {
         !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
     }
 
-    fn merge(&mut self, other: Operation) {
+    fn merge(&mut self, other: InternalOperation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {
                 OpType::Set(amp::Value::Counter(number)) => {
@@ -656,4 +692,5 @@ impl OpExt for Operation {
             }
         }
     }
+    */
 }
