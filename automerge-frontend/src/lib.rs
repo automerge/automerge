@@ -241,7 +241,7 @@ impl Frontend {
                     .iter()
                     .flat_map(|(k, v)| {
                         value::value_to_op_requests(
-                            ObjectID::Root.to_string(),
+                            ObjectID::Root,
                             PathElement::Key(k.to_string()),
                             v,
                             false,

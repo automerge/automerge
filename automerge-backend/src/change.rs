@@ -5,7 +5,7 @@ use crate::columnar::{
 use crate::encoding::{Decodable, Encodable};
 use crate::error::AutomergeError;
 use crate::op::Operation;
-use automerge_protocol::{ActorID, ChangeHash};
+use automerge_protocol as amp;
 use core::fmt::Debug;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,15 +25,15 @@ pub struct UnencodedChange {
     #[serde(rename = "ops")]
     pub operations: Vec<Operation>,
     #[serde(rename = "actor")]
-    pub actor_id: ActorID,
-    //pub hash: ChangeHash,
+    pub actor_id: amp::ActorID,
+    //pub hash: amp::ChangeHash,
     pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    pub deps: Vec<ChangeHash>,
+    pub deps: Vec<amp::ChangeHash>,
 }
 
 impl UnencodedChange {
@@ -103,19 +103,19 @@ impl UnencodedChange {
 #[derive(PartialEq, Debug, Clone)]
 pub struct Change {
     pub bytes: Vec<u8>,
-    pub hash: ChangeHash,
+    pub hash: amp::ChangeHash,
     pub seq: u64,
     pub start_op: u64,
     pub time: i64,
     body: Range<usize>,
     message: Range<usize>,
-    actors: Vec<ActorID>,
-    pub deps: Vec<ChangeHash>,
+    actors: Vec<amp::ActorID>,
+    pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
 }
 
 impl Change {
-    pub fn actor_id(&self) -> ActorID {
+    pub fn actor_id(&self) -> amp::ActorID {
         self.actors[0].clone()
     }
 
@@ -161,7 +161,7 @@ impl Change {
         let hash = hasher.result()[..].try_into()?;
 
         let mut cursor = body.clone();
-        let actor = ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
+        let actor = amp::ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
         let seq = read_slice(&bytes, &mut cursor)?;
         let start_op = read_slice(&bytes, &mut cursor)?;
         let time = read_slice(&bytes, &mut cursor)?;
@@ -169,7 +169,9 @@ impl Change {
         let num_actors = read_slice(&bytes, &mut cursor)?;
         let mut actors = vec![actor];
         for _ in 0..num_actors {
-            actors.push(ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]));
+            actors.push(amp::ActorID::from(
+                &bytes[slice_bytes(&bytes, &mut cursor)?],
+            ));
         }
         let mut deps = Vec::new();
         let num_deps = read_slice(&bytes, &mut cursor)?;
@@ -336,7 +338,6 @@ const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 mod tests {
     use super::*;
     use crate::op_type::OpType;
-    use automerge_protocol::{Key, ObjType, ObjectID, OpID, Value};
     use std::str::FromStr;
 
     #[test]
@@ -346,7 +347,7 @@ mod tests {
             seq: 2,
             time: 1234,
             message: None,
-            actor_id: ActorID::from_str("deadbeefdeadbeef").unwrap(),
+            actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
         };
@@ -359,23 +360,23 @@ mod tests {
 
     #[test]
     fn test_complex_change() -> Result<(), AutomergeError> {
-        let actor1 = ActorID::from_str("deadbeefdeadbeef").unwrap();
-        let actor2 = ActorID::from_str("feeddefaff").unwrap();
-        let actor3 = ActorID::from_str("00101010fafafafa").unwrap();
-        let opid1 = OpID::new(102, &actor1);
-        let opid2 = OpID::new(391, &actor1);
-        let opid3 = OpID::new(299, &actor2);
-        let opid4 = OpID::new(762, &actor3);
-        let opid5 = OpID::new(100_203, &actor2);
-        let obj1 = ObjectID::ID(opid1.clone());
-        let obj2 = ObjectID::Root;
-        let obj3 = ObjectID::ID(opid4.clone());
-        let key1 = Key::Map("field1".into());
-        let key2 = Key::Map("field2".into());
-        let key3 = Key::Map("field3".into());
-        let head = Key::head();
-        let keyseq1 = Key::from(&opid1);
-        let keyseq2 = Key::from(&opid2);
+        let actor1 = amp::ActorID::from_str("deadbeefdeadbeef").unwrap();
+        let actor2 = amp::ActorID::from_str("feeddefaff").unwrap();
+        let actor3 = amp::ActorID::from_str("00101010fafafafa").unwrap();
+        let opid1 = amp::OpID::new(102, &actor1);
+        let opid2 = amp::OpID::new(391, &actor1);
+        let opid3 = amp::OpID::new(299, &actor2);
+        let opid4 = amp::OpID::new(762, &actor3);
+        let opid5 = amp::OpID::new(100_203, &actor2);
+        let obj1 = amp::ObjectID::ID(opid1.clone());
+        let obj2 = amp::ObjectID::Root;
+        let obj3 = amp::ObjectID::ID(opid4.clone());
+        let key1 = amp::Key::Map("field1".into());
+        let key2 = amp::Key::Map("field2".into());
+        let key3 = amp::Key::Map("field3".into());
+        let head = amp::Key::head();
+        let keyseq1 = amp::Key::from(&opid1);
+        let keyseq2 = amp::Key::from(&opid2);
         let insert = false;
         let change1 = UnencodedChange {
             start_op: 123,
@@ -386,49 +387,49 @@ mod tests {
             deps: vec![],
             operations: vec![
                 Operation {
-                    action: OpType::Set(Value::F64(10.0)),
+                    action: OpType::Set(amp::Value::F64(10.0)),
                     key: key1.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(Value::Counter(-11)),
+                    action: OpType::Set(amp::Value::Counter(-11)),
                     key: key2.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(Value::Timestamp(20)),
+                    action: OpType::Set(amp::Value::Timestamp(20)),
                     key: key3,
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2],
                 },
                 Operation {
-                    action: OpType::Set(Value::Str("some value".into())),
+                    action: OpType::Set(amp::Value::Str("some value".into())),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Make(ObjType::List),
+                    action: OpType::Make(amp::ObjType::List),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(Value::Str("val1".into())),
+                    action: OpType::Set(amp::Value::Str("val1".into())),
                     key: head.clone(),
                     obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(Value::Str("val2".into())),
+                    action: OpType::Set(amp::Value::Str("val2".into())),
                     key: head,
                     obj: obj3.clone(),
                     insert: true,

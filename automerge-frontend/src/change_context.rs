@@ -2,7 +2,6 @@ use automerge_protocol::{Diff, DiffEdit, MapDiff, ObjType, ObjectID, OpID, SeqDi
 //use crate::AutomergeFrontendError;
 use crate::object::{Object, Values};
 use crate::{AutomergeFrontendError, MapType, SequenceType, Value};
-use std::str::FromStr;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// A `ChangeContext` represents some kind of change which has not been applied
@@ -132,15 +131,14 @@ impl<'a> ChangeContext<'a> {
     ) -> Result<Rc<RefCell<Object>>, AutomergeFrontendError> {
         match diff {
             Diff::Map(MapDiff {
-                object_id: object_id_str,
+                object_id,
                 obj_type,
                 props,
             }) => {
-                let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
                     ObjType::Map => {
                         let obj = Self::get_or_create_object(
-                            &object_id,
+                            object_id,
                             original_objects,
                             updated,
                             || Object::Map(object_id.clone(), HashMap::new(), MapType::Map),
@@ -164,8 +162,7 @@ impl<'a> ChangeContext<'a> {
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values
-                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values.update_for_opid(opid.clone(), object);
                                     }
                                     if prop_diffs.is_empty() {
                                         kvs.remove(key);
@@ -189,7 +186,7 @@ impl<'a> ChangeContext<'a> {
                                     let values = kvs
                                         .entry(key.clone())
                                         .or_insert_with(|| Values(HashMap::new()));
-                                    let prop_diffs_vec: Vec<(&String, &Diff)> =
+                                    let prop_diffs_vec: Vec<(&OpID, &Diff)> =
                                         prop_diffs.iter().collect();
                                     match prop_diffs_vec[..] {
                                         [] => {
@@ -203,10 +200,7 @@ impl<'a> ChangeContext<'a> {
                                             )?;
                                             // This unwrap should be removed by using OpIDs in the
                                             // types of diffs
-                                            values.update_for_opid(
-                                                OpID::from_str(opid).unwrap(),
-                                                object,
-                                            );
+                                            values.update_for_opid(opid.clone(), object);
                                         }
                                         _ => {
                                             return Err(
@@ -224,16 +218,15 @@ impl<'a> ChangeContext<'a> {
                 }
             }
             Diff::Seq(SeqDiff {
-                object_id: object_id_str,
+                object_id,
                 edits,
                 obj_type,
                 props,
             }) => {
-                let object_id = ObjectID::from_str(object_id_str).unwrap();
                 match obj_type {
                     ObjType::List => {
                         let obj = Self::get_or_create_object(
-                            &object_id,
+                            object_id,
                             original_objects,
                             updated,
                             || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
@@ -265,8 +258,7 @@ impl<'a> ChangeContext<'a> {
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values
-                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values.update_for_opid(opid.clone(), object);
                                     }
                                 }
                             }
@@ -308,8 +300,7 @@ impl<'a> ChangeContext<'a> {
                                         )?;
                                         // This unwrap should be removed by using OpIDs in the
                                         // types of diffs
-                                        values
-                                            .update_for_opid(OpID::from_str(opid).unwrap(), object);
+                                        values.update_for_opid(opid.clone(), object);
                                     }
                                 }
                             }
@@ -322,9 +313,9 @@ impl<'a> ChangeContext<'a> {
             }
             Diff::Value(v) => Ok(Rc::new(RefCell::new(Object::Primitive(v.clone())))),
             Diff::Unchanged(subdiff) => {
-                let object_id = ObjectID::from_str(&subdiff.object_id).unwrap();
+                let object_id = &subdiff.object_id;
                 Ok(Self::get_or_create_object(
-                    &object_id,
+                    object_id,
                     original_objects,
                     updated,
                     || match subdiff.obj_type {

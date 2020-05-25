@@ -1,5 +1,5 @@
 use crate::error::AutomergeError;
-use automerge_protocol::ActorID;
+use automerge_protocol as amp;
 use core::fmt::Debug;
 use std::convert::TryFrom;
 use std::io;
@@ -520,7 +520,7 @@ impl Decodable for Option<String> {
     }
 }
 
-impl Decodable for ActorID {
+impl Decodable for amp::ActorID {
     fn decode<R>(bytes: &mut R) -> Option<Self>
     where
         R: Read,
@@ -531,7 +531,7 @@ impl Decodable for ActorID {
 }
 
 pub(crate) trait Encodable {
-    fn encode_with_actors_to_vec(&self, actors: &mut Vec<ActorID>) -> io::Result<Vec<u8>> {
+    fn encode_with_actors_to_vec(&self, actors: &mut Vec<amp::ActorID>) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
         self.encode_with_actors(&mut buf, actors)?;
         Ok(buf)
@@ -540,7 +540,7 @@ pub(crate) trait Encodable {
     fn encode_with_actors<R: Write>(
         &self,
         buf: &mut R,
-        _actors: &mut Vec<ActorID>,
+        _actors: &mut Vec<amp::ActorID>,
     ) -> io::Result<usize> {
         self.encode(buf)
     }

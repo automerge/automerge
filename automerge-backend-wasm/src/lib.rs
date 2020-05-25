@@ -108,12 +108,12 @@ impl State {
 
     #[wasm_bindgen(js_name = getUndoStack)]
     pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
-        rust_to_js(&self.backend.undo_stack)
+        rust_to_js(&self.backend.undo_stack())
     }
 
     #[wasm_bindgen(js_name = getRedoStack)]
     pub fn get_redo_stack(&self) -> Result<JsValue, JsValue> {
-        rust_to_js(&self.backend.redo_stack)
+        rust_to_js(&self.backend.redo_stack())
     }
 
     #[allow(clippy::should_implement_trait)]
