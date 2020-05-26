@@ -35,7 +35,26 @@ mod tests {
     }
 
     #[test]
-    fn cli_export_with_input() {
+    fn cli_export_with_flat_map() {
+        let initial_state_json: serde_json::Value =
+            serde_json::from_str(r#"{"sparrows": 15.0}"#).unwrap();
+        let value: automerge_frontend::Value =
+            automerge_frontend::Value::from_json(&initial_state_json);
+
+        let (_, initial_change) =
+            automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
+        let mut backend = automerge_backend::Backend::init();
+        backend.apply_local_change(initial_change).unwrap();
+
+        let change_bytes = backend.save().unwrap();
+        assert_eq!(
+            get_state_json(change_bytes).unwrap(),
+            serde_json::json!({"sparrows": 15.0})
+        )
+    }
+
+    #[test]
+    fn cli_export_with_nested_map() {
         let initial_state_json: serde_json::Value = serde_json::from_str(
             r#"{
     "birds": {
@@ -50,7 +69,6 @@ mod tests {
 
         let (_, initial_change) =
             automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
-        println!("{:?}", initial_change);
         let mut backend = automerge_backend::Backend::init();
         backend.apply_local_change(initial_change).unwrap();
 
