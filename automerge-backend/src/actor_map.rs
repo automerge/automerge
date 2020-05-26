@@ -77,12 +77,12 @@ impl ActorMap {
         }
     }
 
-    pub fn export_actor(&self, actor: &ActorID) -> amp::ActorID {
+    pub fn export_actor(&self, actor: ActorID) -> amp::ActorID {
         self.0[actor.0].clone()
     }
 
     pub fn export_opid(&self, opid: &OpID) -> amp::OpID {
-        amp::OpID(opid.0, self.export_actor(&opid.1))
+        amp::OpID(opid.0, self.export_actor(opid.1))
     }
 
     pub fn export_obj(&self, obj: &ObjectID) -> amp::ObjectID {
@@ -151,7 +151,7 @@ impl ActorMap {
     }
 
     pub fn opid_to_string(&self, id: &OpID) -> String {
-        format!("{}@{}", id.0, self.export_actor(&id.1).to_hex_string())
+        format!("{}@{}", id.0, self.export_actor(id.1).to_hex_string())
     }
 
     pub fn elementid_to_string(&self, eid: &ElementID) -> String {

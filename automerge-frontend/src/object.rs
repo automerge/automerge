@@ -1,4 +1,4 @@
-use crate::{MapType, SequenceType, Value};
+use crate::Value;
 use automerge_protocol as amp;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -42,8 +42,8 @@ impl Values {
 /// Internal data type used to represent the values of an automerge document
 #[derive(Clone, Debug)]
 pub enum Object {
-    Sequence(amp::ObjectID, Vec<Option<Values>>, SequenceType),
-    Map(amp::ObjectID, HashMap<String, Values>, MapType),
+    Sequence(amp::ObjectID, Vec<Option<Values>>, amp::SequenceType),
+    Map(amp::ObjectID, HashMap<String, Values>, amp::MapType),
     Primitive(amp::Value),
 }
 
@@ -54,13 +54,13 @@ impl Object {
                 vals.iter()
                     .filter_map(|v| v.clone().map(|v2| v2.to_value()))
                     .collect(),
-                seq_type.clone(),
+                *seq_type,
             ),
             Object::Map(_, vals, map_type) => Value::Map(
                 vals.iter()
                     .map(|(k, v)| (k.to_string(), v.to_value()))
                     .collect(),
-                map_type.clone(),
+                *map_type,
             ),
             Object::Primitive(v) => Value::Primitive(v.clone()),
         }

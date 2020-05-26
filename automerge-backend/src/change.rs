@@ -415,7 +415,7 @@ mod tests {
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Make(amp::ObjType::List),
+                    action: OpType::Make(amp::ObjType::list()),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,

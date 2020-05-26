@@ -127,10 +127,10 @@ impl Backend {
                 let internal_key = self.actors.import_key(external_key.clone());
                 let pred = op_set.get_pred(&internal_object_id, &internal_key, insert);
                 let action = match rop.action {
-                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map),
-                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::Table),
-                    amp::OpType::MakeList => OpType::Make(amp::ObjType::List),
-                    amp::OpType::MakeText => OpType::Make(amp::ObjType::Text),
+                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::map()),
+                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::table()),
+                    amp::OpType::MakeList => OpType::Make(amp::ObjType::list()),
+                    amp::OpType::MakeText => OpType::Make(amp::ObjType::text()),
                     amp::OpType::Del => OpType::Del,
                     amp::OpType::Link => OpType::Link(
                         child

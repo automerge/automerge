@@ -1,7 +1,9 @@
-use automerge_protocol::{Diff, DiffEdit, MapDiff, ObjType, ObjectID, OpID, SeqDiff};
+use automerge_protocol::{
+    Diff, DiffEdit, MapDiff, MapType, ObjType, ObjectID, OpID, SeqDiff, SequenceType,
+};
 //use crate::AutomergeFrontendError;
 use crate::object::{Object, Values};
-use crate::{AutomergeFrontendError, MapType, SequenceType, Value};
+use crate::{AutomergeFrontendError, Value};
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// A `ChangeContext` represents some kind of change which has not been applied
@@ -136,7 +138,7 @@ impl<'a> ChangeContext<'a> {
                 props,
             }) => {
                 match obj_type {
-                    ObjType::Map => {
+                    MapType::Map => {
                         let obj = Self::get_or_create_object(
                             object_id,
                             original_objects,
@@ -173,7 +175,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Table => {
+                    MapType::Table => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -214,7 +216,6 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
             }
             Diff::Seq(SeqDiff {
@@ -224,7 +225,7 @@ impl<'a> ChangeContext<'a> {
                 props,
             }) => {
                 match obj_type {
-                    ObjType::List => {
+                    SequenceType::List => {
                         let obj = Self::get_or_create_object(
                             object_id,
                             original_objects,
@@ -266,7 +267,7 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    ObjType::Text => {
+                    SequenceType::Text => {
                         let obj = Self::get_or_create_object(
                             &object_id,
                             original_objects,
@@ -308,7 +309,6 @@ impl<'a> ChangeContext<'a> {
                         };
                         Ok(obj)
                     }
-                    _ => panic!("Invalid object type (not map or table) inside MapDiff"),
                 }
             }
             Diff::Value(v) => Ok(Rc::new(RefCell::new(Object::Primitive(v.clone())))),
@@ -319,16 +319,16 @@ impl<'a> ChangeContext<'a> {
                     original_objects,
                     updated,
                     || match subdiff.obj_type {
-                        ObjType::Map => {
+                        ObjType::Map(MapType::Map) => {
                             Object::Map(object_id.clone(), HashMap::new(), MapType::Map)
                         }
-                        ObjType::Table => {
+                        ObjType::Map(MapType::Table) => {
                             Object::Map(object_id.clone(), HashMap::new(), MapType::Table)
                         }
-                        ObjType::List => {
+                        ObjType::Sequence(SequenceType::List) => {
                             Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
                         }
-                        ObjType::Text => {
+                        ObjType::Sequence(SequenceType::Text) => {
                             Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text)
                         }
                     },

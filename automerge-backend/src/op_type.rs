@@ -16,10 +16,10 @@ impl Serialize for OpType {
         S: Serializer,
     {
         let s = match self {
-            OpType::Make(amp::ObjType::Map) => "makeMap",
-            OpType::Make(amp::ObjType::Table) => "makeTable",
-            OpType::Make(amp::ObjType::List) => "makeList",
-            OpType::Make(amp::ObjType::Text) => "makeText",
+            OpType::Make(amp::ObjType::Map(amp::MapType::Map)) => "makeMap",
+            OpType::Make(amp::ObjType::Map(amp::MapType::Table)) => "makeTable",
+            OpType::Make(amp::ObjType::Sequence(amp::SequenceType::List)) => "makeList",
+            OpType::Make(amp::ObjType::Sequence(amp::SequenceType::Text)) => "makeText",
             OpType::Del => "del",
             OpType::Link(_) => "link",
             OpType::Inc(_) => "inc",

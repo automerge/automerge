@@ -229,10 +229,10 @@ impl<'a> Iterator for OperationIterator<'a> {
         let child = self.chld.next()?;
         let action = match action {
             Action::Set => OpType::Set(value),
-            Action::MakeList => OpType::Make(amp::ObjType::List),
-            Action::MakeText => OpType::Make(amp::ObjType::Text),
-            Action::MakeMap => OpType::Make(amp::ObjType::Map),
-            Action::MakeTable => OpType::Make(amp::ObjType::Table),
+            Action::MakeList => OpType::Make(amp::ObjType::list()),
+            Action::MakeText => OpType::Make(amp::ObjType::text()),
+            Action::MakeMap => OpType::Make(amp::ObjType::map()),
+            Action::MakeTable => OpType::Make(amp::ObjType::table()),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
             Action::Link => OpType::Link(child),
@@ -537,10 +537,10 @@ impl ColumnEncoder {
                 self.val.append_null();
                 self.chld.append_null();
                 match kind {
-                    amp::ObjType::List => Action::MakeList,
-                    amp::ObjType::Map => Action::MakeMap,
-                    amp::ObjType::Table => Action::MakeTable,
-                    amp::ObjType::Text => Action::MakeText,
+                    amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,
+                    amp::ObjType::Map(amp::MapType::Map) => Action::MakeMap,
+                    amp::ObjType::Map(amp::MapType::Table) => Action::MakeTable,
+                    amp::ObjType::Sequence(amp::SequenceType::Text) => Action::MakeText,
                 }
             }
         };
