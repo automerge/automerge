@@ -8,7 +8,7 @@ fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
     let patch = backend.apply_changes(changes)?;
 
     let mut frontend = automerge_frontend::Frontend::new();
-    frontend.apply_patch(patch).unwrap();
+    frontend.apply_patch(patch)?;
 
     Ok(frontend.state().to_json())
 }
