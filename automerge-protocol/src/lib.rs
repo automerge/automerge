@@ -35,12 +35,42 @@ impl ActorID {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
+    Map(MapType),
+    Sequence(SequenceType),
+}
+
+impl ObjType {
+    pub fn map() -> ObjType {
+        ObjType::Map(MapType::Map)
+    }
+
+    pub fn table() -> ObjType {
+        ObjType::Map(MapType::Table)
+    }
+
+    pub fn text() -> ObjType {
+        ObjType::Sequence(SequenceType::Text)
+    }
+
+    pub fn list() -> ObjType {
+        ObjType::Sequence(SequenceType::List)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum MapType {
     Map,
     Table,
-    Text,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum SequenceType {
     List,
+    Text,
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
@@ -215,10 +245,10 @@ impl Op {
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            OpType::MakeMap => Some(ObjType::Map),
-            OpType::MakeTable => Some(ObjType::Table),
-            OpType::MakeList => Some(ObjType::List),
-            OpType::MakeText => Some(ObjType::Text),
+            OpType::MakeMap => Some(ObjType::Map(MapType::Map)),
+            OpType::MakeTable => Some(ObjType::Map(MapType::Table)),
+            OpType::MakeList => Some(ObjType::Sequence(SequenceType::List)),
+            OpType::MakeText => Some(ObjType::Sequence(SequenceType::Text)),
             _ => None,
         }
     }
@@ -292,7 +322,7 @@ pub enum Diff {
 pub struct MapDiff {
     pub object_id: ObjectID,
     #[serde(rename = "type")]
-    pub obj_type: ObjType,
+    pub obj_type: MapType,
     pub props: HashMap<String, HashMap<OpID, Diff>>,
 }
 
@@ -301,7 +331,7 @@ pub struct MapDiff {
 pub struct SeqDiff {
     pub object_id: ObjectID,
     #[serde(rename = "type")]
-    pub obj_type: ObjType,
+    pub obj_type: SequenceType,
     pub edits: Vec<DiffEdit>,
     pub props: HashMap<usize, HashMap<OpID, Diff>>,
 }

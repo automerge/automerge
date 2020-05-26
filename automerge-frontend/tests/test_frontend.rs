@@ -1,6 +1,4 @@
-use automerge_frontend::{
-    AutomergeFrontendError, Frontend, LocalChange, MapType, Path, SequenceType, Value,
-};
+use automerge_frontend::{AutomergeFrontendError, Frontend, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -272,7 +270,7 @@ fn create_lists() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()], SequenceType::List),
+                Value::Sequence(vec!["chaffinch".into()], amp::SequenceType::List),
             ))?;
             Ok(())
         })
@@ -340,7 +338,7 @@ fn apply_updates_inside_lists() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()], SequenceType::List),
+                Value::Sequence(vec!["chaffinch".into()], amp::SequenceType::List),
             ))?;
             Ok(())
         })
@@ -474,7 +472,7 @@ fn handle_counters_inside_maps() {
             hashmap! {
                 "wrens".into() => Value::Primitive(amp::Value::Counter(0))
             },
-            MapType::Map
+            amp::MapType::Map
         )
     );
 
@@ -484,7 +482,7 @@ fn handle_counters_inside_maps() {
             hashmap! {
                 "wrens".into() => Value::Primitive(amp::Value::Counter(1))
             },
-            MapType::Map
+            amp::MapType::Map
         )
     );
 
@@ -564,7 +562,7 @@ fn handle_counters_inside_lists() {
             hashmap! {
                 "counts".into() => vec![Value::Primitive(amp::Value::Counter(1))].into()
             },
-            MapType::Map
+            amp::MapType::Map
         )
     );
 
@@ -574,7 +572,7 @@ fn handle_counters_inside_lists() {
             hashmap! {
                 "counts".into() => vec![Value::Primitive(amp::Value::Counter(3))].into()
             },
-            MapType::Map
+            amp::MapType::Map
         )
     );
 
