@@ -421,7 +421,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                     object_id: oid.clone(),
                                     obj_type: *seq_type,
                                     edits: vec![amp::DiffEdit::Remove { index: *i }],
-                                    props: hashmap! {*i => HashMap::new()},
+                                    props: HashMap::new(),
                                 })
                             } else {
                                 return Err(AutomergeFrontendError::NoSuchPathError(change.path));
@@ -480,7 +480,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                             Err(AutomergeFrontendError::InvalidChangeRequest)
                         }
                         Object::Sequence(oid, vals, seq_type) => {
-                            if vals.len() > index + 1 {
+                            if *index > vals.len() {
                                 return Err(AutomergeFrontendError::InvalidChangeRequest);
                             }
                             let (ops, diff) = value_to_op_requests(
