@@ -2,6 +2,7 @@ extern crate automerge_backend;
 use automerge_backend::{Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
 use automerge_protocol as protocol;
+use automerge_protocol as amp;
 use automerge_protocol::{
     ActorID, ChangeHash, DataType, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID,
     Op, Patch, Request, RequestType, SeqDiff, SequenceType,
@@ -612,4 +613,82 @@ fn assert_changes_equal(mut change1: UnencodedChange, change2: UnencodedChange) 
     );
     change1.deps = change2.deps;
     assert_eq!(change1, change2_clone)
+}
+
+#[test]
+fn valid_objectid_as_child_works() {
+    let actor = ActorID::from_str("1928d3c61735456993ffe94d6b44b9f3").unwrap();
+    let cr = Request {
+        actor: actor.clone(),
+        seq: 1,
+        version: 0,
+        message: Some("Initialization".to_string()),
+        undoable: false,
+        time: Some(1_590_236_501_416),
+        deps: None,
+        ops: Some(vec![
+            Op {
+                action: amp::OpType::MakeMap,
+                obj: amp::ObjectID::Root.to_string(),
+                key: "birds".into(),
+                child: Some("1@8ee3b3c4587245a684af1b121361141d".to_string()),
+                value: None,
+                datatype: None,
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set,
+                obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
+                key: "wrens".into(),
+                child: None,
+                value: Some(amp::Value::F64(3.0)),
+                datatype: Some(amp::DataType::Undefined),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set,
+                obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
+                key: "sparrows".into(),
+                child: None,
+                value: Some(amp::Value::F64(15.0)),
+                datatype: Some(amp::DataType::Undefined),
+                insert: false,
+            },
+        ]),
+        request_type: amp::RequestType::Change,
+    };
+    let mut expected_patch = amp::Patch {
+        actor: Some(actor.to_string()),
+        seq: Some(1),
+        can_undo: false,
+        can_redo: false,
+        version: 1,
+        clock: hashmap! {cr.actor.to_string() => 1},
+        deps: Vec::new(),
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectID::Root,
+            obj_type: amp::MapType::Map,
+            props: hashmap! {
+                "birds".to_string() => hashmap!{
+                    cr.actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: amp::MapType::Map,
+                        props: hashmap!{
+                            "wrens".to_string() => hashmap!{
+                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::F64(3.0)),
+                            },
+                            "sparrows".to_string() => hashmap!{
+                                actor.op_id_at(3) => amp::Diff::Value(amp::Value::F64(15.0))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
+
+    let mut backend = Backend::init();
+    let patch = backend.apply_local_change(cr).unwrap();
+    expected_patch.deps = patch.clone().deps;
+    assert_eq!(patch, expected_patch);
 }

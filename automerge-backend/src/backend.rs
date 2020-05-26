@@ -57,12 +57,11 @@ impl Backend {
     }
 
     fn str_to_object(&self, name: &str) -> Result<amp::ObjectID, AutomergeError> {
-        amp::ObjectID::from_str(name).or_else(|_| {
-            self.obj_alias
-                .get(name)
-                .cloned()
-                .ok_or_else(|| AutomergeError::MissingChildID(name.to_string()))
-        })
+        self.obj_alias
+            .get(name)
+            .cloned()
+            .or_else(|| amp::ObjectID::from_str(name).ok())
+            .ok_or_else(|| AutomergeError::MissingChildID(name.to_string()))
     }
 
     fn process_request(
