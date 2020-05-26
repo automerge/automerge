@@ -361,6 +361,13 @@ impl Frontend {
                 _ => None,
             })
     }
+
+    pub fn get_value(&self, path: &Path) -> Option<Value> {
+        self.state
+            .as_ref()
+            .and_then(|s| s.get_object(path))
+            .map(|o| o.value())
+    }
 }
 
 fn system_time() -> Option<i64> {

@@ -272,7 +272,7 @@ impl<'a> ChangeContext<'a> {
                             &object_id,
                             original_objects,
                             updated,
-                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
+                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text),
                         );
                         match &mut *obj.borrow_mut() {
                             Object::Sequence(_, ref mut elems, SequenceType::Text) => {
