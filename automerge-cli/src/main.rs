@@ -42,7 +42,7 @@ enum Command {
 
         /// File that contains automerge changes
         #[clap(parse(from_os_str))]
-        changes_file: PathBuf,
+        changes_file: Option<PathBuf>,
     },
 
     Import {
@@ -51,10 +51,35 @@ enum Command {
         format: ExportFormat,
 
         /// Path to write Automerge changes to
-        // TODO: How to conditionally require outfile based on isatty?
-        #[clap(long, short)]
-        out_file: String,
+        #[clap(parse(from_os_str), long, short)]
+        out_file: Option<PathBuf>,
     },
+}
+
+fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
+    if atty::is(atty::Stream::Stdin) {
+        if let Some(path) = maybe_path {
+            Ok(Box::new(File::open(&path).unwrap()))
+        } else {
+            Err(anyhow!(
+                "Must provide file path if not providing input via stdin"
+            ))
+        }
+    } else {
+        Ok(Box::new(std::io::stdin()))
+    }
+}
+
+fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Write>> {
+    if atty::is(atty::Stream::Stdout) {
+        if let Some(path) = maybe_path {
+            Ok(Box::new(File::create(&path).unwrap()))
+        } else {
+            Err(anyhow!("Must provide file path if not piping to stdout"))
+        }
+    } else {
+        Ok(Box::new(std::io::stdout()))
+    }
 }
 
 fn main() -> Result<()> {
@@ -65,18 +90,16 @@ fn main() -> Result<()> {
             format,
         } => match format {
             ExportFormat::JSON => {
-                let mut f = File::open(&changes_file)?;
-                export::export_json(&mut f, &mut std::io::stdout())
+                let mut in_buffer = open_file_or_stdin(changes_file)?;
+                export::export_json(&mut in_buffer, &mut std::io::stdout())
             }
             ExportFormat::TOML => unimplemented!(),
         },
 
         Command::Import { format, out_file } => match format {
-            // TODO: import_json returns a String, how do we pipe this correctly
-            // either to a file or to stdout?
             ExportFormat::JSON => {
-                let mut buffer = File::create(out_file)?;
-                import::import_json(std::io::stdin(), &mut buffer)
+                let mut out_buffer = create_file_or_stdout(out_file)?;
+                import::import_json(std::io::stdin(), &mut out_buffer)
             }
             ExportFormat::TOML => unimplemented!(),
         },
