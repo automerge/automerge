@@ -52,7 +52,7 @@ enum Command {
 
         /// Path to write Automerge changes to
         #[clap(parse(from_os_str), long, short)]
-        out_file: Option<PathBuf>,
+        changes_file: Option<PathBuf>,
     },
 }
 
@@ -96,9 +96,12 @@ fn main() -> Result<()> {
             ExportFormat::TOML => unimplemented!(),
         },
 
-        Command::Import { format, out_file } => match format {
+        Command::Import {
+            format,
+            changes_file,
+        } => match format {
             ExportFormat::JSON => {
-                let mut out_buffer = create_file_or_stdout(out_file)?;
+                let mut out_buffer = create_file_or_stdout(changes_file)?;
                 import::import_json(std::io::stdin(), &mut out_buffer)
             }
             ExportFormat::TOML => unimplemented!(),
