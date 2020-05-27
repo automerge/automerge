@@ -50,8 +50,11 @@ enum Command {
         #[clap(long, short, default_value = "json")]
         format: ExportFormat,
 
+        #[clap(parse(from_os_str))]
+        input_file: Option<PathBuf>,
+
         /// Path to write Automerge changes to
-        #[clap(parse(from_os_str), long, short)]
+        #[clap(parse(from_os_str), long("out"), short("o"))]
         changes_file: Option<PathBuf>,
     },
 }
@@ -98,11 +101,13 @@ fn main() -> Result<()> {
 
         Command::Import {
             format,
+            input_file,
             changes_file,
         } => match format {
             ExportFormat::JSON => {
                 let mut out_buffer = create_file_or_stdout(changes_file)?;
-                import::import_json(std::io::stdin(), &mut out_buffer)
+                let mut in_buffer = open_file_or_stdin(input_file)?;
+                import::import_json(&mut in_buffer, &mut out_buffer)
             }
             ExportFormat::TOML => unimplemented!(),
         },
