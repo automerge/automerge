@@ -40,7 +40,7 @@ enum Command {
         #[clap(long, short, default_value = "json")]
         format: ExportFormat,
 
-        /// File that contains automerge changes
+        /// Path that contains Automerge changes
         #[clap(parse(from_os_str))]
         changes_file: Option<PathBuf>,
     },
