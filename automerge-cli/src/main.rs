@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use clap::Clap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 mod export;
@@ -42,7 +42,8 @@ enum Command {
         format: ExportFormat,
 
         /// File that contains automerge changes
-        changes_file: String,
+        #[clap(parse(from_os_str))]
+        changes_file: PathBuf,
     },
 
     Import {
@@ -65,7 +66,8 @@ fn main() -> Result<()> {
             format,
         } => match format {
             ExportFormat::JSON => {
-                export::export_json(Path::new(&changes_file), &mut std::io::stdout())
+                let mut f = File::open(&changes_file)?;
+                export::export_json(&mut f, &mut std::io::stdout())
             }
             ExportFormat::TOML => unimplemented!(),
         },
