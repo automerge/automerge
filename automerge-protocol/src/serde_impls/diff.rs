@@ -1,5 +1,7 @@
 use super::read_field;
-use crate::{DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, SeqDiff, Value};
+use crate::{
+    DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, ScalarValue, SeqDiff,
+};
 use serde::{
     de,
     de::{Error, MapAccess, Unexpected},
@@ -19,13 +21,13 @@ impl Serialize for Diff {
             Diff::Seq(diff) => diff.serialize(serializer),
             Diff::Unchanged(diff) => diff.serialize(serializer),
             Diff::Value(val) => match val {
-                Value::Counter(_) => {
+                ScalarValue::Counter(_) => {
                     let mut op = serializer.serialize_struct("Value", 2)?;
                     op.serialize_field("value", &val)?;
                     op.serialize_field("datatype", "counter")?;
                     op.end()
                 }
-                Value::Timestamp(_) => {
+                ScalarValue::Timestamp(_) => {
                     let mut op = serializer.serialize_struct("Value", 2)?;
                     op.serialize_field("value", &val)?;
                     op.serialize_field("datatype", "timestamp")?;
@@ -64,7 +66,7 @@ impl<'de> Deserialize<'de> for Diff {
                 let mut object_id: Option<ObjectID> = None;
                 let mut obj_type: Option<ObjType> = None;
                 let mut props: Option<HashMap<String, HashMap<OpID, Diff>>> = None;
-                let mut value: Option<Value> = None;
+                let mut value: Option<ScalarValue> = None;
                 let mut datatype: Option<DataType> = None;
 
                 while let Some(field) = map.next_key::<String>()? {
@@ -123,18 +125,18 @@ impl<'de> Deserialize<'de> for Diff {
     }
 }
 
-fn maybe_add_datatype_to_value(value: Value, datatype: DataType) -> Value {
+fn maybe_add_datatype_to_value(value: ScalarValue, datatype: DataType) -> ScalarValue {
     match datatype {
         DataType::Counter => {
             if let Some(n) = value.to_i64() {
-                Value::Counter(n)
+                ScalarValue::Counter(n)
             } else {
                 value
             }
         }
         DataType::Timestamp => {
             if let Some(n) = value.to_i64() {
-                Value::Timestamp(n)
+                ScalarValue::Timestamp(n)
             } else {
                 value
             }

@@ -48,7 +48,7 @@ fn test_set_root_object_properties() {
         .change(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
-                Value::Primitive(amp::Value::Str("magpie".to_string())),
+                Value::Primitive(amp::ScalarValue::Str("magpie".to_string())),
             ))?;
             Ok(())
         })
@@ -71,7 +71,7 @@ fn test_set_root_object_properties() {
             obj: ROOT_ID.to_string(),
             key: amp::RequestKey::Str("bird".to_string()),
             child: None,
-            value: Some(amp::Value::Str("magpie".to_string())),
+            value: Some(amp::ScalarValue::Str("magpie".to_string())),
             datatype: Some(amp::DataType::Undefined),
             insert: false,
         }]),
@@ -128,7 +128,7 @@ fn it_should_create_nested_maps() {
                 key: amp::RequestKey::Str("wrens".into()),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
-                value: Some(amp::Value::F64(3.0)),
+                value: Some(amp::ScalarValue::F64(3.0)),
                 insert: false,
             },
         ]),
@@ -156,7 +156,7 @@ fn apply_updates_inside_nested_maps() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").key("sparrows"),
-                Value::Primitive(amp::Value::F64(15.0)),
+                Value::Primitive(amp::ScalarValue::F64(15.0)),
             ))?;
             Ok(())
         })
@@ -195,7 +195,7 @@ fn apply_updates_inside_nested_maps() {
             obj: birds_id.to_string(),
             key: "sparrows".into(),
             child: None,
-            value: Some(amp::Value::F64(15.0)),
+            value: Some(amp::ScalarValue::F64(15.0)),
             insert: false,
             datatype: Some(amp::DataType::Undefined),
         }]),
@@ -449,7 +449,7 @@ fn handle_counters_inside_maps() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("wrens"),
-                Value::Primitive(amp::Value::Counter(0)),
+                Value::Primitive(amp::ScalarValue::Counter(0)),
             ))?;
             Ok(())
         })
@@ -470,7 +470,7 @@ fn handle_counters_inside_maps() {
         state_after_first_change,
         Value::Map(
             hashmap! {
-                "wrens".into() => Value::Primitive(amp::Value::Counter(0))
+                "wrens".into() => Value::Primitive(amp::ScalarValue::Counter(0))
             },
             amp::MapType::Map
         )
@@ -480,7 +480,7 @@ fn handle_counters_inside_maps() {
         state_after_second_change,
         Value::Map(
             hashmap! {
-                "wrens".into() => Value::Primitive(amp::Value::Counter(1))
+                "wrens".into() => Value::Primitive(amp::ScalarValue::Counter(1))
             },
             amp::MapType::Map
         )
@@ -500,7 +500,7 @@ fn handle_counters_inside_maps() {
             obj: amp::ObjectID::Root.to_string(),
             key: "wrens".into(),
             child: None,
-            value: Some(amp::Value::Counter(0)),
+            value: Some(amp::ScalarValue::Counter(0)),
             insert: false,
             datatype: Some(amp::DataType::Counter),
         }]),
@@ -521,7 +521,7 @@ fn handle_counters_inside_maps() {
             obj: amp::ObjectID::Root.to_string(),
             key: "wrens".into(),
             child: None,
-            value: Some(amp::Value::Int(1)),
+            value: Some(amp::ScalarValue::Int(1)),
             insert: false,
             datatype: Some(amp::DataType::Counter),
         }]),
@@ -536,7 +536,7 @@ fn handle_counters_inside_lists() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("counts"),
-                vec![Value::Primitive(amp::Value::Counter(1))].into(),
+                vec![Value::Primitive(amp::ScalarValue::Counter(1))].into(),
             ))?;
             Ok(())
         })
@@ -560,7 +560,7 @@ fn handle_counters_inside_lists() {
         state_after_first_change,
         Value::Map(
             hashmap! {
-                "counts".into() => vec![Value::Primitive(amp::Value::Counter(1))].into()
+                "counts".into() => vec![Value::Primitive(amp::ScalarValue::Counter(1))].into()
             },
             amp::MapType::Map
         )
@@ -570,7 +570,7 @@ fn handle_counters_inside_lists() {
         state_after_second_change,
         Value::Map(
             hashmap! {
-                "counts".into() => vec![Value::Primitive(amp::Value::Counter(3))].into()
+                "counts".into() => vec![Value::Primitive(amp::ScalarValue::Counter(3))].into()
             },
             amp::MapType::Map
         )
@@ -602,7 +602,7 @@ fn handle_counters_inside_lists() {
                 obj: counts_id.to_string(),
                 key: 0.into(),
                 child: None,
-                value: Some(amp::Value::Counter(1)),
+                value: Some(amp::ScalarValue::Counter(1)),
                 insert: true,
                 datatype: Some(amp::DataType::Counter),
             },
@@ -624,7 +624,7 @@ fn handle_counters_inside_lists() {
             obj: counts_id.to_string(),
             key: 0.into(),
             child: None,
-            value: Some(amp::Value::Int(2)),
+            value: Some(amp::ScalarValue::Int(2)),
             insert: false,
             datatype: Some(amp::DataType::Counter),
         }]),
@@ -638,7 +638,7 @@ fn refuse_to_overwrite_counter_value() {
     doc.change(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
-            Value::Primitive(amp::Value::Counter(1)),
+            Value::Primitive(amp::ScalarValue::Counter(1)),
         ))?;
         Ok(())
     })

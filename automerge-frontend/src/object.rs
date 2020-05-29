@@ -44,7 +44,7 @@ impl Values {
 pub enum Object {
     Sequence(amp::ObjectID, Vec<Option<Values>>, amp::SequenceType),
     Map(amp::ObjectID, HashMap<String, Values>, amp::MapType),
-    Primitive(amp::Value),
+    Primitive(amp::ScalarValue),
 }
 
 impl Object {

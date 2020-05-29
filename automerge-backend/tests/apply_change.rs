@@ -3,7 +3,7 @@ use automerge_backend::{AutomergeError, Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
 use automerge_protocol::{
     ActorID, Diff, DiffEdit, ElementID, Key, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Patch,
-    SeqDiff, SequenceType, Value,
+    ScalarValue, SeqDiff, SequenceType,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -58,7 +58,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
         operations: vec![Operation::set(
             ObjectID::Root,
             "counter".into(),
-            Value::Counter(1),
+            ScalarValue::Counter(1),
             vec![],
         )],
     }
@@ -94,7 +94,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
                 obj_type: MapType::Map,
                 props: hashmap!(
                 "counter".into() => hashmap!{
-                    "1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap() =>  Value::Counter(3).into(),
+                    "1@cdee6963c1664645920be8b41a933c2b".try_into().unwrap() =>  ScalarValue::Counter(3).into(),
                 }),
             }
             .into(),
@@ -182,7 +182,7 @@ fn delete_key_from_map() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Set(Value::Str("magpie".into())),
+            action: OpType::Set(ScalarValue::Str("magpie".into())),
             obj: ObjectID::Root,
             key: Key::Map("bird".into()),
             pred: Vec::new(),
@@ -250,7 +250,7 @@ fn create_nested_maps() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::F64(3.0)),
+                action: OpType::Set(ScalarValue::F64(3.0)),
                 obj: "1@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap(),
                 key: Key::Map("wrens".into()),
                 pred: Vec::new(),
@@ -278,7 +278,7 @@ fn create_nested_maps() {
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                 "2@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap() => Diff::Value(Value::F64(3.0))
+                                 "2@d6226fcd55204b82b396f2473da3e26f".try_into().unwrap() => Diff::Value(ScalarValue::F64(3.0))
                             }
                         }
                     })
@@ -311,7 +311,7 @@ fn test_assign_to_nested_keys_in_map() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::F64(3.0)),
+                action: OpType::Set(ScalarValue::F64(3.0)),
                 obj: "1@3c39c994039042778f4779a01a59a917".try_into().unwrap(),
                 key: "wrens".into(),
                 pred: Vec::new(),
@@ -329,7 +329,7 @@ fn test_assign_to_nested_keys_in_map() {
         deps: vec![change1.hash],
         message: None,
         operations: vec![Operation {
-            action: OpType::Set(Value::F64(15.0)),
+            action: OpType::Set(ScalarValue::F64(15.0)),
             obj: "1@3c39c994039042778f4779a01a59a917".try_into().unwrap(),
             key: "sparrows".into(),
             pred: Vec::new(),
@@ -358,7 +358,7 @@ fn test_assign_to_nested_keys_in_map() {
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                "3@3c39c994039042778f4779a01a59a917".try_into().unwrap() => Diff::Value(Value::F64(15.0))
+                                "3@3c39c994039042778f4779a01a59a917".try_into().unwrap() => Diff::Value(ScalarValue::F64(15.0))
                             }
                         }
                     })
@@ -391,7 +391,7 @@ fn test_create_lists() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::Str("chaffinch".into())),
+                action: OpType::Set(ScalarValue::Str("chaffinch".into())),
                 obj: "1@f82cb62dabe64372ab87466b77792010".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 insert: true,
@@ -422,7 +422,7 @@ fn test_create_lists() {
                         edits: vec![DiffEdit::Insert{ index: 0 }],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@f82cb62dabe64372ab87466b77792010".try_into().unwrap() => Diff::Value(Value::Str("chaffinch".into()))
+                                "2@f82cb62dabe64372ab87466b77792010".try_into().unwrap() => Diff::Value(ScalarValue::Str("chaffinch".into()))
                             }
                         }
                     })
@@ -455,7 +455,7 @@ fn test_apply_updates_inside_lists() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::Str("chaffinch".into())),
+                action: OpType::Set(ScalarValue::Str("chaffinch".into())),
                 obj: "1@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 pred: Vec::new(),
@@ -473,7 +473,7 @@ fn test_apply_updates_inside_lists() {
         deps: vec![change1.hash],
         message: None,
         operations: vec![Operation {
-            action: OpType::Set(Value::Str("greenfinch".into())),
+            action: OpType::Set(ScalarValue::Str("greenfinch".into())),
             obj: "1@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap(),
             key: Key::Seq("2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()),
             pred: vec!["2@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap()],
@@ -503,7 +503,7 @@ fn test_apply_updates_inside_lists() {
                         edits: Vec::new(),
                         props: hashmap!{
                             0 => hashmap!{
-                                "3@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap() => Diff::Value(Value::Str("greenfinch".into()))
+                                "3@4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap() => Diff::Value(ScalarValue::Str("greenfinch".into()))
                             }
                         }
                     })
@@ -537,7 +537,7 @@ fn test_delete_list_elements() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::Str("chaffinch".into())),
+                action: OpType::Set(ScalarValue::Str("chaffinch".into())),
                 obj: "1@8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 insert: true,
@@ -627,7 +627,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         operations: vec![
             Operation {
-                action: OpType::Set(Value::Str("chaffinch".into())),
+                action: OpType::Set(ScalarValue::Str("chaffinch".into())),
                 obj: "1@ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 insert: true,
@@ -727,7 +727,7 @@ fn test_handle_changes_within_conflicted_objects() {
         message: None,
         deps: vec![change2.hash],
         operations: vec![Operation {
-            action: OpType::Set(Value::F64(12.0)),
+            action: OpType::Set(ScalarValue::F64(12.0)),
             obj: "1@83768a19a13842beb6dde8c68a662fad".try_into().unwrap(),
             key: "sparrow".into(),
             pred: Vec::new(),
@@ -761,7 +761,7 @@ fn test_handle_changes_within_conflicted_objects() {
                        obj_type: MapType::Map,
                        props: hashmap!{
                            "sparrow".into() => hashmap!{
-                             "2@83768a19a13842beb6dde8c68a662fad".try_into().unwrap() => Diff::Value(Value::F64(12.0))
+                             "2@83768a19a13842beb6dde8c68a662fad".try_into().unwrap() => Diff::Value(ScalarValue::F64(12.0))
                            }
                        }
                     })
@@ -788,7 +788,7 @@ fn test_support_date_objects_at_root() {
         deps: Vec::new(),
         message: None,
         operations: vec![Operation {
-            action: OpType::Set(Value::Timestamp(1_586_528_122_277)),
+            action: OpType::Set(ScalarValue::Timestamp(1_586_528_122_277)),
             obj: ObjectID::Root,
             key: "now".into(),
             pred: Vec::new(),
@@ -812,7 +812,7 @@ fn test_support_date_objects_at_root() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "now".into() => hashmap!{
-                    "1@955afa3bbcc140b3b4bac8836479d650".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_528_122_277))
+                    "1@955afa3bbcc140b3b4bac8836479d650".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_528_122_277))
                 }
             },
         })),
@@ -842,7 +842,7 @@ fn test_support_date_objects_in_a_list() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::Timestamp(1_586_528_191_421)),
+                action: OpType::Set(ScalarValue::Timestamp(1_586_528_191_421)),
                 obj: "1@27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 insert: true,
@@ -873,7 +873,7 @@ fn test_support_date_objects_in_a_list() {
                         edits: vec![DiffEdit::Insert{index: 0}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_528_191_421))
+                                "2@27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_528_191_421))
                             }
                         }
                     })

@@ -6,4 +6,4 @@ mod key;
 mod object_id;
 mod opid;
 mod request_key;
-mod value;
+mod scalar_value;

@@ -1,4 +1,4 @@
-use crate::{Diff, MapDiff, SeqDiff, Value};
+use crate::{Diff, MapDiff, ScalarValue, SeqDiff};
 
 impl From<MapDiff> for Diff {
     fn from(m: MapDiff) -> Self {
@@ -12,14 +12,14 @@ impl From<SeqDiff> for Diff {
     }
 }
 
-impl From<&Value> for Diff {
-    fn from(v: &Value) -> Self {
+impl From<&ScalarValue> for Diff {
+    fn from(v: &ScalarValue) -> Self {
         Diff::Value(v.clone())
     }
 }
 
-impl From<Value> for Diff {
-    fn from(v: Value) -> Self {
+impl From<ScalarValue> for Diff {
+    fn from(v: ScalarValue) -> Self {
         Diff::Value(v)
     }
 }

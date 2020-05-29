@@ -79,7 +79,7 @@ pub(crate) enum InternalOpType {
     Del,
     Link(ObjectID),
     Inc(i64),
-    Set(amp::Value),
+    Set(amp::ScalarValue),
 }
 
 impl Key {

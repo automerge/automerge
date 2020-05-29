@@ -366,7 +366,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     return self.wrap_root_assignment(value);
                 }
                 if let Some(o) = self.value_for_path(&change.path) {
-                    if let Object::Primitive(amp::Value::Counter(_)) = &*o {
+                    if let Object::Primitive(amp::ScalarValue::Counter(_)) = &*o {
                         return Err(AutomergeFrontendError::CannotOverwriteCounter);
                     }
                 };
@@ -441,7 +441,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
             LocalOperation::Increment(by) => {
                 if let Some(val) = self.value_for_path(&change.path) {
                     let current_val = match &*val {
-                        Object::Primitive(amp::Value::Counter(i)) => i,
+                        Object::Primitive(amp::ScalarValue::Counter(i)) => i,
                         _ => return Err(AutomergeFrontendError::PathIsNotCounter),
                     };
                     // Unwrap is fine as we know the parent object exists from the above
@@ -454,10 +454,10 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                         key: change.path.name().unwrap().to_request_key(),
                         child: None,
                         insert: false,
-                        value: Some(amp::Value::Int(*by)),
+                        value: Some(amp::ScalarValue::Int(*by)),
                         datatype: Some(amp::DataType::Counter),
                     };
-                    let diff = amp::Diff::Value(amp::Value::Counter(current_val + by));
+                    let diff = amp::Diff::Value(amp::ScalarValue::Counter(current_val + by));
                     let diff = self.diff_at_path(&change.path, diff).unwrap();
                     self.ops.push(op);
                     self.change_context.apply_diff(&diff)?;

@@ -641,7 +641,7 @@ fn valid_objectid_as_child_works() {
                 obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
                 key: "wrens".into(),
                 child: None,
-                value: Some(amp::Value::F64(3.0)),
+                value: Some(amp::ScalarValue::F64(3.0)),
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
             },
@@ -650,7 +650,7 @@ fn valid_objectid_as_child_works() {
                 obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
                 key: "sparrows".into(),
                 child: None,
-                value: Some(amp::Value::F64(15.0)),
+                value: Some(amp::ScalarValue::F64(15.0)),
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
             },
@@ -675,10 +675,10 @@ fn valid_objectid_as_child_works() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".to_string() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::F64(3.0)),
+                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::F64(3.0)),
                             },
                             "sparrows".to_string() => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value(amp::Value::F64(15.0))
+                                actor.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::F64(15.0))
                             }
                         }
                     })

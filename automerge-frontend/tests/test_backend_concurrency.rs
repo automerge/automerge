@@ -31,7 +31,7 @@ fn use_version_and_sequence_number_from_backend() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::F64(24.0))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::F64(24.0))
                 }
             },
         })),
@@ -47,7 +47,7 @@ fn use_version_and_sequence_number_from_backend() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                Value::Primitive(amp::Value::Int(1)),
+                Value::Primitive(amp::ScalarValue::Int(1)),
             ))?;
             Ok(())
         })
@@ -68,7 +68,7 @@ fn use_version_and_sequence_number_from_backend() {
             obj: amp::ObjectID::Root.to_string(),
             key: "partridges".into(),
             insert: false,
-            value: Some(amp::Value::Int(1)),
+            value: Some(amp::ScalarValue::Int(1)),
             datatype: Some(amp::DataType::Undefined),
             child: None,
         }]),
@@ -86,7 +86,7 @@ fn remove_pending_requests_once_handled() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -97,7 +97,7 @@ fn remove_pending_requests_once_handled() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                amp::Value::Int(1).into(),
+                amp::ScalarValue::Int(1).into(),
             ))?;
             Ok(())
         })
@@ -123,7 +123,7 @@ fn remove_pending_requests_once_handled() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(24))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
         })),
@@ -135,8 +135,8 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "partridges".to_string() => amp::Value::Int(1),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "partridges".to_string() => amp::ScalarValue::Int(1),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![2]);
@@ -157,7 +157,7 @@ fn remove_pending_requests_once_handled() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(1))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
         })),
@@ -172,8 +172,8 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "partridges".to_string() => amp::Value::Int(1),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "partridges".to_string() => amp::ScalarValue::Int(1),
         })
     );
 
@@ -191,7 +191,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -217,7 +217,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "pheasants".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(2))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(2))
                 }
             },
         })),
@@ -229,7 +229,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![1]);
@@ -251,7 +251,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(24))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
         })),
@@ -264,8 +264,8 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "pheasants".to_string() => amp::Value::Int(2),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "pheasants".to_string() => amp::ScalarValue::Int(2),
         })
     );
 
@@ -281,7 +281,7 @@ fn dont_allow_out_of_order_request_patches() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -303,7 +303,7 @@ fn dont_allow_out_of_order_request_patches() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(1))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
         })),
@@ -489,7 +489,7 @@ fn allow_interleacing_of_patches_and_changes() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(1).into(),
+                amp::ScalarValue::Int(1).into(),
             ))?;
             Ok(())
         })
@@ -500,7 +500,7 @@ fn allow_interleacing_of_patches_and_changes() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(2).into(),
+                amp::ScalarValue::Int(2).into(),
             ))?;
             Ok(())
         })
@@ -522,7 +522,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(1)),
+                value: Some(amp::ScalarValue::Int(1)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
@@ -545,7 +545,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(2)),
+                value: Some(amp::ScalarValue::Int(2)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
@@ -561,7 +561,7 @@ fn allow_interleacing_of_patches_and_changes() {
         .change(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(3).into(),
+                amp::ScalarValue::Int(3).into(),
             ))?;
             Ok(())
         })
@@ -583,7 +583,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(3)),
+                value: Some(amp::ScalarValue::Int(3)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,

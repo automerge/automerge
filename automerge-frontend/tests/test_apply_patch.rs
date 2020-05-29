@@ -111,7 +111,7 @@ fn create_nested_maps() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::Int(3))
+                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
@@ -123,7 +123,7 @@ fn create_nested_maps() {
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"birds" => hashmap!{"wrens" => amp::Value::Int(3)}})
+        &Into::<Value>::into(hashmap! {"birds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}})
     );
 }
 
@@ -150,7 +150,7 @@ fn apply_updates_inside_nested_maps() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::Int(3))
+                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
@@ -183,7 +183,7 @@ fn apply_updates_inside_nested_maps() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value(amp::Value::Int(15))
+                                actor.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(15))
                             }
                         }
                     })
@@ -197,7 +197,7 @@ fn apply_updates_inside_nested_maps() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => hashmap!{"wrens" => amp::Value::Int(3), "sparrows" => amp::Value::Int(15)}}
+            hashmap! {"birds" => hashmap!{"wrens" => amp::ScalarValue::Int(3), "sparrows" => amp::ScalarValue::Int(15)}}
         )
     );
 }
@@ -237,7 +237,7 @@ fn apply_updates_inside_map_conflicts() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
-                                actor1.op_id_at(2) => amp::Diff::Value(amp::Value::Int(1)),
+                                actor1.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(1)),
                             }
                         },
                     }),
@@ -246,7 +246,7 @@ fn apply_updates_inside_map_conflicts() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor2.op_id_at(2) => amp::Diff::Value(amp::Value::Int(3)),
+                                actor2.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3)),
                             }
                         },
                     })
@@ -260,7 +260,7 @@ fn apply_updates_inside_map_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::Value::Int(3)}}
+            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}}
         )
     );
 
@@ -269,8 +269,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::Value::Int(1)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => amp::Value::Int(3)}.into(),
+            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::ScalarValue::Int(1)}.into(),
+            actor2.op_id_at(1) => hashmap!{"wrens" => amp::ScalarValue::Int(3)}.into(),
         }
     );
 
@@ -295,7 +295,7 @@ fn apply_updates_inside_map_conflicts() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
-                                actor1.op_id_at(3) => amp::Diff::Value(amp::Value::Int(2)),
+                                actor1.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                             }
                         },
                     }),
@@ -313,7 +313,7 @@ fn apply_updates_inside_map_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::Value::Int(3)}}
+            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}}
         )
     );
 
@@ -322,8 +322,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::Value::Int(2)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => amp::Value::Int(3)}.into(),
+            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::ScalarValue::Int(2)}.into(),
+            actor2.op_id_at(1) => hashmap!{"wrens" => amp::ScalarValue::Int(3)}.into(),
         }
     );
 }
@@ -347,10 +347,10 @@ fn delete_keys_in_maps() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "magpies".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Value(amp::Value::Int(2))
+                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Int(2))
                 },
                 "sparrows".into() => hashmap!{
-                    actor.op_id_at(2) => amp::Diff::Value(amp::Value::Int(15))
+                    actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(15))
                 }
             },
         })),
@@ -359,7 +359,7 @@ fn delete_keys_in_maps() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"magpies" => amp::Value::Int(2), "sparrows" => amp::Value::Int(15)}
+            hashmap! {"magpies" => amp::ScalarValue::Int(2), "sparrows" => amp::ScalarValue::Int(15)}
         )
     );
 
@@ -385,7 +385,7 @@ fn delete_keys_in_maps() {
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"sparrows" => amp::Value::Int(15)})
+        &Into::<Value>::into(hashmap! {"sparrows" => amp::ScalarValue::Int(15)})
     );
 }
 
@@ -549,7 +549,7 @@ fn apply_updates_inside_list_conflicts() {
                                             actor1.op_id_at(3) => amp::Diff::Value("woodpecker".into()),
                                         },
                                         "numSeen".into() => hashmap!{
-                                            actor1.op_id_at(4) => amp::Diff::Value(amp::Value::Int(1)),
+                                            actor1.op_id_at(4) => amp::Diff::Value(amp::ScalarValue::Int(1)),
                                         },
                                     }
                                 }),
@@ -561,7 +561,7 @@ fn apply_updates_inside_list_conflicts() {
                                             actor2.op_id_at(3) => amp::Diff::Value("lapwing".into()),
                                         },
                                         "numSeen".into() => hashmap!{
-                                            actor2.op_id_at(4) => amp::Diff::Value(amp::Value::Int(2)),
+                                            actor2.op_id_at(4) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                                         },
                                     }
                                 }),
@@ -578,7 +578,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => amp::Value::Str("lapwing".to_string()), "numSeen" => amp::Value::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => amp::ScalarValue::Str("lapwing".to_string()), "numSeen" => amp::ScalarValue::Int(2)}]}
         )
     );
 
@@ -588,12 +588,12 @@ fn apply_updates_inside_list_conflicts() {
             .unwrap(),
         hashmap! {
             actor1.op_id_at(2) => hashmap!{
-                "species" => amp::Value::Str("woodpecker".into()),
-                "numSeen" => amp::Value::Int(1),
+                "species" => amp::ScalarValue::Str("woodpecker".into()),
+                "numSeen" => amp::ScalarValue::Int(1),
             }.into(),
             actor2.op_id_at(2) => hashmap!{
-                "species" => amp::Value::Str("lapwing".into()),
-                "numSeen" => amp::Value::Int(2),
+                "species" => amp::ScalarValue::Str("lapwing".into()),
+                "numSeen" => amp::ScalarValue::Int(2),
             }.into(),
         }
     );
@@ -625,7 +625,7 @@ fn apply_updates_inside_list_conflicts() {
                                     obj_type: amp::MapType::Map,
                                     props: hashmap!{
                                         "numSeen".into() => hashmap!{
-                                            actor1.op_id_at(5) => amp::Diff::Value(amp::Value::Int(2)),
+                                            actor1.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                                         },
                                     }
                                 }),
@@ -646,7 +646,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => amp::Value::Str("lapwing".to_string()), "numSeen" => amp::Value::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => amp::ScalarValue::Str("lapwing".to_string()), "numSeen" => amp::ScalarValue::Int(2)}]}
         )
     );
 
@@ -656,12 +656,12 @@ fn apply_updates_inside_list_conflicts() {
             .unwrap(),
         hashmap! {
             actor1.op_id_at(2) => hashmap!{
-                "species" => amp::Value::Str("woodpecker".into()),
-                "numSeen" => amp::Value::Int(2),
+                "species" => amp::ScalarValue::Str("woodpecker".into()),
+                "numSeen" => amp::ScalarValue::Int(2),
             }.into(),
             actor2.op_id_at(2) => hashmap!{
-                "species" => amp::Value::Str("lapwing".into()),
-                "numSeen" => amp::Value::Int(2),
+                "species" => amp::ScalarValue::Str("lapwing".into()),
+                "numSeen" => amp::ScalarValue::Int(2),
             }.into(),
         }
     );
@@ -762,7 +762,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "magpie".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::Int(2))
+                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(2))
                             }
                         }
                     })
@@ -800,7 +800,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {
-            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::Value::Int(2)}),
+            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::ScalarValue::Int(2)}),
             "details" => vec![Into::<Value>::into(hashmap!{
                 "species" => "magpie",
                 "family" => "Corvidae",
@@ -826,7 +826,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "magpie".into() => hashmap!{
-                                actor.op_id_at(7) => amp::Diff::Value(amp::Value::Int(3))
+                                actor.op_id_at(7) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
@@ -860,7 +860,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {
-            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::Value::Int(3)}),
+            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::ScalarValue::Int(3)}),
             "details" => vec![Into::<Value>::into(hashmap!{
                 "species" => "Eurasian magpie",
                 "family" => "Corvidae",

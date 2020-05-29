@@ -18,24 +18,24 @@ impl From<HashMap<amp::OpID, Value>> for Conflicts {
 pub enum Value {
     Map(HashMap<String, Value>, amp::MapType),
     Sequence(Vec<Value>, amp::SequenceType),
-    Primitive(amp::Value),
+    Primitive(amp::ScalarValue),
 }
 
-impl From<amp::Value> for Value {
-    fn from(val: amp::Value) -> Self {
+impl From<amp::ScalarValue> for Value {
+    fn from(val: amp::ScalarValue) -> Self {
         Value::Primitive(val)
     }
 }
 
-impl From<&amp::Value> for Value {
-    fn from(val: &amp::Value) -> Self {
+impl From<&amp::ScalarValue> for Value {
+    fn from(val: &amp::ScalarValue) -> Self {
         val.clone().into()
     }
 }
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::Primitive(amp::Value::Str(s.to_string()))
+        Value::Primitive(amp::ScalarValue::Str(s.to_string()))
     }
 }
 
@@ -80,12 +80,12 @@ impl Value {
                 vs.iter().map(Value::from_json).collect(),
                 amp::SequenceType::List,
             ),
-            serde_json::Value::String(s) => Value::Primitive(amp::Value::Str(s.clone())),
+            serde_json::Value::String(s) => Value::Primitive(amp::ScalarValue::Str(s.clone())),
             serde_json::Value::Number(n) => {
-                Value::Primitive(amp::Value::F64(n.as_f64().unwrap_or(0.0)))
+                Value::Primitive(amp::ScalarValue::F64(n.as_f64().unwrap_or(0.0)))
             }
-            serde_json::Value::Bool(b) => Value::Primitive(amp::Value::Boolean(*b)),
-            serde_json::Value::Null => Value::Primitive(amp::Value::Null),
+            serde_json::Value::Bool(b) => Value::Primitive(amp::ScalarValue::Boolean(*b)),
+            serde_json::Value::Null => Value::Primitive(amp::ScalarValue::Null),
         }
     }
 
@@ -103,27 +103,33 @@ impl Value {
                 elements
                     .iter()
                     .map(|v| match v {
-                        Value::Primitive(amp::Value::Str(c)) => c.as_str(),
+                        Value::Primitive(amp::ScalarValue::Str(c)) => c.as_str(),
                         // TODO fix panic
                         _ => panic!("Non string element in text sequence"),
                     })
                     .collect(),
             ),
             Value::Primitive(v) => match v {
-                amp::Value::F64(n) => serde_json::Value::Number(
+                amp::ScalarValue::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amp::Value::F32(n) => serde_json::Value::Number(
+                amp::ScalarValue::F32(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(f64::from(*n))
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amp::Value::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-                amp::Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-                amp::Value::Str(s) => serde_json::Value::String(s.to_string()),
-                amp::Value::Boolean(b) => serde_json::Value::Bool(*b),
-                amp::Value::Counter(c) => serde_json::Value::Number(serde_json::Number::from(*c)),
-                amp::Value::Timestamp(t) => serde_json::Value::Number(serde_json::Number::from(*t)),
-                amp::Value::Null => serde_json::Value::Null,
+                amp::ScalarValue::Uint(n) => {
+                    serde_json::Value::Number(serde_json::Number::from(*n))
+                }
+                amp::ScalarValue::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                amp::ScalarValue::Str(s) => serde_json::Value::String(s.to_string()),
+                amp::ScalarValue::Boolean(b) => serde_json::Value::Bool(*b),
+                amp::ScalarValue::Counter(c) => {
+                    serde_json::Value::Number(serde_json::Number::from(*c))
+                }
+                amp::ScalarValue::Timestamp(t) => {
+                    serde_json::Value::Number(serde_json::Number::from(*t))
+                }
+                amp::ScalarValue::Null => serde_json::Value::Null,
             },
         }
     }
@@ -258,10 +264,10 @@ pub(crate) fn random_op_id() -> amp::OpID {
     amp::OpID::new(1, &amp::ActorID::random())
 }
 
-fn value_to_datatype(value: &amp::Value) -> amp::DataType {
+fn value_to_datatype(value: &amp::ScalarValue) -> amp::DataType {
     match value {
-        amp::Value::Counter(_) => amp::DataType::Counter,
-        amp::Value::Timestamp(_) => amp::DataType::Timestamp,
+        amp::ScalarValue::Counter(_) => amp::DataType::Counter,
+        amp::ScalarValue::Timestamp(_) => amp::DataType::Timestamp,
         _ => amp::DataType::Undefined,
     }
 }

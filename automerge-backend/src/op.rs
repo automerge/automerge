@@ -37,7 +37,7 @@ impl Operation {
     pub fn set(
         obj: amp::ObjectID,
         key: amp::Key,
-        value: amp::Value,
+        value: amp::ScalarValue,
         pred: Vec<amp::OpID>,
     ) -> Operation {
         Operation {
@@ -52,7 +52,7 @@ impl Operation {
     pub fn insert(
         obj: amp::ObjectID,
         key: amp::Key,
-        value: amp::Value,
+        value: amp::ScalarValue,
         pred: Vec<amp::OpID>,
     ) -> Operation {
         Operation {
@@ -71,8 +71,8 @@ impl Operation {
     pub(crate) fn merge(&mut self, other: Operation) {
         if let OpType::Inc(delta) = other.action {
             match self.action {
-                OpType::Set(amp::Value::Counter(number)) => {
-                    self.action = OpType::Set(amp::Value::Counter(number + delta))
+                OpType::Set(amp::ScalarValue::Counter(number)) => {
+                    self.action = OpType::Set(amp::ScalarValue::Counter(number + delta))
                 }
                 OpType::Inc(number) => self.action = OpType::Inc(number + delta),
                 _ => {}
@@ -144,8 +144,8 @@ impl Serialize for Operation {
         }
 
         match &self.action {
-            OpType::Set(amp::Value::Timestamp(_)) => fields += 2,
-            OpType::Set(amp::Value::Counter(_)) => fields += 2,
+            OpType::Set(amp::ScalarValue::Timestamp(_)) => fields += 2,
+            OpType::Set(amp::ScalarValue::Counter(_)) => fields += 2,
             OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
@@ -160,11 +160,11 @@ impl Serialize for Operation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(amp::Value::Counter(value)) => {
+            OpType::Set(amp::ScalarValue::Counter(value)) => {
                 op.serialize_field("value", &value)?;
                 op.serialize_field("datatype", &amp::DataType::Counter)?;
             }
-            OpType::Set(amp::Value::Timestamp(value)) => {
+            OpType::Set(amp::ScalarValue::Timestamp(value)) => {
                 op.serialize_field("value", &value)?;
                 op.serialize_field("datatype", &amp::DataType::Timestamp)?;
             }
@@ -200,7 +200,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let mut pred: Option<Vec<amp::OpID>> = None;
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<amp::DataType> = None;
-                let mut value: Option<amp::Value> = None;
+                let mut value: Option<amp::ScalarValue> = None;
                 let mut child: Option<amp::ObjectID> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
@@ -220,7 +220,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let key = key.ok_or_else(|| Error::missing_field("key"))?;
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
-                let value = amp::Value::from(value, datatype);
+                let value = amp::ScalarValue::from(value, datatype);
                 let action = match action {
                     amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map(amp::MapType::Map)),
                     amp::OpType::MakeTable => OpType::Make(amp::ObjType::Map(amp::MapType::Table)),
@@ -235,23 +235,23 @@ impl<'de> Deserialize<'de> for Operation {
                         OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
                     }
                     amp::OpType::Set => OpType::Set(
-                        amp::Value::from(value, datatype)
+                        amp::ScalarValue::from(value, datatype)
                             .ok_or_else(|| Error::missing_field("value"))?,
                     ),
                     amp::OpType::Inc => match value {
-                        Some(amp::Value::Int(n)) => Ok(OpType::Inc(n)),
-                        Some(amp::Value::Uint(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(amp::Value::F64(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(amp::Value::F32(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(amp::Value::Counter(n)) => Ok(OpType::Inc(n)),
-                        Some(amp::Value::Timestamp(n)) => Ok(OpType::Inc(n)),
-                        Some(amp::Value::Str(s)) => {
+                        Some(amp::ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
+                        Some(amp::ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(amp::ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(amp::ScalarValue::F32(n)) => Ok(OpType::Inc(n as i64)),
+                        Some(amp::ScalarValue::Counter(n)) => Ok(OpType::Inc(n)),
+                        Some(amp::ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
+                        Some(amp::ScalarValue::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }
-                        Some(amp::Value::Boolean(b)) => {
+                        Some(amp::ScalarValue::Boolean(b)) => {
                             Err(Error::invalid_value(Unexpected::Bool(b), &"a number"))
                         }
-                        Some(amp::Value::Null) => {
+                        Some(amp::ScalarValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }
                         None => Err(Error::missing_field("value")),
