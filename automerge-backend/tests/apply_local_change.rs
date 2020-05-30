@@ -57,7 +57,7 @@ fn test_apply_local_change() {
     assert_eq!(changes[0], &expected_change);
 
     let expected_patch = Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(1),
         version: 1,
         clock: hashmap! {
@@ -512,7 +512,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     };
 
     let mut expected_patch = Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(2),
         version: 2,
         clock: hashmap! {
@@ -658,7 +658,7 @@ fn valid_objectid_as_child_works() {
         request_type: amp::RequestType::Change,
     };
     let mut expected_patch = amp::Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(1),
         can_undo: false,
         can_redo: false,

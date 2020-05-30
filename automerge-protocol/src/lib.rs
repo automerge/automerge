@@ -355,7 +355,7 @@ pub enum DiffEdit {
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub actor: Option<String>,
+    pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
     pub clock: HashMap<String, u64>,

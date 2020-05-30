@@ -11,7 +11,6 @@ use mutation::PathElement;
 pub use mutation::{LocalChange, MutableDocument, Path};
 use object::Object;
 use std::convert::TryFrom;
-use std::str::FromStr;
 use std::time;
 use std::{collections::HashMap, rc::Rc};
 pub use value::{Conflicts, Value};
@@ -73,7 +72,7 @@ impl FrontendState {
                 if let (Some(patch_actor), Some(patch_seq)) = (&patch.actor, patch.seq) {
                     // If this is a local change corresponding to our actor then we
                     // need to match it against in flight requests
-                    if self_actor == &ActorID::from_str(patch_actor.as_str())? {
+                    if self_actor == patch_actor {
                         // Check that if the patch is for our actor ID then it is not
                         // out of order
                         if new_in_flight_requests[0] != patch_seq {

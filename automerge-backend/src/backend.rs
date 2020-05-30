@@ -191,7 +191,7 @@ impl Backend {
                 .iter()
                 .map(|(k, v)| (k.to_hex_string(), v.len() as u64))
                 .collect(),
-            actor: request.map(|r| r.actor.to_hex_string()),
+            actor: request.map(|r| r.actor.clone()),
             seq: request.map(|r| r.seq),
         })
     }

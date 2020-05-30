@@ -109,7 +109,7 @@ fn remove_pending_requests_once_handled() {
 
     // Apply a patch corresponding (via actor ID and seq) to the first change
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
             doc.actor_id.to_string() => 1,
@@ -143,7 +143,7 @@ fn remove_pending_requests_once_handled() {
 
     // Apply a patch corresponding (via actor ID and seq) to the second change
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         clock: hashmap! {
             doc.actor_id.to_string() => 2,
@@ -236,7 +236,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
 
     // Now apply a patch corresponding to the outstanding in flight request
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
             doc.actor_id.to_string() => 2,
@@ -289,7 +289,7 @@ fn dont_allow_out_of_order_request_patches() {
         .unwrap();
 
     let result = doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         version: 2,
         clock: hashmap! {
@@ -334,7 +334,7 @@ fn handle_concurrent_insertions_into_lists() {
     // Apply the corresponding backend patch for the above state, document
     // shoudl be reconciled after this
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         version: 1,
         clock: hashmap! {
@@ -440,7 +440,7 @@ fn handle_concurrent_insertions_into_lists() {
 
     // Now apply a patch acknowledging the in flight request
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         version: 3,
         clock: hashmap!{
