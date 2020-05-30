@@ -61,7 +61,7 @@ fn test_apply_local_change() {
         seq: Some(1),
         version: 1,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -516,7 +516,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         seq: Some(2),
         version: 2,
         clock: hashmap! {
-            "0723d2a1940744868ffd6b294ada813f".into() => 2
+            "0723d2a1940744868ffd6b294ada813f".try_into().unwrap() => 2
         },
         can_undo: false,
         can_redo: false,
@@ -663,7 +663,7 @@ fn valid_objectid_as_child_works() {
         can_undo: false,
         can_redo: false,
         version: 1,
-        clock: hashmap! {cr.actor.to_string() => 1},
+        clock: hashmap! {cr.actor.clone() => 1},
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,

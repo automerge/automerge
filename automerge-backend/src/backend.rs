@@ -189,7 +189,7 @@ impl Backend {
             clock: self
                 .states
                 .iter()
-                .map(|(k, v)| (k.to_hex_string(), v.len() as u64))
+                .map(|(k, v)| (k.clone(), v.len() as u64))
                 .collect(),
             actor: request.map(|r| r.actor.clone()),
             seq: request.map(|r| r.seq),

@@ -21,9 +21,9 @@ fn use_version_and_sequence_number_from_backend() {
         can_undo: false,
         can_redo: false,
         clock: hashmap! {
-            doc.actor_id.to_string() => 4,
-            remote_actor1.to_string() => 11,
-            remote_actor2.to_string() => 41,
+            doc.actor_id.clone() => 4,
+            remote_actor1 => 11,
+            remote_actor2 => 41,
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -112,7 +112,7 @@ fn remove_pending_requests_once_handled() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
+            doc.actor_id.clone() => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -146,7 +146,7 @@ fn remove_pending_requests_once_handled() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
+            doc.actor_id.clone() => 2,
         },
         can_undo: true,
         can_redo: false,
@@ -207,7 +207,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         seq: None,
         version: 1,
         clock: hashmap! {
-            remote.to_string() => 1,
+            remote.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -239,8 +239,8 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 2,
+            remote => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -293,7 +293,7 @@ fn dont_allow_out_of_order_request_patches() {
         seq: Some(2),
         version: 2,
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
+            doc.actor_id.clone() => 2,
         },
         deps: Vec::new(),
         can_undo: true,
@@ -338,7 +338,7 @@ fn handle_concurrent_insertions_into_lists() {
         seq: Some(1),
         version: 1,
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
+            doc.actor_id.clone() => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -401,8 +401,8 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         version: 3,
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 1,
+            remote.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -444,8 +444,8 @@ fn handle_concurrent_insertions_into_lists() {
         seq: Some(2),
         version: 3,
         clock: hashmap!{
-            doc.actor_id.to_string() => 2,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 2,
+            remote => 1,
         },
         can_undo: true,
         can_redo: false,

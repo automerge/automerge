@@ -50,7 +50,7 @@ fn test_include_most_recent_value_for_key() {
         seq: None,
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -113,8 +113,8 @@ fn test_includes_conflicting_values_for_key() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor1.to_string() => 1,
-            actor2.to_string() => 1,
+            actor1 => 1,
+            actor2 => 1,
         },
         seq: None,
         actor: None,
@@ -181,7 +181,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         seq: None,
         actor: None,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -261,7 +261,7 @@ fn test_creates_nested_maps() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         actor: None,
         seq: None,
@@ -325,7 +325,7 @@ fn test_create_lists() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -404,7 +404,7 @@ fn test_includes_latests_state_of_list() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1
+            actor => 1
         },
         can_undo: false,
         can_redo: false,
@@ -471,7 +471,7 @@ fn test_includes_date_objects_at_root() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -527,7 +527,7 @@ fn test_includes_date_objects_in_a_list() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,

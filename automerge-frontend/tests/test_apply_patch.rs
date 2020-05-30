@@ -11,7 +11,7 @@ fn set_object_root_properties() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -52,8 +52,8 @@ fn reveal_conflicts_on_root_properties() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            actor1.to_string() => 1,
-            actor2.to_string() => 2,
+            actor1.clone() => 1,
+            actor2.clone() => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -97,7 +97,7 @@ fn create_nested_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -136,7 +136,7 @@ fn apply_updates_inside_nested_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -169,7 +169,7 @@ fn apply_updates_inside_nested_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor.clone() => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -222,8 +222,8 @@ fn apply_updates_inside_map_conflicts() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.to_string() => 1,
-            actor2.to_string() => 1,
+            actor1.clone() => 1,
+            actor2.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -280,8 +280,8 @@ fn apply_updates_inside_map_conflicts() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.to_string() => 2,
-            actor2.to_string() => 1,
+            actor1.clone() => 2,
+            actor2.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -338,7 +338,7 @@ fn delete_keys_in_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -369,7 +369,7 @@ fn delete_keys_in_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -399,7 +399,7 @@ fn create_lists() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor.clone() => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -440,7 +440,7 @@ fn apply_updates_inside_lists() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -471,7 +471,7 @@ fn apply_updates_inside_lists() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor.clone() => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -524,9 +524,9 @@ fn apply_updates_inside_list_conflicts() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            other_actor.to_string() => 1,
-            actor1.to_string() => 1,
-            actor2.to_string() => 1,
+            other_actor.clone() => 1,
+            actor1.clone() => 1,
+            actor2.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -604,8 +604,8 @@ fn apply_updates_inside_list_conflicts() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.to_string() => 2,
-            actor2.to_string() => 1,
+            actor1.clone() => 2,
+            actor2.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -677,7 +677,7 @@ fn delete_list_elements() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -715,7 +715,7 @@ fn delete_list_elements() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor.clone() => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -746,7 +746,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     let actor = amp::ActorID::random();
     let patch1 = amp::Patch {
         version: 1,
-        clock: hashmap! {actor.to_string() => 1},
+        clock: hashmap! {actor.clone() => 1},
         can_undo: false,
         can_redo: false,
         seq: None,
@@ -810,7 +810,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
 
     let patch2 = amp::Patch {
         version: 2,
-        clock: hashmap! {actor.to_string() => 2},
+        clock: hashmap! {actor.clone() => 2},
         can_undo: false,
         can_redo: false,
         seq: None,

@@ -358,7 +358,7 @@ pub struct Patch {
     pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
-    pub clock: HashMap<String, u64>,
+    pub clock: HashMap<ActorID, u64>,
     pub deps: Vec<ChangeHash>,
     pub can_undo: bool,
     pub can_redo: bool,

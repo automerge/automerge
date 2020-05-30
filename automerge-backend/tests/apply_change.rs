@@ -34,7 +34,7 @@ fn test_incremental_diffs_in_a_map() {
         actor: None,
         seq: None,
         deps: vec![change.hash],
-        clock: hashmap!{"7b7723afd9e6480397a4d467b7693156".into() => 1},
+        clock: hashmap!{"7b7723afd9e6480397a4d467b7693156".try_into().unwrap() => 1},
         can_undo: false,
         can_redo: false,
         diffs: Some(MapDiff {
@@ -84,7 +84,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
         version: 2,
         actor: None,
         seq: None,
-        clock: hashmap! {"cdee6963c1664645920be8b41a933c2b".into() => 2},
+        clock: hashmap! {"cdee6963c1664645920be8b41a933c2b".try_into().unwrap() => 2},
         can_undo: false,
         can_redo: false,
         deps: vec![change2.hash],
@@ -146,8 +146,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            "ac11".into() => 1,
-            "ac22".into() => 1,
+            "ac11".try_into().unwrap() => 1,
+            "ac22".try_into().unwrap() => 1,
         },
         deps: vec![change2.hash],
         can_undo: false,
@@ -212,7 +212,7 @@ fn delete_key_from_map() {
         actor: None,
         seq: None,
         version: 2,
-        clock: hashmap! {actor.to_string() => 2},
+        clock: hashmap! {actor.try_into().unwrap() => 2},
         deps: vec![change2.hash],
         can_undo: false,
         can_redo: false,
@@ -264,7 +264,7 @@ fn create_nested_maps() {
         actor: None,
         deps: vec![change.hash],
         seq: None,
-        clock: hashmap! {actor.to_string() => 1},
+        clock: hashmap! {actor.try_into().unwrap() => 1},
         can_undo: false,
         can_redo: false,
         version: 1,
@@ -341,7 +341,7 @@ fn test_assign_to_nested_keys_in_map() {
     let expected_patch = Patch {
         version: 2,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_redo: false,
         can_undo: false,
@@ -404,7 +404,7 @@ fn test_create_lists() {
     let expected_patch = Patch {
         version: 1,
         clock: hashmap! {
-            "f82cb62dabe64372ab87466b77792010".into() => 1,
+            "f82cb62dabe64372ab87466b77792010".try_into().unwrap() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -487,7 +487,7 @@ fn test_apply_updates_inside_lists() {
         version: 2,
         deps: vec![change2.hash],
         clock: hashmap! {
-            actor.to_string() => 2
+            actor => 2
         },
         can_undo: false,
         can_redo: false,
@@ -573,7 +573,7 @@ fn test_delete_list_elements() {
         can_undo: false,
         can_redo: false,
         clock: hashmap! {
-            actor.to_string() => 2
+            actor => 2
         },
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
@@ -649,7 +649,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     let expected_patch = Patch {
         version: 2,
         clock: hashmap! {
-            actor.to_string() => 2
+            actor => 2
         },
         can_redo: false,
         can_undo: false,
@@ -741,8 +741,8 @@ fn test_handle_changes_within_conflicted_objects() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            actor1.to_string() => 1,
-            actor2.to_string() => 2,
+            actor1 => 1,
+            actor2 => 2,
         },
         can_redo: false,
         can_undo: false,
@@ -800,7 +800,7 @@ fn test_support_date_objects_at_root() {
     let expected_patch = Patch {
         version: 1,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -855,7 +855,7 @@ fn test_support_date_objects_in_a_list() {
     let expected_patch = Patch {
         version: 1,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,

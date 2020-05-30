@@ -325,7 +325,7 @@ impl Frontend {
             self.cached_value = new_cached_value;
         };
         self.version = std::cmp::max(self.version, patch.version);
-        if let Some(seq) = patch.clock.get(&self.actor_id.to_string()) {
+        if let Some(seq) = patch.clock.get(&self.actor_id) {
             if *seq > self.seq {
                 self.seq = *seq;
             }
