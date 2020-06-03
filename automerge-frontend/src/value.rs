@@ -17,7 +17,8 @@ impl From<HashMap<amp::OpID, Value>> for Conflicts {
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>, amp::MapType),
-    Sequence(Vec<Value>, amp::SequenceType),
+    Sequence(Vec<Value>),
+    Text(Vec<char>),
     Primitive(amp::ScalarValue),
 }
 
@@ -44,10 +45,7 @@ where
     T: Into<Value>,
 {
     fn from(v: Vec<T>) -> Self {
-        Value::Sequence(
-            v.into_iter().map(|t| t.into()).collect(),
-            amp::SequenceType::List,
-        )
+        Value::Sequence(v.into_iter().map(|t| t.into()).collect())
     }
 }
 
@@ -76,10 +74,9 @@ impl Value {
                     .collect();
                 Value::Map(result, amp::MapType::Map)
             }
-            serde_json::Value::Array(vs) => Value::Sequence(
-                vs.iter().map(Value::from_json).collect(),
-                amp::SequenceType::List,
-            ),
+            serde_json::Value::Array(vs) => {
+                Value::Sequence(vs.iter().map(Value::from_json).collect())
+            }
             serde_json::Value::String(s) => Value::Primitive(amp::ScalarValue::Str(s.clone())),
             serde_json::Value::Number(n) => {
                 Value::Primitive(amp::ScalarValue::F64(n.as_f64().unwrap_or(0.0)))
@@ -96,19 +93,10 @@ impl Value {
                     map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
                 serde_json::Value::Object(result)
             }
-            Value::Sequence(elements, amp::SequenceType::List) => {
+            Value::Sequence(elements) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
             }
-            Value::Sequence(elements, amp::SequenceType::Text) => serde_json::Value::String(
-                elements
-                    .iter()
-                    .map(|v| match v {
-                        Value::Primitive(amp::ScalarValue::Str(c)) => c.as_str(),
-                        // TODO fix panic
-                        _ => panic!("Non string element in text sequence"),
-                    })
-                    .collect(),
-            ),
+            Value::Text(chars) => serde_json::Value::String(chars.iter().collect()),
             Value::Primitive(v) => match v {
                 amp::ScalarValue::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
@@ -154,14 +142,10 @@ pub(crate) fn value_to_op_requests(
     insert: bool,
 ) -> (Vec<amp::Op>, amp::Diff) {
     match v {
-        Value::Sequence(vs, seq_type) => {
-            let make_action = match seq_type {
-                amp::SequenceType::List => amp::OpType::MakeList,
-                amp::SequenceType::Text => amp::OpType::MakeText,
-            };
+        Value::Sequence(vs) => {
             let list_id = new_object_id();
             let make_op = amp::Op {
-                action: make_action,
+                action: amp::OpType::MakeList,
                 obj: parent_object.to_string(),
                 key: key.to_request_key(),
                 child: Some(list_id.to_string()),
@@ -188,7 +172,7 @@ pub(crate) fn value_to_op_requests(
                     .map(|(index, _)| amp::DiffEdit::Insert { index })
                     .collect(),
                 object_id: list_id,
-                obj_type: *seq_type,
+                obj_type: amp::SequenceType::List,
                 props: child_requests_and_diffs
                     .into_iter()
                     .enumerate()
@@ -198,6 +182,40 @@ pub(crate) fn value_to_op_requests(
             let mut result = vec![make_op];
             result.extend(child_requests);
             (result, amp::Diff::Seq(child_diff))
+        }
+        Value::Text(chars) => {
+            let text_id = new_object_id();
+            let make_op = amp::Op {
+                action: amp::OpType::MakeText,
+                obj: parent_object.to_string(),
+                key: key.to_request_key(),
+                child: Some(text_id.to_string()),
+                value: None,
+                datatype: None,
+                insert,
+            };
+            let insert_ops: Vec<amp::Op> = chars
+                .iter()
+                .enumerate()
+                .map(|(i, c)| amp::Op {
+                    action: amp::OpType::Set,
+                    obj: text_id.to_string(),
+                    key: amp::RequestKey::Num(i as u64),
+                    child: None,
+                    value: Some(amp::ScalarValue::Str(c.to_string())),
+                    datatype: None,
+                    insert: true,
+                })
+                .collect();
+            let mut ops = vec![make_op];
+            ops.extend(insert_ops.into_iter());
+            let diff = amp::SeqDiff {
+                edits: chars.iter().enumerate().map(|(index, _)| amp::DiffEdit::Insert { index }).collect(),
+                object_id: text_id,
+                obj_type: amp::SequenceType::Text,
+                props: chars.iter().enumerate().map(|(i,c)| (i, hashmap!{random_op_id() => amp::Diff::Value(amp::ScalarValue::Str(c.to_string()))})).collect()
+            };
+            (ops, amp::Diff::Seq(diff))
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {

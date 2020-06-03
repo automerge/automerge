@@ -50,12 +50,26 @@ pub enum Object {
 impl Object {
     pub(crate) fn value(&self) -> Value {
         match self {
-            Object::Sequence(_, vals, seq_type) => Value::Sequence(
-                vals.iter()
-                    .filter_map(|v| v.clone().map(|v2| v2.to_value()))
-                    .collect(),
-                *seq_type,
-            ),
+            Object::Sequence(_, vals, seq_type) => {
+                match seq_type {
+                    amp::SequenceType::List => {
+                        Value::Sequence(vals.iter()
+                            .filter_map(|v| v.clone().map(|v2| v2.to_value()))
+                            .collect())
+                    }
+                    amp::SequenceType::Text => {
+                        Value::Text(vals.iter().map(|e| e.as_ref().map(|e| match e.to_value() {
+                            Value::Primitive(amp::ScalarValue::Str(s)) => {
+                                if s.chars().count() != 1 {
+                                    panic!("Text object with a value which is not a single character")
+                                }
+                                s.chars().nth(0).unwrap()
+                            },
+                            _ => panic!("Text object with non character element")
+                        }).unwrap()).collect())
+                    }
+                }
+            },
             Object::Map(_, vals, map_type) => Value::Map(
                 vals.iter()
                     .map(|(k, v)| (k.to_string(), v.to_value()))
@@ -84,6 +98,14 @@ impl Object {
         match self {
             Object::Sequence(oid, _, _) => Some(oid.clone()),
             Object::Map(oid, _, _) => Some(oid.clone()),
+            Object::Primitive(..) => None,
+        }
+    }
+
+    pub(crate) fn obj_type(&self) -> Option<amp::ObjType> {
+        match self {
+            Object::Sequence(_, _, seq_type) => Some(amp::ObjType::Sequence(seq_type.clone())),
+            Object::Map(_, _, map_type) => Some(amp::ObjType::Map(map_type.clone())),
             Object::Primitive(..) => None,
         }
     }

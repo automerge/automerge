@@ -1,5 +1,5 @@
 use automerge_backend::Backend;
-use automerge_frontend::{AutomergeFrontendError, Frontend, LocalChange, Path, Value};
+use automerge_frontend::{Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -44,7 +44,7 @@ fn use_version_and_sequence_number_from_backend() {
     // Now apply a local patch, this will move the doc into the "waiting for
     // in flight requests" state, which should reflect the change just made.
     let req = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
                 Value::Primitive(amp::ScalarValue::Int(1)),
@@ -83,7 +83,7 @@ fn remove_pending_requests_once_handled() {
 
     // First we add two local changes
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 amp::ScalarValue::Int(24).into(),
@@ -94,7 +94,7 @@ fn remove_pending_requests_once_handled() {
         .unwrap();
 
     let _req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
                 amp::ScalarValue::Int(1).into(),
@@ -188,7 +188,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     // Enqueue a local change, moving the document into the "waiting for in
     // flight requests" state
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 amp::ScalarValue::Int(24).into(),
@@ -278,7 +278,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
 fn dont_allow_out_of_order_request_patches() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 amp::ScalarValue::Int(24).into(),
@@ -311,7 +311,10 @@ fn dont_allow_out_of_order_request_patches() {
 
     assert_eq!(
         result,
-        Err(AutomergeFrontendError::MismatchedSequenceNumber)
+        Err(InvalidPatch::MismatchedSequenceNumber {
+            expected: 1,
+            actual: 2
+        })
     );
 }
 
@@ -319,7 +322,7 @@ fn dont_allow_out_of_order_request_patches() {
 fn handle_concurrent_insertions_into_lists() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 vec!["goldfinch"].into(),
@@ -373,7 +376,7 @@ fn handle_concurrent_insertions_into_lists() {
     // Now add another change which updates the same list, this results in an
     // in flight reuest
     let _req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("birds").index(0),
                 "chaffinch".into(),
@@ -486,7 +489,7 @@ fn handle_concurrent_insertions_into_lists() {
 fn allow_interleacing_of_patches_and_changes() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 amp::ScalarValue::Int(1).into(),
@@ -497,7 +500,7 @@ fn allow_interleacing_of_patches_and_changes() {
         .unwrap();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 amp::ScalarValue::Int(2).into(),
@@ -558,7 +561,7 @@ fn allow_interleacing_of_patches_and_changes() {
     doc.apply_patch(patch1).unwrap();
 
     let req3 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 amp::ScalarValue::Int(3).into(),

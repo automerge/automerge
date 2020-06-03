@@ -1,4 +1,4 @@
-use automerge_frontend::{AutomergeFrontendError, Frontend, LocalChange, Path, Value};
+use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -45,7 +45,7 @@ fn test_init_with_empty_state() {
 fn test_set_root_object_properties() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change(Some("set root object".into()), |doc| {
+        .change::<_, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
                 Value::Primitive(amp::ScalarValue::Str("magpie".to_string())),
@@ -83,7 +83,9 @@ fn test_set_root_object_properties() {
 #[test]
 fn it_should_return_no_changes_if_nothing_was_changed() {
     let mut doc = Frontend::new();
-    let change_request = doc.change(Some("do nothing".into()), |_| Ok(())).unwrap();
+    let change_request = doc
+        .change::<_, InvalidChangeRequest>(Some("do nothing".into()), |_| Ok(()))
+        .unwrap();
     assert!(change_request.is_none())
 }
 
@@ -91,7 +93,7 @@ fn it_should_return_no_changes_if_nothing_was_changed() {
 fn it_should_create_nested_maps() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::from_json(&serde_json::json!({
@@ -140,7 +142,7 @@ fn it_should_create_nested_maps() {
 fn apply_updates_inside_nested_maps() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::from_json(&serde_json::json!({
@@ -153,7 +155,7 @@ fn apply_updates_inside_nested_maps() {
         .unwrap();
     let state_after_first_change = doc.state().clone();
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").key("sparrows"),
                 Value::Primitive(amp::ScalarValue::F64(15.0)),
@@ -208,7 +210,7 @@ fn apply_updates_inside_nested_maps() {
 fn delete_keys_in_a_map() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root(),
                 Value::from_json(&serde_json::json!({
@@ -226,7 +228,7 @@ fn delete_keys_in_a_map() {
         .unwrap()
         .unwrap();
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::delete(Path::root().key("magpies")))?;
             Ok(())
         })
@@ -267,10 +269,10 @@ fn delete_keys_in_a_map() {
 fn create_lists() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()], amp::SequenceType::List),
+                Value::Sequence(vec!["chaffinch".into()]),
             ))?;
             Ok(())
         })
@@ -278,7 +280,7 @@ fn create_lists() {
         .unwrap();
 
     let _req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
                 "chaffinch".into(),
@@ -335,10 +337,10 @@ fn create_lists() {
 fn apply_updates_inside_lists() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()], amp::SequenceType::List),
+                Value::Sequence(vec!["chaffinch".into()]),
             ))?;
             Ok(())
         })
@@ -346,7 +348,7 @@ fn apply_updates_inside_lists() {
         .unwrap();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
                 "greenfinch".into(),
@@ -392,7 +394,7 @@ fn apply_updates_inside_lists() {
 fn delete_list_elements() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 vec!["chaffinch", "goldfinch"].into(),
@@ -403,7 +405,7 @@ fn delete_list_elements() {
         .unwrap();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::delete(Path::root().key("birds").index(0)))?;
             Ok(())
         })
@@ -446,7 +448,7 @@ fn delete_list_elements() {
 fn handle_counters_inside_maps() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("wrens"),
                 Value::Primitive(amp::ScalarValue::Counter(0)),
@@ -458,7 +460,7 @@ fn handle_counters_inside_maps() {
     let state_after_first_change = doc.state().clone();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::increment(Path::root().key("wrens")))?;
             Ok(())
         })
@@ -533,7 +535,7 @@ fn handle_counters_inside_maps() {
 fn handle_counters_inside_lists() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("counts"),
                 vec![Value::Primitive(amp::ScalarValue::Counter(1))].into(),
@@ -545,7 +547,7 @@ fn handle_counters_inside_lists() {
     let state_after_first_change = doc.state().clone();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::increment_by(
                 Path::root().key("counts").index(0),
                 2,
@@ -635,7 +637,7 @@ fn handle_counters_inside_lists() {
 #[test]
 fn refuse_to_overwrite_counter_value() {
     let mut doc = Frontend::new();
-    doc.change(None, |doc| {
+    doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
             Value::Primitive(amp::ScalarValue::Counter(1)),
@@ -645,7 +647,7 @@ fn refuse_to_overwrite_counter_value() {
     .unwrap()
     .unwrap();
 
-    let result = doc.change(None, |doc| {
+    let result = doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
             Value::Primitive("somethingelse".into()),
@@ -653,5 +655,10 @@ fn refuse_to_overwrite_counter_value() {
         Ok(())
     });
 
-    assert_eq!(result, Err(AutomergeFrontendError::CannotOverwriteCounter));
+    assert_eq!(
+        result,
+        Err(InvalidChangeRequest::CannotOverwriteCounter {
+            path: Path::root().key("counts")
+        })
+    );
 }

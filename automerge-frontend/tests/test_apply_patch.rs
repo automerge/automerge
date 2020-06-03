@@ -868,3 +868,93 @@ fn apply_updates_at_different_levels_of_object_tree() {
         })
     );
 }
+
+#[test]
+fn test_text_objects() {
+    let actor = amp::ActorID::random();
+    let mut frontend = Frontend::new();
+    let patch = amp::Patch {
+        version: 1,
+        actor: None,
+        seq: None,
+        deps: Vec::new(),
+        clock: hashmap! {
+            actor.clone() => 2,
+        },
+        can_undo: false,
+        can_redo: false,
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectID::Root,
+            obj_type: amp::MapType::Map,
+            props: hashmap! {
+                "name".into() => hashmap!{
+                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: amp::SequenceType::Text,
+                        edits: vec![
+                            amp::DiffEdit::Insert { index: 0 },
+                            amp::DiffEdit::Insert { index: 1 },
+                            amp::DiffEdit::Insert { index: 2 },
+                        ],
+                        props: hashmap!{
+                            0 => hashmap!{
+                                actor.op_id_at(2) => amp::Diff::Value("b".into())
+                            },
+                            1 => hashmap!{
+                                actor.op_id_at(3) => amp::Diff::Value("e".into())
+                            },
+                            2 => hashmap!{
+                                actor.op_id_at(4) => amp::Diff::Value("n".into())
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
+    frontend.apply_patch(patch).unwrap();
+
+    assert_eq!(
+        frontend.state(),
+        &Into::<Value>::into(hashmap! {"name" => Value::Text("ben".to_string().chars().collect())})
+    );
+
+    let patch2 = amp::Patch {
+        version: 2,
+        actor: None,
+        seq: None,
+        deps: Vec::new(),
+        clock: hashmap! {
+            actor.clone() => 3,
+        },
+        can_undo: false,
+        can_redo: false,
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectID::Root,
+            obj_type: amp::MapType::Map,
+            props: hashmap! {
+                "name".into() => hashmap!{
+                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: amp::SequenceType::Text,
+                        edits: vec![
+                            amp::DiffEdit::Remove { index: 1 },
+                        ],
+                        props: hashmap!{
+                            1 => hashmap! {
+                                actor.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Str("i".to_string()))
+                            }
+                        }
+                    })
+                }
+            },
+        })),
+    };
+
+    frontend.apply_patch(patch2).unwrap();
+
+    assert_eq!(
+        frontend.state(),
+        &Into::<Value>::into(hashmap! {"name" => Value::Text("bi".to_string().chars().collect())})
+    );
+}

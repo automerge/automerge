@@ -1,14 +1,14 @@
 use crate::change_context::ChangeContext;
+use crate::error::InvalidChangeRequest;
 use crate::object::Object;
-use crate::value::{random_op_id, value_to_op_requests};
-use crate::{AutomergeFrontendError, Value};
+use crate::value::{random_op_id, value_to_op_requests, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::{collections::HashMap, fmt, rc::Rc};
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;
-    fn add_change(&mut self, change: LocalChange) -> Result<(), AutomergeFrontendError>;
+    fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest>;
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -341,7 +341,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
     /// the root object
-    fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), AutomergeFrontendError> {
+    fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), InvalidChangeRequest> {
         match value {
             Value::Map(kvs, amp::MapType::Map) => {
                 for (k, v) in kvs.iter() {
@@ -349,7 +349,9 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
                 }
                 Ok(())
             }
-            _ => Err(AutomergeFrontendError::InvalidChangeRequest),
+            _ => Err(InvalidChangeRequest::CannotSetNonMapObjectAsRoot {
+                value: value.clone(),
+            }),
         }
     }
 }
@@ -359,7 +361,7 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
         self.value_for_path(path).map(|o| o.value())
     }
 
-    fn add_change(&mut self, change: LocalChange) -> Result<(), AutomergeFrontendError> {
+    fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest> {
         match &change.operation {
             LocalOperation::Set(value) => {
                 if change.path == Path::root() {
@@ -367,7 +369,9 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                 }
                 if let Some(o) = self.value_for_path(&change.path) {
                     if let Object::Primitive(amp::ScalarValue::Counter(_)) = &*o {
-                        return Err(AutomergeFrontendError::CannotOverwriteCounter);
+                        return Err(InvalidChangeRequest::CannotOverwriteCounter {
+                            path: change.path.clone(),
+                        });
                     }
                 };
                 if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
@@ -376,19 +380,23 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                         change
                             .path
                             .name()
-                            .ok_or_else(|| {
-                                AutomergeFrontendError::NoSuchPathError(change.path.clone())
+                            .ok_or_else(|| InvalidChangeRequest::NoSuchPathError {
+                                path: change.path.clone(),
                             })?
                             .clone(),
                         &value,
                         false,
                     );
                     let diff = self.diff_at_path(&change.path, difflink).unwrap(); //TODO fix unwrap
-                    self.change_context.apply_diff(&diff)?;
+                                                                                   // TODO: check this unwrap is okay
+                                                                                   // specifically:
+                                                                                   // - Check the path exists
+                                                                                   // - Check that the target object is compatible
+                    self.change_context.apply_diff(&diff).unwrap();
                     self.ops.extend(ops.into_iter());
                     Ok(())
                 } else {
-                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                 }
             }
             LocalOperation::Delete => {
@@ -424,7 +432,9 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                     props: HashMap::new(),
                                 })
                             } else {
-                                return Err(AutomergeFrontendError::NoSuchPathError(change.path));
+                                return Err(InvalidChangeRequest::NoSuchPathError {
+                                    path: change.path,
+                                });
                             }
                         }
                         Object::Primitive(..) => panic!("parent object was primitive"),
@@ -432,17 +442,22 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     // TODO fix unwrap
                     let diff = self.diff_at_path(&change.path.parent(), diff).unwrap();
                     self.ops.push(op);
-                    self.change_context.apply_diff(&diff)?;
+                    // TODO check this unwrap is okay
+                    self.change_context.apply_diff(&diff).unwrap();
                     Ok(())
                 } else {
-                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                 }
             }
             LocalOperation::Increment(by) => {
                 if let Some(val) = self.value_for_path(&change.path) {
                     let current_val = match &*val {
                         Object::Primitive(amp::ScalarValue::Counter(i)) => i,
-                        _ => return Err(AutomergeFrontendError::PathIsNotCounter),
+                        _ => {
+                            return Err(InvalidChangeRequest::IncrementForNonCounterObject {
+                                path: change.path,
+                            })
+                        }
                     };
                     // Unwrap is fine as we know the parent object exists from the above
                     let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
@@ -460,36 +475,44 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                     let diff = amp::Diff::Value(amp::ScalarValue::Counter(current_val + by));
                     let diff = self.diff_at_path(&change.path, diff).unwrap();
                     self.ops.push(op);
-                    self.change_context.apply_diff(&diff)?;
+                    // TODO fix unwrap
+                    self.change_context.apply_diff(&diff).unwrap();
                     Ok(())
                 } else {
-                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                 }
             }
             LocalOperation::Insert(value) => {
                 let index = match change.path.name() {
                     Some(PathElement::Index(i)) => i,
-                    // TODO make this error more descriptive, probably need
-                    // a specific branch for invalid insert paths
-                    _ => return Err(AutomergeFrontendError::InvalidChangeRequest),
+                    _ => {
+                        return Err(InvalidChangeRequest::InsertWithNonSequencePath {
+                            path: change.path,
+                        })
+                    }
                 };
                 if let Some(parent) = self.value_for_path(&change.path.parent()) {
                     match &*parent {
                         // TODO make this error more descriptive
                         Object::Map(..) | Object::Primitive(..) => {
-                            Err(AutomergeFrontendError::InvalidChangeRequest)
+                            Err(InvalidChangeRequest::InsertForNonSequenceObject {
+                                path: change.path,
+                            })
                         }
                         Object::Sequence(oid, vals, seq_type) => {
                             if *index > vals.len() {
-                                return Err(AutomergeFrontendError::InvalidChangeRequest);
+                                return Err(InvalidChangeRequest::InsertPastEndOfSequence {
+                                    path: change.path.clone(),
+                                    sequence_length: vals.len() as u64,
+                                });
                             }
                             let (ops, diff) = value_to_op_requests(
                                 oid.clone(),
                                 change
                                     .path
                                     .name()
-                                    .ok_or_else(|| {
-                                        AutomergeFrontendError::NoSuchPathError(change.path.clone())
+                                    .ok_or_else(|| InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path.clone(),
                                     })?
                                     .clone(),
                                 &value,
@@ -505,14 +528,16 @@ impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
                                     }
                                 },
                             });
-                            let diff = self.diff_at_path(&change.path.parent(), seqdiff).unwrap(); //TODO fix unwrap
+                            //TODO fix unwrap
+                            let diff = self.diff_at_path(&change.path.parent(), seqdiff).unwrap();
                             self.ops.extend(ops);
-                            self.change_context.apply_diff(&diff)?;
+                            //TODO fix unwrap
+                            self.change_context.apply_diff(&diff).unwrap();
                             Ok(())
                         }
                     }
                 } else {
-                    Err(AutomergeFrontendError::NoSuchPathError(change.path))
+                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                 }
             }
         }

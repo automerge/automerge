@@ -6,11 +6,14 @@ mod mutation;
 mod object;
 mod value;
 
-pub use error::{AutomergeFrontendError, InvalidInitialStateError};
+pub use error::{
+    AutomergeFrontendError, InvalidChangeRequest, InvalidInitialStateError, InvalidPatch,
+};
 use mutation::PathElement;
 pub use mutation::{LocalChange, MutableDocument, Path};
 use object::Object;
 use std::convert::TryFrom;
+use std::error::Error;
 use std::time;
 use std::{collections::HashMap, rc::Rc};
 pub use value::{Conflicts, Value};
@@ -59,7 +62,7 @@ impl FrontendState {
         self,
         self_actor: &ActorID,
         patch: &Patch,
-    ) -> Result<(Option<Value>, Self), AutomergeFrontendError> {
+    ) -> Result<(Option<Value>, Self), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
@@ -76,7 +79,10 @@ impl FrontendState {
                         // Check that if the patch is for our actor ID then it is not
                         // out of order
                         if new_in_flight_requests[0] != patch_seq {
-                            return Err(AutomergeFrontendError::MismatchedSequenceNumber);
+                            return Err(InvalidPatch::MismatchedSequenceNumber {
+                                expected: new_in_flight_requests[0],
+                                actual: patch_seq,
+                            });
                         }
                         // unwrap should be fine here as `in_flight_requests` should never have zero length
                         // because we transition to reconciled state when that happens
@@ -88,7 +94,7 @@ impl FrontendState {
                 if let Some(diff) = &patch.diffs {
                     change_ctx.apply_diff(&diff)?;
                 }
-                let new_cached_state = change_ctx.commit()?;
+                let new_cached_state = change_ctx.commit();
                 Ok(match new_in_flight_requests[..] {
                     [] => (
                         Some(new_cached_state),
@@ -111,7 +117,7 @@ impl FrontendState {
                 if let Some(diff) = &patch.diffs {
                     change_ctx.apply_diff(&diff)?;
                 };
-                let new_state = change_ctx.commit()?;
+                let new_state = change_ctx.commit();
                 Ok((Some(new_state), FrontendState::Reconciled { objects }))
             }
         }
@@ -132,14 +138,18 @@ impl FrontendState {
         mutation::resolve_path(path, objects)
     }
 
-    /// Apply a patch
-    pub fn optimistically_apply_change<F>(
+    /// Apply a patch. The change closure will be passed a `MutableDocument`
+    /// which it can use to query the document state and make changes. It
+    /// can also throw an error of type `E`. If an error is thrown in the
+    /// closure no chnages are made and the error is returned.
+    pub fn optimistically_apply_change<F, E>(
         self,
         change_closure: F,
         seq: u64,
-    ) -> Result<(Option<Vec<Op>>, FrontendState, Value), AutomergeFrontendError>
+    ) -> Result<(Option<Vec<Op>>, FrontendState, Value), E>
     where
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
+        E: Error,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
     {
         match self {
             FrontendState::WaitingForInFlightRequests {
@@ -152,7 +162,7 @@ impl FrontendState {
                 let mut mutation_tracker = mutation::MutationTracker::new(&mut change_ctx);
                 change_closure(&mut mutation_tracker)?;
                 let ops = mutation_tracker.ops();
-                let new_value = change_ctx.commit()?;
+                let new_value = change_ctx.commit();
                 in_flight_requests.push(seq);
                 Ok((
                     ops,
@@ -171,7 +181,7 @@ impl FrontendState {
                 let mut mutation_tracker = mutation::MutationTracker::new(&mut change_ctx);
                 change_closure(&mut mutation_tracker)?;
                 let ops = mutation_tracker.ops();
-                let new_value = change_ctx.commit()?;
+                let new_value = change_ctx.commit();
                 let in_flight_requests = vec![seq];
                 Ok((
                     ops,
@@ -264,11 +274,10 @@ impl Frontend {
                 // Unwrap here is fine because it should be impossible to
                 // cause an error applying a local change from a `Value`. If
                 // that happens we've made an error, not the user.
-                front
-                    .change(Some("initialization".into()), |doc| {
-                        doc.add_change(LocalChange::set(Path::root(), initial_state))
-                    })
-                    .unwrap(); // This should never error
+                front.change(Some("initialization".into()), |doc| {
+                    doc.add_change(LocalChange::set(Path::root(), initial_state))
+                        .map_err(|_| InvalidInitialStateError::InitialStateMustBeMap)
+                })?;
                 Ok((front, init_change_request))
             }
             _ => Err(InvalidInitialStateError::InitialStateMustBeMap),
@@ -279,13 +288,14 @@ impl Frontend {
         &self.cached_value
     }
 
-    pub fn change<F>(
+    pub fn change<F, E>(
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<Option<Request>, AutomergeFrontendError>
+    ) -> Result<Option<Request>, E>
     where
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), AutomergeFrontendError>,
+        E: Error,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
     {
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
         let (ops, new_state, new_value) = self
@@ -313,7 +323,7 @@ impl Frontend {
         Ok(Some(change_request))
     }
 
-    pub fn apply_patch(&mut self, patch: Patch) -> Result<(), AutomergeFrontendError> {
+    pub fn apply_patch(&mut self, patch: Patch) -> Result<(), InvalidPatch> {
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
         let (new_cached_value, new_state) = self
             .state
