@@ -9,8 +9,9 @@ name = "automerge"
 path = "src/main.rs"
 
 [dependencies]
-clap = { git = "https://github.com/clap-rs/clap/" }
-automerge-protocol = { path = "../automerge-protocol" }
+clap = "3.0.0-beta.1"
 automerge-backend = { path = "../automerge-backend" }
 automerge-frontend = { path = "../automerge-frontend" }
+automerge-protocol = { path = "../automerge-protocol" }
 serde_json = "^1.0"
+anyhow = "1.0"
