@@ -63,7 +63,7 @@ impl Object {
                                 if s.chars().count() != 1 {
                                     panic!("Text object with a value which is not a single character")
                                 }
-                                s.chars().nth(0).unwrap()
+                                s.chars().next().unwrap()
                             },
                             _ => panic!("Text object with non character element")
                         }).unwrap()).collect())
@@ -104,8 +104,8 @@ impl Object {
 
     pub(crate) fn obj_type(&self) -> Option<amp::ObjType> {
         match self {
-            Object::Sequence(_, _, seq_type) => Some(amp::ObjType::Sequence(seq_type.clone())),
-            Object::Map(_, _, map_type) => Some(amp::ObjType::Map(map_type.clone())),
+            Object::Sequence(_, _, seq_type) => Some(amp::ObjType::Sequence(*seq_type)),
+            Object::Map(_, _, map_type) => Some(amp::ObjType::Map(*map_type)),
             Object::Primitive(..) => None,
         }
     }
