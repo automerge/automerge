@@ -238,11 +238,10 @@ impl Change {
     where
         T: From<&'a [u8]>,
     {
-        #[allow(clippy::reversed_empty_ranges)]
-        let empty = 0..0;
-        let range = self.ops.get(&col_id).unwrap_or(&empty);
-        let buf = &self.bytes[range.clone()];
-        T::from(&buf)
+        self.ops
+            .get(&col_id)
+            .map(|r| T::from(&self.bytes[r.clone()]))
+            .unwrap_or_else(|| T::from(&[] as &[u8]))
     }
 
     pub fn iter_ops(&self) -> OperationIterator {
