@@ -238,6 +238,7 @@ impl Change {
     where
         T: From<&'a [u8]>,
     {
+        #[allow(clippy::reversed_empty_ranges)]
         let empty = 0..0;
         let range = self.ops.get(&col_id).unwrap_or(&empty);
         let buf = &self.bytes[range.clone()];
