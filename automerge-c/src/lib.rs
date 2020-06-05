@@ -254,7 +254,11 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 /// # Safety
 /// This must me called with a valid pointer to a change and the correct len
 #[no_mangle]
-pub unsafe extern "C" fn automerge_decode_change(backend: *mut Backend, len: usize, change: *const u8) -> isize {
+pub unsafe extern "C" fn automerge_decode_change(
+    backend: *mut Backend,
+    len: usize,
+    change: *const u8,
+) -> isize {
     let bytes = from_buf_raw(change, len);
     let change = Change::from_bytes(bytes).unwrap();
     (*backend).generate_json(Ok(change.decode()))
@@ -263,14 +267,16 @@ pub unsafe extern "C" fn automerge_decode_change(backend: *mut Backend, len: usi
 /// # Safety
 /// This must me called with a valid pointer a json string of a change
 #[no_mangle]
-pub unsafe extern "C" fn automerge_encode_change(backend: *mut Backend, change: *const c_char) -> isize {
+pub unsafe extern "C" fn automerge_encode_change(
+    backend: *mut Backend,
+    change: *const c_char,
+) -> isize {
     let change: &CStr = CStr::from_ptr(change);
     let change = change.to_string_lossy();
     let change: Result<UnencodedChange, _> = serde_json::from_str(&change);
     let change = change.unwrap().encode();
     (*backend).handle_binary(Ok(change.bytes))
 }
-
 
 /// # Safety
 /// This must me called with a valid backend pointer
