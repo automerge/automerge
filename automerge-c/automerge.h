@@ -29,6 +29,18 @@ Backend *automerge_clone(Backend *backend);
 
 /**
  * # Safety
+ * This must me called with a valid pointer to a change and the correct len
+ */
+intptr_t automerge_decode_change(Backend *backend, uintptr_t len, const uint8_t *change);
+
+/**
+ * # Safety
+ * This must me called with a valid pointer a json string of a change
+ */
+intptr_t automerge_encode_change(Backend *backend, const char *change);
+
+/**
+ * # Safety
  * This must me called with a valid backend pointer
  */
 void automerge_free(Backend *backend);
