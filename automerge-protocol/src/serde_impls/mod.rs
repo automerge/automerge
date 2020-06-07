@@ -11,7 +11,7 @@ mod key;
 mod object_id;
 mod opid;
 mod request_key;
-mod value;
+mod scalar_value;
 
 // Factory method for use in #[serde(default=..)] annotations
 pub(crate) fn make_false() -> bool {

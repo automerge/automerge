@@ -72,7 +72,7 @@ impl OpHandle {
         if let InternalOpType::Make(_) = base_op.action {
             action = InternalOpType::Link(self.id.into());
         }
-        if let InternalOpType::Set(amp::Value::Counter(_)) = base_op.action {
+        if let InternalOpType::Set(amp::ScalarValue::Counter(_)) = base_op.action {
             action = InternalOpType::Set(self.adjusted_value());
         }
         InternalUndoOperation {
@@ -82,11 +82,13 @@ impl OpHandle {
         }
     }
 
-    pub fn adjusted_value(&self) -> amp::Value {
+    pub fn adjusted_value(&self) -> amp::ScalarValue {
         match &self.action {
-            InternalOpType::Set(amp::Value::Counter(a)) => amp::Value::Counter(a + self.delta),
+            InternalOpType::Set(amp::ScalarValue::Counter(a)) => {
+                amp::ScalarValue::Counter(a + self.delta)
+            }
             InternalOpType::Set(val) => val.clone(),
-            _ => amp::Value::Null,
+            _ => amp::ScalarValue::Null,
         }
     }
 
@@ -109,7 +111,7 @@ impl OpHandle {
     pub fn maybe_increment(&mut self, inc: &OpHandle) {
         if let InternalOpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
-                if let InternalOpType::Set(amp::Value::Counter(_)) = self.action {
+                if let InternalOpType::Set(amp::ScalarValue::Counter(_)) = self.action {
                     self.delta += amount;
                 }
             }

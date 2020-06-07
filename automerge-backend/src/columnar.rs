@@ -110,20 +110,20 @@ impl<'a> Iterator for PredIterator<'a> {
 }
 
 impl<'a> Iterator for ValueIterator<'a> {
-    type Item = amp::Value;
-    fn next(&mut self) -> Option<amp::Value> {
+    type Item = amp::ScalarValue;
+    fn next(&mut self) -> Option<amp::ScalarValue> {
         let val_type = self.val_len.next()??;
         match val_type {
-            VALUE_TYPE_NULL => Some(amp::Value::Null),
-            VALUE_TYPE_FALSE => Some(amp::Value::Boolean(false)),
-            VALUE_TYPE_TRUE => Some(amp::Value::Boolean(true)),
+            VALUE_TYPE_NULL => Some(amp::ScalarValue::Null),
+            VALUE_TYPE_FALSE => Some(amp::ScalarValue::Boolean(false)),
+            VALUE_TYPE_TRUE => Some(amp::ScalarValue::Boolean(true)),
             v if v % 16 == VALUE_TYPE_COUNTER => {
                 let len = v >> 4;
                 let val = self.val_raw.read().ok()?;
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::Value::Counter(val))
+                Some(amp::ScalarValue::Counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
                 let len = v >> 4;
@@ -131,7 +131,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::Value::Timestamp(val))
+                Some(amp::ScalarValue::Timestamp(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_UINT => {
                 let len = v >> 4;
@@ -139,7 +139,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::Value::Uint(val))
+                Some(amp::ScalarValue::Uint(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_INT => {
                 let len = v >> 4;
@@ -147,13 +147,13 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::Value::Int(val))
+                Some(amp::ScalarValue::Int(val))
             }
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(&data).ok()?;
-                Some(amp::Value::Str(s.to_string()))
+                Some(amp::ScalarValue::Str(s.to_string()))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
@@ -172,11 +172,11 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len == 4 {
                     // confirm only 4 bytes read
                     let num: f32 = self.val_raw.read().ok()?;
-                    Some(amp::Value::F32(num))
+                    Some(amp::ScalarValue::F32(num))
                 } else if len == 8 {
                     // confirm only 8 bytes read
                     let num = self.val_raw.read().ok()?;
-                    Some(amp::Value::F64(num))
+                    Some(amp::ScalarValue::F64(num))
                 } else {
                     // bad size of float
                     None
@@ -260,12 +260,12 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &amp::Value) {
+    fn append_value(&mut self, val: &amp::ScalarValue) {
         match val {
-            amp::Value::Null => self.len.append_value(VALUE_TYPE_NULL),
-            amp::Value::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
-            amp::Value::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            amp::Value::Str(s) => {
+            amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
+            amp::ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
+            amp::ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            amp::ScalarValue::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
@@ -278,27 +278,27 @@ impl ValEncoder {
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES)
             },
             */
-            amp::Value::Counter(count) => {
+            amp::ScalarValue::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER)
             }
-            amp::Value::Timestamp(time) => {
+            amp::ScalarValue::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP)
             }
-            amp::Value::Int(n) => {
+            amp::ScalarValue::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
             }
-            amp::Value::Uint(n) => {
+            amp::ScalarValue::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
             }
-            amp::Value::F32(n) => {
+            amp::ScalarValue::F32(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             }
-            amp::Value::F64(n) => {
+            amp::ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             } /*
@@ -519,7 +519,7 @@ impl ColumnEncoder {
                 Action::Set
             }
             OpType::Inc(val) => {
-                self.val.append_value(&amp::Value::Int(*val));
+                self.val.append_value(&amp::ScalarValue::Int(*val));
                 self.chld.append_null();
                 Action::Inc
             }

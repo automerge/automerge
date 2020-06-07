@@ -7,7 +7,7 @@ use crate::error::AutomergeError;
 use crate::op::Operation;
 use automerge_protocol as amp;
 use core::fmt::Debug;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -31,9 +31,31 @@ pub struct UnencodedChange {
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        serialize_with = "se_option_string",
+        deserialize_with = "de_option_string"
+    )]
     pub message: Option<String>,
     pub deps: Vec<amp::ChangeHash>,
+}
+
+fn se_option_string<S>(message: &Option<String>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    String::serialize(&message.clone().unwrap_or_default(), s)
+}
+
+fn de_option_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(s))
+    }
 }
 
 impl UnencodedChange {
@@ -238,10 +260,10 @@ impl Change {
     where
         T: From<&'a [u8]>,
     {
-        let empty = 0..0;
-        let range = self.ops.get(&col_id).unwrap_or(&empty);
-        let buf = &self.bytes[range.clone()];
-        T::from(&buf)
+        self.ops
+            .get(&col_id)
+            .map(|r| T::from(&self.bytes[r.clone()]))
+            .unwrap_or_else(|| T::from(&[] as &[u8]))
     }
 
     pub fn iter_ops(&self) -> OperationIterator {
@@ -387,28 +409,28 @@ mod tests {
             deps: vec![],
             operations: vec![
                 Operation {
-                    action: OpType::Set(amp::Value::F64(10.0)),
+                    action: OpType::Set(amp::ScalarValue::F64(10.0)),
                     key: key1.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(amp::Value::Counter(-11)),
+                    action: OpType::Set(amp::ScalarValue::Counter(-11)),
                     key: key2.clone(),
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 Operation {
-                    action: OpType::Set(amp::Value::Timestamp(20)),
+                    action: OpType::Set(amp::ScalarValue::Timestamp(20)),
                     key: key3,
                     obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2],
                 },
                 Operation {
-                    action: OpType::Set(amp::Value::Str("some value".into())),
+                    action: OpType::Set(amp::ScalarValue::Str("some value".into())),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
@@ -422,14 +444,14 @@ mod tests {
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(amp::Value::Str("val1".into())),
+                    action: OpType::Set(amp::ScalarValue::Str("val1".into())),
                     key: head.clone(),
                     obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 Operation {
-                    action: OpType::Set(amp::Value::Str("val2".into())),
+                    action: OpType::Set(amp::ScalarValue::Str("val2".into())),
                     key: head,
                     obj: obj3.clone(),
                     insert: true,

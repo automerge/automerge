@@ -168,7 +168,7 @@ impl DataType {
 // TODO I feel like a clearer name for this enum would be `ScalarValue`
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
-pub enum Value {
+pub enum ScalarValue {
     Str(String),
     Int(i64),
     Uint(u64),
@@ -180,11 +180,11 @@ pub enum Value {
     Null,
 }
 
-impl Value {
-    pub fn from(val: Option<Value>, datatype: Option<DataType>) -> Option<Value> {
+impl ScalarValue {
+    pub fn from(val: Option<ScalarValue>, datatype: Option<DataType>) -> Option<ScalarValue> {
         match datatype {
-            Some(DataType::Counter) => Some(Value::Counter(val?.to_i64()?)),
-            Some(DataType::Timestamp) => Some(Value::Timestamp(val?.to_i64()?)),
+            Some(DataType::Counter) => Some(ScalarValue::Counter(val?.to_i64()?)),
+            Some(DataType::Timestamp) => Some(ScalarValue::Timestamp(val?.to_i64()?)),
             _ => val,
         }
     }
@@ -192,12 +192,12 @@ impl Value {
     /// If this value can be coerced to an i64, return the i64 value
     pub fn to_i64(&self) -> Option<i64> {
         match self {
-            Value::Int(n) => Some(*n),
-            Value::Uint(n) => Some(*n as i64),
-            Value::F32(n) => Some(*n as i64),
-            Value::F64(n) => Some(*n as i64),
-            Value::Counter(n) => Some(*n),
-            Value::Timestamp(n) => Some(*n),
+            ScalarValue::Int(n) => Some(*n),
+            ScalarValue::Uint(n) => Some(*n as i64),
+            ScalarValue::F32(n) => Some(*n as i64),
+            ScalarValue::F64(n) => Some(*n as i64),
+            ScalarValue::Counter(n) => Some(*n),
+            ScalarValue::Timestamp(n) => Some(*n),
             _ => None,
         }
     }
@@ -228,18 +228,18 @@ pub struct Op {
     pub obj: String,
     pub key: RequestKey,
     pub child: Option<String>,
-    pub value: Option<Value>,
+    pub value: Option<ScalarValue>,
     pub datatype: Option<DataType>,
     #[serde(default = "serde_impls::make_false")]
     pub insert: bool,
 }
 
 impl Op {
-    pub fn primitive_value(&self) -> Value {
+    pub fn primitive_value(&self) -> ScalarValue {
         match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
-            (Some(n), Some(DataType::Counter)) => Value::Counter(n),
-            (Some(n), Some(DataType::Timestamp)) => Value::Timestamp(n),
-            _ => self.value.clone().unwrap_or(Value::Null),
+            (Some(n), Some(DataType::Counter)) => ScalarValue::Counter(n),
+            (Some(n), Some(DataType::Timestamp)) => ScalarValue::Timestamp(n),
+            _ => self.value.clone().unwrap_or(ScalarValue::Null),
         }
     }
 
@@ -314,7 +314,7 @@ pub enum Diff {
     Map(MapDiff),
     Seq(SeqDiff),
     Unchanged(ObjDiff),
-    Value(Value),
+    Value(ScalarValue),
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
@@ -355,10 +355,10 @@ pub enum DiffEdit {
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub actor: Option<String>,
+    pub actor: Option<ActorID>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
-    pub clock: HashMap<String, u64>,
+    pub clock: HashMap<ActorID, u64>,
     pub deps: Vec<ChangeHash>,
     pub can_undo: bool,
     pub can_redo: bool,

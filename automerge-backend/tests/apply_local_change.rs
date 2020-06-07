@@ -57,11 +57,11 @@ fn test_apply_local_change() {
     assert_eq!(changes[0], &expected_change);
 
     let expected_patch = Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(1),
         version: 1,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -512,11 +512,11 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     };
 
     let mut expected_patch = Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(2),
         version: 2,
         clock: hashmap! {
-            "0723d2a1940744868ffd6b294ada813f".into() => 2
+            "0723d2a1940744868ffd6b294ada813f".try_into().unwrap() => 2
         },
         can_undo: false,
         can_redo: false,
@@ -641,7 +641,7 @@ fn valid_objectid_as_child_works() {
                 obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
                 key: "wrens".into(),
                 child: None,
-                value: Some(amp::Value::F64(3.0)),
+                value: Some(amp::ScalarValue::F64(3.0)),
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
             },
@@ -650,7 +650,7 @@ fn valid_objectid_as_child_works() {
                 obj: "1@8ee3b3c4587245a684af1b121361141d".to_string(),
                 key: "sparrows".into(),
                 child: None,
-                value: Some(amp::Value::F64(15.0)),
+                value: Some(amp::ScalarValue::F64(15.0)),
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
             },
@@ -658,12 +658,12 @@ fn valid_objectid_as_child_works() {
         request_type: amp::RequestType::Change,
     };
     let mut expected_patch = amp::Patch {
-        actor: Some(actor.to_string()),
+        actor: Some(actor.clone()),
         seq: Some(1),
         can_undo: false,
         can_redo: false,
         version: 1,
-        clock: hashmap! {cr.actor.to_string() => 1},
+        clock: hashmap! {cr.actor.clone() => 1},
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -675,10 +675,10 @@ fn valid_objectid_as_child_works() {
                         obj_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".to_string() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::Value::F64(3.0)),
+                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::F64(3.0)),
                             },
                             "sparrows".to_string() => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value(amp::Value::F64(15.0))
+                                actor.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::F64(15.0))
                             }
                         }
                     })

@@ -12,8 +12,8 @@ impl Serialize for UndoOperation {
         let mut fields = 4;
 
         match &self.action {
-            OpType::Set(amp::Value::Counter(_)) => fields += 2,
-            OpType::Set(amp::Value::Timestamp(_)) => fields += 2,
+            OpType::Set(amp::ScalarValue::Counter(_)) => fields += 2,
+            OpType::Set(amp::ScalarValue::Timestamp(_)) => fields += 2,
             OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
@@ -26,11 +26,11 @@ impl Serialize for UndoOperation {
         match &self.action {
             OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(amp::Value::Timestamp(value)) => {
+            OpType::Set(amp::ScalarValue::Timestamp(value)) => {
                 op.serialize_field("value", &value)?;
                 op.serialize_field("datatype", &amp::DataType::Timestamp)?;
             }
-            OpType::Set(amp::Value::Counter(value)) => {
+            OpType::Set(amp::ScalarValue::Counter(value)) => {
                 op.serialize_field("value", &value)?;
                 op.serialize_field("datatype", &amp::DataType::Counter)?;
             }

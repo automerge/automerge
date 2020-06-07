@@ -1,5 +1,5 @@
 use automerge_backend::Backend;
-use automerge_frontend::{AutomergeFrontendError, Frontend, LocalChange, Path, Value};
+use automerge_frontend::{Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -21,9 +21,9 @@ fn use_version_and_sequence_number_from_backend() {
         can_undo: false,
         can_redo: false,
         clock: hashmap! {
-            doc.actor_id.to_string() => 4,
-            remote_actor1.to_string() => 11,
-            remote_actor2.to_string() => 41,
+            doc.actor_id.clone() => 4,
+            remote_actor1 => 11,
+            remote_actor2 => 41,
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -31,7 +31,7 @@ fn use_version_and_sequence_number_from_backend() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::F64(24.0))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::F64(24.0))
                 }
             },
         })),
@@ -44,10 +44,10 @@ fn use_version_and_sequence_number_from_backend() {
     // Now apply a local patch, this will move the doc into the "waiting for
     // in flight requests" state, which should reflect the change just made.
     let req = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                Value::Primitive(amp::Value::Int(1)),
+                Value::Primitive(amp::ScalarValue::Int(1)),
             ))?;
             Ok(())
         })
@@ -68,7 +68,7 @@ fn use_version_and_sequence_number_from_backend() {
             obj: amp::ObjectID::Root.to_string(),
             key: "partridges".into(),
             insert: false,
-            value: Some(amp::Value::Int(1)),
+            value: Some(amp::ScalarValue::Int(1)),
             datatype: Some(amp::DataType::Undefined),
             child: None,
         }]),
@@ -83,10 +83,10 @@ fn remove_pending_requests_once_handled() {
 
     // First we add two local changes
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -94,10 +94,10 @@ fn remove_pending_requests_once_handled() {
         .unwrap();
 
     let _req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                amp::Value::Int(1).into(),
+                amp::ScalarValue::Int(1).into(),
             ))?;
             Ok(())
         })
@@ -109,10 +109,10 @@ fn remove_pending_requests_once_handled() {
 
     // Apply a patch corresponding (via actor ID and seq) to the first change
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
+            doc.actor_id.clone() => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -123,7 +123,7 @@ fn remove_pending_requests_once_handled() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(24))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
         })),
@@ -135,18 +135,18 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "partridges".to_string() => amp::Value::Int(1),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "partridges".to_string() => amp::ScalarValue::Int(1),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![2]);
 
     // Apply a patch corresponding (via actor ID and seq) to the second change
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
+            doc.actor_id.clone() => 2,
         },
         can_undo: true,
         can_redo: false,
@@ -157,7 +157,7 @@ fn remove_pending_requests_once_handled() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(1))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
         })),
@@ -172,8 +172,8 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "partridges".to_string() => amp::Value::Int(1),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "partridges".to_string() => amp::ScalarValue::Int(1),
         })
     );
 
@@ -188,10 +188,10 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     // Enqueue a local change, moving the document into the "waiting for in
     // flight requests" state
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -207,7 +207,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         seq: None,
         version: 1,
         clock: hashmap! {
-            remote.to_string() => 1,
+            remote.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -217,7 +217,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "pheasants".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(2))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(2))
                 }
             },
         })),
@@ -229,18 +229,18 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![1]);
 
     // Now apply a patch corresponding to the outstanding in flight request
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 2,
+            remote => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -251,7 +251,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(24))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
         })),
@@ -264,8 +264,8 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::Value::Int(24),
-            "pheasants".to_string() => amp::Value::Int(2),
+            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "pheasants".to_string() => amp::ScalarValue::Int(2),
         })
     );
 
@@ -278,10 +278,10 @@ fn leave_request_queue_unchanged_on_remote_changes() {
 fn dont_allow_out_of_order_request_patches() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::Value::Int(24).into(),
+                amp::ScalarValue::Int(24).into(),
             ))?;
             Ok(())
         })
@@ -289,11 +289,11 @@ fn dont_allow_out_of_order_request_patches() {
         .unwrap();
 
     let result = doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         version: 2,
         clock: hashmap! {
-            doc.actor_id.to_string() => 2,
+            doc.actor_id.clone() => 2,
         },
         deps: Vec::new(),
         can_undo: true,
@@ -303,7 +303,7 @@ fn dont_allow_out_of_order_request_patches() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
-                    random_op_id() => amp::Diff::Value(amp::Value::Int(1))
+                    random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
         })),
@@ -311,7 +311,10 @@ fn dont_allow_out_of_order_request_patches() {
 
     assert_eq!(
         result,
-        Err(AutomergeFrontendError::MismatchedSequenceNumber)
+        Err(InvalidPatch::MismatchedSequenceNumber {
+            expected: 1,
+            actual: 2
+        })
     );
 }
 
@@ -319,7 +322,7 @@ fn dont_allow_out_of_order_request_patches() {
 fn handle_concurrent_insertions_into_lists() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 vec!["goldfinch"].into(),
@@ -334,11 +337,11 @@ fn handle_concurrent_insertions_into_lists() {
     // Apply the corresponding backend patch for the above state, document
     // shoudl be reconciled after this
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         version: 1,
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
+            doc.actor_id.clone() => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -373,7 +376,7 @@ fn handle_concurrent_insertions_into_lists() {
     // Now add another change which updates the same list, this results in an
     // in flight reuest
     let _req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("birds").index(0),
                 "chaffinch".into(),
@@ -401,8 +404,8 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         version: 3,
         clock: hashmap! {
-            doc.actor_id.to_string() => 1,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 1,
+            remote.clone() => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -440,12 +443,12 @@ fn handle_concurrent_insertions_into_lists() {
 
     // Now apply a patch acknowledging the in flight request
     doc.apply_patch(amp::Patch {
-        actor: Some(doc.actor_id.to_string()),
+        actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         version: 3,
         clock: hashmap!{
-            doc.actor_id.to_string() => 2,
-            remote.to_string() => 1,
+            doc.actor_id.clone() => 2,
+            remote => 1,
         },
         can_undo: true,
         can_redo: false,
@@ -486,10 +489,10 @@ fn handle_concurrent_insertions_into_lists() {
 fn allow_interleacing_of_patches_and_changes() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(1).into(),
+                amp::ScalarValue::Int(1).into(),
             ))?;
             Ok(())
         })
@@ -497,10 +500,10 @@ fn allow_interleacing_of_patches_and_changes() {
         .unwrap();
 
     let req2 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(2).into(),
+                amp::ScalarValue::Int(2).into(),
             ))?;
             Ok(())
         })
@@ -522,7 +525,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(1)),
+                value: Some(amp::ScalarValue::Int(1)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
@@ -545,7 +548,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(2)),
+                value: Some(amp::ScalarValue::Int(2)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,
@@ -558,10 +561,10 @@ fn allow_interleacing_of_patches_and_changes() {
     doc.apply_patch(patch1).unwrap();
 
     let req3 = doc
-        .change(None, |doc| {
+        .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::Value::Int(3).into(),
+                amp::ScalarValue::Int(3).into(),
             ))?;
             Ok(())
         })
@@ -583,7 +586,7 @@ fn allow_interleacing_of_patches_and_changes() {
                 action: amp::OpType::Set,
                 obj: amp::ObjectID::Root.to_string(),
                 key: "number".into(),
-                value: Some(amp::Value::Int(3)),
+                value: Some(amp::ScalarValue::Int(3)),
                 child: None,
                 datatype: Some(amp::DataType::Undefined),
                 insert: false,

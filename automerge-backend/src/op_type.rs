@@ -7,7 +7,7 @@ pub enum OpType {
     Del,
     Link(amp::ObjectID),
     Inc(i64),
-    Set(amp::Value),
+    Set(amp::ScalarValue),
 }
 
 impl Serialize for OpType {

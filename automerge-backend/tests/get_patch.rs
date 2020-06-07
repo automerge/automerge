@@ -2,8 +2,8 @@ extern crate automerge_backend;
 use automerge_backend::{Backend, UnencodedChange};
 use automerge_backend::{OpType, Operation};
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID, Patch, SeqDiff,
-    SequenceType, Value,
+    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID, Patch, ScalarValue,
+    SeqDiff, SequenceType,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -50,7 +50,7 @@ fn test_include_most_recent_value_for_key() {
         seq: None,
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -113,8 +113,8 @@ fn test_includes_conflicting_values_for_key() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor1.to_string() => 1,
-            actor2.to_string() => 1,
+            actor1 => 1,
+            actor2 => 1,
         },
         seq: None,
         actor: None,
@@ -150,7 +150,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Set(Value::Counter(1)),
+            action: OpType::Set(ScalarValue::Counter(1)),
             obj: ObjectID::Root,
             key: "counter".into(),
             pred: Vec::new(),
@@ -181,7 +181,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         seq: None,
         actor: None,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         can_undo: false,
         can_redo: false,
@@ -191,7 +191,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "counter".into() => hashmap!{
-                    "1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap() => Diff::Value(Value::Counter(3))
+                    "1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap() => Diff::Value(ScalarValue::Counter(3))
                 }
             },
         })),
@@ -222,7 +222,7 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::F64(3.0)),
+                action: OpType::Set(ScalarValue::F64(3.0)),
                 key: "wrens".into(),
                 obj: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
                 pred: Vec::new(),
@@ -248,7 +248,7 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::F64(15.0)),
+                action: OpType::Set(ScalarValue::F64(15.0)),
                 obj: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
                 key: "sparrows".into(),
                 pred: Vec::new(),
@@ -261,7 +261,7 @@ fn test_creates_nested_maps() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 2,
+            actor => 2,
         },
         actor: None,
         seq: None,
@@ -278,7 +278,7 @@ fn test_creates_nested_maps() {
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                "4@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Value(Value::F64(15.0))
+                                "4@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Value(ScalarValue::F64(15.0))
                             }
                         }
                     })
@@ -325,7 +325,7 @@ fn test_create_lists() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -404,7 +404,7 @@ fn test_includes_latests_state_of_list() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1
+            actor => 1
         },
         can_undo: false,
         can_redo: false,
@@ -459,7 +459,7 @@ fn test_includes_date_objects_at_root() {
         message: None,
         deps: Vec::new(),
         operations: vec![Operation {
-            action: OpType::Set(Value::Timestamp(1_586_541_033_457)),
+            action: OpType::Set(ScalarValue::Timestamp(1_586_541_033_457)),
             obj: ObjectID::Root,
             key: "now".into(),
             pred: Vec::new(),
@@ -471,7 +471,7 @@ fn test_includes_date_objects_at_root() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -483,7 +483,7 @@ fn test_includes_date_objects_at_root() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "now".into() => hashmap!{
-                    "1@90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_541_033_457))
+                    "1@90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_541_033_457))
                 }
             },
         })),
@@ -514,7 +514,7 @@ fn test_includes_date_objects_in_a_list() {
                 insert: false,
             },
             Operation {
-                action: OpType::Set(Value::Timestamp(1_586_541_089_595)),
+                action: OpType::Set(ScalarValue::Timestamp(1_586_541_089_595)),
                 obj: "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap(),
                 key: ElementID::Head.into(),
                 insert: true,
@@ -527,7 +527,7 @@ fn test_includes_date_objects_in_a_list() {
     let expected_patch = Patch {
         version: 0,
         clock: hashmap! {
-            actor.to_string() => 1,
+            actor => 1,
         },
         can_undo: false,
         can_redo: false,
@@ -545,7 +545,7 @@ fn test_includes_date_objects_in_a_list() {
                         edits: vec![DiffEdit::Insert {index: 0}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Value(Value::Timestamp(1_586_541_089_595))
+                                "2@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_541_089_595))
                             }
                         }
                     })

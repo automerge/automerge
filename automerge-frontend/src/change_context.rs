@@ -2,8 +2,9 @@ use automerge_protocol::{
     Diff, DiffEdit, MapDiff, MapType, ObjType, ObjectID, OpID, SeqDiff, SequenceType,
 };
 //use crate::AutomergeFrontendError;
+use crate::error::InvalidPatch;
 use crate::object::{Object, Values};
-use crate::{AutomergeFrontendError, Value};
+use crate::Value;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 /// A `ChangeContext` represents some kind of change which has not been applied
@@ -121,7 +122,8 @@ impl<'a> ChangeContext<'a> {
     /// modified to the `updated` map before modifying them. Then, once the
     /// change is complete we can `commit` the change context.
     ///
-    pub fn apply_diff(&mut self, diff: &Diff) -> Result<(), AutomergeFrontendError> {
+    pub fn apply_diff(&mut self, diff: &Diff) -> Result<(), InvalidPatch> {
+        println!("The diff: {:?}", diff);
         Self::apply_diff_helper(&self.original_objects, &self.updated, diff)?;
         Ok(())
     }
@@ -130,7 +132,7 @@ impl<'a> ChangeContext<'a> {
         original_objects: &'b HashMap<ObjectID, Rc<Object>>,
         updated: &'b RefCell<HashMap<ObjectID, Rc<RefCell<Object>>>>,
         diff: &Diff,
-    ) -> Result<Rc<RefCell<Object>>, AutomergeFrontendError> {
+    ) -> Result<Rc<RefCell<Object>>, InvalidPatch> {
         match diff {
             Diff::Map(MapDiff {
                 object_id,
@@ -171,7 +173,13 @@ impl<'a> ChangeContext<'a> {
                                     }
                                 }
                             }
-                            _ => panic!("Invalid object type when applying diff"),
+                            o => {
+                                return Err(InvalidPatch::MismatchingObjectType {
+                                    object_id: object_id.clone(),
+                                    expected_type: ObjType::Map(MapType::Map),
+                                    actual_type: o.obj_type(),
+                                })
+                            }
                         };
                         Ok(obj)
                     }
@@ -200,19 +208,26 @@ impl<'a> ChangeContext<'a> {
                                                 updated,
                                                 subdiff,
                                             )?;
-                                            // This unwrap should be removed by using OpIDs in the
-                                            // types of diffs
                                             values.update_for_opid(opid.clone(), object);
                                         }
                                         _ => {
                                             return Err(
-                                                AutomergeFrontendError::InvalidChangeRequest,
+                                                InvalidPatch::ConflictsReceivedForTableKey {
+                                                    table_id: object_id.clone(),
+                                                    diff: diff.clone(),
+                                                },
                                             )
                                         }
                                     };
                                 }
                             }
-                            _ => panic!("Invalid object type when applying diff"),
+                            o => {
+                                return Err(InvalidPatch::MismatchingObjectType {
+                                    object_id: object_id.clone(),
+                                    expected_type: ObjType::Map(MapType::Table),
+                                    actual_type: o.obj_type(),
+                                })
+                            }
                         };
                         Ok(obj)
                     }
@@ -223,94 +238,96 @@ impl<'a> ChangeContext<'a> {
                 edits,
                 obj_type,
                 props,
-            }) => {
-                match obj_type {
-                    SequenceType::List => {
-                        let obj = Self::get_or_create_object(
-                            object_id,
-                            original_objects,
-                            updated,
-                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List),
-                        );
-                        match &mut *obj.borrow_mut() {
-                            Object::Sequence(_, ref mut elems, SequenceType::List) => {
-                                for edit in edits {
-                                    match edit {
-                                        DiffEdit::Insert { index } => elems.insert(*index, None),
-                                        DiffEdit::Remove { index } => {
-                                            elems.remove(*index);
-                                        }
-                                    };
-                                }
-                                for (index, prop_diffs) in props {
-                                    let values = match elems[*index].as_mut() {
-                                        Some(v) => v,
-                                        None => {
-                                            let to_insert = Some(Values(HashMap::new()));
-                                            elems[*index] = to_insert;
-                                            elems[*index].as_mut().unwrap()
-                                        }
-                                    };
-                                    for (opid, subdiff) in prop_diffs.iter() {
-                                        let object = Self::apply_diff_helper(
-                                            original_objects,
-                                            updated,
-                                            subdiff,
-                                        )?;
-                                        // This unwrap should be removed by using OpIDs in the
-                                        // types of diffs
-                                        values.update_for_opid(opid.clone(), object);
+            }) => match obj_type {
+                SequenceType::List => {
+                    let obj =
+                        Self::get_or_create_object(object_id, original_objects, updated, || {
+                            Object::Sequence(object_id.clone(), Vec::new(), SequenceType::List)
+                        });
+                    match &mut *obj.borrow_mut() {
+                        Object::Sequence(_, ref mut elems, SequenceType::List) => {
+                            for edit in edits {
+                                match edit {
+                                    DiffEdit::Insert { index } => elems.insert(*index, None),
+                                    DiffEdit::Remove { index } => {
+                                        elems.remove(*index);
                                     }
+                                };
+                            }
+                            for (index, prop_diffs) in props {
+                                let values = match elems[*index].as_mut() {
+                                    Some(v) => v,
+                                    None => {
+                                        let to_insert = Some(Values(HashMap::new()));
+                                        elems[*index] = to_insert;
+                                        elems[*index].as_mut().unwrap()
+                                    }
+                                };
+                                for (opid, subdiff) in prop_diffs.iter() {
+                                    let object = Self::apply_diff_helper(
+                                        original_objects,
+                                        updated,
+                                        subdiff,
+                                    )?;
+                                    values.update_for_opid(opid.clone(), object);
                                 }
                             }
-                            _ => panic!("Invalid object type when applying diff"),
-                        };
-                        Ok(obj)
-                    }
-                    SequenceType::Text => {
-                        let obj = Self::get_or_create_object(
-                            &object_id,
-                            original_objects,
-                            updated,
-                            || Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text),
-                        );
-                        match &mut *obj.borrow_mut() {
-                            Object::Sequence(_, ref mut elems, SequenceType::Text) => {
-                                for edit in edits {
-                                    match edit {
-                                        DiffEdit::Insert { index } => elems.insert(*index, None),
-                                        DiffEdit::Remove { index } => {
-                                            elems.remove(*index);
-                                        }
-                                    };
-                                }
-                                for (index, prop_diffs) in props {
-                                    let values = match elems[*index].as_mut() {
-                                        Some(v) => v,
-                                        None => {
-                                            let to_insert = Some(Values(HashMap::new()));
-                                            elems[*index] = to_insert;
-                                            elems[*index].as_mut().unwrap()
-                                        }
-                                    };
-                                    for (opid, subdiff) in prop_diffs.iter() {
-                                        let object = Self::apply_diff_helper(
-                                            original_objects,
-                                            updated,
-                                            subdiff,
-                                        )?;
-                                        // This unwrap should be removed by using OpIDs in the
-                                        // types of diffs
-                                        values.update_for_opid(opid.clone(), object);
-                                    }
-                                }
-                            }
-                            _ => panic!("Invalid object type when applying diff"),
-                        };
-                        Ok(obj)
-                    }
+                        }
+                        o => {
+                            return Err(InvalidPatch::MismatchingObjectType {
+                                object_id: object_id.clone(),
+                                expected_type: ObjType::Sequence(SequenceType::List),
+                                actual_type: o.obj_type(),
+                            })
+                        }
+                    };
+                    Ok(obj)
                 }
-            }
+                SequenceType::Text => {
+                    let obj =
+                        Self::get_or_create_object(&object_id, original_objects, updated, || {
+                            Object::Sequence(object_id.clone(), Vec::new(), SequenceType::Text)
+                        });
+                    match &mut *obj.borrow_mut() {
+                        Object::Sequence(_, ref mut elems, SequenceType::Text) => {
+                            for edit in edits {
+                                match edit {
+                                    DiffEdit::Insert { index } => elems.insert(*index, None),
+                                    DiffEdit::Remove { index } => {
+                                        elems.remove(*index);
+                                    }
+                                };
+                            }
+                            for (index, prop_diffs) in props {
+                                let values = match elems[*index].as_mut() {
+                                    Some(v) => v,
+                                    None => {
+                                        let to_insert = Some(Values(HashMap::new()));
+                                        elems[*index] = to_insert;
+                                        elems[*index].as_mut().unwrap()
+                                    }
+                                };
+                                for (opid, subdiff) in prop_diffs.iter() {
+                                    let object = Self::apply_diff_helper(
+                                        original_objects,
+                                        updated,
+                                        subdiff,
+                                    )?;
+                                    values.update_for_opid(opid.clone(), object);
+                                }
+                            }
+                        }
+                        o => {
+                            return Err(InvalidPatch::MismatchingObjectType {
+                                object_id: object_id.clone(),
+                                expected_type: ObjType::Sequence(SequenceType::Text),
+                                actual_type: o.obj_type(),
+                            })
+                        }
+                    };
+                    Ok(obj)
+                }
+            },
             Diff::Value(v) => Ok(Rc::new(RefCell::new(Object::Primitive(v.clone())))),
             Diff::Unchanged(subdiff) => {
                 let object_id = &subdiff.object_id;
@@ -369,14 +386,13 @@ impl<'a> ChangeContext<'a> {
         self.original_objects.get(object_id).cloned()
     }
 
-    pub fn commit(self) -> Result<Value, AutomergeFrontendError> {
+    pub fn commit(self) -> Value {
         for (object_id, object) in self.updated.into_inner().into_iter() {
             let cloned_object = object.borrow().clone();
             self.original_objects
                 .insert(object_id.clone(), Rc::new(cloned_object));
         }
         // The root ID must be in result by this point so we can unwrap
-        let state = self.original_objects.get(&ObjectID::Root).unwrap().value();
-        Ok(state)
+        self.original_objects.get(&ObjectID::Root).unwrap().value()
     }
 }
