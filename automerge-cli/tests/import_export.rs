@@ -29,11 +29,11 @@ fn import_stdin() {
     let mut temp_file = std::env::temp_dir();
     temp_file.push("import_test.mpl");
     let no_pipe_file = cmd!(bin, "import", "--out", &temp_file)
-        .stdin_bytes(json_bytes.clone())
+        .stdin_bytes(json_bytes)
         .run();
 
     assert!(no_pipe_file.is_ok());
-    std::fs::remove_file(temp_file.clone()).unwrap();
+    std::fs::remove_file(temp_file).unwrap();
 }
 
 #[test]
