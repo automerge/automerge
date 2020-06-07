@@ -123,7 +123,7 @@ impl<'a> ChangeContext<'a> {
     /// change is complete we can `commit` the change context.
     ///
     pub fn apply_diff(&mut self, diff: &Diff) -> Result<(), InvalidPatch> {
-        println!("The diff: {:?}", diff);
+        // println!("The diff: {:?}", diff);
         Self::apply_diff_helper(&self.original_objects, &self.updated, diff)?;
         Ok(())
     }
