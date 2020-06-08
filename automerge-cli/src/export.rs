@@ -1,6 +1,4 @@
 use anyhow::Result;
-use std::fs::read;
-use std::path::Path;
 
 fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
     let mut backend = automerge_backend::Backend::init();
@@ -13,8 +11,12 @@ fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
     Ok(frontend.state().to_json())
 }
 
-pub fn export_json(changes_file: &Path, mut writer: impl std::io::Write) -> Result<()> {
-    let input_data = read(changes_file)?;
+pub fn export_json(
+    mut changes_reader: impl std::io::Read,
+    mut writer: impl std::io::Write,
+) -> Result<()> {
+    let mut input_data = vec![];
+    changes_reader.read_to_end(&mut input_data)?;
 
     let state_json = get_state_json(input_data)?;
     writeln!(

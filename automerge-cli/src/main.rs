@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Result};
 use clap::Clap;
-use std::path::Path;
+use std::fs::File;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 mod export;
+mod import;
 
 #[derive(Debug, Clap)]
 #[clap(about = "Automerge CLI")]
@@ -38,9 +40,49 @@ enum Command {
         #[clap(long, short, default_value = "json")]
         format: ExportFormat,
 
-        /// File that contains automerge changes
-        changes_file: String,
+        /// Path that contains Automerge changes
+        #[clap(parse(from_os_str))]
+        changes_file: Option<PathBuf>,
     },
+
+    Import {
+        /// Format for input: json, toml
+        #[clap(long, short, default_value = "json")]
+        format: ExportFormat,
+
+        #[clap(parse(from_os_str))]
+        input_file: Option<PathBuf>,
+
+        /// Path to write Automerge changes to
+        #[clap(parse(from_os_str), long("out"), short("o"))]
+        changes_file: Option<PathBuf>,
+    },
+}
+
+fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
+    if atty::is(atty::Stream::Stdin) {
+        if let Some(path) = maybe_path {
+            Ok(Box::new(File::open(&path).unwrap()))
+        } else {
+            Err(anyhow!(
+                "Must provide file path if not providing input via stdin"
+            ))
+        }
+    } else {
+        Ok(Box::new(std::io::stdin()))
+    }
+}
+
+fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Write>> {
+    if atty::is(atty::Stream::Stdout) {
+        if let Some(path) = maybe_path {
+            Ok(Box::new(File::create(&path).unwrap()))
+        } else {
+            Err(anyhow!("Must provide file path if not piping to stdout"))
+        }
+    } else {
+        Ok(Box::new(std::io::stdout()))
+    }
 }
 
 fn main() -> Result<()> {
@@ -51,7 +93,21 @@ fn main() -> Result<()> {
             format,
         } => match format {
             ExportFormat::JSON => {
-                export::export_json(Path::new(&changes_file), &mut std::io::stdout())
+                let mut in_buffer = open_file_or_stdin(changes_file)?;
+                export::export_json(&mut in_buffer, &mut std::io::stdout())
+            }
+            ExportFormat::TOML => unimplemented!(),
+        },
+
+        Command::Import {
+            format,
+            input_file,
+            changes_file,
+        } => match format {
+            ExportFormat::JSON => {
+                let mut out_buffer = create_file_or_stdout(changes_file)?;
+                let mut in_buffer = open_file_or_stdin(input_file)?;
+                import::import_json(&mut in_buffer, &mut out_buffer)
             }
             ExportFormat::TOML => unimplemented!(),
         },

@@ -10,8 +10,13 @@ path = "src/main.rs"
 
 [dependencies]
 clap = "3.0.0-beta.1"
+serde_json = "^1.0"
+anyhow = "1.0"
+atty = "0.2"
+
 automerge-backend = { path = "../automerge-backend" }
 automerge-frontend = { path = "../automerge-frontend" }
 automerge-protocol = { path = "../automerge-protocol" }
-serde_json = "^1.0"
-anyhow = "1.0"
+
+[dev-dependencies]
+duct = "0.13"
