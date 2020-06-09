@@ -17,6 +17,9 @@
   ]
   $ automerge import foo.json --out bar.mpl
   $ automerge export foo.mpl | automerge import - > bar.mpl
+  $ automerge set foo.mpl "birds[3].name" "wren"
+  $ cat wren.json | automerge set foo.mpl "birds[3]"
+  $ automerge get foo.mpl "birds[3].name"
   $ automerge union foo.mpl bar.mpl --out baz.mpl
   $ automerge intersect foo.mpl bar.mpl --out baz.mpl
   $ automerge union foo.mpl bar.mpl - > baz.mpl
