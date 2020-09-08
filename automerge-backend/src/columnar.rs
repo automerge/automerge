@@ -591,24 +591,24 @@ pub(crate) const COLUMN_TYPE_VALUE_RAW: u32 = 7;
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
 pub(crate) enum Action {
-    Set,
-    Del,
-    Inc,
-    Link,
     MakeMap,
+    Set,
     MakeList,
+    Del,
     MakeText,
+    Inc,
     MakeTable,
+    Link,
 }
 const ACTIONS: [Action; 8] = [
-    Action::Set,
-    Action::Del,
-    Action::Inc,
-    Action::Link,
     Action::MakeMap,
+    Action::Set,
     Action::MakeList,
+    Action::Del,
     Action::MakeText,
+    Action::Inc,
     Action::MakeTable,
+    Action::Link,
 ];
 
 impl Decodable for Action {
