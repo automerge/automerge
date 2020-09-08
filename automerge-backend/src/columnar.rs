@@ -195,7 +195,7 @@ impl<'a> Iterator for KeyIterator<'a> {
     fn next(&mut self) -> Option<amp::Key> {
         match (self.actor.next()?, self.ctr.next()?, self.str.next()?) {
             (None, None, Some(string)) => Some(amp::Key::Map(string)),
-            (Some(0), Some(0), None) => Some(amp::Key::head()),
+            (None, Some(0), None) => Some(amp::Key::head()),
             (Some(actor), Some(ctr), None) => {
                 let actor_id = self.actors.get(actor)?;
                 Some(amp::OpID::new(ctr, actor_id).into())
@@ -349,7 +349,7 @@ impl KeyEncoder {
                 self.str.append_value(s.clone());
             }
             amp::Key::Seq(amp::ElementID::Head) => {
-                self.actor.append_value(0);
+                self.actor.append_null();
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
