@@ -668,7 +668,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                             DiffEdit::Insert{index: 0},
                             DiffEdit::Remove{index: 0},
                         ],
-                        props: hashmap!{},
+                        props: hashmap!{}
                     })
                 }
             },
@@ -746,7 +746,7 @@ fn test_handle_changes_within_conflicted_objects() {
         },
         can_redo: false,
         can_undo: false,
-        deps: vec![change1.hash, change3.hash],
+        deps: vec![change3.hash, change1.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
