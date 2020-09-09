@@ -144,6 +144,10 @@ int main() {
   printf("*** get_patch of dbA & dbE -- equal? *** --> %s\n\n",strlen(buff) + 1 == strlen(buff2) ? "true" : "false");
   assert(strlen(buff) + 1 == strlen(buff2));
 
+  len = automerge_get_missing_deps(dbE);
+  automerge_read_json(dbE, buff); // [] - nothing missing
+  assert(strlen(buff) == 2);
+
   printf("free resources\n");
   automerge_free(dbA);
   automerge_free(dbB);
