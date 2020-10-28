@@ -368,7 +368,7 @@ impl Backend {
     pub fn apply_local_change(
         &mut self,
         mut request: amp::Request,
-    ) -> Result<amp::Patch, AutomergeError> {
+    ) -> Result<(amp::Patch,Rc<Change>), AutomergeError> {
         self.check_for_duplicate(&request)?; // Change has already been applied
 
         let ver = self.get_version(request.version)?;
@@ -388,9 +388,9 @@ impl Backend {
 
         let patch = self.apply(vec![change.clone()], Some(&request), undoable, true)?;
 
-        self.finalize_version(request.version, change)?;
+        self.finalize_version(request.version, change.clone())?;
 
-        Ok(patch)
+        Ok((patch,change))
     }
 
     fn check_for_duplicate(&self, request: &amp::Request) -> Result<(), AutomergeError> {

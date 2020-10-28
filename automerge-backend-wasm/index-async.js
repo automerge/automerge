@@ -29,7 +29,7 @@ async function exports(resolve,reject) {
     let result = fn(state)
     oldBackend.frozen = true
     let newBackend = { state, clock: state.getClock(), frozen: false };
-    return [ newBackend, result ]
+    return [ newBackend, result ].flat()
   }
 
   let applyChanges = (backend,changes) => {

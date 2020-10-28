@@ -10,10 +10,19 @@ use std::iter::Iterator;
 use std::mem;
 use std::ops::AddAssign;
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Link<K>
+where
+    K: Clone + Copy + Debug + PartialEq,
+{
+    key: Option<K>,
+    count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct LinkLevel<K>
 where
-    K: Clone + Debug + PartialEq,
+    K: Copy + Clone + Debug + PartialEq,
 {
     next: Link<K>,
     prev: Link<K>,
@@ -22,7 +31,7 @@ where
 #[derive(Debug, Clone, PartialEq)]
 struct Node<K>
 where
-    K: Clone + Debug + PartialEq,
+    K: Copy + Clone + Debug + PartialEq,
 {
     level: usize,
     links: Vec<LinkLevel<K>>,
@@ -30,18 +39,9 @@ where
     // IDEA - Node could be Node(Vec<K>)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct Link<K>
-where
-    K: Clone + Debug + PartialEq,
-{
-    key: Option<K>,
-    count: usize,
-}
-
 impl<K> AddAssign for Link<K>
 where
-    K: Clone + Debug + PartialEq,
+    K: Copy + Clone + Debug + PartialEq,
 {
     fn add_assign(&mut self, other: Self) {
         self.key = other.key;
@@ -51,7 +51,7 @@ where
 
 impl<K> Node<K>
 where
-    K: Debug + Clone + PartialEq,
+    K: Debug + Copy + Clone + PartialEq,
 {
     fn successor(&self) -> Option<&K> {
         if self.links.is_empty() {
@@ -64,7 +64,7 @@ where
     fn remove_node_after(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
         for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.links[level].next = link.clone();
+                self.links[level].next = *link;
             } else {
                 self.links[level].next.count -= 1;
             }
@@ -74,7 +74,7 @@ where
     fn remove_node_before(&mut self, from_level: usize, removed_level: usize, links: &[Link<K>]) {
         for (level, link) in links.iter().enumerate().take(self.level).skip(from_level) {
             if level < removed_level {
-                self.links[level].prev = link.clone();
+                self.links[level].prev = *link;
             } else {
                 self.links[level].prev.count -= 1;
             }
@@ -97,7 +97,7 @@ where
         for level in from_level..self.level {
             if level < new_level {
                 let next = Link {
-                    key: Some(new_key.clone()),
+                    key: Some(*new_key),
                     count: distance,
                 };
                 let prev = Link {
@@ -128,7 +128,7 @@ where
         for level in from_level..self.level {
             if level < new_level {
                 self.links[level].prev = Link {
-                    key: Some(new_key.clone()),
+                    key: Some(*new_key),
                     count: distance,
                 };
             } else {
@@ -168,7 +168,7 @@ where
 
 impl<K> OrderedSet<K> for SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     fn remove_index(&mut self, index: usize) -> Option<K> {
         let key = self.key_of(index).cloned();
@@ -276,7 +276,7 @@ where
 
 impl<K> Default for SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     fn default() -> Self {
         Self::new()
@@ -306,7 +306,7 @@ where
 
 impl<'a, K> IntoIterator for &'a SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     type Item = &'a K;
     type IntoIter = SkipIterator<'a, K>;
@@ -322,7 +322,7 @@ where
 #[derive(Debug, Clone)]
 pub(crate) struct SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     nodes: HashMap<K, Node<K>>,
     head: Node<K>,
@@ -332,7 +332,7 @@ where
 
 impl<K> PartialEq for SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.nodes.eq(&other.nodes)
@@ -341,7 +341,7 @@ where
 
 impl<K> SkipList<K>
 where
-    K: Clone + Debug + Hash + PartialEq + Eq,
+    K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     pub fn new() -> SkipList<K> {
         let nodes = HashMap::new();
@@ -554,7 +554,7 @@ where
 
 pub(crate) struct SkipIterator<'a, K>
 where
-    K: Debug + Clone + PartialEq,
+    K: Debug + Copy + Clone + PartialEq,
 {
     id: Option<&'a K>,
     nodes: &'a HashMap<K, Node<K>>,
@@ -562,7 +562,7 @@ where
 
 impl<'a, K> Iterator for SkipIterator<'a, K>
 where
-    K: Debug + Clone + Hash + PartialEq + Eq,
+    K: Debug + Copy + Clone + Hash + PartialEq + Eq,
 {
     type Item = &'a K;
 
@@ -593,6 +593,7 @@ where
 // also this could perform worse if the ops per change were huge
 // eg.. 10,000 changes with 10 ops each vs 10 changes with 10,000 ops each
 
+/*
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OrdDelta<'a, K>
 where
@@ -696,6 +697,7 @@ where
         panic!("not implemented");
     }
 }
+*/
 
 // get(n)
 // insert(n)

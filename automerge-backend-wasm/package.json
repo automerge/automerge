@@ -24,6 +24,6 @@
     "webpack": "webpack",
     "test": "cargo test && wasm-pack test --node"
   },
-  "dependencies": { },
-  "devDependencies": { }
+  "dependencies": {},
+  "devDependencies": {}
 }

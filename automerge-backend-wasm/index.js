@@ -46,9 +46,9 @@ function applyChanges(backend, changes) {
 
 function applyLocalChange(backend, request) {
   const state = backendState(backend)
-  const patch = state.applyLocalChange(request)
+  const [patch,change] = state.applyLocalChange(request)
   backend.frozen = true
-  return [{ state, frozen: false }, patch]
+  return [{ state, frozen: false }, patch, change]
 }
 
 function loadChanges(backend, changes) {
