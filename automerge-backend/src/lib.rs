@@ -4,6 +4,7 @@ extern crate maplit;
 extern crate rand;
 extern crate uuid;
 extern crate web_sys;
+extern crate fxhash;
 
 #[allow(unused_macros)]
 macro_rules! log {

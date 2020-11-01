@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use im_rc::HashMap;
+use fxhash::FxBuildHasher;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::{max, min};
@@ -324,7 +325,7 @@ pub(crate) struct SkipList<K>
 where
     K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
-    nodes: HashMap<K, Node<K>>,
+    nodes: HashMap<K, Node<K>, FxBuildHasher>,
     head: Node<K>,
     rng: ThreadRng,
     pub len: usize,
@@ -344,7 +345,7 @@ where
     K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     pub fn new() -> SkipList<K> {
-        let nodes = HashMap::new();
+        let nodes = HashMap::default();
         let head = Node {
             links: Vec::new(),
             level: 1,
@@ -557,7 +558,7 @@ where
     K: Debug + Copy + Clone + PartialEq,
 {
     id: Option<&'a K>,
-    nodes: &'a HashMap<K, Node<K>>,
+    nodes: &'a HashMap<K, Node<K>, FxBuildHasher>,
 }
 
 impl<'a, K> Iterator for SkipIterator<'a, K>
