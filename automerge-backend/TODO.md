@@ -2,9 +2,8 @@
 
 ### TODO
 
-1. Undo
-2. Redo
-3. collapse duplicate ops in applyLocalChange
-4. a bug in tables
-5. links not fully implemented
+1. Performance work
+2. Multi-Change compression `save() / load()`
+3. `Automerge.ack()`
+4. `Automerge.getLastLocalChange()`
 

@@ -64,27 +64,6 @@ impl Operation {
         }
     }
 
-    pub(crate) fn can_merge(&self, other: &Operation) -> bool {
-        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
-    }
-
-    pub(crate) fn merge(&mut self, other: Operation) {
-        if let OpType::Inc(delta) = other.action {
-            match self.action {
-                OpType::Set(amp::ScalarValue::Counter(number)) => {
-                    self.action = OpType::Set(amp::ScalarValue::Counter(number + delta))
-                }
-                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
-                _ => {}
-            } // error?
-        } else {
-            match other.action {
-                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
-                _ => {}
-            }
-        }
-    }
-
     pub fn inc(obj: amp::ObjectID, key: amp::Key, value: i64, pred: Vec<amp::OpID>) -> Operation {
         Operation {
             action: OpType::Inc(value),
@@ -102,25 +81,6 @@ impl Operation {
             key,
             insert: false,
             pred,
-        }
-    }
-
-    pub fn is_make(&self) -> bool {
-        self.obj_type().is_some()
-    }
-
-    pub fn is_basic_assign(&self) -> bool {
-        !self.insert
-            && match self.action {
-                OpType::Del | OpType::Set(_) | OpType::Inc(_) | OpType::Link(_) => true,
-                _ => false,
-            }
-    }
-
-    pub fn is_inc(&self) -> bool {
-        match self.action {
-            OpType::Inc(_) => true,
-            _ => false,
         }
     }
 
@@ -268,4 +228,52 @@ impl<'de> Deserialize<'de> for Operation {
         }
         deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
     }
+}
+
+fn is_basic_assign(op: &amp::Op) -> bool {
+    !op.insert
+        && matches!((op.action,&op.key), (amp::OpType::Del, &amp::RequestKey::Str(_)) | (amp::OpType::Set,_) | (amp::OpType::Inc,_) | (amp::OpType::Link,_))
+}
+
+fn can_merge(op: &amp::Op, other: &amp::Op) -> bool {
+    is_basic_assign(other) && other.obj == op.obj && other.key == op.key
+}
+
+fn merge(op: &mut amp::Op, other: &amp::Op) {
+    if let (amp::OpType::Inc, &Some(ref delta)) = (other.action, &other.value) {
+        match (op.action, &op.value, &op.datatype) {
+            (amp::OpType::Set, &Some(ref number), &Some(amp::DataType::Counter)) => {
+                op.value = Some(amp::ScalarValue::Int(
+                    number.to_i64().unwrap_or(0) + delta.to_i64().unwrap_or(0),
+                ));
+            }
+            (amp::OpType::Inc, &Some(ref number), _) => {
+                op.value = Some(amp::ScalarValue::Int(
+                    number.to_i64().unwrap_or(0) + delta.to_i64().unwrap_or(0),
+                ));
+            }
+            _ => {}
+        }
+    } else {
+        match other.action {
+            amp::OpType::Set | amp::OpType::Link | amp::OpType::Del => {
+                *op = other.clone();
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn compress_ops(ops: &[amp::Op]) -> Vec<amp::Op> {
+    let mut compressed: Vec<amp::Op> = Vec::new();
+    for rop in ops.iter() {
+        if is_basic_assign(rop) {
+            if let Some(index) = compressed.iter().position(|old| can_merge(rop, old)) {
+                merge(&mut compressed[index], rop);
+                continue;
+            }
+        }
+        compressed.push(rop.clone())
+    }
+    compressed
 }

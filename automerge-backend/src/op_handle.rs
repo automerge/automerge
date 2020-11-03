@@ -4,26 +4,21 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::actor_map::ActorMap;
-use crate::internal::{
-    InternalOpType, InternalOperation, InternalUndoOperation, Key, ObjectID, OpID,
-};
+use crate::internal::{InternalOp, InternalOpType, InternalUndoOperation, Key, ObjectID, OpID};
 use crate::Change;
 use automerge_protocol as amp;
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
     pub id: OpID,
-    op: InternalOperation,
-    //change: Rc<Change>,
-    //index: usize,
-    delta: i64,
+    pub op: InternalOp,
+    pub delta: i64,
 }
 
 impl OpHandle {
     pub fn extract(change: Rc<Change>, actors: &mut ActorMap) -> Vec<OpHandle> {
         change
             .iter_ops()
-            //            .iter()
             .enumerate()
             .map(|(index, op)| {
                 let id = OpID(
@@ -31,13 +26,7 @@ impl OpHandle {
                     actors.import_actor(change.actor_id()),
                 );
                 let op = actors.import_op(op);
-                OpHandle {
-                    id,
-                    op,
-                    //change: change.clone(),
-                    //index,
-                    delta: 0,
-                }
+                OpHandle { id, op, delta: 0 }
             })
             .collect()
     }
@@ -145,7 +134,7 @@ impl PartialEq for OpHandle {
 impl Eq for OpHandle {}
 
 impl Deref for OpHandle {
-    type Target = InternalOperation;
+    type Target = InternalOp;
 
     fn deref(&self) -> &Self::Target {
         &self.op

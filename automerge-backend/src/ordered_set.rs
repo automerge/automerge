@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use im_rc::HashMap;
 use fxhash::FxBuildHasher;
+use im_rc::HashMap;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::{max, min};
@@ -431,7 +431,7 @@ where
         });
 
         for level in 1..max_level {
-            let mut link = pre[level - 1].clone();
+            let mut link = pre[level - 1];
             while link.key.is_some() {
                 let node = self.get_node(link.key.as_ref());
                 if node.level > level {
@@ -440,7 +440,7 @@ where
                 if node.level < level {
                     panic!("Level lower than expected");
                 }
-                link += node.links[level - 1].prev.clone();
+                link += node.links[level - 1].prev;
             }
             pre.push(link);
         }
@@ -455,7 +455,7 @@ where
         });
 
         for level in 1..max_level {
-            let mut link = suc[level - 1].clone();
+            let mut link = suc[level - 1];
             while link.key.is_some() {
                 let node = self.get_node(link.key.as_ref());
                 if node.level > level {
@@ -464,7 +464,7 @@ where
                 if node.level < level {
                     panic!("Level lower than expected");
                 }
-                link += node.links[level - 1].next.clone();
+                link += node.links[level - 1].next;
             }
             suc.push(link);
         }

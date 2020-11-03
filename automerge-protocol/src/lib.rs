@@ -158,10 +158,7 @@ pub enum DataType {
 impl DataType {
     #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn is_undefined(d: &DataType) -> bool {
-        match d {
-            DataType::Undefined => true,
-            _ => false,
-        }
+        matches!(d, DataType::Undefined)
     }
 }
 
@@ -209,7 +206,7 @@ pub enum RequestKey {
     Num(u64),
 }
 
-#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Debug, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 pub enum OpType {
     MakeMap,

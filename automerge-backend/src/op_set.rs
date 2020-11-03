@@ -14,6 +14,7 @@ use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
 use crate::pending_diff::PendingDiff;
+use crate::Change;
 use automerge_protocol as amp;
 use core::cmp::max;
 use std::collections::HashMap;
@@ -85,7 +86,7 @@ impl OpSet {
         Ok(all_undo_ops)
     }
 
-    fn apply_op(
+    pub fn apply_op(
         &mut self,
         op: OpHandle,
         actors: &ActorMap,
@@ -181,14 +182,14 @@ impl OpSet {
         self.objs
             .get(&object_id)
             .map(|o| o.as_ref())
-            .ok_or_else(|| AutomergeError::MissingObjectError)
+            .ok_or(AutomergeError::MissingObjectError)
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
         self.objs
             .get_mut(&object_id)
             .map(|rc| Rc::make_mut(rc))
-            .ok_or_else(|| AutomergeError::MissingObjectError)
+            .ok_or(AutomergeError::MissingObjectError)
     }
 
     pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
@@ -400,6 +401,15 @@ impl OpSet {
             props,
         }
         .into())
+    }
+
+    pub fn update_deps(&mut self, change: &Change) {
+        self.max_op = max(self.max_op, change.max_op());
+
+        for d in change.deps.iter() {
+            self.deps.remove(d);
+        }
+        self.deps.insert(change.hash);
     }
 
     fn gen_obj_diff(

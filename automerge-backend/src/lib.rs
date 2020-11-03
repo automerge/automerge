@@ -1,10 +1,10 @@
+extern crate fxhash;
 extern crate hex;
 extern crate im_rc;
 extern crate maplit;
 extern crate rand;
 extern crate uuid;
 extern crate web_sys;
-extern crate fxhash;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -26,6 +26,7 @@ mod op;
 mod op_handle;
 mod op_set;
 mod op_type;
+mod obj_alias;
 mod ordered_set;
 mod pending_diff;
 mod serialize;

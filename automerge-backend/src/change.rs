@@ -137,8 +137,8 @@ pub struct Change {
 }
 
 impl Change {
-    pub fn actor_id(&self) -> amp::ActorID {
-        self.actors[0].clone()
+    pub fn actor_id(&self) -> &amp::ActorID {
+        &self.actors[0]
     }
 
     pub fn parse(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {

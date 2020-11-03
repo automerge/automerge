@@ -1,6 +1,5 @@
 use crate::internal::{
-    ActorID, ElementID, InternalOpType, InternalOperation, InternalUndoOperation, Key, ObjectID,
-    OpID,
+    ActorID, ElementID, InternalOp, InternalOpType, InternalUndoOperation, Key, ObjectID, OpID,
 };
 use crate::op_type::OpType;
 use crate::undo_operation::UndoOperation;
@@ -16,57 +15,57 @@ impl ActorMap {
         ActorMap(Vec::new())
     }
 
-    pub fn import_key(&mut self, key: amp::Key) -> Key {
+    pub fn import_key(&mut self, key: &amp::Key) -> Key {
         match key {
-            amp::Key::Map(string) => Key::Map(string),
-            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(eid)),
+            amp::Key::Map(string) => Key::Map(string.to_string()),
+            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(&eid)),
         }
     }
 
-    pub fn import_actor(&mut self, actor: amp::ActorID) -> ActorID {
-        if let Some(idx) = self.0.iter().position(|a| a == &actor) {
+    pub fn import_actor(&mut self, actor: &amp::ActorID) -> ActorID {
+        if let Some(idx) = self.0.iter().position(|a| a == actor) {
             ActorID(idx)
         } else {
-            self.0.push(actor);
+            self.0.push(actor.clone());
             ActorID(self.0.len() - 1)
         }
     }
 
-    pub fn import_opid(&mut self, opid: amp::OpID) -> OpID {
-        OpID(opid.0, self.import_actor(opid.1))
+    pub fn import_opid(&mut self, opid: &amp::OpID) -> OpID {
+        OpID(opid.0, self.import_actor(&opid.1))
     }
 
-    pub fn import_obj(&mut self, obj: amp::ObjectID) -> ObjectID {
+    pub fn import_obj(&mut self, obj: &amp::ObjectID) -> ObjectID {
         match obj {
             amp::ObjectID::Root => ObjectID::Root,
-            amp::ObjectID::ID(opid) => ObjectID::ID(self.import_opid(opid)),
+            amp::ObjectID::ID(ref opid) => ObjectID::ID(self.import_opid(opid)),
         }
     }
 
-    pub fn import_element_id(&mut self, eid: amp::ElementID) -> ElementID {
+    pub fn import_element_id(&mut self, eid: &amp::ElementID) -> ElementID {
         match eid {
             amp::ElementID::Head => ElementID::Head,
-            amp::ElementID::ID(opid) => ElementID::ID(self.import_opid(opid)),
+            amp::ElementID::ID(ref opid) => ElementID::ID(self.import_opid(opid)),
         }
     }
 
-    pub fn import_op(&mut self, op: Operation) -> InternalOperation {
-        InternalOperation {
-            action: self.import_optype(op.action),
-            obj: self.import_obj(op.obj),
-            key: self.import_key(op.key),
-            pred: op.pred.into_iter().map(|id| self.import_opid(id)).collect(),
+    pub fn import_op(&mut self, op: Operation) -> InternalOp {
+        InternalOp {
+            action: self.import_optype(&op.action),
+            obj: self.import_obj(&op.obj),
+            key: self.import_key(&op.key),
+            pred: op.pred.into_iter().map(|ref id| self.import_opid(id)).collect(),
             insert: op.insert,
         }
     }
 
-    pub fn import_optype(&mut self, optype: OpType) -> InternalOpType {
+    pub fn import_optype(&mut self, optype: &OpType) -> InternalOpType {
         match optype {
-            OpType::Make(val) => InternalOpType::Make(val),
+            OpType::Make(val) => InternalOpType::Make(val.clone()),
             OpType::Del => InternalOpType::Del,
-            OpType::Link(obj) => InternalOpType::Link(self.import_obj(obj)),
-            OpType::Inc(val) => InternalOpType::Inc(val),
-            OpType::Set(val) => InternalOpType::Set(val),
+            OpType::Link(obj) => InternalOpType::Link(self.import_obj(&obj)),
+            OpType::Inc(val) => InternalOpType::Inc(val.clone()),
+            OpType::Set(val) => InternalOpType::Set(val.clone()),
         }
     }
 
@@ -99,7 +98,7 @@ impl ActorMap {
         }
     }
 
-    pub fn export_op(&self, op: &InternalOperation) -> Operation {
+    pub fn export_op(&self, op: &InternalOp) -> Operation {
         Operation {
             action: self.export_optype(&op.action),
             obj: self.export_obj(&op.obj),

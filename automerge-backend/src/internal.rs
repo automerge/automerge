@@ -1,5 +1,7 @@
 use automerge_protocol as amp;
 
+use crate::op_handle::OpHandle;
+
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ActorID(pub usize);
 
@@ -25,8 +27,7 @@ pub(crate) enum Key {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) struct InternalOperation {
-    //    pub id: OpID,
+pub(crate) struct InternalOp {
     pub action: InternalOpType,
     pub obj: ObjectID,
     pub key: Key,
@@ -34,7 +35,7 @@ pub(crate) struct InternalOperation {
     pub insert: bool,
 }
 
-impl InternalOperation {
+impl InternalOp {
     pub fn obj_type(&self) -> Option<amp::ObjType> {
         match self.action {
             InternalOpType::Make(objtype) => Some(objtype),
@@ -43,14 +44,31 @@ impl InternalOperation {
     }
 
     pub fn is_inc(&self) -> bool {
-        match self.action {
-            InternalOpType::Inc(_) => true,
-            _ => false,
-        }
+        matches!(self.action, InternalOpType::Inc(_))
     }
 
     pub fn is_make(&self) -> bool {
         self.obj_type().is_some()
+    }
+
+    pub fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation> {
+        let key = self.key.clone();
+
+        if let InternalOpType::Inc(value) = self.action {
+            vec![InternalUndoOperation {
+                action: InternalOpType::Inc(-value),
+                obj: self.obj,
+                key,
+            }]
+        } else if overwritten.is_empty() {
+            vec![InternalUndoOperation {
+                action: InternalOpType::Del,
+                obj: self.obj,
+                key,
+            }]
+        } else {
+            overwritten.iter().map(|o| o.invert(&key)).collect()
+        }
     }
 }
 
@@ -62,8 +80,8 @@ pub(crate) struct InternalUndoOperation {
 }
 
 impl InternalUndoOperation {
-    pub fn into_operation(self, pred: Vec<OpID>) -> InternalOperation {
-        InternalOperation {
+    pub fn into_operation(self, pred: Vec<OpID>) -> InternalOp {
+        InternalOp {
             action: self.action,
             obj: self.obj,
             key: self.key,
@@ -95,6 +113,10 @@ impl Key {
             ElementID::ID(id) => Some(id),
             ElementID::Head => None,
         }
+    }
+
+    pub fn head() -> Self {
+        Key::Seq(ElementID::Head)
     }
 }
 

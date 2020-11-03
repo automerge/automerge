@@ -1,21 +1,19 @@
 use crate::actor_map::ActorMap;
 use crate::error::AutomergeError;
-use crate::internal::{InternalOpType, InternalOperation, InternalUndoOperation, ObjectID, OpID};
-use crate::op::Operation;
+use crate::internal::{InternalOp, InternalUndoOperation, ObjectID, OpID, Key};
+use crate::op::{compress_ops, Operation};
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::op_type::OpType;
-use crate::ordered_set::OrderedSet;
+use crate::ordered_set::{ SkipList, OrderedSet };
 use crate::pending_diff::PendingDiff;
 use crate::time;
+use crate::obj_alias::ObjAlias;
 use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
-use std::borrow::BorrowMut;
-use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::str::FromStr;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -24,7 +22,7 @@ pub struct Backend {
     op_set: Rc<OpSet>,
     states: HashMap<amp::ActorID, Vec<Rc<Change>>>,
     actors: ActorMap,
-    obj_alias: HashMap<String, amp::ObjectID>,
+    obj_alias: ObjAlias,
     undo_pos: usize,
     hashes: HashMap<amp::ChangeHash, Rc<Change>>,
     history: Vec<amp::ChangeHash>,
@@ -36,17 +34,13 @@ impl Backend {
     pub fn init() -> Backend {
         let mut versions = Vec::new();
         let op_set = Rc::new(OpSet::init());
-        versions.push(Version {
-            version: 0,
-            local_state: None,
-            queue: Vec::new(),
-        });
+        versions.push(Version::new(0));
         Backend {
             versions,
             op_set,
             queue: Vec::new(),
             actors: ActorMap::new(),
-            obj_alias: HashMap::new(),
+            obj_alias: ObjAlias::new(),
             states: HashMap::new(),
             history: Vec::new(),
             hashes: HashMap::new(),
@@ -56,127 +50,114 @@ impl Backend {
         }
     }
 
-    fn str_to_object(&self, name: &str) -> Result<amp::ObjectID, AutomergeError> {
-        self.obj_alias
-            .get(name)
-            .cloned()
-            .or_else(|| amp::ObjectID::from_str(name).ok())
-            .ok_or_else(|| AutomergeError::MissingChildID(name.to_string()))
-    }
-
     fn process_request(
         &mut self,
-        request: &amp::Request,
-        op_set: Rc<OpSet>,
-        start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
-        let time = request.time.unwrap_or_else(time::unix_timestamp);
-        let actor_id = request.actor.clone();
+        request: amp::Request,
+    ) -> Result<(amp::Patch,Rc<Change>), AutomergeError> {
+        let mut all_undo_ops = Vec::new();
+        let mut new_objects: HashSet<ObjectID> = HashSet::new();
         let mut operations: Vec<Operation> = Vec::new();
-        // this is a local cache of elemids that I can manipulate as i insert and edit so the
-        // index's stay consistent as I walk through the ops
-        let mut elemid_cache: HashMap<ObjectID, Box<dyn OrderedSet<OpID>>> = HashMap::new();
+        let mut pending_diffs : HashMap<ObjectID, Vec<PendingDiff>> = HashMap::new();
+
+        let start_op = self.get_start_op(request.version);
+        let actor_seq = Some((request.actor.clone(), request.seq));
+        self.lazy_update_version(request.version)?;
+        let version_local_state = self.versions.iter_mut().find(|v| v.version == request.version).and_then(|v| v.local_state.as_mut());
+        let not_head = version_local_state.is_some();
+        let op_set = Rc::make_mut(version_local_state.unwrap_or(&mut self.op_set));
         if let Some(ops) = &request.ops {
+            let ops = compress_ops(ops);
             for rop in ops.iter() {
-                let external_id = amp::OpID::new(start_op + (operations.len() as u64), &actor_id);
-                let internal_id = self.actors.import_opid(external_id.clone());
-                let insert = rop.insert;
-                let object_id = self.str_to_object(&rop.obj)?;
-                let internal_object_id = self.actors.import_obj(object_id.clone());
+                let external_id = amp::OpID::new(start_op + (operations.len() as u64), &request.actor);
+                let internal_id = self.actors.import_opid(&external_id);
+                let external_object_id = self.obj_alias.fetch(&rop.obj)?;
+                let internal_object_id = self.actors.import_obj(&external_object_id);
+                let child = self.obj_alias.cache(&rop.child, &external_id);
 
-                let child = match &rop.child {
-                    Some(child) => {
-                        self.obj_alias
-                            .insert(child.clone(), amp::ObjectID::ID(external_id.clone()));
-                        Some(self.str_to_object(&child)?)
-                    }
-                    None => None,
-                };
+                let skip_list = op_set.get_obj(&internal_object_id).map(|o| &o.seq).ok();
+                let internal_key = resolve_key_onepass(&rop, &skip_list)?;
+                let external_key = self.actors.export_key(&internal_key);
 
-                // Ok - this madness is that 30% of the execution time for lists was spent
-                // in resolve_key making tiny throw away edits to object.seq
-                // OrdDelta offered a huge speedup but this would blow up for
-                // huge bulk load changes so this way I do one vs the other
-                // I should run benchmarks and figure out where the correct break point
-                // really is
-                // !!!
-                // Idea - maybe the correct fast path here is feed the ops into op_set
-                // as they are generated so I dont need to make these list ops twice
-                // and when the version is out of date - i need to apply ops to that anyway...
-                let elemids = elemid_cache.entry(internal_object_id).or_insert_with(|| {
-                    //if ops.len() > 2000 {
-                    Box::new(
-                        op_set
-                            .get_obj(&internal_object_id)
-                            .map(|o| o.seq.clone())
-                            .ok()
-                            .unwrap_or_default(),
-                    )
-                    /*
-                    } else {
-                        Box::new(OrdDelta::new(
-                            op_set.get_obj(&internal_object_id).map(|o| &o.seq).ok(),
-                        ))
-                    }
-                    */
-                });
-                let elemids2: &mut dyn OrderedSet<OpID> = elemids.borrow_mut(); // I dont understand why I need to do this
-
-                let external_key = resolve_key(rop, &internal_id, &self.actors, elemids2)?;
-                let internal_key = self.actors.import_key(external_key.clone());
-                let pred = op_set.get_pred(&internal_object_id, &internal_key, insert);
-                let action = match rop.action {
-                    amp::OpType::MakeMap => OpType::Make(amp::ObjType::map()),
-                    amp::OpType::MakeTable => OpType::Make(amp::ObjType::table()),
-                    amp::OpType::MakeList => OpType::Make(amp::ObjType::list()),
-                    amp::OpType::MakeText => OpType::Make(amp::ObjType::text()),
-                    amp::OpType::Del => OpType::Del,
-                    amp::OpType::Link => OpType::Link(
-                        child
-                            .ok_or_else(|| AutomergeError::LinkMissingChild(external_id.clone()))?,
-                    ),
-                    amp::OpType::Inc => OpType::Inc(
-                        rop.to_i64()
-                            .ok_or_else(|| AutomergeError::MissingNumberValue(rop.clone()))?,
-                    ),
-                    amp::OpType::Set => OpType::Set(rop.primitive_value()),
-                };
+                let __tmp_actors = self.actors.clone();
+                let internal_pred = op_set.get_pred(&internal_object_id, &internal_key, rop.insert);
+                let pred = internal_pred.iter().map(|id| __tmp_actors.export_opid(&id)).collect();
+                let action = rop_to_optype(&rop, child)?;
+                let internal_action = self.actors.import_optype(&action);
 
                 let op = Operation {
                     action,
-                    obj: object_id.clone(),
+                    obj: external_object_id,
                     key: external_key,
-                    pred: pred.iter().map(|id| self.actors.export_opid(&id)).collect(),
-                    insert,
+                    pred,
+                    insert: rop.insert,
                 };
 
-                if op.is_basic_assign() {
-                    if let Some(index) = operations.iter().position(|old| op.can_merge(old)) {
-                        operations[index].merge(op);
-                        continue;
-                    }
+                let internal_op = OpHandle {
+                    id: internal_id,
+                    op: InternalOp {
+                        action: internal_action,
+                        obj: internal_object_id.clone(),
+                        key: internal_key,
+                        insert: rop.insert,
+                        pred: internal_pred,
+                    },
+                    delta: 0,
+                };
+
+				if internal_op.is_make() {
+                	new_objects.insert(internal_op.id.into());
+	            }
+
+	            let use_undo = request.undoable && !(new_objects.contains(&internal_op.obj));
+
+                let (pending_diff, undo_ops) = op_set.apply_op(internal_op, &self.actors)?;
+
+                if let Some(d) = pending_diff {
+                    pending_diffs.entry(internal_object_id).or_default().push(d);
                 }
+
+				if use_undo {
+					all_undo_ops.extend(undo_ops);
+				}
+
                 operations.push(op);
             }
         }
-        Ok(Rc::new(
+        let change : Rc<Change> = Rc::new(
             UnencodedChange {
                 start_op,
-                message: request.message.clone(),
-                actor_id: request.actor.clone(),
+                message: request.message,
+                actor_id: request.actor,
                 seq: request.seq,
-                deps: request.deps.clone().unwrap_or_default(),
-                time,
+                deps: request.deps.unwrap_or_default(),
+                time: request.time.unwrap_or_else(time::unix_timestamp),
                 operations,
             }
             .into(),
-        ))
+        );
+
+        op_set.update_deps(&change);
+
+        if not_head {
+            pending_diffs.clear();
+            self.apply_change(change.clone(),request.undoable,&mut pending_diffs)?;
+        } else {
+            self.update_history(&change);
+            if request.undoable {
+                self.push_undo_ops(all_undo_ops);
+            }
+        }
+
+        self.bump_version();
+        let diffs = self.op_set.finalize_diffs(pending_diffs, &self.actors)?;
+        let patch = self.make_patch(diffs, actor_seq)?;
+        Ok((patch,change))
     }
 
     fn make_patch(
         &self,
         diffs: Option<amp::Diff>,
-        request: Option<&amp::Request>,
+        actor_seq: Option<(amp::ActorID, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = self.op_set.deps.iter().cloned().collect();
         deps.sort_unstable();
@@ -191,16 +172,14 @@ impl Backend {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.len() as u64))
                 .collect(),
-            actor: request.map(|r| r.actor.clone()),
-            seq: request.map(|r| r.seq),
+            actor: actor_seq.clone().map(|(actor, _)| actor),
+            seq: actor_seq.map(|(_, seq)| seq),
         })
     }
 
-    fn undo(
-        &mut self,
-        request: &amp::Request,
-        start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
+    fn undo(&mut self, request: amp::Request) -> Result<(amp::Patch,Rc<Change>), AutomergeError> {
+        let actor_seq = Some((request.actor.clone(), request.seq));
+        let start_op = self.get_start_op(request.version);
         let undo_pos = self.undo_pos;
 
         if undo_pos < 1 || self.internal_undo_stack.len() < undo_pos {
@@ -232,7 +211,7 @@ impl Backend {
             seq: request.seq,
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
-            message: request.message.clone(),
+            message: request.message,
             time: time::unix_timestamp(),
             operations,
         }
@@ -241,14 +220,14 @@ impl Backend {
         self.undo_pos -= 1;
         self.internal_redo_stack.push(redo_ops);
 
-        Ok(Rc::new(change))
+        let change : Rc<Change> = Rc::new(change);
+        let patch = self.apply(vec![change.clone()], actor_seq, false, true)?;
+        Ok((patch,change))
     }
 
-    fn redo(
-        &mut self,
-        request: &amp::Request,
-        start_op: u64,
-    ) -> Result<Rc<Change>, AutomergeError> {
+    fn redo(&mut self, request: amp::Request) -> Result<(amp::Patch,Rc<Change>), AutomergeError> {
+        let actor_seq = Some((request.actor.clone(), request.seq));
+        let start_op = self.get_start_op(request.version);
         let mut redo_ops = self
             .internal_redo_stack
             .pop()
@@ -271,7 +250,7 @@ impl Backend {
             seq: request.seq,
             start_op,
             deps: request.deps.clone().unwrap_or_default(),
-            message: request.message.clone(),
+            message: request.message,
             time: time::unix_timestamp(),
             operations,
         }
@@ -279,7 +258,9 @@ impl Backend {
 
         self.undo_pos += 1;
 
-        Ok(Rc::new(change))
+        let change : Rc<Change> = Rc::new(change);
+        let patch = self.apply(vec![change.clone()], actor_seq, false, true)?;
+        Ok((patch,change))
     }
 
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
@@ -304,15 +285,13 @@ impl Backend {
         self.apply(changes, None, false, true)
     }
 
-    fn get_version(&mut self, version: u64) -> Result<Rc<OpSet>, AutomergeError> {
+    fn lazy_update_version(&mut self, version: u64) -> Result<(), AutomergeError> {
         let v = self
             .versions
             .iter_mut()
             .find(|v| v.version == version)
-            .ok_or_else(|| AutomergeError::UnknownVersion(version))?;
+            .ok_or(AutomergeError::UnknownVersion(version))?;
         if let Some(ref mut op_set) = v.local_state {
-            // apply the queued ops lazily b/c hopefully these
-            // can be thrown away before they are applied
             for change in v.queue.drain(0..) {
                 let mut m = HashMap::new();
                 Rc::make_mut(op_set)
@@ -324,73 +303,85 @@ impl Backend {
                     )
                     .unwrap();
             }
-            return Ok(op_set.clone());
         }
-        Ok(self.op_set.clone())
+        Ok(())
+    }
+
+    fn get_deps(&mut self, version: u64) -> Vec<amp::ChangeHash> {
+        let local_state = self
+            .versions
+            .iter_mut()
+            .find(|v| v.version == version)
+            .and_then(|v| v.local_state.as_ref());
+        if let Some(ref op_set) = local_state {
+           op_set.deps.iter().cloned().collect()
+        } else {
+           self.op_set.deps.iter().cloned().collect()
+        }
+    }
+
+    fn get_start_op(&mut self, version: u64) -> u64 {
+        let local_state = self
+            .versions
+            .iter_mut()
+            .find(|v| v.version == version)
+            .and_then(|v| v.local_state.as_ref());
+        if let Some(ref op_set) = local_state {
+           op_set.max_op + 1
+        } else {
+           self.op_set.max_op + 1
+        }
     }
 
     fn apply(
         &mut self,
         mut changes: Vec<Rc<Change>>,
-        request: Option<&amp::Request>,
+        actor: Option<(amp::ActorID, u64)>,
         undoable: bool,
         incremental: bool,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
         for change in changes.drain(..) {
-            self.add_change(change, request.is_some(), undoable, &mut pending_diffs)?;
+            self.add_change(change, actor.is_some(), undoable, &mut pending_diffs)?;
         }
 
         if incremental {
-            let version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
-            let version_obj = Version {
-                version,
-                queue: Vec::new(),
-                local_state: None,
-            };
-            self.versions.push(version_obj);
+            self.bump_version();
         } else {
-            let version_obj = Version {
-                version: 0,
-                queue: Vec::new(),
-                local_state: None,
-            };
             self.versions.clear();
-            self.versions.push(version_obj);
+            self.versions.push(Version::new(0));
         }
 
         let diffs = self.op_set.finalize_diffs(pending_diffs, &self.actors)?;
-
-        self.make_patch(diffs, request)
+        self.make_patch(diffs, actor)
     }
 
     pub fn apply_local_change(
         &mut self,
         mut request: amp::Request,
-    ) -> Result<(amp::Patch,Rc<Change>), AutomergeError> {
+    ) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
+
         self.check_for_duplicate(&request)?; // Change has already been applied
 
-        let ver = self.get_version(request.version)?;
+        let ver_no = request.version;
 
-        request
-            .deps
-            .get_or_insert_with(|| ver.deps.iter().cloned().collect());
+        request.deps.get_or_insert_with(|| self.get_deps(ver_no));
 
-        let start_op = ver.max_op + 1;
-        let change = match request.request_type {
-            amp::RequestType::Change => self.process_request(&request, ver, start_op)?,
-            amp::RequestType::Undo => self.undo(&request, start_op)?,
-            amp::RequestType::Redo => self.redo(&request, start_op)?,
+        let (patch,change) = match request.request_type {
+            amp::RequestType::Change => self.process_request(request)?,
+            amp::RequestType::Undo => self.undo(request)?,
+            amp::RequestType::Redo => self.redo(request)?,
         };
 
-        let undoable = request.request_type == amp::RequestType::Change && request.undoable;
+        self.finalize_version(ver_no, change.clone());
 
-        let patch = self.apply(vec![change.clone()], Some(&request), undoable, true)?;
+        Ok((patch, change))
+    }
 
-        self.finalize_version(request.version, change.clone())?;
-
-        Ok((patch,change))
+    fn bump_version(&mut self) {
+        let next_version = self.versions.last().map(|v| v.version).unwrap_or(0) + 1;
+        self.versions.push(Version::new(next_version));
     }
 
     fn check_for_duplicate(&self, request: &amp::Request) -> Result<(), AutomergeError> {
@@ -445,23 +436,11 @@ impl Backend {
             return Ok(());
         }
 
-        self.states
-            .entry(change.actor_id())
-            .or_default()
-            .push(change.clone());
-
-        self.hashes.insert(change.hash, change.clone());
-
-        self.history.push(change.hash);
+        self.update_history(&change);
 
         let op_set = Rc::make_mut(&mut self.op_set);
 
-        op_set.max_op = max(op_set.max_op, change.max_op());
-
-        for d in change.deps.iter() {
-            op_set.deps.remove(d);
-        }
-        op_set.deps.insert(change.hash);
+        op_set.update_deps(&change);
 
         let undo_ops = op_set.apply_ops(
             OpHandle::extract(change, &mut self.actors),
@@ -475,6 +454,16 @@ impl Backend {
         };
 
         Ok(())
+    }
+
+    fn update_history(&mut self, change: &Rc<Change>) {
+        self.states
+            .entry(change.actor_id().clone())
+            .or_default()
+            .push(change.clone());
+
+        self.history.push(change.hash);
+        self.hashes.insert(change.hash, change.clone());
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Rc<Change>> {
@@ -493,7 +482,8 @@ impl Backend {
         &mut self,
         request_version: u64,
         change: Rc<Change>,
-    ) -> Result<(), AutomergeError> {
+    ) {
+
         // remove all versions older than this one
         let mut i = 0;
         while i != self.versions.len() {
@@ -509,8 +499,6 @@ impl Backend {
                 v.queue.push(change.clone())
             }
         }
-
-        Ok(())
     }
 
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
@@ -610,86 +598,50 @@ struct Version {
     queue: Vec<Rc<Change>>,
 }
 
-fn resolve_key(
+impl Version {
+    fn new(version: u64) -> Self {
+        Version {
+            version,
+            local_state: None,
+            queue: Vec::new(),
+        }
+    }
+}
+
+fn resolve_key_onepass(
     rop: &amp::Op,
-    id: &OpID,
-    actors: &ActorMap,
-    ids: &mut dyn OrderedSet<OpID>,
-) -> Result<amp::Key, AutomergeError> {
-    let key = &rop.key;
-    let insert = rop.insert;
-    let del = rop.action == amp::OpType::Del;
-    match key {
-        amp::RequestKey::Str(s) => Ok(amp::Key::Map(s.clone())),
+    seq: &Option<&SkipList<OpID>>,
+) -> Result<Key, AutomergeError> {
+    //log!("rop={:?}",rop);
+    //log!("seq={:?}",seq);
+    match &rop.key {
+        amp::RequestKey::Str(s) => Ok(Key::Map(s.clone())),
         amp::RequestKey::Num(n) => {
             let n: usize = *n as usize;
-            (if insert {
+            (if rop.insert {
                 if n == 0 {
-                    ids.insert_index(0, *id);
-                    Some(amp::Key::head())
+                    Some(Key::head())
                 } else {
-                    ids.insert_index(n, *id);
-                    ids.key_of(n - 1).map(|i| actors.export_opid(&i).into())
+                    seq.and_then(|ids| ids.key_of(n - 1)).map(|i| (*i).into())
                 }
-            } else if del {
-                ids.remove_index(n).map(|k| actors.export_opid(&k).into())
             } else {
-                ids.key_of(n).map(|i| actors.export_opid(&i).into())
+                seq.and_then(|ids| ids.key_of(n)).map(|i| (*i).into())
             })
             .ok_or(AutomergeError::IndexOutOfBounds(n))
         }
     }
 }
 
-/// Extension trait adding a few helper methods with backend specific logic
-/// to `Operation`
-trait OpExt {
-    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation>;
-    //fn can_merge(&self, other: &InternalOperation) -> bool;
-    //fn merge(&mut self, other: InternalOperation);
+fn rop_to_optype(rop: &amp::Op, child: Option<amp::ObjectID> ) -> Result<OpType, AutomergeError> {
+    Ok(match rop.action {
+        amp::OpType::MakeMap => OpType::Make(amp::ObjType::map()),
+        amp::OpType::MakeTable => OpType::Make(amp::ObjType::table()),
+        amp::OpType::MakeList => OpType::Make(amp::ObjType::list()),
+        amp::OpType::MakeText => OpType::Make(amp::ObjType::text()),
+        amp::OpType::Del => OpType::Del,
+        amp::OpType::Link => OpType::Link(child.ok_or(AutomergeError::LinkMissingChild)?),
+        amp::OpType::Inc => OpType::Inc(rop.to_i64().ok_or(AutomergeError::MissingNumberValue)?),
+        amp::OpType::Set => OpType::Set(rop.primitive_value()),
+    })
 }
 
-impl OpExt for InternalOperation {
-    fn generate_redos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation> {
-        let key = self.key.clone();
-
-        if let InternalOpType::Inc(value) = self.action {
-            vec![InternalUndoOperation {
-                action: InternalOpType::Inc(-value),
-                obj: self.obj,
-                key,
-            }]
-        } else if overwritten.is_empty() {
-            vec![InternalUndoOperation {
-                action: InternalOpType::Del,
-                obj: self.obj,
-                key,
-            }]
-        } else {
-            overwritten.iter().map(|o| o.invert(&key)).collect()
-        }
-    }
-
-    /*
-    fn can_merge(&self, other: &InternalOperation) -> bool {
-        !self.insert && !other.insert && other.obj == self.obj && other.key == self.key
-    }
-
-    fn merge(&mut self, other: InternalOperation) {
-        if let OpType::Inc(delta) = other.action {
-            match self.action {
-                OpType::Set(amp::Value::Counter(number)) => {
-                    self.action = OpType::Set(amp::Value::Counter(number + delta))
-                }
-                OpType::Inc(number) => self.action = OpType::Inc(number + delta),
-                _ => {}
-            } // error?
-        } else {
-            match other.action {
-                OpType::Set(_) | OpType::Link(_) | OpType::Del => self.action = other.action,
-                _ => {}
-            }
-        }
-    }
-    */
-}
