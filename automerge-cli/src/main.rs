@@ -54,7 +54,7 @@ enum Command {
         input_file: Option<PathBuf>,
 
         /// Path to write Automerge changes to
-        #[clap(parse(from_os_str), long("out"), short("o"))]
+        #[clap(parse(from_os_str), long("out"), short('o'))]
         changes_file: Option<PathBuf>,
     },
 }
