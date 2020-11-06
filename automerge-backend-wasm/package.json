@@ -9,21 +9,28 @@
   "license": "MIT",
   "files": [
     "README.md",
-    "pkg.js",
     "LICENSE",
     "package.json",
-    "automerge_backend_wasm_bg.wasm",
-    "automerge_backend_wasm.js"
+    "index-node.js",
+    "index-bundler.js",
+    "shared.js",
+    "pkg-node/index.d.ts",
+    "pkg-node/index.js",
+    "pkg-node/index_bg.wasm",
+    "pkg-node/index_bg.wasm.d.ts",
+    "pkg-bundler/index.js",
+    "pkg-bundler/index_bg.js",
+    "pkg-bundler/index_bg.wasm"
   ],
-  "main": "./index.js",
+  "main": "./index-node.js",
+  "module": "./index-bundler.js",
   "scripts": {
-    "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --out-name index",
-    "release": "rm -rf pkg && wasm-pack build --target nodejs --release --out-name index",
-    "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --out-name index",
+    "build": "rm -rf pkg-node pkg-bundler && wasm-pack build --target nodejs --out-name index --out-dir pkg-node && wasm-pack build --target bundler --out-name index --out-dir pkg-bundler",
+    "release": "rm -rf pkg-node pkg-bundler && wasm-pack build --target nodejs --release --out-name index --out-dir pkg-node && wasm-pack build --target bundler --release --out-name index --out-dir pkg-bundler",
+    "profiling": "rm -rf pkg-node pkg-bundler && wasm-pack build --target nodejs --profiling --out-name index --out-dir pkg-node && wasm-pack build --target bundler --profiling --out-name index --out-dir pkg-bundler",
     "mocha": "yarn build && mocha --bail --full-trace",
-    "webpack": "webpack",
     "test": "cargo test && wasm-pack test --node"
   },
-  "dependencies": { },
-  "devDependencies": { }
+  "dependencies": {},
+  "devDependencies": {}
 }
