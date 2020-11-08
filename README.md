@@ -17,7 +17,7 @@ This project is tracking the `performance` branch of the javascript reference im
 
 This backend is tracking the [performance branch of automerge](https://github.com/automerge/automerge/tree/performance)
 
-To build the wasm backend
+To build the wasm backend you'll need to install [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/). Then:
 
 ```
   $ cd automerge-backend-wasm
