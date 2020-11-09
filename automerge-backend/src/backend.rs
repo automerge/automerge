@@ -83,12 +83,11 @@ impl Backend {
                 let internal_key = resolve_key_onepass(&rop, &skip_list)?;
                 let external_key = self.actors.export_key(&internal_key);
 
-                let __tmp_actors = self.actors.clone();
                 let internal_pred = op_set.get_pred(&internal_object_id, &internal_key, rop.insert);
-                let pred = internal_pred
-                    .iter()
-                    .map(|id| __tmp_actors.export_opid(&id))
-                    .collect();
+                let mut pred = Vec::new();
+                for id in internal_pred.iter() {
+                    pred.push(self.actors.export_opid(&id))
+                }
                 let action = rop_to_optype(&rop, child)?;
                 let internal_action = self.actors.import_optype(&action);
 
