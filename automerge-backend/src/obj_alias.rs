@@ -13,7 +13,7 @@ impl ObjAlias {
 
     pub fn cache(&mut self, child: &Option<String>, id: &amp::OpID) -> Option<amp::ObjectID> {
         child.as_ref().map(|child| {
-            let obj : amp::ObjectID = id.into();
+            let obj: amp::ObjectID = id.into();
             self.0.insert(child.to_string(), obj.clone());
             obj
         })

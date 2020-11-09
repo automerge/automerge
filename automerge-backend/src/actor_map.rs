@@ -54,17 +54,21 @@ impl ActorMap {
             action: self.import_optype(&op.action),
             obj: self.import_obj(&op.obj),
             key: self.import_key(&op.key),
-            pred: op.pred.into_iter().map(|ref id| self.import_opid(id)).collect(),
+            pred: op
+                .pred
+                .into_iter()
+                .map(|ref id| self.import_opid(id))
+                .collect(),
             insert: op.insert,
         }
     }
 
     pub fn import_optype(&mut self, optype: &OpType) -> InternalOpType {
         match optype {
-            OpType::Make(val) => InternalOpType::Make(val.clone()),
+            OpType::Make(val) => InternalOpType::Make(*val),
             OpType::Del => InternalOpType::Del,
             OpType::Link(obj) => InternalOpType::Link(self.import_obj(&obj)),
-            OpType::Inc(val) => InternalOpType::Inc(val.clone()),
+            OpType::Inc(val) => InternalOpType::Inc(*val),
             OpType::Set(val) => InternalOpType::Set(val.clone()),
         }
     }
