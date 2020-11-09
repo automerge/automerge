@@ -76,24 +76,8 @@ impl Backend {
                 let op_counter = start_op + (operations.len() as u64);
 
                 let (op,internal_op) = rop_to_op(&mut self.actors, &mut self.obj_alias, &op_set, &request, &rop, op_counter)?;
-
-                if internal_op.is_make() {
-                    new_objects.insert(internal_op.id.into());
-                }
-
-                let internal_obj_id = internal_op.obj;
-
-                let use_undo = request.undoable && !(new_objects.contains(&internal_op.obj));
-
-                let (pending_diff, undo_ops) = op_set.apply_op(internal_op, &self.actors)?;
-
-                if let Some(d) = pending_diff {
-                    pending_diffs.entry(internal_obj_id).or_default().push(d);
-                }
-
-                if use_undo {
-                    all_undo_ops.extend(undo_ops);
-                }
+                let (pending_diff, undo_ops) = op_set.apply_op(internal_op.clone(), &self.actors)?;
+                handle_undo(internal_op, pending_diff, undo_ops, request.undoable, &mut pending_diffs, &mut all_undo_ops, &mut new_objects);    
 
                 operations.push(op);
             }
@@ -655,24 +639,18 @@ fn rop_to_op(actors: &mut ActorMap, obj_alias: &mut ObjAlias, op_set: &OpSet, re
             Ok((external_op,internal_op))
 }
 
-fn apply_internal_op(internal_op: OpHandle, op_set: &mut OpSet, actors: &ActorMap, pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>, all_undo_ops: &mut Vec<InternalUndoOperation>) {
-    /*
-                if internal_op.is_make() {
-                    new_objects.insert(internal_op.id.into());
-                }
+fn handle_undo(internal_op: OpHandle, pending_diff: Option<PendingDiff>, undo_ops: Vec<InternalUndoOperation>, undoable: bool, pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>, all_undo_ops: &mut Vec<InternalUndoOperation>, new_objects: &mut HashSet<ObjectID>) {
+    if internal_op.is_make() {
+        new_objects.insert(internal_op.id.into());
+    }
 
-                let internal_obj_id = internal_op.obj;
+    let use_undo = undoable && !(new_objects.contains(&internal_op.obj));
 
-                let use_undo = request.undoable && !(new_objects.contains(&internal_obj_id));
+    if let Some(d) = pending_diff {
+        pending_diffs.entry(internal_op.obj).or_default().push(d);
+    }
 
-                let (pending_diff, undo_ops) = op_set.apply_op(internal_op, &self.actors)?;
-
-                if let Some(d) = pending_diff {
-                    pending_diffs.entry(internal_obj_id).or_default().push(d);
-                }
-
-                if use_undo {
-                    all_undo_ops.extend(undo_ops);
-                }
-                */
+    if use_undo {
+        all_undo_ops.extend(undo_ops);
+    }                
 }
