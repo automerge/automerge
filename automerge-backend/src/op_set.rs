@@ -404,7 +404,7 @@ impl OpSet {
     }
 
     pub fn update_deps(&mut self, change: &Change) {
-        self.max_op = max(self.max_op, change.max_op());
+        //self.max_op = max(self.max_op, change.max_op());
 
         for d in change.deps.iter() {
             self.deps.remove(d);

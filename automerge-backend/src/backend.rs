@@ -13,6 +13,7 @@ use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
 use std::collections::{HashMap, HashSet};
+use core::cmp::max;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -82,6 +83,9 @@ impl Backend {
                 operations.push(op);
             }
         }
+
+        let num_ops = operations.len() as u64;
+
         let change: Rc<Change> = Rc::new(
             UnencodedChange {
                 start_op,
@@ -95,6 +99,7 @@ impl Backend {
             .into(),
         );
 
+        op_set.max_op = max(op_set.max_op, change.start_op + num_ops - 1);
         op_set.update_deps(&change);
 
         if not_head {
@@ -398,10 +403,16 @@ impl Backend {
 
         let op_set = Rc::make_mut(&mut self.op_set);
 
+        let start_op = change.start_op;
+
         op_set.update_deps(&change);
 
+        let ops = OpHandle::extract(change, &mut self.actors);
+
+        op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
+
         let undo_ops = op_set.apply_ops(
-            OpHandle::extract(change, &mut self.actors),
+            ops,
             undoable,
             diffs,
             &self.actors,
