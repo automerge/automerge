@@ -13,6 +13,7 @@ use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
 use std::collections::{HashMap, HashSet};
+use core::cmp::max;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -50,6 +51,7 @@ impl Backend {
         }
     }
 
+
     fn process_request(
         &mut self,
         request: amp::Request,
@@ -72,64 +74,18 @@ impl Backend {
         if let Some(ops) = &request.ops {
             let ops = compress_ops(ops);
             for rop in ops.iter() {
-                let external_id =
-                    amp::OpID::new(start_op + (operations.len() as u64), &request.actor);
-                let internal_id = self.actors.import_opid(&external_id);
-                let external_object_id = self.obj_alias.fetch(&rop.obj)?;
-                let internal_object_id = self.actors.import_obj(&external_object_id);
-                let child = self.obj_alias.cache(&rop.child, &external_id);
+                let op_counter = start_op + (operations.len() as u64);
 
-                let skip_list = op_set.get_obj(&internal_object_id).map(|o| &o.seq).ok();
-                let internal_key = resolve_key_onepass(&rop, &skip_list)?;
-                let external_key = self.actors.export_key(&internal_key);
-
-                let internal_pred = op_set.get_pred(&internal_object_id, &internal_key, rop.insert);
-                let mut pred = Vec::new();
-                for id in internal_pred.iter() {
-                    pred.push(self.actors.export_opid(&id))
-                }
-                let action = rop_to_optype(&rop, child)?;
-                let internal_action = self.actors.import_optype(&action);
-
-                let op = Operation {
-                    action,
-                    obj: external_object_id,
-                    key: external_key,
-                    pred,
-                    insert: rop.insert,
-                };
-
-                let internal_op = OpHandle {
-                    id: internal_id,
-                    op: InternalOp {
-                        action: internal_action,
-                        obj: internal_object_id,
-                        key: internal_key,
-                        insert: rop.insert,
-                        pred: internal_pred,
-                    },
-                    delta: 0,
-                };
-
-                if internal_op.is_make() {
-                    new_objects.insert(internal_op.id.into());
-                }
-
-                let use_undo = request.undoable && !(new_objects.contains(&internal_op.obj));
-
-                let (pending_diff, undo_ops) = op_set.apply_op(internal_op, &self.actors)?;
-
-                if let Some(d) = pending_diff {
-                    pending_diffs.entry(internal_object_id).or_default().push(d);
-                }
-
-                if use_undo {
-                    all_undo_ops.extend(undo_ops);
-                }
+                let (op,internal_op) = rop_to_op(&mut self.actors, &mut self.obj_alias, &op_set, &request, &rop, op_counter)?;
+                let (pending_diff, undo_ops) = op_set.apply_op(internal_op.clone(), &self.actors)?;
+                handle_undo(internal_op, pending_diff, undo_ops, request.undoable, &mut pending_diffs, &mut all_undo_ops, &mut new_objects);    
 
                 operations.push(op);
             }
         }
+
+        let num_ops = operations.len() as u64;
+
         let change: Rc<Change> = Rc::new(
             UnencodedChange {
                 start_op,
@@ -143,6 +99,7 @@ impl Backend {
             .into(),
         );
 
+        op_set.max_op = max(op_set.max_op, change.start_op + num_ops - 1);
         op_set.update_deps(&change);
 
         if not_head {
@@ -274,6 +231,17 @@ impl Backend {
         let changes = changes.drain(0..).map(Rc::new).collect();
         self.apply(changes, None, false, false)?;
         Ok(())
+    }
+
+    pub fn ack(&mut self, ack_version: u64) {
+        let mut i = 0;
+        while i != self.versions.len() {
+            if self.versions[i].version < ack_version {
+                self.versions.remove(i);
+            } else {
+                i += 1;
+            }
+        }
     }
 
     pub fn apply_changes(
@@ -446,10 +414,16 @@ impl Backend {
 
         let op_set = Rc::make_mut(&mut self.op_set);
 
+        let start_op = change.start_op;
+
         op_set.update_deps(&change);
 
+        let ops = OpHandle::extract(change, &mut self.actors);
+
+        op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
+
         let undo_ops = op_set.apply_ops(
-            OpHandle::extract(change, &mut self.actors),
+            ops,
             undoable,
             diffs,
             &self.actors,
@@ -644,4 +618,61 @@ fn rop_to_optype(rop: &amp::Op, child: Option<amp::ObjectID>) -> Result<OpType, 
         amp::OpType::Inc => OpType::Inc(rop.to_i64().ok_or(AutomergeError::MissingNumberValue)?),
         amp::OpType::Set => OpType::Set(rop.primitive_value()),
     })
+}
+
+fn rop_to_op(actors: &mut ActorMap, obj_alias: &mut ObjAlias, op_set: &OpSet, request: &amp::Request, rop: &amp::Op, op_counter: u64) -> Result<(Operation, OpHandle),AutomergeError> {
+            let external_id = amp::OpID::new(op_counter, &request.actor);
+            let internal_id = actors.import_opid(&external_id);
+            let external_object_id = obj_alias.fetch(&rop.obj)?;
+            let internal_object_id = actors.import_obj(&external_object_id);
+            let child = obj_alias.cache(&rop.child, &external_id);
+
+            let skip_list = op_set.get_obj(&internal_object_id).map(|o| &o.seq).ok();
+            let internal_key = resolve_key_onepass(&rop, &skip_list)?;
+            let external_key = actors.export_key(&internal_key);
+
+            let internal_pred = op_set.get_pred(&internal_object_id, &internal_key, rop.insert);
+            let mut pred = Vec::with_capacity(internal_pred.len());
+            for id in internal_pred.iter() {
+                pred.push(actors.export_opid(&id));
+            }
+            let action = rop_to_optype(&rop, child)?;
+            let internal_action = actors.import_optype(&action);
+
+            let external_op = Operation {
+                action,
+                obj: external_object_id,
+                key: external_key,
+                pred,
+                insert: rop.insert,
+            };
+
+            let internal_op = OpHandle {
+                id: internal_id,
+                op: InternalOp {
+                    action: internal_action,
+                    obj: internal_object_id,
+                    key: internal_key,
+                    insert: rop.insert,
+                    pred: internal_pred,
+                },
+                delta: 0,
+            };
+            Ok((external_op,internal_op))
+}
+
+fn handle_undo(internal_op: OpHandle, pending_diff: Option<PendingDiff>, undo_ops: Vec<InternalUndoOperation>, undoable: bool, pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>, all_undo_ops: &mut Vec<InternalUndoOperation>, new_objects: &mut HashSet<ObjectID>) {
+    if internal_op.is_make() {
+        new_objects.insert(internal_op.id.into());
+    }
+
+    let use_undo = undoable && !(new_objects.contains(&internal_op.obj));
+
+    if let Some(d) = pending_diff {
+        pending_diffs.entry(internal_op.obj).or_default().push(d);
+    }
+
+    if use_undo {
+        all_undo_ops.extend(undo_ops);
+    }                
 }
