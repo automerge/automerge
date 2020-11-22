@@ -1,6 +1,7 @@
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
+use std::convert::TryInto;
 
 #[test]
 fn test_should_be_empty_after_init() {
@@ -53,27 +54,24 @@ fn test_set_root_object_properties() {
         .unwrap()
         // Remove timestamp which is irrelevant to test
         .map(|mut cr| {
-            cr.time = None;
+            cr.time = 0;
             cr
         });
-    let expected_change = amp::Request {
-        actor: doc.actor_id,
+    let expected_change = amp::UncompressedChange {
+        actor_id: doc.actor_id,
+        start_op: 1,
         seq: 1,
-        version: 0,
-        time: None,
+        time: 0,
         message: Some("set root object".into()),
-        undoable: true,
-        deps: None,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Set,
-            obj: "_root".to_string(),
-            key: amp::RequestKey::Str("bird".to_string()),
-            child: None,
-            value: Some(amp::ScalarValue::Str("magpie".to_string())),
-            datatype: Some(amp::DataType::Undefined),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Str("magpie".to_string())),
+            obj: "_root".try_into().unwrap(),
+            key: "bird".into(),
             insert: false,
-        }]),
-        request_type: amp::RequestType::Change,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(change_request, Some(expected_change));
 }
@@ -103,35 +101,30 @@ fn it_should_create_nested_maps() {
         .unwrap()
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
-    let expected_change = amp::Request {
-        actor: doc.actor_id,
+    let expected_change = amp::UncompressedChange {
+        actor_id: doc.actor_id,
+        start_op: 1,
         seq: 1,
         time: change_request.time,
         message: None,
-        version: 0,
-        undoable: true,
-        request_type: amp::RequestType::Change,
-        deps: None,
-        ops: Some(vec![
+        deps: Vec::new(),
+        operations: vec![
             amp::Op {
-                action: amp::OpType::MakeMap,
-                obj: amp::ObjectID::Root.to_string(),
-                key: amp::RequestKey::Str("birds".into()),
-                child: Some(birds_id.to_string()),
-                datatype: None,
-                value: None,
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: amp::ObjectID::Root,
+                key: "birds".into(),
                 insert: false,
+                pred: Vec::new(),
             },
             amp::Op {
-                action: amp::OpType::Set,
-                obj: birds_id.to_string(),
-                key: amp::RequestKey::Str("wrens".into()),
-                child: None,
-                datatype: Some(amp::DataType::Undefined),
-                value: Some(amp::ScalarValue::F64(3.0)),
+                action: amp::OpType::Set(amp::ScalarValue::F64(3.0)),
+                obj: birds_id,
+                key: "wrens".into(),
                 insert: false,
+                pred: Vec::new(),
             },
-        ]),
+        ],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(change_request, expected_change);
 }
@@ -181,24 +174,21 @@ fn apply_updates_inside_nested_maps() {
     );
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id,
         seq: 2,
-        version: 0,
+        start_op: 3,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Set,
-            obj: birds_id.to_string(),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::F64(15.0)),
+            obj: birds_id,
             key: "sparrows".into(),
-            child: None,
-            value: Some(amp::ScalarValue::F64(15.0)),
             insert: false,
-            datatype: Some(amp::DataType::Undefined),
-        }]),
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req2, expected_change_request);
@@ -240,24 +230,21 @@ fn delete_keys_in_a_map() {
         }))
     );
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 2,
-        version: 0,
+        start_op: 3,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
+        deps: Vec::new(),
+        operations: vec![amp::Op {
             action: amp::OpType::Del,
-            obj: amp::ObjectID::Root.to_string(),
+            obj: amp::ObjectID::Root,
             key: "magpies".into(),
-            child: None,
-            value: None,
             insert: false,
-            datatype: None,
-        }]),
+            pred: vec![doc.actor_id.op_id_at(1)],
+        }],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req2, expected_change_request);
@@ -297,35 +284,30 @@ fn create_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id,
         seq: 1,
-        version: 0,
+        start_op: 1,
         time: req1.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![
+        deps: Vec::new(),
+        operations: vec![
             amp::Op {
-                action: amp::OpType::MakeList,
+                action: amp::OpType::Make(amp::ObjType::list()),
                 key: "birds".into(),
-                obj: amp::ObjectID::Root.to_string(),
-                child: Some(birds_id.to_string()),
-                value: None,
-                datatype: None,
+                obj: amp::ObjectID::Root,
                 insert: false,
+                pred: Vec::new(),
             },
             amp::Op {
-                action: amp::OpType::Set,
-                obj: birds_id.to_string(),
-                key: 0.into(),
-                child: None,
-                value: Some("chaffinch".into()),
+                action: amp::OpType::Set("chaffinch".into()),
+                obj: birds_id,
+                key: amp::ElementID::Head.into(),
                 insert: true,
-                datatype: Some(amp::DataType::Undefined),
+                pred: Vec::new(),
             },
-        ]),
+        ],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req1, expected_change_request);
@@ -365,24 +347,21 @@ fn apply_updates_inside_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 2,
-        version: 0,
+        start_op: 3,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Set,
-            obj: birds_id.to_string(),
-            key: 0.into(),
-            child: None,
-            value: Some("greenfinch".into()),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set("greenfinch".into()),
+            obj: birds_id,
+            key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            datatype: Some(amp::DataType::Undefined),
-        }]),
+            pred: vec![doc.actor_id.op_id_at(2)],
+        }],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req2, expected_change_request);
@@ -419,24 +398,21 @@ fn delete_list_elements() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 2,
-        version: 0,
+        start_op: 4,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
+        deps: Vec::new(),
+        operations: vec![amp::Op {
             action: amp::OpType::Del,
-            obj: birds_id.to_string(),
-            key: 0.into(),
-            child: None,
-            value: None,
+            obj: birds_id,
+            key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            datatype: None,
-        }]),
+            pred: vec![doc.actor_id.op_id_at(2)],
+        }],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req2, expected_change_request);
@@ -486,45 +462,39 @@ fn handle_counters_inside_maps() {
         )
     );
 
-    let expected_change_request_1 = amp::Request {
-        actor: doc.actor_id.clone(),
+    let expected_change_request_1 = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 1,
-        version: 0,
+        start_op: 1,
         time: req1.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Set,
-            obj: amp::ObjectID::Root.to_string(),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Counter(0)),
+            obj: amp::ObjectID::Root,
             key: "wrens".into(),
-            child: None,
-            value: Some(amp::ScalarValue::Counter(0)),
             insert: false,
-            datatype: Some(amp::DataType::Counter),
-        }]),
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request_2 = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 2,
-        version: 0,
+        start_op: 2,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Inc,
-            obj: amp::ObjectID::Root.to_string(),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Inc(1),
+            obj: amp::ObjectID::Root,
             key: "wrens".into(),
-            child: None,
-            value: Some(amp::ScalarValue::Int(1)),
             insert: false,
-            datatype: Some(amp::DataType::Counter),
-        }]),
+            pred: vec![doc.actor_id.op_id_at(1)],
+        }],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(req2, expected_change_request_2);
 }
@@ -578,56 +548,48 @@ fn handle_counters_inside_lists() {
 
     let counts_id = doc.get_object_id(&Path::root().key("counts")).unwrap();
 
-    let expected_change_request_1 = amp::Request {
-        actor: doc.actor_id.clone(),
+    let expected_change_request_1 = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 1,
-        version: 0,
         time: req1.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![
+        deps: Vec::new(),
+        start_op: 1,
+        operations: vec![
             amp::Op {
-                action: amp::OpType::MakeList,
-                obj: amp::ObjectID::Root.to_string(),
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: amp::ObjectID::Root,
                 key: "counts".into(),
-                child: Some(counts_id.to_string()),
                 insert: false,
-                value: None,
-                datatype: None,
+                pred: Vec::new(),
             },
             amp::Op {
-                action: amp::OpType::Set,
-                obj: counts_id.to_string(),
-                key: 0.into(),
-                child: None,
-                value: Some(amp::ScalarValue::Counter(1)),
+                action: amp::OpType::Set(amp::ScalarValue::Counter(1)),
+                obj: counts_id.clone(),
+                key: amp::ElementID::Head.into(),
                 insert: true,
-                datatype: Some(amp::DataType::Counter),
+                pred: Vec::new(),
             },
-        ]),
+        ],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request_2 = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
         seq: 2,
-        version: 0,
+        start_op: 3,
         time: req2.time,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Inc,
-            obj: counts_id.to_string(),
-            key: 0.into(),
-            child: None,
-            value: Some(amp::ScalarValue::Int(2)),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Inc(2),
+            obj: counts_id,
+            key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            datatype: Some(amp::DataType::Counter),
-        }]),
+            pred: vec![doc.actor_id.op_id_at(2)],
+        }],
+        extra_bytes: Vec::new(),
     };
     assert_eq!(req2, expected_change_request_2);
 }
@@ -659,4 +621,179 @@ fn refuse_to_overwrite_counter_value() {
             path: Path::root().key("counts")
         })
     );
+}
+
+#[test]
+fn test_sets_characters_in_text() {
+    let mut doc = Frontend::new();
+    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+        doc.add_change(LocalChange::set(
+            Path::root().key("text"),
+            Value::Text("some".chars().collect()),
+        ))?;
+        Ok(())
+    })
+    .unwrap()
+    .unwrap();
+
+    let request = doc
+        .change::<_, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("text").index(1),
+                Value::Primitive("a".into()),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
+
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
+        seq: 2,
+        start_op: 6,
+        time: request.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Str("a".into())),
+            obj: text_id,
+            key: doc.actor_id.op_id_at(3).into(),
+            insert: false,
+            pred: vec![doc.actor_id.op_id_at(3)],
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(request, expected_change_request);
+
+    let value = doc.get_value(&Path::root()).unwrap();
+    let expected_value: Value = Value::Map(
+        hashmap! {
+            "text".into() => Value::Text(vec!['s', 'a', 'm', 'e']),
+        },
+        amp::MapType::Map,
+    );
+    assert_eq!(value, expected_value);
+}
+
+#[test]
+fn test_inserts_characters_in_text() {
+    let mut doc = Frontend::new();
+    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+        doc.add_change(LocalChange::set(
+            Path::root().key("text"),
+            Value::Text("same".chars().collect()),
+        ))?;
+        Ok(())
+    })
+    .unwrap()
+    .unwrap();
+
+    let request = doc
+        .change::<_, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::insert(
+                Path::root().key("text").index(1),
+                Value::Primitive("h".into()),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
+
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
+        seq: 2,
+        start_op: 6,
+        time: request.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Str("h".into())),
+            obj: text_id,
+            key: doc.actor_id.op_id_at(2).into(),
+            insert: true,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(request, expected_change_request);
+
+    let value = doc.get_value(&Path::root()).unwrap();
+    let expected_value: Value = Value::Map(
+        hashmap! {
+            "text".into() => Value::Text(vec!['s', 'h', 'a', 'm', 'e']),
+        },
+        amp::MapType::Map,
+    );
+    assert_eq!(value, expected_value);
+}
+
+#[test]
+fn test_inserts_at_end_of_lists() {
+    let mut doc = Frontend::new();
+    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+        doc.add_change(LocalChange::set(
+            Path::root().key("birds"),
+            Value::Sequence(Vec::new()),
+        ))?;
+        Ok(())
+    })
+    .unwrap()
+    .unwrap();
+
+    let request = doc
+        .change::<_, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::insert(
+                Path::root().key("birds").index(0),
+                "greenfinch".into(),
+            ))?;
+            doc.add_change(LocalChange::insert(
+                Path::root().key("birds").index(1),
+                "bullfinch".into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let list_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
+
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
+        seq: 2,
+        start_op: 2,
+        time: request.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![
+            amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Str("greenfinch".into())),
+                obj: list_id.clone(),
+                key: amp::ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Str("bullfinch".into())),
+                obj: list_id,
+                key: doc.actor_id.op_id_at(2).into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+        ],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(request, expected_change_request);
+
+    let value = doc.get_value(&Path::root()).unwrap();
+    let expected_value: Value = Value::Map(
+        hashmap! {
+            "birds".into() => Value::Sequence(vec!["greenfinch".into(), "bullfinch".into()]),
+        },
+        amp::MapType::Map,
+    );
+    assert_eq!(value, expected_value);
 }

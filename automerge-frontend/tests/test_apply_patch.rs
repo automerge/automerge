@@ -6,15 +6,13 @@ use maplit::hashmap;
 fn set_object_root_properties() {
     let actor = amp::ActorID::random();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 1,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -48,15 +46,13 @@ fn reveal_conflicts_on_root_properties() {
             .as_bytes(),
     );
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 2,
         clock: hashmap! {
             actor1.clone() => 1,
             actor2.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -92,15 +88,13 @@ fn reveal_conflicts_on_root_properties() {
 fn create_nested_maps() {
     let actor = amp::ActorID::random();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 3,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -131,15 +125,13 @@ fn create_nested_maps() {
 fn apply_updates_inside_nested_maps() {
     let actor = amp::ActorID::random();
     let patch1 = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 2,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -164,15 +156,13 @@ fn apply_updates_inside_nested_maps() {
     let birds_id = frontend.get_object_id(&Path::root().key("birds")).unwrap();
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 3,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -217,16 +207,14 @@ fn apply_updates_inside_map_conflicts() {
             .as_bytes(),
     );
     let patch1 = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 2,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -275,16 +263,14 @@ fn apply_updates_inside_map_conflicts() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 1,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -333,15 +319,13 @@ fn delete_keys_in_maps() {
     let actor = amp::ActorID::random();
     let mut frontend = Frontend::new();
     let patch1 = amp::Patch {
-        version: 1,
         actor: None,
+        max_op: 2,
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -364,15 +348,13 @@ fn delete_keys_in_maps() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 3,
         deps: Vec::new(),
         clock: hashmap! {
             actor => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -394,15 +376,13 @@ fn create_lists() {
     let actor = amp::ActorID::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 2,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -411,7 +391,7 @@ fn create_lists() {
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0 }],
+                        edits: vec![amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() }],
                         props: hashmap!{
                             0 => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
@@ -435,15 +415,13 @@ fn apply_updates_inside_lists() {
     let actor = amp::ActorID::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 1,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -452,7 +430,7 @@ fn apply_updates_inside_lists() {
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0 }],
+                        edits: vec![amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() }],
                         props: hashmap!{
                             0 => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
@@ -466,15 +444,13 @@ fn apply_updates_inside_lists() {
     frontend.apply_patch(patch).unwrap();
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 3,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -519,17 +495,15 @@ fn apply_updates_inside_list_conflicts() {
     let other_actor = amp::ActorID::random();
 
     let patch1 = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 2,
         deps: Vec::new(),
         clock: hashmap! {
             other_actor.clone() => 1,
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -538,7 +512,7 @@ fn apply_updates_inside_list_conflicts() {
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: other_actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0}],
+                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: actor1.op_id_at(2).into()}],
                         props: hashmap!{
                             0 => hashmap!{
                                 actor1.op_id_at(2) => amp::Diff::Map(amp::MapDiff{
@@ -599,16 +573,14 @@ fn apply_updates_inside_list_conflicts() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 5,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -672,15 +644,13 @@ fn delete_list_elements() {
     let actor = amp::ActorID::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 3,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -689,7 +659,10 @@ fn delete_list_elements() {
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0 }, amp::DiffEdit::Insert { index: 1 }],
+                        edits: vec![
+                            amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() },
+                            amp::DiffEdit::Insert { index: 1, elem_id: actor.op_id_at(3).into() },
+                        ],
                         props: hashmap!{
                             0 => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
@@ -710,15 +683,13 @@ fn delete_list_elements() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 4,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -745,11 +716,9 @@ fn delete_list_elements() {
 fn apply_updates_at_different_levels_of_object_tree() {
     let actor = amp::ActorID::random();
     let patch1 = amp::Patch {
-        version: 1,
         clock: hashmap! {actor.clone() => 1},
-        can_undo: false,
-        can_redo: false,
         seq: None,
+        max_op: 6,
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -771,7 +740,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     actor.op_id_at(3) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(3).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0 }],
+                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: actor.op_id_at(4).into() }],
                         props: hashmap!{
                             0 => hashmap!{
                                 actor.op_id_at(4) => amp::Diff::Map(amp::MapDiff{
@@ -809,11 +778,9 @@ fn apply_updates_at_different_levels_of_object_tree() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         clock: hashmap! {actor.clone() => 2},
-        can_undo: false,
-        can_redo: false,
         seq: None,
+        max_op: 7,
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -874,15 +841,13 @@ fn test_text_objects() {
     let actor = amp::ActorID::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
-        version: 1,
         actor: None,
         seq: None,
+        max_op: 4,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -892,9 +857,9 @@ fn test_text_objects() {
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::Text,
                         edits: vec![
-                            amp::DiffEdit::Insert { index: 0 },
-                            amp::DiffEdit::Insert { index: 1 },
-                            amp::DiffEdit::Insert { index: 2 },
+                            amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() },
+                            amp::DiffEdit::Insert { index: 1, elem_id: actor.op_id_at(3).into() },
+                            amp::DiffEdit::Insert { index: 2, elem_id: actor.op_id_at(4).into() },
                         ],
                         props: hashmap!{
                             0 => hashmap!{
@@ -920,15 +885,13 @@ fn test_text_objects() {
     );
 
     let patch2 = amp::Patch {
-        version: 2,
         actor: None,
         seq: None,
+        max_op: 5,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 3,
         },
-        can_undo: false,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,

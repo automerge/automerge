@@ -1,20 +1,12 @@
 extern crate automerge_protocol as amp;
 use proptest::prelude::*;
-use std::str::FromStr;
-use std::convert::TryInto;
 
 fn arb_maptype() -> impl Strategy<Value = amp::MapType> {
-    prop_oneof![
-        Just(amp::MapType::Map),
-        Just(amp::MapType::Table),
-    ]
+    prop_oneof![Just(amp::MapType::Map), Just(amp::MapType::Table),]
 }
 
 fn arb_seqtype() -> impl Strategy<Value = amp::SequenceType> {
-    prop_oneof![
-        Just(amp::SequenceType::List),
-        Just(amp::SequenceType::Text),
-    ]
+    prop_oneof![Just(amp::SequenceType::List), Just(amp::SequenceType::Text),]
 }
 
 fn arb_objtype() -> impl Strategy<Value = amp::ObjType> {
@@ -28,7 +20,7 @@ fn arb_scalar_value() -> impl Strategy<Value = amp::ScalarValue> {
     prop_oneof![
         any::<String>().prop_map(amp::ScalarValue::Str),
         any::<i64>().prop_map(amp::ScalarValue::Int),
-         //This is necessary because we don't support integers larger than i64 in the JSON protocol
+        //This is necessary because we don't support integers larger than i64 in the JSON protocol
         //any::<i64>().prop_map(|i| amp::ScalarValue::Uint(i as u64)),
         any::<u64>().prop_map(amp::ScalarValue::Uint),
         any::<f64>().prop_map(amp::ScalarValue::F64),
@@ -42,7 +34,7 @@ fn arb_scalar_value() -> impl Strategy<Value = amp::ScalarValue> {
 
 fn arb_optype() -> impl Strategy<Value = amp::OpType> {
     prop_oneof![
-        arb_objtype().prop_map(amp::OpType::Make),        
+        arb_objtype().prop_map(amp::OpType::Make),
         Just(amp::OpType::Del),
         any::<i64>().prop_map(amp::OpType::Inc),
         arb_scalar_value().prop_map(amp::OpType::Set),
@@ -82,7 +74,7 @@ fn arb_changehash() -> impl Strategy<Value = amp::ChangeHash> {
     any::<[u8; 32]>().prop_map(amp::ChangeHash)
 }
 
-prop_compose!{
+prop_compose! {
     fn arb_op()
         (insert in any::<bool>(),
          action in arb_optype(),
@@ -99,7 +91,7 @@ prop_compose!{
     }
 }
 
-prop_compose!{
+prop_compose! {
     fn arb_change()
             (seq in any::<u64>(),
              actor_id in arb_actorid(),
@@ -123,7 +115,7 @@ prop_compose!{
 }
 
 /// We're roundtripping through json, which doesn't have a 32 bit float type or a uint type.
-/// This means that inputs with f32 values will round trip into 64 bit floats, and any 
+/// This means that inputs with f32 values will round trip into 64 bit floats, and any
 /// positive i64's will round trip into u64's. This function performs that normalisation on an
 /// existing change so  it can be compared with a round tripped change.
 fn normalize_change(change: &amp::UncompressedChange) -> amp::UncompressedChange {
@@ -137,28 +129,27 @@ fn normalize_change(change: &amp::UncompressedChange) -> amp::UncompressedChange
             }
             amp::OpType::Set(amp::ScalarValue::Int(i)) => {
                 let val = if *i > 0 {
-                    amp::ScalarValue::Uint((*i) as u64) 
+                    amp::ScalarValue::Uint((*i) as u64)
                 } else {
-                    amp::ScalarValue::Int(*i) 
+                    amp::ScalarValue::Int(*i)
                 };
                 amp::OpType::Set(val)
             }
             //amp::OpType::Set(amp::ScalarValue::Uint(u)) => {
-                //if *u > (i64::max_value() as u64) {
-                    //amp::OpType::Set(amp::ScalarValue::Uint(*u))
-                //} else {
-                    //amp::OpType::Set(amp::ScalarValue::Int((*u).try_into().unwrap()))
-                //}
+            //if *u > (i64::max_value() as u64) {
+            //amp::OpType::Set(amp::ScalarValue::Uint(*u))
+            //} else {
+            //amp::OpType::Set(amp::ScalarValue::Int((*u).try_into().unwrap()))
             //}
-            a => a.clone()
+            //}
+            a => a.clone(),
         };
         op.action = new_action;
     }
     result
 }
 
-
-proptest!{
+proptest! {
     #[test]
     fn test_round_trip_serialization(change in arb_change()) {
         let serialized = serde_json::to_string(&change)?;

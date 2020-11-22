@@ -134,7 +134,7 @@ impl Key {
     pub fn is_map_key(&self) -> bool {
         match self {
             Key::Map(_) => true,
-            Key::Seq(_) => false
+            Key::Seq(_) => false,
         }
     }
 
@@ -185,46 +185,44 @@ pub enum ScalarValue {
 }
 
 impl ScalarValue {
-
-    pub fn as_datatype(&self, datatype: DataType) -> Result<ScalarValue, error::InvalidScalarValue> {
+    pub fn as_datatype(
+        &self,
+        datatype: DataType,
+    ) -> Result<ScalarValue, error::InvalidScalarValue> {
         match (datatype, self) {
             (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i)),
-            (DataType::Counter, ScalarValue::Uint(u)) => {
-                match i64::try_from(*u) {
-                    Ok(i) => Ok(ScalarValue::Counter(i)),
-                    Err(_) => Err(error::InvalidScalarValue{
-                        raw_value: self.clone(),
-                        expected: "an integer".to_string(),
-                        unexpected: "an integer larger than i64::max_value".to_string(),
-                        datatype,
-                    }),
-                }
+            (DataType::Counter, ScalarValue::Uint(u)) => match i64::try_from(*u) {
+                Ok(i) => Ok(ScalarValue::Counter(i)),
+                Err(_) => Err(error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an integer".to_string(),
+                    unexpected: "an integer larger than i64::max_value".to_string(),
+                    datatype,
+                }),
             },
-            (DataType::Counter, v) => Err(error::InvalidScalarValue{
+            (DataType::Counter, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
                 expected: "an integer".to_string(),
                 unexpected: v.to_string(),
                 datatype,
             }),
             (DataType::Timestamp, ScalarValue::Int(i)) => Ok(ScalarValue::Timestamp(*i)),
-            (DataType::Timestamp, ScalarValue::Uint(u)) => {
-                match i64::try_from(*u) {
-                    Ok(i) => Ok(ScalarValue::Timestamp(i)),
-                    Err(_) => Err(error::InvalidScalarValue{
-                        raw_value: self.clone(),
-                        expected: "an integer".to_string(),
-                        unexpected: "an integer larger than i64::max_value".to_string(),
-                        datatype,
-                    }),
-                }
-            }
-            (DataType::Timestamp, v) => Err(error::InvalidScalarValue{
+            (DataType::Timestamp, ScalarValue::Uint(u)) => match i64::try_from(*u) {
+                Ok(i) => Ok(ScalarValue::Timestamp(i)),
+                Err(_) => Err(error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an integer".to_string(),
+                    unexpected: "an integer larger than i64::max_value".to_string(),
+                    datatype,
+                }),
+            },
+            (DataType::Timestamp, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
                 expected: "an integer".to_string(),
                 unexpected: v.to_string(),
                 datatype,
             }),
-            (DataType::Undefined, _) => Ok(self.clone())
+            (DataType::Undefined, _) => Ok(self.clone()),
         }
     }
 

@@ -1,7 +1,7 @@
+use super::read_field;
 use crate::{
     DataType, Key, MapType, ObjType, ObjectID, Op, OpID, OpType, ScalarValue, SequenceType,
 };
-use super::read_field;
 use serde::ser::SerializeStruct;
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
@@ -120,12 +120,16 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
                     RawOpType::Del => OpType::Del,
                     RawOpType::Set => {
-                        let raw_value = value.ok_or_else(|| Error::missing_field("value"))?.unwrap_or(ScalarValue::Null);
+                        let raw_value = value
+                            .ok_or_else(|| Error::missing_field("value"))?
+                            .unwrap_or(ScalarValue::Null);
                         let value = if let Some(datatype) = datatype {
-                            raw_value.as_datatype(datatype).map_err(|e| Error::invalid_value(
-                                Unexpected::Other(e.unexpected.as_str()),
-                                &e.expected.as_str(),
-                            ))?
+                            raw_value.as_datatype(datatype).map_err(|e| {
+                                Error::invalid_value(
+                                    Unexpected::Other(e.unexpected.as_str()),
+                                    &e.expected.as_str(),
+                                )
+                            })?
                         } else {
                             raw_value
                         };
@@ -336,7 +340,7 @@ mod tests {
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
-                })
+                }),
             },
             Scenario {
                 name: "Inc without counter",
@@ -353,7 +357,7 @@ mod tests {
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
-                })
+                }),
             },
             Scenario {
                 name: "Inc without value",
@@ -380,7 +384,7 @@ mod tests {
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
-                })
+                }),
             },
         ];
 
@@ -413,14 +417,15 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_obj(){
+    fn test_deserialize_obj() {
         let root: Op = serde_json::from_value(serde_json::json!({
             "action": "inc",
             "obj": "_root",
             "key": "somekey",
             "value": 1,
             "pred": []
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(root.obj, crate::ObjectID::Root);
 
         let opid: Op = serde_json::from_value(serde_json::json!({
@@ -429,8 +434,12 @@ mod tests {
             "key": "somekey",
             "value": 1,
             "pred": []
-        })).unwrap();
-        assert_eq!(opid.obj, crate::ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap());
+        }))
+        .unwrap();
+        assert_eq!(
+            opid.obj,
+            crate::ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()
+        );
 
         let invalid: Result<Op, serde_json::Error> = serde_json::from_value(serde_json::json!({
             "action": "inc",
@@ -443,12 +452,11 @@ mod tests {
             Ok(_) => panic!("Parsing an invalid object id should fail"),
             Err(e) => assert!(e.to_string().contains("A valid ObjectID")),
         }
-
     }
 
     #[test]
     fn test_serialize_key() {
-        let map_key = Op{
+        let map_key = Op {
             action: OpType::Inc(12),
             obj: ObjectID::Root,
             key: "somekey".into(),
@@ -459,10 +467,12 @@ mod tests {
         let expected: serde_json::Value = "somekey".into();
         assert_eq!(json.as_object().unwrap().get("key"), Some(&expected));
 
-        let elemid_key = Op{
+        let elemid_key = Op {
             action: OpType::Inc(12),
             obj: ObjectID::Root,
-            key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap().into(),
+            key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716")
+                .unwrap()
+                .into(),
             insert: false,
             pred: Vec::new(),
         };
@@ -472,53 +482,54 @@ mod tests {
     }
 
     #[test]
-    fn test_round_trips(){
+    fn test_round_trips() {
         let testcases = vec![
-            Op{
+            Op {
                 action: OpType::Set(ScalarValue::Uint(12)),
                 obj: ObjectID::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
-            Op{
+            Op {
                 action: OpType::Inc(12),
                 obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
-            Op{
+            Op {
                 action: OpType::Set(ScalarValue::Uint(12)),
                 obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
                 pred: vec![OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
             },
-            Op{
+            Op {
                 action: OpType::Inc(12),
                 obj: ObjectID::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
-            Op{
+            Op {
                 action: OpType::Set("seomthing".into()),
                 obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
-                key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap().into(),
+                key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716")
+                    .unwrap()
+                    .into(),
                 insert: false,
                 pred: vec![OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
             },
         ];
         for (testcase_num, testcase) in testcases.iter().enumerate() {
-            let serialized = serde_json::to_string(testcase).expect(
-                format!("Failed to serialize testcase {}", testcase_num).as_str()
-            );
-            let deserialized: Op = serde_json::from_str(&serialized).expect(
-                format!("Failed to deserialize testcase {}", testcase_num).as_str()
-            );
+            #[allow(clippy::expect_fun_call)]
+            let serialized = serde_json::to_string(testcase)
+                .expect(format!("Failed to serialize testcase {}", testcase_num).as_str());
+            #[allow(clippy::expect_fun_call)]
+            let deserialized: Op = serde_json::from_str(&serialized)
+                .expect(format!("Failed to deserialize testcase {}", testcase_num).as_str());
             assert_eq!(testcase, &deserialized, "Testcase {} failed", testcase_num);
         }
     }
-
 }

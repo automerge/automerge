@@ -1,78 +1,18 @@
-use crate::change_context::ChangeContext;
 use crate::error::InvalidChangeRequest;
-use crate::object::Object;
-use crate::value::{random_op_id, value_to_op_requests, Value};
+use crate::state_tree::{LocalOperationResult, ResolvedPath, SetOrInsertPayload, StateTree};
+use crate::value::Value;
+use crate::{Path, PathElement};
 use automerge_protocol as amp;
-use maplit::hashmap;
-use std::{collections::HashMap, fmt, rc::Rc};
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;
     fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest>;
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PathElement {
-    Key(String),
-    Index(usize),
-}
-
-impl PathElement {
-    pub(crate) fn to_request_key(&self) -> amp::RequestKey {
-        match self {
-            PathElement::Key(s) => amp::RequestKey::Str(s.into()),
-            PathElement::Index(i) => amp::RequestKey::Num(*i as u64),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Path(Vec<PathElement>);
-
-impl Path {
-    pub fn root() -> Path {
-        Path(Vec::new())
-    }
-
-    pub fn index(mut self, index: usize) -> Self {
-        self.0.push(PathElement::Index(index));
-        self
-    }
-
-    pub fn key<S: Into<String>>(mut self, key: S) -> Path {
-        self.0.push(PathElement::Key(key.into()));
-        self
-    }
-
-    pub fn parent(&self) -> Self {
-        if self.0.is_empty() {
-            Path(Vec::new())
-        } else {
-            let mut new_path = self.0.clone();
-            new_path.pop();
-            Path(new_path)
-        }
-    }
-
-    /// Get the final component of the path, if any
-    pub(crate) fn name(&self) -> Option<&PathElement> {
-        self.0.last()
-    }
-}
-
-impl fmt::Display for PathElement {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PathElement::Key(k) => write!(f, "{}", k),
-            PathElement::Index(i) => write!(f, "{}", i),
-        }
-    }
-}
-
 pub(crate) enum LocalOperation {
     Set(Value),
     Delete,
-    Increment(i64),
+    Increment(u32),
     Insert(Value),
 }
 
@@ -107,7 +47,7 @@ impl LocalChange {
     }
 
     /// Increment the counter at path by a (possibly negative) amount `by`
-    pub fn increment_by(path: Path, by: i64) -> LocalChange {
+    pub fn increment_by(path: Path, by: u32) -> LocalChange {
         LocalChange {
             path,
             operation: LocalOperation::Increment(by),
@@ -127,22 +67,27 @@ impl LocalChange {
 /// captures the changes that the mutation closure is making.
 ///
 /// For each operation in the mutation closure the `MutationTracker` generates
-/// a diff and immediately applies it to the `ChangeContext` it is constructed
+/// a diff and immediately applies it to the `StateTree` it is constructed
 /// with. It also adds the change to a set of operations. This set of operations
 /// is used to generate a `ChangeRequest` once the closure is completed.
-///
-/// If the mutation closure is successful then the changes it has enacted can
-/// be applied using `ChangeContext::commit`
-pub struct MutationTracker<'a, 'b> {
-    change_context: &'a mut ChangeContext<'b>,
-    ops: Vec<amp::Op>,
+pub struct MutationTracker {
+    pub(crate) state: StateTree,
+    pub(crate) ops: Vec<amp::Op>,
+    pub max_op: u64,
+    actor_id: amp::ActorID,
 }
 
-impl<'a, 'b> MutationTracker<'a, 'b> {
-    pub fn new(change_context: &'a mut ChangeContext<'b>) -> MutationTracker<'a, 'b> {
+impl MutationTracker {
+    pub(crate) fn new(
+        state_tree: StateTree,
+        max_op: u64,
+        actor_id: amp::ActorID,
+    ) -> MutationTracker {
         MutationTracker {
-            change_context,
+            state: state_tree,
             ops: Vec::new(),
+            max_op,
+            actor_id,
         }
     }
 
@@ -152,191 +97,6 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
         } else {
             None
         }
-    }
-
-    fn parent_object<'c>(&'a self, path: &'c Path) -> Option<Rc<Object>> {
-        self.value_for_path(&path.parent())
-    }
-
-    fn value_for_path<'c>(&'a self, path: &'c Path) -> Option<Rc<Object>> {
-        let mut stack = path.clone().0;
-        stack.reverse();
-        let mut current_obj: Rc<Object> = self
-            .change_context
-            .value_for_object_id(&amp::ObjectID::Root)
-            .unwrap();
-        while let Some(next_elem) = stack.pop() {
-            match (next_elem, &*current_obj) {
-                (PathElement::Key(ref k), Object::Map(_, ref vals, _)) => {
-                    if let Some(target) = vals.get(k) {
-                        current_obj = Rc::new(target.default_value().borrow().clone());
-                    } else {
-                        return None;
-                    }
-                }
-                (PathElement::Index(i), Object::Sequence(_, vals, _)) => {
-                    if let Some(Some(target)) = vals.get(i) {
-                        current_obj = Rc::new(target.default_value().borrow().clone());
-                    } else {
-                        return None;
-                    }
-                }
-                _ => return None,
-            }
-        }
-        Some(current_obj)
-    }
-
-    /// Given `subdiff` which is intended to be applied at the object pointed
-    /// to by `path`, construct a diff which starts at the root object and
-    /// contains all the diffs between the root and the target path.
-    ///
-    /// For example, given an object structure like the following:
-    ///
-    /// ```json
-    /// {
-    ///     birds: [{name: magpie, flightless: false}]
-    /// }
-    /// ```
-    ///
-    /// And a diff like this, which is intended to be applied to the inner object:
-    ///
-    /// ```json
-    /// {
-    ///     {likes: "shiny things"}
-    /// }
-    /// ```
-    ///
-    /// We produce a diff like this:
-    ///
-    /// ```json
-    /// {
-    ///     objectId: '_root',
-    ///     type: 'object',
-    ///     props: {
-    ///         birds: {
-    ///             <OPID>: {
-    ///                 objectId: <birds list object ID>,
-    ///                 type: 'list',
-    ///                 props: {
-    ///                     <OPID>: {
-    ///                         0: {
-    ///                             objectId: <magbie object ID>,
-    ///                             type: 'object',
-    ///                             props: {
-    ///                                 <OPID>: {
-    ///                                     likes: "shiny things"
-    ///                                 }
-    ///                             }
-    ///                         }
-    ///                     }
-    ///                 }
-    ///             }
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// The OPIDs at each step are autogenerated.
-    fn diff_at_path<'c>(&'a self, path: &'c Path, subdiff: amp::Diff) -> Option<amp::Diff> {
-        // This code duplicates a lot of logic from the `value_for_path` method.
-        // This is because it needs to build up a set of intermediate
-        // values to build diffs out of as it traverses the path
-
-        // We'll use these once we've reached the end of the path to generate
-        // the enclosing diffs
-        #[derive(Debug)]
-        enum Intermediate {
-            Map(amp::ObjectID, amp::MapType, String, Option<amp::OpID>),
-            Seq(amp::ObjectID, amp::SequenceType, usize, Option<amp::OpID>),
-        };
-        let mut intermediates: Vec<Intermediate> = Vec::new();
-
-        // This is just the logic for reducing the path
-        let mut stack = path.0.clone();
-        stack.reverse();
-        let mut current_obj: Rc<Object> = self
-            .change_context
-            .value_for_object_id(&amp::ObjectID::Root)
-            .unwrap();
-        while let Some(next_elem) = stack.pop() {
-            match (&next_elem, &*current_obj) {
-                (PathElement::Key(ref k), Object::Map(oid, ref vals, map_type)) => {
-                    if let Some(target) = vals.get(k) {
-                        intermediates.push(Intermediate::Map(
-                            oid.clone(),
-                            *map_type,
-                            k.clone(),
-                            current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
-                        ));
-                        current_obj = Rc::new(target.default_value().borrow().clone());
-                    } else {
-                        // This key does not exist, but it's the last element in
-                        // the path, so we can still make a diff as we're
-                        // creating this key
-                        if stack.is_empty() {
-                            intermediates.push(Intermediate::Map(
-                                oid.clone(),
-                                *map_type,
-                                k.clone(),
-                                current_obj.default_op_id_for_key(amp::RequestKey::Str(k.clone())),
-                            ))
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-                (PathElement::Index(i), Object::Sequence(oid, vals, seq_type)) => {
-                    if let Some(Some(target)) = vals.get(*i) {
-                        intermediates.push(Intermediate::Seq(
-                            oid.clone(),
-                            *seq_type,
-                            *i,
-                            current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
-                        ));
-                        current_obj = Rc::new(target.default_value().borrow().clone());
-                    } else {
-                        // This index does not exist, but it's the last element
-                        // in the path so we can create a diff for it as we're
-                        // setting this index
-                        // TODO should we check if this is an `insert` subdiff
-                        // first?
-                        if stack.is_empty() {
-                            intermediates.push(Intermediate::Seq(
-                                oid.clone(),
-                                *seq_type,
-                                *i,
-                                current_obj.default_op_id_for_key(amp::RequestKey::Num(*i as u64)),
-                            ))
-                        } else {
-                            return None;
-                        }
-                    }
-                }
-                _ => return None,
-            }
-        }
-
-        // Okay, we've followed the path and built the intermediate states we
-        // need, now we can use them to create a set of diffs. We rfold
-        // because we start with the smallest diff and keep enclosing it in
-        // larger ones
-        let diff = intermediates
-            .into_iter()
-            .rfold(subdiff, |diff_so_far, intermediate| match intermediate {
-                Intermediate::Map(oid, map_type, k, opid) => amp::Diff::Map(amp::MapDiff {
-                    object_id: oid,
-                    obj_type: map_type,
-                    props: hashmap! {k => hashmap!{opid.unwrap_or_else(random_op_id) => diff_so_far}},
-                }),
-                Intermediate::Seq(oid, seq_type, index, opid) => amp::Diff::Seq(amp::SeqDiff {
-                    object_id: oid,
-                    obj_type: seq_type,
-                    edits: Vec::new(),
-                    props: hashmap! {index => hashmap!{opid.unwrap_or_else(random_op_id) => diff_so_far}},
-                }),
-            });
-        Some(diff)
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
@@ -354,221 +114,242 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
             }),
         }
     }
+
+    fn apply_state_change(&mut self, change: LocalOperationResult) {
+        self.state = change.new_state;
+        self.max_op += change.new_ops.len() as u64;
+        self.ops.extend(change.new_ops);
+    }
 }
 
-impl<'a, 'b> MutableDocument for MutationTracker<'a, 'b> {
+impl MutableDocument for MutationTracker {
     fn value_at_path(&self, path: &Path) -> Option<Value> {
-        self.value_for_path(path).map(|o| o.value())
+        self.state.resolve_path(path).map(|r| r.default_value())
     }
 
     fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest> {
         match &change.operation {
             LocalOperation::Set(value) => {
-                if change.path == Path::root() {
-                    return self.wrap_root_assignment(value);
-                }
-                if let Some(o) = self.value_for_path(&change.path) {
-                    if let Object::Primitive(amp::ScalarValue::Counter(_)) = &*o {
+                //TODO double resolving is ugly here
+                if let Some(target) = self.state.resolve_path(&change.path) {
+                    if let ResolvedPath::Counter(_) = target {
                         return Err(InvalidChangeRequest::CannotOverwriteCounter {
-                            path: change.path.clone(),
+                            path: change.path,
                         });
                     }
                 };
-                if let Some(oid) = self.parent_object(&change.path).and_then(|o| o.id()) {
-                    let (ops, difflink) = value_to_op_requests(
-                        oid,
-                        change
-                            .path
-                            .name()
-                            .ok_or_else(|| InvalidChangeRequest::NoSuchPathError {
-                                path: change.path.clone(),
-                            })?
-                            .clone(),
-                        &value,
-                        false,
-                    );
-                    let diff = self.diff_at_path(&change.path, difflink).unwrap(); //TODO fix unwrap
-                                                                                   // TODO: check this unwrap is okay
-                                                                                   // specifically:
-                                                                                   // - Check the path exists
-                                                                                   // - Check that the target object is compatible
-                    self.change_context.apply_diff(&diff).unwrap();
-                    self.ops.extend(ops.into_iter());
-                    Ok(())
+                if let Some(name) = change.path.name() {
+                    if let Some(parent) = self.state.resolve_path(&change.path.parent()) {
+                        let payload = SetOrInsertPayload {
+                            start_op: self.max_op + 1,
+                            actor: &self.actor_id.clone(),
+                            value,
+                        };
+                        match (name, parent) {
+                            (PathElement::Key(ref k), ResolvedPath::Root(ref root_target)) => {
+                                self.apply_state_change(root_target.set_key(k, payload));
+                                Ok(())
+                            }
+                            (PathElement::Key(ref k), ResolvedPath::Map(ref maptarget)) => {
+                                self.apply_state_change(maptarget.set_key(k, payload));
+                                Ok(())
+                            }
+                            (PathElement::Key(ref k), ResolvedPath::Table(ref tabletarget)) => {
+                                self.apply_state_change(tabletarget.set_key(k, payload));
+                                Ok(())
+                            }
+                            // In this case we are trying to modify a key in something which is not
+                            // an object or a table, so the path does not exist
+                            (PathElement::Key(_), _) => {
+                                Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                            }
+                            (PathElement::Index(i), ResolvedPath::List(ref list_target)) => {
+                                self.apply_state_change(list_target.set(*i, payload)?);
+                                Ok(())
+                            }
+                            (PathElement::Index(i), ResolvedPath::Text(ref text)) => match value {
+                                Value::Primitive(amp::ScalarValue::Str(s)) => {
+                                    if s.len() == 1 {
+                                        let payload = SetOrInsertPayload {
+                                            start_op: self.max_op + 1,
+                                            actor: &self.actor_id.clone(),
+                                            value: s.chars().next().unwrap(),
+                                        };
+                                        self.apply_state_change(text.set(*i, payload)?);
+                                        Ok(())
+                                    } else {
+                                        Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                            path: change.path.clone(),
+                                            object: value.clone(),
+                                        })
+                                    }
+                                }
+                                _ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                    path: change.path.clone(),
+                                    object: value.clone(),
+                                }),
+                            },
+                            (PathElement::Index(_), _) => {
+                                Err(InvalidChangeRequest::InsertWithNonSequencePath {
+                                    path: change.path.clone(),
+                                })
+                            }
+                        }
+                    } else {
+                        Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    }
                 } else {
-                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    self.wrap_root_assignment(value)
                 }
             }
             LocalOperation::Delete => {
-                if self.value_for_path(&change.path).is_some() {
-                    // Unwrap is fine as we know the parent object exists from the above
-                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
-                    let op = amp::Op {
-                        action: amp::OpType::Del,
-                        // This unwrap is fine because we know the parent
-                        // is a container
-                        obj: parent_obj.id().unwrap().to_string(),
-                        // Is this unwrap fine? I think so as we intercept assignments
-                        // to the root path at the top of this function so we know
-                        // this path has at least one element
-                        key: change.path.name().unwrap().to_request_key(),
-                        child: None,
-                        insert: false,
-                        value: None,
-                        datatype: None,
-                    };
-                    let diff = match &*parent_obj {
-                        Object::Map(oid, _, map_type) => amp::Diff::Map(amp::MapDiff {
-                            object_id: oid.clone(),
-                            obj_type: *map_type,
-                            props: hashmap! {change.path.name().unwrap().to_string() => HashMap::new()},
-                        }),
-                        Object::Sequence(oid, _, seq_type) => {
-                            if let Some(PathElement::Index(i)) = change.path.name() {
-                                amp::Diff::Seq(amp::SeqDiff {
-                                    object_id: oid.clone(),
-                                    obj_type: *seq_type,
-                                    edits: vec![amp::DiffEdit::Remove { index: *i }],
-                                    props: HashMap::new(),
-                                })
-                            } else {
+                if let Some(name) = change.path.name() {
+                    if let Some(pr) = self.state.resolve_path(&change.path.parent()) {
+                        let state_change = match pr {
+                            ResolvedPath::Counter(_) => {
                                 return Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path,
-                                });
+                                })
                             }
-                        }
-                        Object::Primitive(..) => panic!("parent object was primitive"),
-                    };
-                    // TODO fix unwrap
-                    let diff = self.diff_at_path(&change.path.parent(), diff).unwrap();
-                    self.ops.push(op);
-                    // TODO check this unwrap is okay
-                    self.change_context.apply_diff(&diff).unwrap();
-                    Ok(())
+                            ResolvedPath::List(l) => match name {
+                                PathElement::Index(i) => l.remove(*i)?,
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                            ResolvedPath::Text(t) => match name {
+                                PathElement::Index(i) => t.remove(*i)?,
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                            ResolvedPath::Primitive(_) => {
+                                return Err(InvalidChangeRequest::NoSuchPathError {
+                                    path: change.path,
+                                })
+                            }
+                            ResolvedPath::Map(m) => match name {
+                                PathElement::Key(k) => m.delete_key(k),
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                            ResolvedPath::Table(t) => match name {
+                                PathElement::Key(k) => t.delete_key(k),
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                            ResolvedPath::Character(_) => {
+                                return Err(InvalidChangeRequest::NoSuchPathError {
+                                    path: change.path,
+                                })
+                            }
+                            ResolvedPath::Root(r) => match name {
+                                PathElement::Key(k) => r.delete_key(k),
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                        };
+                        self.apply_state_change(state_change);
+                        Ok(())
+                    } else {
+                        Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    }
                 } else {
-                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    Err(InvalidChangeRequest::CannotDeleteRootObject)
                 }
             }
             LocalOperation::Increment(by) => {
-                if let Some(val) = self.value_for_path(&change.path) {
-                    let current_val = match &*val {
-                        Object::Primitive(amp::ScalarValue::Counter(i)) => i,
-                        _ => {
-                            return Err(InvalidChangeRequest::IncrementForNonCounterObject {
-                                path: change.path,
-                            })
+                if change.path.name().is_some() {
+                    if let Some(pr) = self.state.resolve_path(&change.path) {
+                        match pr {
+                            ResolvedPath::Counter(counter_target) => {
+                                self.apply_state_change(counter_target.increment(*by as i64));
+                                Ok(())
+                            }
+                            _ => Err(InvalidChangeRequest::IncrementForNonCounterObject {
+                                path: change.path.clone(),
+                            }),
                         }
-                    };
-                    // Unwrap is fine as we know the parent object exists from the above
-                    let parent_obj = self.value_for_path(&change.path.parent()).unwrap();
-                    let op = amp::Op {
-                        action: amp::OpType::Inc,
-                        // This unwrap is fine because we know the parent
-                        // is a container
-                        obj: parent_obj.id().unwrap().to_string(),
-                        key: change.path.name().unwrap().to_request_key(),
-                        child: None,
-                        insert: false,
-                        value: Some(amp::ScalarValue::Int(*by)),
-                        datatype: Some(amp::DataType::Counter),
-                    };
-                    let diff = amp::Diff::Value(amp::ScalarValue::Counter(current_val + by));
-                    let diff = self.diff_at_path(&change.path, diff).unwrap();
-                    self.ops.push(op);
-                    // TODO fix unwrap
-                    self.change_context.apply_diff(&diff).unwrap();
-                    Ok(())
+                    } else {
+                        Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    }
                 } else {
-                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    Err(InvalidChangeRequest::IncrementForNonCounterObject {
+                        path: change.path.clone(),
+                    })
                 }
             }
             LocalOperation::Insert(value) => {
-                let index = match change.path.name() {
-                    Some(PathElement::Index(i)) => i,
-                    _ => {
-                        return Err(InvalidChangeRequest::InsertWithNonSequencePath {
-                            path: change.path,
-                        })
-                    }
-                };
-                if let Some(parent) = self.value_for_path(&change.path.parent()) {
-                    match &*parent {
-                        // TODO make this error more descriptive
-                        Object::Map(..) | Object::Primitive(..) => {
-                            Err(InvalidChangeRequest::InsertForNonSequenceObject {
+                if let Some(name) = change.path.name() {
+                    let index = match name {
+                        PathElement::Index(i) => i,
+                        _ => {
+                            return Err(InvalidChangeRequest::InsertWithNonSequencePath {
                                 path: change.path,
                             })
                         }
-                        Object::Sequence(oid, vals, seq_type) => {
-                            if *index > vals.len() {
-                                return Err(InvalidChangeRequest::InsertPastEndOfSequence {
-                                    path: change.path.clone(),
-                                    sequence_length: vals.len() as u64,
-                                });
+                    };
+                    if let Some(parent) = self.state.resolve_path(&change.path.parent()) {
+                        match (parent, value) {
+                            (ResolvedPath::List(list_target), _) => {
+                                let payload = SetOrInsertPayload {
+                                    start_op: self.max_op + 1,
+                                    actor: &self.actor_id.clone(),
+                                    value,
+                                };
+                                self.apply_state_change(list_target.insert(*index, payload)?);
+                                Ok(())
                             }
-                            let (ops, diff) = value_to_op_requests(
-                                oid.clone(),
-                                change
-                                    .path
-                                    .name()
-                                    .ok_or_else(|| InvalidChangeRequest::NoSuchPathError {
-                                        path: change.path.clone(),
-                                    })?
-                                    .clone(),
-                                &value,
-                                true,
-                            );
-                            let seqdiff = amp::Diff::Seq(amp::SeqDiff {
-                                object_id: oid.clone(),
-                                obj_type: *seq_type,
-                                edits: vec![amp::DiffEdit::Insert { index: *index }],
-                                props: hashmap! {
-                                    *index => hashmap!{
-                                        random_op_id() => diff,
+                            (ResolvedPath::Text(text_target), val) => match val {
+                                Value::Primitive(amp::ScalarValue::Str(s)) => {
+                                    if s.len() == 1 {
+                                        let payload = SetOrInsertPayload {
+                                            start_op: self.max_op + 1,
+                                            actor: &self.actor_id.clone(),
+                                            value: s.chars().next().unwrap(),
+                                        };
+                                        self.apply_state_change(
+                                            text_target.insert(*index, payload)?,
+                                        );
+                                        Ok(())
+                                    } else {
+                                        Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                            path: change.path,
+                                            object: value.clone(),
+                                        })
                                     }
-                                },
-                            });
-                            //TODO fix unwrap
-                            let diff = self.diff_at_path(&change.path.parent(), seqdiff).unwrap();
-                            self.ops.extend(ops);
-                            //TODO fix unwrap
-                            self.change_context.apply_diff(&diff).unwrap();
-                            Ok(())
+                                }
+                                _ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                    path: change.path,
+                                    object: value.clone(),
+                                }),
+                            },
+                            _ => Err(InvalidChangeRequest::NoSuchPathError {
+                                path: change.path.clone(),
+                            }),
                         }
+                    } else {
+                        Err(InvalidChangeRequest::InsertForNonSequenceObject { path: change.path })
                     }
                 } else {
-                    Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                    Err(InvalidChangeRequest::NoSuchPathError {
+                        path: change.path.clone(),
+                    })
                 }
             }
         }
     }
-}
-
-pub(crate) fn resolve_path(
-    path: &Path,
-    objects: &HashMap<amp::ObjectID, Rc<Object>>,
-) -> Option<Rc<Object>> {
-    let mut stack = path.clone().0;
-    stack.reverse();
-    let mut current_obj: Rc<Object> = objects.get(&amp::ObjectID::Root).unwrap().clone();
-    while let Some(next_elem) = stack.pop() {
-        match (next_elem, &*current_obj) {
-            (PathElement::Key(ref k), Object::Map(_, ref vals, _)) => {
-                if let Some(target) = vals.get(k) {
-                    current_obj = Rc::new(target.default_value().borrow().clone());
-                } else {
-                    return None;
-                }
-            }
-            (PathElement::Index(i), Object::Sequence(_, vals, _)) => {
-                if let Some(Some(target)) = vals.get(i) {
-                    current_obj = Rc::new(target.default_value().borrow().clone());
-                } else {
-                    return None;
-                }
-            }
-            _ => return None,
-        }
-    }
-    Some(current_obj)
 }

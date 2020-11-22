@@ -1,5 +1,5 @@
-use crate::mutation::Path;
 use crate::value::Value;
+use crate::Path;
 use automerge_protocol as amp;
 use automerge_protocol::ObjectID;
 use std::error::Error;
@@ -44,8 +44,12 @@ impl fmt::Display for InvalidInitialStateError {
 
 impl Error for InvalidInitialStateError {}
 
+//TODO Most of these errors should have paths associated with them to make it
+//easier to understand where things are going wrong
 #[derive(Error, Debug, PartialEq)]
 pub enum InvalidPatch {
+    #[error("Patch did not begin as a map with root object ID")]
+    PatchDidNotBeginAtRoot,
     #[error("Mismatched sequence number, expected: {expected} but got {actual}")]
     MismatchedSequenceNumber { expected: u64, actual: u64 },
     #[error("Received a diff inserting a non text object in a text object. Target object id was {object_id}, diff was {diff:?}")]
@@ -53,14 +57,31 @@ pub enum InvalidPatch {
         object_id: ObjectID,
         diff: amp::Diff,
     },
+    #[error(
+        "Received a diff for a character in a text object which created more than one character"
+    )]
+    InsertMultipleCharsInTextChar,
     #[error("Received a diff which had multiple values for a key in a table. Table id was {table_id}, diff was {diff:?}")]
     ConflictsReceivedForTableKey { table_id: ObjectID, diff: amp::Diff },
-    #[error("Patch contained a diff which expected object with ID {object_id} to be {expected_type:?} but we think it is {actual_type:?}")]
+    #[error("Patch contained a diff which expected object with ID {object_id:?} to be {patch_expected_type:?} but we think it is {actual_type:?}")]
     MismatchingObjectType {
         object_id: ObjectID,
-        expected_type: amp::ObjType,
+        patch_expected_type: Option<amp::ObjType>,
         actual_type: Option<amp::ObjType>,
     },
+    #[error("Patch referenced an object id {patch_expected_id:?} at a path where we ecpected {actual_id:?}")]
+    MismatchingObjectIDs {
+        patch_expected_id: Option<ObjectID>,
+        actual_id: ObjectID,
+    },
+    #[error("Patch attempted to reference an index which did not exist for object {object_id}")]
+    InvalidIndex { object_id: ObjectID, index: usize },
+    #[error("Patch sent us a diff which referenced an object which does not exist but had no details on how to create it")]
+    UnchangedDiffForNonExistentObject,
+    #[error("The patch tried to create an object but specified no value for the new object")]
+    DiffCreatedObjectWithNoValue,
+    #[error("The patch contained a diff with a list edit which referenced the '_head' of a list, rather than a specific element ID")]
+    DiffEditWithHeadElemID,
 }
 
 #[derive(Error, Debug, PartialEq)]
@@ -79,4 +100,20 @@ pub enum InvalidChangeRequest {
     InsertForNonSequenceObject { path: Path },
     #[error("attempted to insert past the end of a sequence, path was {path:?}, max length of sequence is {sequence_length}")]
     InsertPastEndOfSequence { path: Path, sequence_length: u64 },
+    #[error("attempted to insert something into a text object which is not a character, object: {object:?}")]
+    InsertNonTextInTextObject { path: Path, object: Value },
+    #[error("attmpted to delete root object")]
+    CannotDeleteRootObject,
+    #[error("Attempted to access a missing index")]
+    MissingIndexError {
+        #[from]
+        source: MissingIndexError,
+    },
+}
+
+#[derive(Error, Debug, PartialEq)]
+#[error("Attempted to access index {missing_index} in a collection with max index: {size_of_collection}")]
+pub struct MissingIndexError {
+    pub missing_index: usize,
+    pub size_of_collection: usize,
 }

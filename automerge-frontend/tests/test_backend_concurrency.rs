@@ -17,9 +17,6 @@ fn use_version_and_sequence_number_from_backend() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        version: 3,
-        can_undo: false,
-        can_redo: false,
         clock: hashmap! {
             doc.actor_id.clone() => 4,
             remote_actor1 => 11,
@@ -35,6 +32,7 @@ fn use_version_and_sequence_number_from_backend() {
                 }
             },
         })),
+        max_op: 4,
     };
 
     // There were no in flight requests so the doc state should be reconciled
@@ -54,24 +52,21 @@ fn use_version_and_sequence_number_from_backend() {
         .unwrap()
         .unwrap();
 
-    let expected_change_request = amp::Request {
-        actor: doc.actor_id,
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id,
         seq: 5,
+        start_op: 5,
         time: req.time,
-        version: 3,
         message: None,
-        undoable: true,
-        deps: None,
-        request_type: amp::RequestType::Change,
-        ops: Some(vec![amp::Op {
-            action: amp::OpType::Set,
-            obj: amp::ObjectID::Root.to_string(),
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Int(1)),
+            obj: amp::ObjectID::Root,
             key: "partridges".into(),
             insert: false,
-            value: Some(amp::ScalarValue::Int(1)),
-            datatype: Some(amp::DataType::Undefined),
-            child: None,
-        }]),
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
     };
 
     assert_eq!(req, expected_change_request);
@@ -114,9 +109,7 @@ fn remove_pending_requests_once_handled() {
         clock: hashmap! {
             doc.actor_id.clone() => 1,
         },
-        can_undo: true,
-        can_redo: false,
-        version: 1,
+        max_op: 4,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -148,9 +141,7 @@ fn remove_pending_requests_once_handled() {
         clock: hashmap! {
             doc.actor_id.clone() => 2,
         },
-        can_undo: true,
-        can_redo: false,
-        version: 2,
+        max_op: 5,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -177,7 +168,6 @@ fn remove_pending_requests_once_handled() {
         })
     );
 
-    assert_eq!(doc.version, 2);
     assert_eq!(doc.seq, 2);
 }
 
@@ -205,12 +195,10 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     doc.apply_patch(amp::Patch {
         actor: None,
         seq: None,
-        version: 1,
+        max_op: 10,
         clock: hashmap! {
             remote.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -242,9 +230,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             doc.actor_id.clone() => 2,
             remote => 1,
         },
-        can_undo: true,
-        can_redo: false,
-        version: 2,
+        max_op: 11,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -270,7 +256,6 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     );
 
     assert!(doc.in_flight_requests().is_empty());
-    assert_eq!(doc.version, 2);
     assert_eq!(doc.seq, 2);
 }
 
@@ -291,13 +276,11 @@ fn dont_allow_out_of_order_request_patches() {
     let result = doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(2),
-        version: 2,
+        max_op: 8,
         clock: hashmap! {
             doc.actor_id.clone() => 2,
         },
         deps: Vec::new(),
-        can_undo: true,
-        can_redo: false,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
             obj_type: amp::MapType::Map,
@@ -339,12 +322,10 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(1),
-        version: 1,
+        max_op: 1,
         clock: hashmap! {
             doc.actor_id.clone() => 1,
         },
-        can_undo: true,
-        can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectID::Root,
@@ -354,7 +335,7 @@ fn handle_concurrent_insertions_into_lists() {
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0 }],
+                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: doc.actor_id.op_id_at(1).into() }],
                         props: hashmap!{
                             0 => hashmap!{
                                 random_op_id() => amp::Diff::Value("goldfinch".into())
@@ -402,13 +383,11 @@ fn handle_concurrent_insertions_into_lists() {
     // Apply a patch which does not take effect because we're still waiting
     // for the in flight requests to be responded to
     doc.apply_patch(amp::Patch {
-        version: 3,
         clock: hashmap! {
             doc.actor_id.clone() => 1,
             remote.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 3,
         actor: None,
         seq: None,
         deps: Vec::new(),
@@ -420,7 +399,7 @@ fn handle_concurrent_insertions_into_lists() {
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 1 }],
+                        edits: vec![amp::DiffEdit::Insert{ index: 1, elem_id: remote.op_id_at(1).into()}],
                         props: hashmap!{
                             1 => hashmap!{
                                 remote.op_id_at(1) => amp::Diff::Value("bullfinch".into())
@@ -445,13 +424,11 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(2),
-        version: 3,
+        max_op: 3,
         clock: hashmap!{
             doc.actor_id.clone() => 2,
             remote => 1,
         },
-        can_undo: true,
-        can_redo: false,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff{
             object_id: amp::ObjectID::Root,
@@ -461,7 +438,10 @@ fn handle_concurrent_insertions_into_lists() {
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id,
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0 }, amp::DiffEdit::Insert{ index: 2 }],
+                        edits: vec![
+                            amp::DiffEdit::Insert { index: 0, elem_id: doc.actor_id.op_id_at(2).into() },
+                            amp::DiffEdit::Insert{ index: 2, elem_id: doc.actor_id.op_id_at(3).into() },
+                        ],
                         props: hashmap!{
                             0 => hashmap!{
                                 doc.actor_id.op_id_at(2) => amp::Diff::Value("chaffinch".into()),
@@ -486,7 +466,7 @@ fn handle_concurrent_insertions_into_lists() {
 }
 
 #[test]
-fn allow_interleacing_of_patches_and_changes() {
+fn allow_interleaving_of_patches_and_changes() {
     let mut doc = Frontend::new();
     let req1 = doc
         .change::<_, InvalidChangeRequest>(None, |doc| {
@@ -512,52 +492,46 @@ fn allow_interleacing_of_patches_and_changes() {
 
     assert_eq!(
         req1,
-        amp::Request {
-            actor: doc.actor_id.clone(),
+        amp::UncompressedChange {
+            actor_id: doc.actor_id.clone(),
             seq: 1,
-            version: 0,
+            start_op: 1,
             message: None,
             time: req1.time,
-            undoable: true,
-            deps: None,
-            request_type: amp::RequestType::Change,
-            ops: Some(vec![amp::Op {
-                action: amp::OpType::Set,
-                obj: amp::ObjectID::Root.to_string(),
+            deps: Vec::new(),
+            operations: vec![amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Int(1)),
+                obj: amp::ObjectID::Root,
                 key: "number".into(),
-                value: Some(amp::ScalarValue::Int(1)),
-                child: None,
-                datatype: Some(amp::DataType::Undefined),
                 insert: false,
-            }])
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
         }
     );
 
     assert_eq!(
         req2,
-        amp::Request {
-            actor: doc.actor_id.clone(),
+        amp::UncompressedChange {
+            actor_id: doc.actor_id.clone(),
             seq: 2,
-            version: 0,
+            start_op: 2,
             message: None,
             time: req2.time,
-            undoable: true,
-            deps: None,
-            request_type: amp::RequestType::Change,
-            ops: Some(vec![amp::Op {
-                action: amp::OpType::Set,
-                obj: amp::ObjectID::Root.to_string(),
+            deps: Vec::new(),
+            operations: vec![amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Int(2)),
+                obj: amp::ObjectID::Root,
                 key: "number".into(),
-                value: Some(amp::ScalarValue::Int(2)),
-                child: None,
-                datatype: Some(amp::DataType::Undefined),
                 insert: false,
-            }])
+                pred: vec![doc.actor_id.op_id_at(1)],
+            }],
+            extra_bytes: Vec::new(),
         }
     );
 
     let mut backend = Backend::init();
-    let patch1 = backend.apply_local_change(req1).unwrap();
+    let (patch1, _) = backend.apply_local_change(req1).unwrap();
     doc.apply_patch(patch1).unwrap();
 
     let req3 = doc
@@ -573,24 +547,172 @@ fn allow_interleacing_of_patches_and_changes() {
 
     assert_eq!(
         req3,
-        amp::Request {
-            actor: doc.actor_id,
+        amp::UncompressedChange {
+            actor_id: doc.actor_id.clone(),
             seq: 3,
-            version: 1,
+            start_op: 3,
             message: None,
             time: req3.time,
-            undoable: true,
-            deps: None,
-            request_type: amp::RequestType::Change,
-            ops: Some(vec![amp::Op {
-                action: amp::OpType::Set,
-                obj: amp::ObjectID::Root.to_string(),
+            deps: Vec::new(),
+            operations: vec![amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Int(3)),
+                obj: amp::ObjectID::Root,
                 key: "number".into(),
-                value: Some(amp::ScalarValue::Int(3)),
-                child: None,
-                datatype: Some(amp::DataType::Undefined),
                 insert: false,
-            }])
+                pred: vec![doc.actor_id.op_id_at(2)],
+            }],
+            extra_bytes: Vec::new(),
         }
     );
+}
+
+//it('deps are filled in if the frontend does not have the latest patch', () => {
+//const actor1 = uuid(), actor2 = uuid()
+//const [doc1, change1] = Frontend.change(Frontend.init(actor1), doc => doc.number = 1)
+//const [state1, patch1, binChange1] = Backend.applyLocalChange(Backend.init(), change1)
+
+//const [state1a, patch1a] = Backend.applyChanges(Backend.init(), [binChange1])
+//const doc1a = Frontend.applyPatch(Frontend.init(actor2), patch1a)
+//const [doc2, change2] = Frontend.change(doc1a, doc => doc.number = 2)
+//const [doc3, change3] = Frontend.change(doc2, doc => doc.number = 3)
+//assert.deepStrictEqual(change2, {
+//actor: actor2, seq: 1, startOp: 2, deps: [decodeChange(binChange1).hash], time: change2.time, message: '', ops: [
+//{obj: '_root', action: 'set', key: 'number', insert: false, value: 2, pred: [`1@${actor1}`]}
+//]
+//})
+//assert.deepStrictEqual(change3, {
+//actor: actor2, seq: 2, startOp: 3, deps: [], time: change3.time, message: '', ops: [
+//{obj: '_root', action: 'set', key: 'number', insert: false, value: 3, pred: [`2@${actor2}`]}
+//]
+//})
+
+//const [state2, patch2, binChange2] = Backend.applyLocalChange(state1a, change2)
+//const [state3, patch3, binChange3] = Backend.applyLocalChange(state2, change3)
+//assert.deepStrictEqual(decodeChange(binChange2).deps, [decodeChange(binChange1).hash])
+//assert.deepStrictEqual(decodeChange(binChange3).deps, [decodeChange(binChange2).hash])
+//assert.deepStrictEqual(patch1a.deps, [decodeChange(binChange1).hash])
+//assert.deepStrictEqual(patch2.deps, [])
+
+//const doc2a = Frontend.applyPatch(doc3, patch2)
+//const doc3a = Frontend.applyPatch(doc2a, patch3)
+//const [doc4, change4] = Frontend.change(doc3a, doc => doc.number = 4)
+//assert.deepStrictEqual(change4, {
+//actor: actor2, seq: 3, startOp: 4, time: change4.time, message: '', deps: [], ops: [
+//{obj: '_root', action: 'set', key: 'number', insert: false, value: 4, pred: [`3@${actor2}`]}
+//]
+//})
+//const [state4, patch4, binChange4] = Backend.applyLocalChange(state3, change4)
+//assert.deepStrictEqual(decodeChange(binChange4).deps, [decodeChange(binChange3).hash])
+//})
+#[test]
+fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
+    let (doc, change1) =
+        Frontend::new_with_initial_state(hashmap! {"number" => amp::ScalarValue::from(1)}.into())
+            .unwrap();
+
+    let mut backend1 = Backend::init();
+    let (_, binchange1) = backend1.apply_local_change(change1).unwrap();
+
+    let mut doc2 = Frontend::new();
+    let mut backend2 = Backend::init();
+    let patch1 = backend2.apply_changes(vec![(*binchange1).clone()]).unwrap();
+    doc2.apply_patch(patch1.clone()).unwrap();
+
+    let change2 = doc2
+        .change::<_, InvalidChangeRequest>(None, |d| {
+            d.add_change(LocalChange::set(
+                Path::root().key("number"),
+                amp::ScalarValue::from(2).into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let change3 = doc2
+        .change::<_, InvalidChangeRequest>(None, |d| {
+            d.add_change(LocalChange::set(
+                Path::root().key("number"),
+                amp::ScalarValue::from(3).into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let expected_change2 = amp::UncompressedChange {
+        actor_id: doc2.actor_id.clone(),
+        start_op: 2,
+        seq: 1,
+        time: change2.time,
+        message: None,
+        deps: vec![binchange1.hash],
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::from(2)),
+            obj: amp::ObjectID::Root,
+            key: "number".into(),
+            insert: false,
+            pred: vec![doc.actor_id.op_id_at(1)],
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(change2, expected_change2);
+
+    let expected_change3 = amp::UncompressedChange {
+        actor_id: doc2.actor_id.clone(),
+        start_op: 3,
+        seq: 2,
+        time: change3.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::from(3)),
+            obj: amp::ObjectID::Root,
+            key: "number".into(),
+            insert: false,
+            pred: vec![doc2.actor_id.op_id_at(2)],
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(change3, expected_change3);
+
+    let (patch2, binchange2) = backend2.apply_local_change(change2).unwrap();
+    let (patch3, binchange3) = backend2.apply_local_change(change3).unwrap();
+
+    assert_eq!(binchange2.deps, vec![binchange1.hash]);
+    assert_eq!(binchange3.deps, vec![binchange2.hash]);
+    assert_eq!(patch1.deps, vec![binchange1.hash]);
+    assert_eq!(patch2.deps, Vec::new());
+
+    doc2.apply_patch(patch2).unwrap();
+    doc2.apply_patch(patch3).unwrap();
+
+    let change4 = doc2
+        .change::<_, InvalidChangeRequest>(None, |d| {
+            d.add_change(LocalChange::set(
+                Path::root().key("number"),
+                amp::ScalarValue::from(4).into(),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let expected_change4 = amp::UncompressedChange {
+        actor_id: doc2.actor_id.clone(),
+        start_op: 4,
+        seq: 3,
+        time: change4.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::from(4)),
+            obj: amp::ObjectID::Root,
+            key: "number".into(),
+            insert: false,
+            pred: vec![doc2.actor_id.op_id_at(3)],
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(change4, expected_change4);
 }

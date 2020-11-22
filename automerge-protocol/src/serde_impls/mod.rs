@@ -9,11 +9,10 @@ mod diff;
 mod element_id;
 mod key;
 mod object_id;
+mod op;
+mod op_type;
 mod opid;
 mod scalar_value;
-mod op_type;
-mod op;
-
 
 // Helper method for use in custom deserialize impls
 pub(crate) fn read_field<'de, T, M>(

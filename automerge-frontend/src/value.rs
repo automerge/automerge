@@ -1,6 +1,4 @@
-use crate::PathElement;
 use automerge_protocol as amp;
-use maplit::hashmap;
 use serde::Serialize;
 use std::{borrow::Borrow, collections::HashMap};
 
@@ -127,165 +125,117 @@ impl Value {
 ///
 /// #Arguments
 ///
+/// * actor         - The actor who is creating this value
+/// * start_op      - The start op which will be used to generate element IDs
 /// * parent_object - The ID of the "parent" object, i.e the object that will
 ///                   contain the newly created object
 /// * key           - The property that the newly created object will populate
 ///                   within the parent object.
+/// * insert        - Whether the op that creates this value should be insert
 ///
 ///
-/// Returns a tuple of the op requests which will create this value, and a diff
-/// which corresponds to those ops.
+/// Returns a vector of the op requests which will create this value
 pub(crate) fn value_to_op_requests(
+    actor: &amp::ActorID,
+    start_op: u64,
     parent_object: amp::ObjectID,
-    key: PathElement,
+    key: &amp::Key,
     v: &Value,
     insert: bool,
-) -> (Vec<amp::Op>, amp::Diff) {
+) -> (Vec<amp::Op>, u64) {
     match v {
         Value::Sequence(vs) => {
-            let list_id = new_object_id();
+            let list_op = amp::OpID(start_op, actor.clone());
             let make_op = amp::Op {
-                action: amp::OpType::MakeList,
-                obj: parent_object.to_string(),
-                key: key.to_request_key(),
-                child: Some(list_id.to_string()),
-                value: None,
-                datatype: None,
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: parent_object,
+                key: key.clone(),
                 insert,
+                pred: Vec::new(),
             };
-            let child_requests_and_diffs: Vec<(Vec<amp::Op>, amp::Diff)> = vs
-                .iter()
-                .enumerate()
-                .map(|(index, v)| {
-                    value_to_op_requests(list_id.clone(), PathElement::Index(index), v, true)
-                })
-                .collect();
-            let child_requests: Vec<amp::Op> = child_requests_and_diffs
-                .iter()
-                .cloned()
-                .flat_map(|(o, _)| o)
-                .collect();
-            let child_diff = amp::SeqDiff {
-                edits: vs
-                    .iter()
-                    .enumerate()
-                    .map(|(index, _)| amp::DiffEdit::Insert { index })
-                    .collect(),
-                object_id: list_id,
-                obj_type: amp::SequenceType::List,
-                props: child_requests_and_diffs
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, (_, diff_link))| (index, hashmap! {random_op_id() => diff_link}))
-                    .collect(),
-            };
+            let mut op_num = start_op + 1;
             let mut result = vec![make_op];
-            result.extend(child_requests);
-            (result, amp::Diff::Seq(child_diff))
+            let mut last_elemid = amp::ElementID::Head;
+            for v in vs.iter() {
+                let (child_requests, new_op_num) = value_to_op_requests(
+                    actor,
+                    op_num,
+                    amp::ObjectID::from(list_op.clone()),
+                    &last_elemid.clone().into(),
+                    v,
+                    true,
+                );
+                last_elemid = amp::OpID::new(op_num, actor).into();
+                op_num = new_op_num;
+                result.extend(child_requests);
+            }
+            (result, op_num)
         }
         Value::Text(chars) => {
-            let text_id = new_object_id();
+            let make_text_op = amp::OpID(start_op, actor.clone());
             let make_op = amp::Op {
-                action: amp::OpType::MakeText,
-                obj: parent_object.to_string(),
-                key: key.to_request_key(),
-                child: Some(text_id.to_string()),
-                value: None,
-                datatype: None,
+                action: amp::OpType::Make(amp::ObjType::text()),
+                obj: parent_object,
+                key: key.clone(),
                 insert,
+                pred: Vec::new(),
             };
-            let insert_ops: Vec<amp::Op> = chars
-                .iter()
-                .enumerate()
-                .map(|(i, c)| amp::Op {
-                    action: amp::OpType::Set,
-                    obj: text_id.to_string(),
-                    key: amp::RequestKey::Num(i as u64),
-                    child: None,
-                    value: Some(amp::ScalarValue::Str(c.to_string())),
-                    datatype: None,
+            let mut insert_ops: Vec<amp::Op> = Vec::new();
+            let mut last_elemid = amp::ElementID::Head;
+            let mut op_num = start_op + 1;
+            for c in chars.iter() {
+                insert_ops.push(amp::Op {
+                    action: amp::OpType::Set(amp::ScalarValue::Str(c.to_string())),
+                    obj: amp::ObjectID::from(make_text_op.clone()),
+                    key: last_elemid.clone().into(),
                     insert: true,
-                })
-                .collect();
+                    pred: Vec::new(),
+                });
+                last_elemid = amp::OpID::new(op_num, actor).into();
+                op_num += 1;
+            }
             let mut ops = vec![make_op];
             ops.extend(insert_ops.into_iter());
-            let diff = amp::SeqDiff {
-                edits: chars.iter().enumerate().map(|(index, _)| amp::DiffEdit::Insert { index }).collect(),
-                object_id: text_id,
-                obj_type: amp::SequenceType::Text,
-                props: chars.iter().enumerate().map(|(i,c)| (i, hashmap!{random_op_id() => amp::Diff::Value(amp::ScalarValue::Str(c.to_string()))})).collect()
-            };
-            (ops, amp::Diff::Seq(diff))
+            (ops, op_num)
         }
         Value::Map(kvs, map_type) => {
             let make_action = match map_type {
-                amp::MapType::Map => amp::OpType::MakeMap,
-                amp::MapType::Table => amp::OpType::MakeTable,
+                amp::MapType::Map => amp::OpType::Make(amp::ObjType::map()),
+                amp::MapType::Table => amp::OpType::Make(amp::ObjType::table()),
             };
-            let map_id = new_object_id();
+            let make_op_id = amp::OpID::new(start_op, actor);
             let make_op = amp::Op {
                 action: make_action,
-                obj: parent_object.to_string(),
-                key: key.to_request_key(),
-                child: Some(map_id.to_string()),
-                value: None,
-                datatype: None,
+                obj: parent_object,
+                key: key.clone(),
                 insert,
+                pred: Vec::new(),
             };
-            let child_requests_and_diffs: HashMap<String, (Vec<amp::Op>, amp::Diff)> = kvs
-                .iter()
-                .map(|(k, v)| {
-                    (
-                        k.clone(),
-                        value_to_op_requests(map_id.clone(), PathElement::Key(k.clone()), v, false),
-                    )
-                })
-                .collect();
+            let mut op_num = start_op + 1;
             let mut result = vec![make_op];
-            let child_requests: Vec<amp::Op> = child_requests_and_diffs
-                .iter()
-                .flat_map(|(_, (o, _))| o)
-                .cloned()
-                .collect();
-            let child_diff = amp::MapDiff {
-                object_id: map_id,
-                obj_type: *map_type,
-                props: child_requests_and_diffs
-                    .into_iter()
-                    .map(|(k, (_, diff_link))| (k, hashmap! {random_op_id() => diff_link}))
-                    .collect(),
-            };
-            result.extend(child_requests);
-            (result, amp::Diff::Map(child_diff))
+            for (key, v) in kvs.iter() {
+                let (child_requests, new_op_num) = value_to_op_requests(
+                    actor,
+                    op_num,
+                    amp::ObjectID::from(make_op_id.clone()),
+                    &amp::Key::from(key.as_str()),
+                    v,
+                    false,
+                );
+                op_num = new_op_num;
+                result.extend(child_requests);
+            }
+            (result, op_num)
         }
         Value::Primitive(prim_value) => {
             let ops = vec![amp::Op {
-                action: amp::OpType::Set,
-                obj: parent_object.to_string(),
-                key: key.to_request_key(),
-                child: None,
-                value: Some(prim_value.clone()),
-                datatype: Some(value_to_datatype(prim_value)),
+                action: amp::OpType::Set(prim_value.clone()),
+                obj: parent_object,
+                key: key.clone(),
                 insert,
+                pred: Vec::new(),
             }];
-            let diff = amp::Diff::Value(prim_value.clone());
-            (ops, diff)
+            (ops, start_op + 1)
         }
-    }
-}
-
-fn new_object_id() -> amp::ObjectID {
-    amp::ObjectID::ID(random_op_id())
-}
-
-pub(crate) fn random_op_id() -> amp::OpID {
-    amp::OpID::new(1, &amp::ActorID::random())
-}
-
-fn value_to_datatype(value: &amp::ScalarValue) -> amp::DataType {
-    match value {
-        amp::ScalarValue::Counter(_) => amp::DataType::Counter,
-        amp::ScalarValue::Timestamp(_) => amp::DataType::Timestamp,
-        _ => amp::DataType::Undefined,
     }
 }

@@ -144,7 +144,6 @@ pub unsafe extern "C" fn automerge_apply_local_change(
             -1
         }
     } else {
-        // json parse error
         -1
     }
 }
@@ -357,13 +356,5 @@ pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *m
         }
     } else {
         -1
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
     }
 }

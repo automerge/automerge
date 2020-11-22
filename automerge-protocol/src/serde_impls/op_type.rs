@@ -1,4 +1,4 @@
-use crate::{OpType, ObjType, MapType, SequenceType};
+use crate::{MapType, ObjType, OpType, SequenceType};
 use serde::{Serialize, Serializer};
 
 impl Serialize for OpType {

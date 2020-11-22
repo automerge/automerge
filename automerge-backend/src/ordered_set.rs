@@ -822,19 +822,18 @@ mod tests {
 
     #[test]
     fn test_remove_key_big() {
-        let mut strings: Vec<String> = Vec::new();
-        for i in 0..10000 {
-            let j = 9999 - i;
-            strings.push(format!("a{}", j));
-        }
+        //String is not Copy so we have to create our elements first and then insert them
+        let elems: Vec<String> = (0..10000)
+            .map(|i| {
+                let j = 9999 - i;
+                format!("a{}", j)
+            })
+            .collect();
+
         let mut s = SkipList::<&str>::new();
-        for string in strings.iter() {
-            s.insert_head(string);
+        for elem in elems.iter() {
+            s.insert_head(elem);
         }
-        //for i in 0..10000 {
-        //let j = 9999 - i;
-        //s.insert_head(format!("a{}", j));
-        //}
 
         assert_eq!(s.index_of(&"a20"), Some(20));
         assert_eq!(s.index_of(&"a500"), Some(500));
