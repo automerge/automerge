@@ -137,8 +137,12 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let request = request.to_string_lossy();
     let request: Result<Request, _> = serde_json::from_str(&request);
     if let Ok(request) = request {
-        let patch = (*backend).apply_local_change(request);
-        (*backend).generate_json(patch)
+        // FIXME - need to update the c api to all receiving the binary change here
+        if let Ok((patch,_change)) = (*backend).apply_local_change(request) {
+            (*backend).generate_json(Ok(patch))
+        } else {
+            -1
+        }
     } else {
         // json parse error
         -1

@@ -26,10 +26,10 @@ int main() {
   Backend * dbA = automerge_init();
   Backend * dbB = automerge_init();
 
-  const char * requestA1 = R"({"requestType":"change","actor":"111111","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"magpie"}]})";
-  const char * requestA2 = R"({"requestType":"change","actor":"111111","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"dog","value":"mastiff"}]})";
-  const char * requestB1 = R"({"requestType":"change","actor":"222222","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"crow"}]})";
-  const char * requestB2 = R"({"requestType":"change","actor":"222222","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"cat","value":"tabby"}]})";
+  const char * requestA1 = R"({"actor":"111111","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"magpie"}]})";
+  const char * requestA2 = R"({"actor":"111111","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"dog","value":"mastiff"}]})";
+  const char * requestB1 = R"({"actor":"222222","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"crow"}]})";
+  const char * requestB2 = R"({"actor":"222222","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"cat","value":"tabby"}]})";
 
   printf("*** requestA1 ***\n\n%s\n\n",requestA1);
 
@@ -76,9 +76,8 @@ int main() {
   len = automerge_get_patch(dbD);
   assert(len <= BUFSIZE);
   automerge_read_json(dbD, buff2);
-  // +1 because canUndo:true vs canUndo:false
-  printf("*** get_patch of dbA & dbD -- equal? *** --> %s\n\n",strlen(buff) + 1 == strlen(buff2) ? "true" : "false");
-  assert(strlen(buff) + 1 == strlen(buff2));
+  printf("*** get_patch of dbA & dbD -- equal? *** --> %s\n\n",strlen(buff) == strlen(buff2) ? "true" : "false");
+  assert(strlen(buff) == strlen(buff2));
 
   printf("*** copy changes from dbA to B ***\n\n");
   len = automerge_get_changes_for_actor(dbA,"111111");
@@ -140,9 +139,8 @@ int main() {
   len = automerge_get_patch(dbE);
   assert(len <= BUFSIZE);
   automerge_read_json(dbE, buff2);
-  // +1 because canUndo:true vs canUndo:false
-  printf("*** get_patch of dbA & dbE -- equal? *** --> %s\n\n",strlen(buff) + 1 == strlen(buff2) ? "true" : "false");
-  assert(strlen(buff) + 1 == strlen(buff2));
+  printf("*** get_patch of dbA & dbE -- equal? *** --> %s\n\n",strlen(buff) == strlen(buff2) ? "true" : "false");
+  assert(strlen(buff) == strlen(buff2));
 
   len = automerge_get_missing_deps(dbE);
   automerge_read_json(dbE, buff); // [] - nothing missing
