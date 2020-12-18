@@ -270,15 +270,7 @@ pub struct Request {
     pub time: Option<i64>,
     pub deps: Option<Vec<ChangeHash>>,
     pub ops: Option<Vec<Op>>,
-    pub request_type: RequestType,
-}
-
-#[derive(Deserialize, PartialEq, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub enum RequestType {
-    Change,
-    Undo,
-    Redo,
+    //pub request_type: RequestType,
 }
 
 // The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
@@ -358,8 +350,8 @@ pub struct Patch {
     pub seq: Option<u64>,
     pub clock: HashMap<ActorID, u64>,
     pub deps: Vec<ChangeHash>,
-    pub can_undo: bool,
-    pub can_redo: bool,
+//    pub can_undo: bool,
+//    pub can_redo: bool,
     pub version: u64,
     #[serde(serialize_with = "Patch::top_level_serialize")]
     pub diffs: Option<Diff>,

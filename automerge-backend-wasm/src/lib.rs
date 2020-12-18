@@ -60,13 +60,6 @@ impl State {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = ack)]
-    pub fn ack(&mut self, ack_version: JsValue) -> Result<(), JsValue> {
-        let ver_no = ack_version.as_f64().ok_or(to_js_err("ack : invalid version"))?;
-        self.backend.ack(ver_no as u64);
-        Ok(())
-    }
-
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<Array, JsValue> {
         let c: Request = js_to_rust(change)?;
@@ -116,16 +109,6 @@ impl State {
     pub fn get_missing_deps(&self) -> Result<JsValue, JsValue> {
         let hashes = self.backend.get_missing_deps();
         rust_to_js(&hashes)
-    }
-
-    #[wasm_bindgen(js_name = getUndoStack)]
-    pub fn get_undo_stack(&self) -> Result<JsValue, JsValue> {
-        rust_to_js(&self.backend.undo_stack())
-    }
-
-    #[wasm_bindgen(js_name = getRedoStack)]
-    pub fn get_redo_stack(&self) -> Result<JsValue, JsValue> {
-        rust_to_js(&self.backend.redo_stack())
     }
 
     #[allow(clippy::should_implement_trait)]

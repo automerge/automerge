@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::actor_map::ActorMap;
-use crate::internal::{InternalOp, InternalOpType, InternalUndoOperation, Key, ObjectID, OpID};
+use crate::internal::{InternalOp, InternalOpType, Key, ObjectID, OpID};
 use crate::Change;
 use automerge_protocol as amp;
 
@@ -29,46 +29,6 @@ impl OpHandle {
                 OpHandle { id, op, delta: 0 }
             })
             .collect()
-    }
-
-    pub fn generate_undos(&self, overwritten: &[OpHandle]) -> Vec<InternalUndoOperation> {
-        let key = self.operation_key();
-
-        if let InternalOpType::Inc(value) = self.action {
-            vec![InternalUndoOperation {
-                action: InternalOpType::Inc(-value),
-                obj: self.obj,
-                key,
-            }]
-        } else if overwritten.is_empty() {
-            vec![InternalUndoOperation {
-                action: InternalOpType::Del,
-                obj: self.obj,
-                key,
-            }]
-        } else {
-            overwritten.iter().map(|o| o.invert(&key)).collect()
-        }
-    }
-
-    pub fn invert(&self, field_key: &Key) -> InternalUndoOperation {
-        let base_op = &self.op;
-        let mut action = base_op.action.clone();
-        let mut key = &base_op.key;
-        if self.insert {
-            key = field_key
-        }
-        if let InternalOpType::Make(_) = base_op.action {
-            action = InternalOpType::Link(self.id.into());
-        }
-        if let InternalOpType::Set(amp::ScalarValue::Counter(_)) = base_op.action {
-            action = InternalOpType::Set(self.adjusted_value());
-        }
-        InternalUndoOperation {
-            action,
-            obj: base_op.obj,
-            key: key.clone(),
-        }
     }
 
     pub fn adjusted_value(&self) -> amp::ScalarValue {

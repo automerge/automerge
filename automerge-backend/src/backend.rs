@@ -1,6 +1,6 @@
 use crate::actor_map::ActorMap;
 use crate::error::AutomergeError;
-use crate::internal::{InternalOp, InternalUndoOperation, Key, ObjectID, OpID};
+use crate::internal::{InternalOp, Key, ObjectID, OpID};
 use crate::obj_alias::ObjAlias;
 use crate::op::{compress_ops, Operation};
 use crate::op_handle::OpHandle;
@@ -9,7 +9,6 @@ use crate::op_type::OpType;
 use crate::ordered_set::{OrderedSet, SkipList};
 use crate::pending_diff::PendingDiff;
 use crate::time;
-use crate::undo_operation::UndoOperation;
 use crate::{Change, UnencodedChange};
 use automerge_protocol as amp;
 use std::collections::{HashMap, HashSet};
@@ -24,11 +23,8 @@ pub struct Backend {
     states: HashMap<amp::ActorID, Vec<Rc<Change>>>,
     actors: ActorMap,
     obj_alias: ObjAlias,
-    undo_pos: usize,
     hashes: HashMap<amp::ChangeHash, Rc<Change>>,
     history: Vec<amp::ChangeHash>,
-    internal_undo_stack: Vec<Vec<InternalUndoOperation>>,
-    internal_redo_stack: Vec<Vec<InternalUndoOperation>>,
 }
 
 impl Backend {
@@ -45,9 +41,6 @@ impl Backend {
             states: HashMap::new(),
             history: Vec::new(),
             hashes: HashMap::new(),
-            internal_undo_stack: Vec::new(),
-            undo_pos: 0,
-            internal_redo_stack: Vec::new(),
         }
     }
 
@@ -56,8 +49,6 @@ impl Backend {
         &mut self,
         request: amp::Request,
     ) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
-        let mut all_undo_ops = Vec::new();
-        let mut new_objects: HashSet<ObjectID> = HashSet::new();
         let mut operations: Vec<Operation> = Vec::new();
         let mut pending_diffs: HashMap<ObjectID, Vec<PendingDiff>> = HashMap::new();
 
@@ -77,8 +68,10 @@ impl Backend {
                 let op_counter = start_op + (operations.len() as u64);
 
                 let (op,internal_op) = rop_to_op(&mut self.actors, &mut self.obj_alias, &op_set, &request, &rop, op_counter)?;
-                let (pending_diff, undo_ops) = op_set.apply_op(internal_op.clone(), &self.actors)?;
-                handle_undo(internal_op, pending_diff, undo_ops, request.undoable, &mut pending_diffs, &mut all_undo_ops, &mut new_objects);    
+                let pending_diff = op_set.apply_op(internal_op.clone(), &self.actors)?;
+                if let Some(d) = pending_diff {
+                  pending_diffs.entry(internal_op.obj).or_default().push(d);
+                }
 
                 operations.push(op);
             }
@@ -104,12 +97,9 @@ impl Backend {
 
         if not_head {
             pending_diffs.clear();
-            self.apply_change(change.clone(), request.undoable, &mut pending_diffs)?;
+            self.apply_change(change.clone(), &mut pending_diffs)?;
         } else {
             self.update_history(&change);
-            if request.undoable {
-                self.push_undo_ops(all_undo_ops);
-            }
         }
 
         self.bump_version();
@@ -127,8 +117,6 @@ impl Backend {
         deps.sort_unstable();
         Ok(amp::Patch {
             version: self.versions.last().map(|v| v.version).unwrap_or(0),
-            can_undo: self.can_undo(),
-            can_redo: self.can_redo(),
             diffs,
             deps,
             clock: self
@@ -141,107 +129,10 @@ impl Backend {
         })
     }
 
-    fn undo(&mut self, request: amp::Request) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
-        let actor_seq = Some((request.actor.clone(), request.seq));
-        let start_op = self.get_start_op(request.version);
-        let undo_pos = self.undo_pos;
-
-        if undo_pos < 1 || self.internal_undo_stack.len() < undo_pos {
-            return Err(AutomergeError::NoUndo);
-        }
-
-        let mut undo_ops = self.internal_undo_stack.get(undo_pos - 1).unwrap().clone();
-        let mut redo_ops = Vec::new();
-
-        let operations = undo_ops
-            .drain(0..)
-            .map(|undo_op| {
-                if let Some(field_ops) = self.op_set.get_field_ops(&undo_op.obj, &undo_op.key) {
-                    let pred = field_ops.iter().map(|op| op.id).collect();
-                    let op = undo_op.into_operation(pred);
-                    redo_ops.extend(op.generate_redos(&field_ops));
-                    op
-                } else {
-                    let op = undo_op.into_operation(Vec::new());
-                    redo_ops.extend(op.generate_redos(&Vec::new()));
-                    op
-                }
-            })
-            .map(|op| self.actors.export_op(&op)) // FIXME
-            .collect();
-
-        let change = UnencodedChange {
-            actor_id: request.actor.clone(),
-            seq: request.seq,
-            start_op,
-            deps: request.deps.clone().unwrap_or_default(),
-            message: request.message,
-            time: time::unix_timestamp(),
-            operations,
-        }
-        .into();
-
-        self.undo_pos -= 1;
-        self.internal_redo_stack.push(redo_ops);
-
-        let change: Rc<Change> = Rc::new(change);
-        let patch = self.apply(vec![change.clone()], actor_seq, false, true)?;
-        Ok((patch, change))
-    }
-
-    fn redo(&mut self, request: amp::Request) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
-        let actor_seq = Some((request.actor.clone(), request.seq));
-        let start_op = self.get_start_op(request.version);
-        let mut redo_ops = self
-            .internal_redo_stack
-            .pop()
-            .ok_or(AutomergeError::NoRedo)?;
-
-        let operations = redo_ops
-            .drain(0..)
-            .map(|redo_op| {
-                if let Some(field_ops) = self.op_set.get_field_ops(&redo_op.obj, &redo_op.key) {
-                    redo_op.into_operation(field_ops.iter().map(|op| op.id).collect())
-                } else {
-                    redo_op.into_operation(Vec::new())
-                }
-            })
-            .map(|op| self.actors.export_op(&op)) // FIXME
-            .collect();
-
-        let change = UnencodedChange {
-            actor_id: request.actor.clone(),
-            seq: request.seq,
-            start_op,
-            deps: request.deps.clone().unwrap_or_default(),
-            message: request.message,
-            time: time::unix_timestamp(),
-            operations,
-        }
-        .into();
-
-        self.undo_pos += 1;
-
-        let change: Rc<Change> = Rc::new(change);
-        let patch = self.apply(vec![change.clone()], actor_seq, false, true)?;
-        Ok((patch, change))
-    }
-
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
         let changes = changes.drain(0..).map(Rc::new).collect();
-        self.apply(changes, None, false, false)?;
+        self.apply(changes, None, false)?;
         Ok(())
-    }
-
-    pub fn ack(&mut self, ack_version: u64) {
-        let mut i = 0;
-        while i != self.versions.len() {
-            if self.versions[i].version < ack_version {
-                self.versions.remove(i);
-            } else {
-                i += 1;
-            }
-        }
     }
 
     pub fn apply_changes(
@@ -257,7 +148,7 @@ impl Backend {
         });
 
         let changes = changes.drain(0..).map(Rc::new).collect();
-        self.apply(changes, None, false, true)
+        self.apply(changes, None, true)
     }
 
     fn lazy_update_version(&mut self, version: u64) -> Result<(), AutomergeError> {
@@ -272,7 +163,6 @@ impl Backend {
                 Rc::make_mut(op_set)
                     .apply_ops(
                         OpHandle::extract(change, &mut self.actors),
-                        false,
                         &mut m,
                         &self.actors,
                     )
@@ -312,13 +202,12 @@ impl Backend {
         &mut self,
         mut changes: Vec<Rc<Change>>,
         actor: Option<(amp::ActorID, u64)>,
-        undoable: bool,
         incremental: bool,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
         for change in changes.drain(..) {
-            self.add_change(change, actor.is_some(), undoable, &mut pending_diffs)?;
+            self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
         if incremental {
@@ -342,11 +231,7 @@ impl Backend {
 
         request.deps.get_or_insert_with(|| self.get_deps(ver_no));
 
-        let (patch, change) = match request.request_type {
-            amp::RequestType::Change => self.process_request(request)?,
-            amp::RequestType::Undo => self.undo(request)?,
-            amp::RequestType::Redo => self.redo(request)?,
-        };
+        let (patch, change) = self.process_request(request)?;
 
         self.finalize_version(ver_no, change.clone());
 
@@ -379,11 +264,10 @@ impl Backend {
         &mut self,
         change: Rc<Change>,
         local: bool,
-        undoable: bool,
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if local {
-            self.apply_change(change, undoable, diffs)
+            self.apply_change(change, diffs)
         } else {
             self.queue.push(change);
             self.apply_queued_ops(diffs)
@@ -395,7 +279,7 @@ impl Backend {
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
-            self.apply_change(next_change, false, diffs)?;
+            self.apply_change(next_change, diffs)?;
         }
         Ok(())
     }
@@ -403,7 +287,6 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Rc<Change>,
-        undoable: bool,
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if self.hashes.contains_key(&change.hash) {
@@ -422,16 +305,11 @@ impl Backend {
 
         op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
 
-        let undo_ops = op_set.apply_ops(
+        op_set.apply_ops(
             ops,
-            undoable,
             diffs,
             &self.actors,
         )?;
-
-        if undoable {
-            self.push_undo_ops(undo_ops);
-        };
 
         Ok(())
     }
@@ -511,14 +389,6 @@ impl Backend {
             .collect()
     }
 
-    fn can_undo(&self) -> bool {
-        self.undo_pos > 0
-    }
-
-    fn can_redo(&self) -> bool {
-        !self.internal_redo_stack.is_empty()
-    }
-
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let bytes: Vec<&[u8]> = self
             .history
@@ -542,26 +412,6 @@ impl Backend {
             .iter()
             .flat_map(|change| change.deps.clone())
             .filter(|h| !in_queue.contains(&h))
-            .collect()
-    }
-
-    fn push_undo_ops(&mut self, undo_ops: Vec<InternalUndoOperation>) {
-        self.internal_undo_stack.truncate(self.undo_pos);
-        self.internal_undo_stack.push(undo_ops);
-        self.undo_pos += 1;
-    }
-
-    pub fn undo_stack(&self) -> Vec<Vec<UndoOperation>> {
-        self.internal_undo_stack
-            .iter()
-            .map(|ops| ops.iter().map(|op| self.actors.export_undo(op)).collect())
-            .collect()
-    }
-
-    pub fn redo_stack(&self) -> Vec<Vec<UndoOperation>> {
-        self.internal_redo_stack
-            .iter()
-            .map(|ops| ops.iter().map(|op| self.actors.export_undo(op)).collect())
             .collect()
     }
 }
@@ -661,18 +511,3 @@ fn rop_to_op(actors: &mut ActorMap, obj_alias: &mut ObjAlias, op_set: &OpSet, re
             Ok((external_op,internal_op))
 }
 
-fn handle_undo(internal_op: OpHandle, pending_diff: Option<PendingDiff>, undo_ops: Vec<InternalUndoOperation>, undoable: bool, pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>, all_undo_ops: &mut Vec<InternalUndoOperation>, new_objects: &mut HashSet<ObjectID>) {
-    if internal_op.is_make() {
-        new_objects.insert(internal_op.id.into());
-    }
-
-    let use_undo = undoable && !(new_objects.contains(&internal_op.obj));
-
-    if let Some(d) = pending_diff {
-        pending_diffs.entry(internal_op.obj).or_default().push(d);
-    }
-
-    if use_undo {
-        all_undo_ops.extend(undo_ops);
-    }                
-}

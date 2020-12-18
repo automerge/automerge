@@ -29,9 +29,7 @@ mod op_set;
 mod op_type;
 mod ordered_set;
 mod pending_diff;
-mod serialize;
 mod time;
-mod undo_operation;
 
 pub use backend::Backend;
 pub use change::{Change, UnencodedChange};

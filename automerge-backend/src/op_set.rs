@@ -9,7 +9,7 @@
 use crate::actor_map::ActorMap;
 use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::internal::{InternalOpType, InternalUndoOperation, Key, ObjectID, OpID};
+use crate::internal::{InternalOpType, Key, ObjectID, OpID};
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
@@ -59,38 +59,26 @@ impl OpSet {
     pub(crate) fn apply_ops(
         &mut self,
         mut ops: Vec<OpHandle>,
-        undoable: bool,
         diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
         actors: &ActorMap,
-    ) -> Result<Vec<InternalUndoOperation>, AutomergeError> {
-        let mut all_undo_ops = Vec::new();
-        let mut new_objects: HashSet<ObjectID> = HashSet::new();
+    ) -> Result<(), AutomergeError> {
         for op in ops.drain(..) {
-            if op.is_make() {
-                new_objects.insert(op.id.into());
-            }
-            let use_undo = undoable && !(new_objects.contains(&op.obj));
-
             let obj_id = op.obj;
 
-            let (pending_diff, undo_ops) = self.apply_op(op, actors)?;
+            let pending_diff = self.apply_op(op, actors)?;
 
             if let Some(d) = pending_diff {
                 diffs.entry(obj_id).or_default().push(d);
             }
-
-            if use_undo {
-                all_undo_ops.extend(undo_ops);
-            }
         }
-        Ok(all_undo_ops)
+        Ok(())
     }
 
     pub fn apply_op(
         &mut self,
         op: OpHandle,
         actors: &ActorMap,
-    ) -> Result<(Option<PendingDiff>, Vec<InternalUndoOperation>), AutomergeError> {
+    ) -> Result<Option<PendingDiff>, AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             //let child = actors.import_obj(child);
             self.objs.insert(child, Rc::new(ObjState::new(obj_type)));
@@ -112,8 +100,6 @@ impl OpSet {
             let before = !ops.is_empty();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
             let after = !ops.is_empty();
-
-            let undo_ops = op.generate_undos(&overwritten_ops);
 
             let diff = match (before, after) {
                 (true, true) => Some(PendingDiff::Set(op.clone())),
@@ -139,19 +125,18 @@ impl OpSet {
 
             self.unlink(&op, &overwritten_ops)?;
 
-            Ok((diff, undo_ops))
+            Ok(diff)
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
             let overwritten_ops = ops.incorporate_new_op(&op)?;
             let after = !ops.is_empty();
-            let undo_ops = op.generate_undos(&overwritten_ops);
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
-                Ok((Some(PendingDiff::Set(op)), undo_ops))
+                Ok(Some(PendingDiff::Set(op)))
             } else {
-                Ok((None, undo_ops))
+                Ok(None)
             }
         }
     }

@@ -15,8 +15,6 @@ pub enum AutomergeError {
     IndexOutOfBounds(usize),
     InvalidOpID(String),
     InvalidObjectID(String),
-    NoRedo,
-    NoUndo,
     MissingValue,
     GeneralError(String),
     MissingNumberValue,

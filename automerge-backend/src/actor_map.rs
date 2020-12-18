@@ -1,8 +1,7 @@
 use crate::internal::{
-    ActorID, ElementID, InternalOp, InternalOpType, InternalUndoOperation, Key, ObjectID, OpID,
+    ActorID, ElementID, InternalOp, InternalOpType, Key, ObjectID, OpID,
 };
 use crate::op_type::OpType;
-use crate::undo_operation::UndoOperation;
 use crate::Operation;
 use automerge_protocol as amp;
 use std::cmp::Ordering;
@@ -102,6 +101,7 @@ impl ActorMap {
         }
     }
 
+    /*
     pub fn export_op(&self, op: &InternalOp) -> Operation {
         Operation {
             action: self.export_optype(&op.action),
@@ -109,14 +109,6 @@ impl ActorMap {
             key: self.export_key(&op.key),
             pred: op.pred.iter().map(|id| self.export_opid(id)).collect(),
             insert: op.insert,
-        }
-    }
-
-    pub fn export_undo(&self, op: &InternalUndoOperation) -> UndoOperation {
-        UndoOperation {
-            action: self.export_optype(&op.action),
-            obj: self.export_obj(&op.obj),
-            key: self.export_key(&op.key),
         }
     }
 
@@ -129,6 +121,7 @@ impl ActorMap {
             InternalOpType::Set(val) => OpType::Set(val.clone()),
         }
     }
+    */
 
     #[allow(dead_code)]
     pub fn index_of(&mut self, actor: &amp::ActorID) -> usize {
