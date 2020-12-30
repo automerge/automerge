@@ -160,7 +160,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let mut pred: Option<Vec<amp::OpID>> = None;
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<amp::DataType> = None;
-                let mut value: Option<amp::ScalarValue> = None;
+                let mut value: Option<Option<amp::ScalarValue>> = None;
                 let mut child: Option<amp::ObjectID> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
@@ -180,7 +180,7 @@ impl<'de> Deserialize<'de> for Operation {
                 let key = key.ok_or_else(|| Error::missing_field("key"))?;
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
-                let value = amp::ScalarValue::from(value, datatype);
+                let value = amp::ScalarValue::from(value.flatten(), datatype);
                 let action = match action {
                     amp::OpType::MakeMap => OpType::Make(amp::ObjType::Map(amp::MapType::Map)),
                     amp::OpType::MakeTable => OpType::Make(amp::ObjType::Map(amp::MapType::Table)),
@@ -194,10 +194,7 @@ impl<'de> Deserialize<'de> for Operation {
                     amp::OpType::Link => {
                         OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
                     }
-                    amp::OpType::Set => OpType::Set(
-                        amp::ScalarValue::from(value, datatype)
-                            .ok_or_else(|| Error::missing_field("value"))?,
-                    ),
+                    amp::OpType::Set => OpType::Set(value.unwrap_or(amp::ScalarValue::Null)),
                     amp::OpType::Inc => match value {
                         Some(amp::ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
                         Some(amp::ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
@@ -230,50 +227,3 @@ impl<'de> Deserialize<'de> for Operation {
     }
 }
 
-fn is_basic_assign(op: &amp::Op) -> bool {
-    !op.insert
-        && matches!((op.action,&op.key), (amp::OpType::Del, &amp::RequestKey::Str(_)) | (amp::OpType::Set,_) | (amp::OpType::Inc,_) | (amp::OpType::Link,_))
-}
-
-fn can_merge(op: &amp::Op, other: &amp::Op) -> bool {
-    is_basic_assign(other) && other.obj == op.obj && other.key == op.key
-}
-
-fn merge(op: &mut amp::Op, other: &amp::Op) {
-    if let (amp::OpType::Inc, &Some(ref delta)) = (other.action, &other.value) {
-        match (op.action, &op.value, &op.datatype) {
-            (amp::OpType::Set, &Some(ref number), &Some(amp::DataType::Counter)) => {
-                op.value = Some(amp::ScalarValue::Int(
-                    number.to_i64().unwrap_or(0) + delta.to_i64().unwrap_or(0),
-                ));
-            }
-            (amp::OpType::Inc, &Some(ref number), _) => {
-                op.value = Some(amp::ScalarValue::Int(
-                    number.to_i64().unwrap_or(0) + delta.to_i64().unwrap_or(0),
-                ));
-            }
-            _ => {}
-        }
-    } else {
-        match other.action {
-            amp::OpType::Set | amp::OpType::Link | amp::OpType::Del => {
-                *op = other.clone();
-            }
-            _ => {}
-        }
-    }
-}
-
-pub(crate) fn compress_ops(ops: &[amp::Op]) -> Vec<amp::Op> {
-    let mut compressed: Vec<amp::Op> = Vec::new();
-    for rop in ops.iter() {
-        if is_basic_assign(rop) {
-            if let Some(index) = compressed.iter().position(|old| can_merge(rop, old)) {
-                merge(&mut compressed[index], rop);
-                continue;
-            }
-        }
-        compressed.push(rop.clone())
-    }
-    compressed
-}

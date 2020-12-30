@@ -22,6 +22,7 @@ pub enum AutomergeError {
     DuplicateChange(String),
     DivergedState(String),
     ChangeDecompressError(String),
+    InvalidSeq(u64),
     MapKeyInSeq,
     HeadToOpID,
     DocFormatUnimplemented,

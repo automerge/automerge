@@ -70,10 +70,6 @@ impl Key {
             ElementID::Head => None,
         }
     }
-
-    pub fn head() -> Self {
-        Key::Seq(ElementID::Head)
-    }
 }
 
 impl From<OpID> for ObjectID {

@@ -337,7 +337,11 @@ pub struct ObjDiff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
-    Insert { index: usize },
+    Insert {
+        index: usize,
+        #[serde(rename = "elemId")]
+        elem_id: ElementID
+    },
     Remove { index: usize },
 }
 
@@ -350,9 +354,10 @@ pub struct Patch {
     pub seq: Option<u64>,
     pub clock: HashMap<ActorID, u64>,
     pub deps: Vec<ChangeHash>,
+    pub max_op: u64,
 //    pub can_undo: bool,
 //    pub can_redo: bool,
-    pub version: u64,
+//    pub version: u64,
     #[serde(serialize_with = "Patch::top_level_serialize")]
     pub diffs: Option<Diff>,
 }

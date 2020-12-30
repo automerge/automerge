@@ -7,9 +7,8 @@
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
 use crate::actor_map::ActorMap;
-use crate::concurrent_operations::ConcurrentOperations;
 use crate::error::AutomergeError;
-use crate::internal::{InternalOpType, Key, ObjectID, OpID};
+use crate::internal::{InternalOpType, ObjectID};
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
@@ -118,7 +117,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.index_of(id)?;
                     object.seq.insert_index(index, id);
-                    Some(PendingDiff::SeqInsert(op.clone(), index))
+                    Some(PendingDiff::SeqInsert(op.clone(), index, op.id ))
                 }
                 (false, false) => None,
             };
@@ -154,15 +153,6 @@ impl OpSet {
         Ok(())
     }
 
-    pub fn get_field_ops(&self, object_id: &ObjectID, key: &Key) -> Option<&ConcurrentOperations> {
-        self.objs.get(object_id).and_then(|obj| obj.props.get(key))
-    }
-
-    pub fn get_field_opids(&self, object_id: &ObjectID, key: &Key) -> Option<Vec<OpID>> {
-        self.get_field_ops(object_id, key)
-            .map(|con_ops| con_ops.iter().map(|op| op.id).collect())
-    }
-
     pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
         self.objs
             .get(&object_id)
@@ -175,18 +165,6 @@ impl OpSet {
             .get_mut(&object_id)
             .map(|rc| Rc::make_mut(rc))
             .ok_or(AutomergeError::MissingObjectError)
-    }
-
-    pub fn get_pred(&self, object_id: &ObjectID, key: &Key, insert: bool) -> Vec<OpID> {
-        if insert {
-            Vec::new()
-        } else if let Some(ops) = self.get_field_opids(&object_id, &key) {
-            ops
-        } else if let Some(opid) = key.to_opid() {
-            vec![opid]
-        } else {
-            Vec::new()
-        }
     }
 
     pub fn construct_map(
@@ -235,9 +213,10 @@ impl OpSet {
         for opid in object.seq.into_iter() {
             max_counter = max(max_counter, opid.0);
             let key = (*opid).into(); // FIXME - something is wrong here
+            let elem_id = actors.export_opid(opid).into();
             if let Some(ops) = object.props.get(&key) {
                 if !ops.is_empty() {
-                    edits.push(amp::DiffEdit::Insert { index });
+                    edits.push(amp::DiffEdit::Insert { index, elem_id });
                     let mut opid_to_value = HashMap::new();
                     for op in ops.iter() {
                         let amp_opid = actors.export_opid(&op.id);
@@ -317,7 +296,7 @@ impl OpSet {
         seq_type: amp::SequenceType,
     ) -> Result<amp::Diff, AutomergeError> {
         let mut props = HashMap::new();
-        let edits = pending.iter().filter_map(|p| p.edit()).collect();
+        let edits = pending.iter().filter_map(|p| p.edit(actors)).collect();
         // i may have duplicate keys - this makes sure I hit each one only once
         let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
         for key in keys.iter() {

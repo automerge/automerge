@@ -25,5 +25,7 @@
     "test": "cargo test && wasm-pack test --node"
   },
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "mocha": "^7.1.1"
+  }
 }

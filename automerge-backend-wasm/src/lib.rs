@@ -1,7 +1,7 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{Backend, Change};
-use automerge_protocol::{ActorID, ChangeHash, Request};
+use automerge_backend::{Backend, Change, UnencodedChange };
+use automerge_protocol::{ActorID, ChangeHash };
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -62,7 +62,7 @@ impl State {
 
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<Array, JsValue> {
-        let c: Request = js_to_rust(change)?;
+        let c: UnencodedChange = js_to_rust(change)?;
         let (patch, change) = self.backend.apply_local_change(c).map_err(to_js_err)?;
         let result = Array::new();
         let bytes: Uint8Array = change.bytes.as_slice().into();

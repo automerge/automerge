@@ -72,13 +72,6 @@ impl ActorMap {
         }
     }
 
-    pub fn export_key(&self, key: &Key) -> amp::Key {
-        match key {
-            Key::Map(string) => amp::Key::Map(string.clone()),
-            Key::Seq(eid) => amp::Key::Seq(self.export_element_id(eid)),
-        }
-    }
-
     pub fn export_actor(&self, actor: ActorID) -> amp::ActorID {
         self.0[actor.0].clone()
     }
@@ -93,35 +86,6 @@ impl ActorMap {
             ObjectID::ID(opid) => amp::ObjectID::ID(self.export_opid(opid)),
         }
     }
-
-    pub fn export_element_id(&self, eid: &ElementID) -> amp::ElementID {
-        match eid {
-            ElementID::Head => amp::ElementID::Head,
-            ElementID::ID(opid) => amp::ElementID::ID(self.export_opid(opid)),
-        }
-    }
-
-    /*
-    pub fn export_op(&self, op: &InternalOp) -> Operation {
-        Operation {
-            action: self.export_optype(&op.action),
-            obj: self.export_obj(&op.obj),
-            key: self.export_key(&op.key),
-            pred: op.pred.iter().map(|id| self.export_opid(id)).collect(),
-            insert: op.insert,
-        }
-    }
-
-    pub fn export_optype(&self, optype: &InternalOpType) -> OpType {
-        match optype {
-            InternalOpType::Make(val) => OpType::Make(*val),
-            InternalOpType::Del => OpType::Del,
-            InternalOpType::Link(obj) => OpType::Link(self.export_obj(obj)),
-            InternalOpType::Inc(val) => OpType::Inc(*val),
-            InternalOpType::Set(val) => OpType::Set(val.clone()),
-        }
-    }
-    */
 
     #[allow(dead_code)]
     pub fn index_of(&mut self, actor: &amp::ActorID) -> usize {

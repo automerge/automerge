@@ -7,7 +7,7 @@ use crate::error::AutomergeError;
 use crate::op::Operation;
 use automerge_protocol as amp;
 use core::fmt::Debug;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::TryFrom;
@@ -31,31 +31,8 @@ pub struct UnencodedChange {
     #[serde(rename = "startOp")]
     pub start_op: u64,
     pub time: i64,
-    #[serde(
-        serialize_with = "se_option_string",
-        deserialize_with = "de_option_string"
-    )]
     pub message: Option<String>,
     pub deps: Vec<amp::ChangeHash>,
-}
-
-fn se_option_string<S>(message: &Option<String>, s: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    String::serialize(&message.clone().unwrap_or_default(), s)
-}
-
-fn de_option_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    if s.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(s))
-    }
 }
 
 impl UnencodedChange {
