@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use fxhash::FxBuildHasher;
-use im_rc::HashMap;
+//use im_rc::HashMap;
+use std::collections::HashMap;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::{max, min};

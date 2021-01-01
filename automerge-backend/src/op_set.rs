@@ -16,6 +16,7 @@ use crate::pending_diff::PendingDiff;
 use crate::Change;
 use automerge_protocol as amp;
 use core::cmp::max;
+use fxhash::FxBuildHasher;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::AsRef;
@@ -38,20 +39,20 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: im_rc::HashMap<ObjectID, Rc<ObjState>>,
+    pub objs: HashMap<ObjectID, Rc<ObjState>, FxBuildHasher>,
     pub deps: HashSet<amp::ChangeHash>,
     pub max_op: u64,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
-        let mut objs = im_rc::HashMap::new();
+        let mut objs = HashMap::default();
         objs.insert(ObjectID::Root, Rc::new(ObjState::new(amp::ObjType::map())));
 
         OpSet {
             objs,
             max_op: 0,
-            deps: HashSet::new(),
+            deps: HashSet::default(),
         }
     }
 
@@ -71,6 +72,12 @@ impl OpSet {
             }
         }
         Ok(())
+    }
+
+    pub fn heads(&self) -> Vec<amp::ChangeHash> {
+      let mut deps: Vec<_> = self.deps.iter().cloned().collect();
+      deps.sort_unstable();
+      deps
     }
 
     pub fn apply_op(

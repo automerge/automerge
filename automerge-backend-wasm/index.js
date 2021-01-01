@@ -8,11 +8,13 @@ function initCodecFunctions(functions) {
 }
 
 function init() {
-  return { state: Backend.State.new(), frozen: false }
+  return { state: Backend.State.new(), heads: [], frozen: false }
 }
 
 function load(data) {
-  return { state: Backend.State.load(data), frozen: false }
+  const state = Backend.State.load(data)
+  const heads = state.getHeads()
+  return { state, heads, frozen: false }
 }
 
 function backendState(backend) {
@@ -28,7 +30,7 @@ function backendState(backend) {
 
 function clone(backend) {
   const state = backend.state.clone();
-  return { state, frozen: false }
+  return { state, heads: backend.heads.slice(), frozen: false }
 }
 
 function free(backend) {
@@ -39,23 +41,23 @@ function free(backend) {
 
 function applyChanges(backend, changes) {
   const state = backendState(backend)
-  const patch = state.applyChanges(changes)
+  const [patch,heads] = state.applyChanges(changes)
   backend.frozen = true
-  return [{ state, frozen: false }, patch]
+  return [{ state, heads, frozen: false }, patch]
 }
 
 function applyLocalChange(backend, request) {
   const state = backendState(backend)
-  const [patch,change] = state.applyLocalChange(request)
+  const [patch,change, heads] = state.applyLocalChange(request)
   backend.frozen = true
-  return [{ state, frozen: false }, patch, change]
+  return [{ state, heads, frozen: false }, patch, change]
 }
 
 function loadChanges(backend, changes) {
   const state = backendState(backend)
-  state.loadChanges(changes)
+  const heads = state.loadChanges(changes)
   backend.frozen = true
-  return { state, frozen: false }
+  return { state, heads, frozen: false }
 }
 
 function getPatch(backend) {
@@ -74,20 +76,16 @@ function getMissingDeps(backend) {
   return backendState(backend).getMissingDeps()
 }
 
-function getUndoStack(backend) {
-  return backendState(backend).getUndoStack()
-}
-
-function getRedoStack(backend) {
-  return backendState(backend).getRedoStack()
-}
-
 function save(backend) {
   return backendState(backend).save()
+}
+
+function getHeads(backend) {
+  return backend.heads
 }
 
 module.exports = {
   initCodecFunctions,
   init, clone, save, load, free, applyChanges, applyLocalChange, loadChanges, getPatch,
-  getChanges, getChangesForActor, getMissingDeps, getUndoStack, getRedoStack,
+  getChanges, getChangesForActor, getMissingDeps, getHeads
 }

@@ -1,6 +1,6 @@
 extern crate fxhash;
 extern crate hex;
-extern crate im_rc;
+//extern crate im_rc;
 extern crate maplit;
 extern crate rand;
 extern crate uuid;

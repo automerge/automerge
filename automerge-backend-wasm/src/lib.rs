@@ -39,36 +39,46 @@ pub struct State {
 #[wasm_bindgen]
 impl State {
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
+    pub fn apply_changes(&mut self, changes: Array) -> Result<Array, JsValue> {
         let mut ch = Vec::with_capacity(changes.length() as usize);
         for c in changes.iter() {
             let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
             ch.push(Change::from_bytes(bytes).map_err(to_js_err)?);
         }
         let patch = self.backend.apply_changes(ch).map_err(to_js_err)?;
-        rust_to_js(&patch)
+        let heads = self.backend.get_heads();
+        let p = rust_to_js(&patch)?;
+        let h = rust_to_js(&heads)?;
+        let result = Array::new();
+        result.push(&p);
+        result.push(&h);
+        Ok(result)
     }
 
     #[wasm_bindgen(js_name = loadChanges)]
-    pub fn load_changes(&mut self, changes: Array) -> Result<(), JsValue> {
+    pub fn load_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
         let mut ch = Vec::with_capacity(changes.length() as usize);
         for c in changes.iter() {
             let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
             ch.push(Change::from_bytes(bytes).unwrap())
         }
         self.backend.load_changes(ch).map_err(to_js_err)?;
-        Ok(())
+        let heads = self.backend.get_heads();
+        rust_to_js(&heads)
     }
 
     #[wasm_bindgen(js_name = applyLocalChange)]
     pub fn apply_local_change(&mut self, change: JsValue) -> Result<Array, JsValue> {
         let c: UnencodedChange = js_to_rust(change)?;
         let (patch, change) = self.backend.apply_local_change(c).map_err(to_js_err)?;
+        let heads = self.backend.get_heads();
         let result = Array::new();
         let bytes: Uint8Array = change.bytes.as_slice().into();
         let p = rust_to_js(&patch)?;
+        let h = rust_to_js(&heads)?;
         result.push(&p);
         result.push(bytes.as_ref());
+        result.push(&h);
         Ok(result)
     }
 
@@ -76,6 +86,12 @@ impl State {
     pub fn get_patch(&self) -> Result<JsValue, JsValue> {
         let patch = self.backend.get_patch().map_err(to_js_err)?;
         rust_to_js(&patch)
+    }
+
+    #[wasm_bindgen(js_name = getHeads)]
+    pub fn get_heads(&self) -> Result<JsValue, JsValue> {
+        let heads = self.backend.get_heads();
+        rust_to_js(&heads)
     }
 
     #[wasm_bindgen(js_name = getChanges)]

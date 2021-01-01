@@ -38,7 +38,12 @@ impl Backend {
         diffs: Option<amp::Diff>,
         actor_seq: Option<(amp::ActorID, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut deps: Vec<_> = self.op_set.deps.iter().cloned().collect();
+        let mut deps : Vec<_> = if let Some((ref actor,ref seq)) = actor_seq {
+            let last_hash = self.get_hash(actor, *seq)?;
+            self.op_set.deps.iter().cloned().filter(|dep| dep != &last_hash).collect()
+        } else {
+            self.op_set.deps.iter().cloned().collect()
+        };
         deps.sort_unstable();
         Ok(amp::Patch {
             diffs,
@@ -68,6 +73,10 @@ impl Backend {
         self.apply(changes, None)
     }
 
+    pub fn get_heads(&self) -> Vec<amp::ChangeHash> {
+        self.op_set.heads()
+    }
+
     fn apply(
         &mut self,
         mut changes: Vec<Rc<Change>>,
@@ -83,6 +92,10 @@ impl Backend {
         self.make_patch(diffs, actor)
     }
 
+    fn get_hash(&self, actor: &amp::ActorID, seq: u64) -> Result<amp::ChangeHash,AutomergeError> {
+        self.states.get(actor).and_then(|v| v.get(seq as usize - 1)).map(|c| c.hash).ok_or(AutomergeError::InvalidSeq(seq))
+    }
+
     pub fn apply_local_change(
         &mut self,
         mut change: UnencodedChange
@@ -91,9 +104,11 @@ impl Backend {
 
         let actor_seq = (change.actor_id.clone(), change.seq);
 
-        if change.seq > 1 && change.deps.is_empty() {
-            let last_hash = self.states.get(&change.actor_id).and_then(|v| v.get(change.seq as usize - 2)).map(|c| c.hash).ok_or(AutomergeError::InvalidSeq(change.seq))?;
-            change.deps.push(last_hash)
+        if change.seq > 1 {
+            let last_hash = self.get_hash(&change.actor_id, change.seq - 1)?;
+            if !change.deps.contains(&last_hash) {
+                change.deps.push(last_hash)
+            }
         }
 
         let bin_change : Rc<Change> = Rc::new(change.into());

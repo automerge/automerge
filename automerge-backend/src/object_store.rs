@@ -4,8 +4,10 @@ use crate::error::AutomergeError;
 use crate::internal::{ElementID, Key, OpID};
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
+use fxhash::FxBuildHasher;
 use automerge_protocol as amp;
-use im_rc::{HashMap, HashSet};
+//use im_rc::{HashMap, HashSet};
+use std::collections::{ HashMap, HashSet };
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -17,22 +19,22 @@ use im_rc::{HashMap, HashSet};
 pub(crate) struct ObjState {
     pub props: HashMap<Key, ConcurrentOperations>,
     pub obj_type: amp::ObjType,
-    pub inbound: HashSet<OpHandle>,
-    pub following: HashMap<ElementID, Vec<ElementID>>,
-    pub insertions: HashMap<ElementID, OpHandle>,
+    pub inbound: HashSet<OpHandle, FxBuildHasher>,
+    pub following: HashMap<ElementID, Vec<ElementID>, FxBuildHasher>,
+    pub insertions: HashMap<ElementID, OpHandle, FxBuildHasher>,
     pub seq: SkipList<OpID>,
 }
 
 impl ObjState {
     pub fn new(obj_type: amp::ObjType) -> ObjState {
-        let mut following = HashMap::new();
+        let mut following = HashMap::default();
         following.insert(ElementID::Head, Vec::new());
         ObjState {
-            props: HashMap::new(),
+            props: HashMap::default(),
             following,
-            insertions: HashMap::new(),
+            insertions: HashMap::default(),
             obj_type,
-            inbound: HashSet::new(),
+            inbound: HashSet::default(),
             seq: SkipList::new(),
         }
     }
