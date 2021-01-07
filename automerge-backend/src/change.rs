@@ -72,9 +72,12 @@ impl UnencodedChange {
 
     fn encode_chunk_body(&self) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
-        let mut actors = Vec::new();
-
-        actors.push(self.actor_id.clone());
+        let mut deps = self.deps.clone();
+        deps.sort_unstable();
+        deps.len().encode(&mut buf)?;
+        for hash in deps.iter() {
+            buf.write_all(&hash.0)?;
+        }
 
         self.actor_id.to_bytes().encode(&mut buf)?;
         self.seq.encode(&mut buf)?;
@@ -82,16 +85,10 @@ impl UnencodedChange {
         self.time.encode(&mut buf)?;
         self.message.encode(&mut buf)?;
 
+        let mut actors = Vec::new();
+        actors.push(self.actor_id.clone());
         let ops_buf = ColumnEncoder::encode_ops(&self.operations, &mut actors);
-
         actors[1..].encode(&mut buf)?;
-
-        let mut deps = self.deps.clone();
-        deps.sort_unstable();
-        deps.len().encode(&mut buf)?;
-        for hash in deps.iter() {
-            buf.write_all(&hash.0)?;
-        }
 
         buf.write_all(&ops_buf)?;
 
@@ -160,6 +157,14 @@ impl Change {
         let hash = hasher.result()[..].try_into()?;
 
         let mut cursor = body.clone();
+        let mut deps = Vec::new();
+        let num_deps = read_slice(&bytes, &mut cursor)?;
+        for _ in 0..num_deps {
+            let hash = cursor.start..(cursor.start + HASH_BYTES);
+            cursor = hash.end..cursor.end;
+            //let hash = slice_n_bytes(bytes, HASH_BYTES)?;
+            deps.push(bytes[hash].try_into()?);
+        }
         let actor = amp::ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
         let seq = read_slice(&bytes, &mut cursor)?;
         let start_op = read_slice(&bytes, &mut cursor)?;
@@ -171,14 +176,6 @@ impl Change {
             actors.push(amp::ActorID::from(
                 &bytes[slice_bytes(&bytes, &mut cursor)?],
             ));
-        }
-        let mut deps = Vec::new();
-        let num_deps = read_slice(&bytes, &mut cursor)?;
-        for _ in 0..num_deps {
-            let hash = cursor.start..(cursor.start + HASH_BYTES);
-            cursor = hash.end..cursor.end;
-            //let hash = slice_n_bytes(bytes, HASH_BYTES)?;
-            deps.push(bytes[hash].try_into()?);
         }
         let mut ops = HashMap::new();
         let mut last_id = 0;
