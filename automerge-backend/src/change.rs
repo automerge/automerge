@@ -181,7 +181,7 @@ impl Change {
         let mut last_id = 0;
         while !bytes[cursor.clone()].is_empty() {
             let id = read_slice(&bytes, &mut cursor)?;
-            if id < last_id {
+            if id <= last_id {
                 return Err(AutomergeError::EncodingError);
             }
             last_id = id;
