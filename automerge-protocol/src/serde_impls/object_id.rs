@@ -9,7 +9,7 @@ impl Serialize for ObjectID {
     {
         match self {
             ObjectID::ID(id) => id.serialize(serializer),
-            ObjectID::Root => serializer.serialize_str("00000000-0000-0000-0000-000000000000"),
+            ObjectID::Root => serializer.serialize_str("_root"),
         }
     }
 }
@@ -20,7 +20,7 @@ impl<'de> Deserialize<'de> for ObjectID {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        if s == "00000000-0000-0000-0000-000000000000" {
+        if s == "_root" {
             Ok(ObjectID::Root)
         } else if let Ok(id) = OpID::from_str(&s) {
             Ok(ObjectID::ID(id))

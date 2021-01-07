@@ -13,7 +13,7 @@ impl FromStr for ObjectID {
     type Err = InvalidObjectID;
 
     fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
-        if s == "00000000-0000-0000-0000-000000000000" {
+        if s == "_root" {
             Ok(ObjectID::Root)
         } else if let Ok(id) = OpID::from_str(s) {
             Ok(ObjectID::ID(id))
@@ -32,7 +32,7 @@ impl From<OpID> for ObjectID {
 impl fmt::Display for ObjectID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ObjectID::Root => write!(f, "00000000-0000-0000-0000-000000000000"),
+            ObjectID::Root => write!(f, "_root"),
             ObjectID::ID(oid) => write!(f, "{}", oid),
         }
     }

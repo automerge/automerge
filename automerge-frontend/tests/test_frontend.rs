@@ -2,8 +2,6 @@ use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Valu
 use automerge_protocol as amp;
 use maplit::hashmap;
 
-const ROOT_ID: &str = "00000000-0000-0000-0000-000000000000";
-
 #[test]
 fn test_should_be_empty_after_init() {
     let frontend = Frontend::new();
@@ -68,7 +66,7 @@ fn test_set_root_object_properties() {
         deps: None,
         ops: Some(vec![amp::Op {
             action: amp::OpType::Set,
-            obj: ROOT_ID.to_string(),
+            obj: "_root".to_string(),
             key: amp::RequestKey::Str("bird".to_string()),
             child: None,
             value: Some(amp::ScalarValue::Str("magpie".to_string())),
