@@ -621,12 +621,12 @@ pub(crate) struct ColData {
     pub data: Vec<u8>,
 }
 
-impl Encodable for ColData {
-    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+impl ColData {
+    pub fn encode_col_len<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = 0;
         if !self.data.is_empty() {
             len += self.col.encode(buf)?;
-            len += self.data.as_slice().encode(buf)?;
+            len += self.data.len().encode(buf)?;
         }
         Ok(len)
     }

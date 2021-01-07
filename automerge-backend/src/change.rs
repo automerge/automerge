@@ -177,16 +177,26 @@ impl Change {
                 &bytes[slice_bytes(&bytes, &mut cursor)?],
             ));
         }
-        let mut ops = HashMap::new();
+
+        let num_columns = read_slice(&bytes, &mut cursor)?;
+        let mut columns = Vec::with_capacity(num_columns);
         let mut last_id = 0;
-        while !bytes[cursor.clone()].is_empty() {
-            let id = read_slice(&bytes, &mut cursor)?;
+        for _ in 0..num_columns {
+            let id: u32 = read_slice(&bytes, &mut cursor)?;
             if id <= last_id {
                 return Err(AutomergeError::EncodingError);
             }
             last_id = id;
-            let column = slice_bytes(&bytes, &mut cursor)?;
-            ops.insert(id, column);
+            let length = read_slice(&bytes, &mut cursor)?;
+            columns.push((id, length));
+        }
+
+        let mut ops = HashMap::new();
+        for (id, length) in columns.iter() {
+            let start = cursor.start;
+            let end = start + length;
+            cursor = end..cursor.end;
+            ops.insert(*id, start..end);
         }
 
         Ok(Change {

@@ -559,8 +559,12 @@ impl ColumnEncoder {
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut result = Vec::new();
+        coldata.iter().filter(|&d| !d.data.is_empty()).count().encode(&mut result).ok();
         for d in coldata.iter() {
-            d.encode(&mut result).ok();
+            d.encode_col_len(&mut result).ok();
+        }
+        for d in coldata.iter() {
+            result.write_all(d.data.as_slice()).ok();
         }
         result
     }
