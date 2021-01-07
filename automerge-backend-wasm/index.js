@@ -1,11 +1,5 @@
 let Backend = require('./pkg')
-let encodeChange, decodeChanges // initialized by initCodecFunctions
 const util = require('util');
-
-function initCodecFunctions(functions) {
-  encodeChange = functions.encodeChange
-  decodeChanges = functions.decodeChanges
-}
 
 function init() {
   return { state: Backend.State.new(), heads: [], frozen: false }
@@ -85,7 +79,6 @@ function getHeads(backend) {
 }
 
 module.exports = {
-  initCodecFunctions,
   init, clone, save, load, free, applyChanges, applyLocalChange, loadChanges, getPatch,
   getChanges, getChangesForActor, getMissingDeps, getHeads
 }
