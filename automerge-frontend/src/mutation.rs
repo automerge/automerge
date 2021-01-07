@@ -211,7 +211,7 @@ impl<'a, 'b> MutationTracker<'a, 'b> {
     ///
     /// ```json
     /// {
-    ///     objectId: <ROOT>,
+    ///     objectId: '_root',
     ///     type: 'object',
     ///     props: {
     ///         birds: {

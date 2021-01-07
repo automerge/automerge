@@ -15,7 +15,7 @@ describe('Automerge.Backend', () => {
             ops: [
                   {
                           action: 'makeText',
-                          obj: '00000000-0000-0000-0000-000000000000',
+                          obj: '_root',
                           key: 'text',
                           insert: false,
                           pred: []

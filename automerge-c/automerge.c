@@ -26,10 +26,10 @@ int main() {
   Backend * dbA = automerge_init();
   Backend * dbB = automerge_init();
 
-  const char * requestA1 = R"({"actor":"111111","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"magpie"}]})";
-  const char * requestA2 = R"({"actor":"111111","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"dog","value":"mastiff"}]})";
-  const char * requestB1 = R"({"actor":"222222","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"bird","value":"crow"}]})";
-  const char * requestB2 = R"({"actor":"222222","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"00000000-0000-0000-0000-000000000000","key":"cat","value":"tabby"}]})";
+  const char * requestA1 = R"({"actor":"111111","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"_root","key":"bird","value":"magpie"}]})";
+  const char * requestA2 = R"({"actor":"111111","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"_root","key":"dog","value":"mastiff"}]})";
+  const char * requestB1 = R"({"actor":"222222","seq":1,"time":0,"version":0,"ops":[{"action":"set","obj":"_root","key":"bird","value":"crow"}]})";
+  const char * requestB2 = R"({"actor":"222222","seq":2,"time":0,"version":1,"ops":[{"action":"set","obj":"_root","key":"cat","value":"tabby"}]})";
 
   printf("*** requestA1 ***\n\n%s\n\n",requestA1);
 
