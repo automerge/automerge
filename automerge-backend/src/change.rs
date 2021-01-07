@@ -33,6 +33,8 @@ pub struct UnencodedChange {
     pub time: i64,
     pub message: Option<String>,
     pub deps: Vec<amp::ChangeHash>,
+    #[serde(rename = "extraBytes")]
+    pub extra_bytes: Vec<u8>,
 }
 
 impl UnencodedChange {
@@ -91,6 +93,7 @@ impl UnencodedChange {
         actors[1..].encode(&mut buf)?;
 
         buf.write_all(&ops_buf)?;
+        buf.write_all(&self.extra_bytes)?;
 
         Ok(buf)
     }
@@ -108,6 +111,7 @@ pub struct Change {
     actors: Vec<amp::ActorID>,
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
+    extra_bytes: Range<usize>,
 }
 
 impl Change {
@@ -210,6 +214,7 @@ impl Change {
             message,
             deps,
             ops,
+            extra_bytes: cursor,
         })
     }
 
@@ -237,6 +242,7 @@ impl Change {
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
             operations: self.iter_ops().collect(),
+            extra_bytes: Vec::new(),
         }
     }
 
@@ -356,6 +362,7 @@ mod tests {
             actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
+            extra_bytes: vec![],
         };
         let bin1 = change1.encode();
         let change2 = bin1.decode();
@@ -470,6 +477,7 @@ mod tests {
                     pred: vec![opid4, opid5],
                 },
             ],
+            extra_bytes: vec![],
         };
         let bin1 = change1.encode();
         let change2 = bin1.decode();
