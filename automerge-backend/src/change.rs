@@ -3,16 +3,14 @@ use crate::columnar::{
     ColumnEncoder, KeyIterator, ObjIterator, OperationIterator, PredIterator, ValueIterator,
 };
 use crate::encoding::{Decodable, Encodable};
-use crate::error::AutomergeError;
+use crate::error::{AutomergeError, InvalidChangeError};
 use crate::op::Operation;
 use automerge_protocol as amp;
 use core::fmt::Debug;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
-use std::io;
 use std::io::Write;
 use std::ops::Range;
 use std::str;
@@ -20,83 +18,96 @@ use std::str;
 const HASH_BYTES: usize = 32;
 const CHUNK_TYPE: u8 = 1;
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
-pub struct UnencodedChange {
-    #[serde(rename = "ops")]
-    pub operations: Vec<Operation>,
-    #[serde(rename = "actor")]
-    pub actor_id: amp::ActorID,
-    //pub hash: amp::ChangeHash,
-    pub seq: u64,
-    #[serde(rename = "startOp")]
-    pub start_op: u64,
-    pub time: i64,
-    pub message: Option<String>,
-    pub deps: Vec<amp::ChangeHash>,
+impl TryFrom<&amp::UncompressedChange> for Change {
+    type Error = AutomergeError;
+
+    fn try_from(value: &amp::UncompressedChange) -> Result<Self, Self::Error> {
+        encode(value).map_err(|e| AutomergeError::InvalidChange { source: e })
+    }
+
+    //pub fn max_op(&self) -> u64 {
+    //self.start_op + (self.operations.len() as u64) - 1
+    //}
 }
 
-impl UnencodedChange {
-    pub fn max_op(&self) -> u64 {
-        self.start_op + (self.operations.len() as u64) - 1
+impl TryFrom<amp::UncompressedChange> for Change {
+    type Error = InvalidChangeError;
+
+    fn try_from(value: amp::UncompressedChange) -> Result<Self, Self::Error> {
+        encode(&value)
+    }
+}
+
+fn encode(uncompressed_change: &amp::UncompressedChange) -> Result<Change, InvalidChangeError> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut hasher = Sha256::new();
+
+    let chunk = encode_chunk(uncompressed_change)?;
+
+    hasher.input(&chunk);
+
+    buf.extend(&MAGIC_BYTES);
+    buf.extend(&hasher.result()[0..4]);
+    buf.extend(&chunk);
+
+    // possible optimization here - i can assemble the metadata without having to parse
+    // the generated object
+    // ---
+    // unwrap :: we generated this binchange so there's no chance of bad format
+    // ---
+    Ok(Change::from_bytes(buf).unwrap())
+}
+
+fn encode_chunk(
+    uncompressed_change: &amp::UncompressedChange,
+) -> Result<Vec<u8>, InvalidChangeError> {
+    let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
+    let data = encode_chunk_body(uncompressed_change)?;
+    // Unwrap is fine as we're writing to in memory data
+    leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
+    chunk.extend(&data);
+    Ok(chunk)
+}
+
+fn encode_chunk_body(
+    uncompressed_change: &amp::UncompressedChange,
+) -> Result<Vec<u8>, InvalidChangeError> {
+    let mut buf = Vec::new();
+    let mut actors = Vec::new();
+
+    actors.push(uncompressed_change.actor_id.clone());
+
+    // All these unwraps are okay because we're writing to an in memory buffer
+    uncompressed_change
+        .actor_id
+        .to_bytes()
+        .encode(&mut buf)
+        .unwrap();
+    uncompressed_change.seq.encode(&mut buf).unwrap();
+    uncompressed_change.start_op.encode(&mut buf).unwrap();
+    uncompressed_change.time.encode(&mut buf).unwrap();
+    uncompressed_change.message.encode(&mut buf).unwrap();
+
+    let ops: Vec<Operation> = uncompressed_change
+        .operations
+        .iter()
+        .map(Operation::try_from)
+        .collect::<Result<Vec<Operation>, InvalidChangeError>>()?;
+
+    let ops_buf = ColumnEncoder::encode_ops(&ops, &mut actors);
+
+    actors[1..].encode(&mut buf).unwrap();
+
+    let mut deps = uncompressed_change.deps.clone();
+    deps.sort_unstable();
+    deps.len().encode(&mut buf).unwrap();
+    for hash in deps.iter() {
+        buf.write_all(&hash.0).unwrap();
     }
 
-    pub fn encode(&self) -> Change {
-        let mut buf = Vec::new();
-        let mut hasher = Sha256::new();
+    buf.write_all(&ops_buf).unwrap();
 
-        let chunk = self.encode_chunk();
-
-        hasher.input(&chunk);
-
-        buf.extend(&MAGIC_BYTES);
-        buf.extend(&hasher.result()[0..4]);
-        buf.extend(&chunk);
-
-        // possible optimization here - i can assemble the metadata without having to parse
-        // the generated object
-        // ---
-        // unwrap :: we generated this binchange so there's no chance of bad format
-        // ---
-
-        Change::from_bytes(buf).unwrap()
-    }
-
-    fn encode_chunk(&self) -> Vec<u8> {
-        let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
-                                          // unwrap - io errors cant happen when writing to an in memory vec
-        let data = self.encode_chunk_body().unwrap();
-        leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
-        chunk.extend(&data);
-        chunk
-    }
-
-    fn encode_chunk_body(&self) -> io::Result<Vec<u8>> {
-        let mut buf = Vec::new();
-        let mut actors = Vec::new();
-
-        actors.push(self.actor_id.clone());
-
-        self.actor_id.to_bytes().encode(&mut buf)?;
-        self.seq.encode(&mut buf)?;
-        self.start_op.encode(&mut buf)?;
-        self.time.encode(&mut buf)?;
-        self.message.encode(&mut buf)?;
-
-        let ops_buf = ColumnEncoder::encode_ops(&self.operations, &mut actors);
-
-        actors[1..].encode(&mut buf)?;
-
-        let mut deps = self.deps.clone();
-        deps.sort_unstable();
-        deps.len().encode(&mut buf)?;
-        for hash in deps.iter() {
-            buf.write_all(&hash.0)?;
-        }
-
-        buf.write_all(&ops_buf)?;
-
-        Ok(buf)
-    }
+    Ok(buf)
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -157,7 +168,9 @@ impl Change {
 
         let mut hasher = Sha256::new();
         hasher.input(&bytes[PREAMBLE_BYTES..]);
-        let hash = hasher.result()[..].try_into()?;
+        let hash = hasher.result()[..]
+            .try_into()
+            .map_err(InvalidChangeError::from)?;
 
         let mut cursor = body.clone();
         let actor = amp::ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
@@ -178,7 +191,7 @@ impl Change {
             let hash = cursor.start..(cursor.start + HASH_BYTES);
             cursor = hash.end..cursor.end;
             //let hash = slice_n_bytes(bytes, HASH_BYTES)?;
-            deps.push(bytes[hash].try_into()?);
+            deps.push(bytes[hash].try_into().map_err(InvalidChangeError::from)?);
         }
         let mut ops = HashMap::new();
         let mut last_id = 0;
@@ -221,15 +234,15 @@ impl Change {
         }
     }
 
-    pub fn decode(&self) -> UnencodedChange {
-        UnencodedChange {
+    pub fn decode(&self) -> amp::UncompressedChange {
+        amp::UncompressedChange {
             start_op: self.start_op,
             seq: self.seq,
             time: self.time,
             message: self.message(),
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
-            operations: self.iter_ops().collect(),
+            operations: self.iter_ops().map(|o| (&o).into()).collect(),
         }
     }
 
@@ -249,11 +262,6 @@ impl Change {
                 actors: &self.actors,
                 actor: self.col_iter(columnar::COL_OBJ_ACTOR),
                 ctr: self.col_iter(columnar::COL_OBJ_CTR),
-            },
-            chld: ObjIterator {
-                actors: &self.actors,
-                actor: self.col_iter(columnar::COL_CHILD_ACTOR),
-                ctr: self.col_iter(columnar::COL_CHILD_CTR),
             },
             keys: KeyIterator {
                 actors: &self.actors,
@@ -277,20 +285,8 @@ impl Change {
     }
 }
 
-impl From<&UnencodedChange> for Change {
-    fn from(change: &UnencodedChange) -> Change {
-        change.encode()
-    }
-}
-
-impl From<UnencodedChange> for Change {
-    fn from(change: UnencodedChange) -> Change {
-        change.encode()
-    }
-}
-
-impl From<&Change> for UnencodedChange {
-    fn from(change: &Change) -> UnencodedChange {
+impl From<&Change> for amp::UncompressedChange {
+    fn from(change: &Change) -> amp::UncompressedChange {
         change.decode()
     }
 }
@@ -336,12 +332,11 @@ const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::op_type::OpType;
     use std::str::FromStr;
 
     #[test]
     fn test_empty_change() {
-        let change1 = UnencodedChange {
+        let change1 = amp::UncompressedChange {
             start_op: 1,
             seq: 2,
             time: 1234,
@@ -350,9 +345,9 @@ mod tests {
             deps: vec![],
             operations: vec![],
         };
-        let bin1 = change1.encode();
+        let bin1: Change = change1.clone().try_into().unwrap();
         let change2 = bin1.decode();
-        let bin2 = change2.encode();
+        let bin2 = Change::try_from(change2.clone()).unwrap();
         assert_eq!(bin1, bin2);
         assert_eq!(change1, change2);
     }
@@ -377,7 +372,7 @@ mod tests {
         let keyseq1 = amp::Key::from(&opid1);
         let keyseq2 = amp::Key::from(&opid2);
         let insert = false;
-        let change1 = UnencodedChange {
+        let change1 = amp::UncompressedChange {
             start_op: 123,
             seq: 29291,
             time: 12_341_231,
@@ -385,88 +380,101 @@ mod tests {
             actor_id: actor1,
             deps: vec![],
             operations: vec![
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::F64(10.0)),
-                    key: key1.clone(),
-                    obj: obj1.clone(),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    key: key1,
+                    obj: obj1.to_string(),
+                    value: Some(amp::ScalarValue::F64(10.0)),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
+                    datatype: Some(amp::DataType::Undefined),
                 },
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::Counter(-11)),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    value: Some(amp::ScalarValue::Counter(-11)),
+                    datatype: Some(amp::DataType::Counter),
                     key: key2.clone(),
-                    obj: obj1.clone(),
+                    obj: obj1.to_string(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::Timestamp(20)),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    value: Some(amp::ScalarValue::Timestamp(20)),
+                    datatype: Some(amp::DataType::Timestamp),
                     key: key3,
-                    obj: obj1.clone(),
+                    obj: obj1.to_string(),
                     insert,
                     pred: vec![opid1.clone(), opid2],
                 },
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::Str("some value".into())),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    value: Some(amp::ScalarValue::Str("some value".into())),
+                    datatype: Some(amp::DataType::Undefined),
                     key: key2.clone(),
-                    obj: obj2.clone(),
+                    obj: obj2.to_string(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
-                Operation {
-                    action: OpType::Make(amp::ObjType::list()),
+                amp::Op {
+                    action: amp::OpType::MakeMap,
+                    value: None,
+                    datatype: None,
                     key: key2.clone(),
-                    obj: obj2.clone(),
+                    obj: obj2.to_string(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::Str("val1".into())),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    value: Some(amp::ScalarValue::Str("val1".into())),
+                    datatype: Some(amp::DataType::Undefined),
                     key: head.clone(),
-                    obj: obj3.clone(),
+                    obj: obj3.to_string(),
                     insert: true,
-                    pred: vec![opid3.clone(), opid4.clone()],
+                    pred: vec![opid3, opid4.clone()],
                 },
-                Operation {
-                    action: OpType::Set(amp::ScalarValue::Str("val2".into())),
+                amp::Op {
+                    action: amp::OpType::Set,
+                    value: Some(amp::ScalarValue::Str("val2".into())),
+                    datatype: Some(amp::DataType::Undefined),
                     key: head,
-                    obj: obj3.clone(),
+                    obj: obj3.to_string(),
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
-                Operation {
-                    action: OpType::Inc(10),
+                amp::Op {
+                    action: amp::OpType::Inc,
+                    value: Some(amp::ScalarValue::Counter(10)),
+                    datatype: Some(amp::DataType::Counter),
                     key: key2,
-                    obj: obj2,
+                    obj: obj2.to_string(),
                     insert,
-                    pred: vec![opid1.clone(), opid5.clone()],
+                    pred: vec![opid1, opid5.clone()],
                 },
-                Operation {
-                    action: OpType::Link(obj3.clone()),
-                    obj: obj1,
-                    key: key1,
-                    insert,
-                    pred: vec![opid1, opid3],
-                },
-                Operation {
-                    action: OpType::Del,
-                    obj: obj3.clone(),
+                amp::Op {
+                    action: amp::OpType::Del,
+                    value: None,
+                    datatype: None,
+                    obj: obj3.to_string(),
                     key: keyseq1,
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
-                Operation {
-                    action: OpType::Del,
-                    obj: obj3,
+                amp::Op {
+                    action: amp::OpType::Del,
+                    value: None,
+                    datatype: None,
+                    obj: obj3.to_string(),
                     key: keyseq2,
                     insert: true,
                     pred: vec![opid4, opid5],
                 },
             ],
         };
-        let bin1 = change1.encode();
+        let bin1 = Change::try_from(change1.clone()).unwrap();
         let change2 = bin1.decode();
-        let bin2 = change2.encode();
+        let bin2 = Change::try_from(change2.clone()).unwrap();
         assert_eq!(bin1, bin2);
         assert_eq!(change1, change2);
         Ok(())

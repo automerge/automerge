@@ -1,6 +1,6 @@
+use crate::actor_map::ActorMap;
 use crate::internal::{Key, OpID};
 use crate::op_handle::OpHandle;
-use crate::actor_map::ActorMap;
 use automerge_protocol as amp;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,7 +21,10 @@ impl PendingDiff {
 
     pub fn edit(&self, actors: &ActorMap) -> Option<amp::DiffEdit> {
         match *self {
-            Self::SeqInsert(_, index, opid ) => Some(amp::DiffEdit::Insert { index , elem_id: actors.export_opid(&opid).into() }),
+            Self::SeqInsert(_, index, opid) => Some(amp::DiffEdit::Insert {
+                index,
+                elem_id: actors.export_opid(&opid).into(),
+            }),
             Self::SeqRemove(_, index) => Some(amp::DiffEdit::Remove { index }),
             _ => None,
         }

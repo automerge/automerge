@@ -3,7 +3,7 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
-use automerge_backend::{AutomergeError, Change, UnencodedChange};
+use automerge_backend::{AutomergeError, Change, UncompressedChange};
 use automerge_protocol::Request;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
@@ -138,7 +138,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let request: Result<Request, _> = serde_json::from_str(&request);
     if let Ok(request) = request {
         // FIXME - need to update the c api to all receiving the binary change here
-        if let Ok((patch,_change)) = (*backend).apply_local_change(request) {
+        if let Ok((patch, _change)) = (*backend).apply_local_change(request) {
             (*backend).generate_json(Ok(patch))
         } else {
             -1
@@ -277,7 +277,7 @@ pub unsafe extern "C" fn automerge_encode_change(
 ) -> isize {
     let change: &CStr = CStr::from_ptr(change);
     let change = change.to_string_lossy();
-    let change: Result<UnencodedChange, _> = serde_json::from_str(&change);
+    let change: Result<UncompressedChange, _> = serde_json::from_str(&change);
     let change = change.unwrap().encode();
     (*backend).handle_binary(Ok(change.bytes))
 }

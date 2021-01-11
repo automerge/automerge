@@ -2,10 +2,10 @@
 
 use fxhash::FxBuildHasher;
 //use im_rc::HashMap;
-use std::collections::HashMap;
 use rand::rngs::ThreadRng;
 use rand::Rng;
 use std::cmp::{max, min};
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::iter::Iterator;
@@ -822,25 +822,33 @@ mod tests {
 
     #[test]
     fn test_remove_key_big() {
-        let mut s = SkipList::<String>::new();
+        let mut strings: Vec<String> = Vec::new();
         for i in 0..10000 {
             let j = 9999 - i;
-            s.insert_head(format!("a{}", j));
+            strings.push(format!("a{}", j));
         }
+        let mut s = SkipList::<&str>::new();
+        for string in strings.iter() {
+            s.insert_head(string);
+        }
+        //for i in 0..10000 {
+        //let j = 9999 - i;
+        //s.insert_head(format!("a{}", j));
+        //}
 
-        assert_eq!(s.index_of(&"a20".to_string()), Some(20));
-        assert_eq!(s.index_of(&"a500".to_string()), Some(500));
-        assert_eq!(s.index_of(&"a1000".to_string()), Some(1000));
+        assert_eq!(s.index_of(&"a20"), Some(20));
+        assert_eq!(s.index_of(&"a500"), Some(500));
+        assert_eq!(s.index_of(&"a1000"), Some(1000));
 
         for i in 0..5000 {
             let j = (4999 - i) * 2 + 1;
             s.remove_index(j);
         }
 
-        assert_eq!(s.index_of(&"a4000".to_string()), Some(2000));
-        assert_eq!(s.index_of(&"a1000".to_string()), Some(500));
-        assert_eq!(s.index_of(&"a500".to_string()), Some(250));
-        assert_eq!(s.index_of(&"a20".to_string()), Some(10));
+        assert_eq!(s.index_of(&"a4000"), Some(2000));
+        assert_eq!(s.index_of(&"a1000"), Some(500));
+        assert_eq!(s.index_of(&"a500"), Some(250));
+        assert_eq!(s.index_of(&"a20"), Some(10));
     }
 
     #[test]

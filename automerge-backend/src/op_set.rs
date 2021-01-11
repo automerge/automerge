@@ -75,9 +75,9 @@ impl OpSet {
     }
 
     pub fn heads(&self) -> Vec<amp::ChangeHash> {
-      let mut deps: Vec<_> = self.deps.iter().cloned().collect();
-      deps.sort_unstable();
-      deps
+        let mut deps: Vec<_> = self.deps.iter().cloned().collect();
+        deps.sort_unstable();
+        deps
     }
 
     pub fn apply_op(
@@ -122,9 +122,9 @@ impl OpSet {
                         .operation_key()
                         .to_opid()
                         .ok_or(AutomergeError::HeadToOpID)?;
-                    let index = object.index_of(id)?;
+                    let index = object.index_of(id).unwrap_or(0);
                     object.seq.insert_index(index, id);
-                    Some(PendingDiff::SeqInsert(op.clone(), index, op.id ))
+                    Some(PendingDiff::SeqInsert(op.clone(), index, op.id))
                 }
                 (false, false) => None,
             };
@@ -314,7 +314,6 @@ impl OpSet {
                     InternalOpType::Make(_) => {
                         self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
                     }
-                    InternalOpType::Link(ref child) => self.construct_object(&child, actors)?,
                     _ => panic!("del or inc found in field_operations"),
                 };
                 opid_to_value.insert(actors.export_opid(&op.id), link);
@@ -356,9 +355,6 @@ impl OpSet {
                     InternalOpType::Make(_) => {
                         // FIXME
                         self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
-                    }
-                    InternalOpType::Link(ref child_id) => {
-                        self.construct_object(&child_id, actors)?
                     }
                     _ => panic!("del or inc found in field_operations"),
                 };

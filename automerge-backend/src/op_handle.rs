@@ -44,7 +44,6 @@ impl OpHandle {
     pub fn child(&self) -> Option<ObjectID> {
         match &self.action {
             InternalOpType::Make(_) => Some(self.id.into()),
-            InternalOpType::Link(obj) => Some(*obj),
             _ => None,
         }
     }

@@ -1,6 +1,7 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
+use std::convert::TryFrom;
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
@@ -198,6 +199,14 @@ impl ScalarValue {
             _ => None,
         }
     }
+
+    pub fn datatype(&self) -> Option<DataType> {
+        match self {
+            ScalarValue::Counter(..) => Some(DataType::Counter),
+            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
@@ -206,7 +215,7 @@ pub enum RequestKey {
     Num(u64),
 }
 
-#[derive(Deserialize, PartialEq, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy)]
 #[serde(rename_all = "camelCase")]
 pub enum OpType {
     MakeMap,
@@ -214,21 +223,22 @@ pub enum OpType {
     MakeList,
     MakeText,
     Del,
-    Link,
     Inc,
     Set,
 }
 
-#[derive(Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
+    //TODO make this an ObjectID
     pub obj: String,
-    pub key: RequestKey,
-    pub child: Option<String>,
+    pub key: Key,
     pub value: Option<ScalarValue>,
     pub datatype: Option<DataType>,
     #[serde(default = "serde_impls::make_false")]
     pub insert: bool,
+    #[serde(default)]
+    pub pred: Vec<OpID>,
 }
 
 impl Op {
@@ -257,21 +267,6 @@ impl Op {
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
-
-#[derive(Deserialize, PartialEq, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Request {
-    pub actor: ActorID,
-    pub seq: u64,
-    pub version: u64,
-    pub message: Option<String>,
-    #[serde(default = "serde_impls::make_true")]
-    pub undoable: bool,
-    pub time: Option<i64>,
-    pub deps: Option<Vec<ChangeHash>>,
-    pub ops: Option<Vec<Op>>,
-    //pub request_type: RequestType,
-}
 
 // The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
 // Diff {
@@ -340,9 +335,11 @@ pub enum DiffEdit {
     Insert {
         index: usize,
         #[serde(rename = "elemId")]
-        elem_id: ElementID
+        elem_id: ElementID,
     },
-    Remove { index: usize },
+    Remove {
+        index: usize,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -355,11 +352,37 @@ pub struct Patch {
     pub clock: HashMap<ActorID, u64>,
     pub deps: Vec<ChangeHash>,
     pub max_op: u64,
-//    pub can_undo: bool,
-//    pub can_redo: bool,
-//    pub version: u64,
+    //    pub can_undo: bool,
+    //    pub can_redo: bool,
+    //    pub version: u64,
     #[serde(serialize_with = "Patch::top_level_serialize")]
     pub diffs: Option<Diff>,
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+pub struct UncompressedChange {
+    #[serde(rename = "ops")]
+    pub operations: Vec<Op>,
+    #[serde(rename = "actor")]
+    pub actor_id: ActorID,
+    //pub hash: amp::ChangeHash,
+    pub seq: u64,
+    #[serde(rename = "startOp")]
+    pub start_op: u64,
+    pub time: i64,
+    pub message: Option<String>,
+    pub deps: Vec<ChangeHash>,
+}
+
+impl UncompressedChange {
+    pub fn op_id_of(&self, index: u64) -> Option<OpID> {
+        if let Ok(index_usize) = usize::try_from(index) {
+            if index_usize < self.operations.len() {
+                return Some(self.actor_id.op_id_at(self.start_op + index));
+            }
+        }
+        None
+    }
 }
 
 impl Patch {
