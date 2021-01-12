@@ -33,7 +33,7 @@ pub struct UnencodedChange {
     pub time: i64,
     pub message: Option<String>,
     pub deps: Vec<amp::ChangeHash>,
-    #[serde(rename = "extraBytes")]
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
 }
 
@@ -242,7 +242,7 @@ impl Change {
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
             operations: self.iter_ops().collect(),
-            extra_bytes: Vec::new(),
+            extra_bytes: self.bytes[self.extra_bytes.clone()].to_vec()
         }
     }
 

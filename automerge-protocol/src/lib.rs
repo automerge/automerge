@@ -130,6 +130,13 @@ impl Key {
         Key::Seq(ElementID::Head)
     }
 
+    pub fn is_map_key(&self) -> bool {
+        match self {
+            Key::Map(_) => true,
+            Key::Seq(_) => false
+        }
+    }
+
     pub fn as_element_id(&self) -> Option<ElementID> {
         match self {
             Key::Map(_) => None,
