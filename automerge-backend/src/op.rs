@@ -113,7 +113,7 @@ impl Serialize for Operation {
         let mut op = serializer.serialize_struct("Operation", fields)?;
         op.serialize_field("action", &self.action)?;
         op.serialize_field("obj", &self.obj)?;
-        op.serialize_field("key", &self.key)?;
+        op.serialize_field(if self.key.is_map_key() { "key" } else { "elemId" }, &self.key)?;
         if self.insert {
             op.serialize_field("insert", &self.insert)?;
         }
@@ -167,6 +167,7 @@ impl<'de> Deserialize<'de> for Operation {
                         "action" => read_field("action", &mut action, &mut map)?,
                         "obj" => read_field("obj", &mut obj, &mut map)?,
                         "key" => read_field("key", &mut key, &mut map)?,
+                        "elemId" => read_field("elemId", &mut key, &mut map)?,
                         "pred" => read_field("pred", &mut pred, &mut map)?,
                         "insert" => read_field("insert", &mut insert, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
