@@ -128,7 +128,7 @@ fn test_includes_conflicting_values_for_key() {
         max_op: 1,
         seq: None,
         actor: None,
-        deps: vec![change2.hash, change1.hash],
+        deps: vec![change1.hash, change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
