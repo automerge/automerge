@@ -1,7 +1,7 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{Backend, Change, UncompressedChange};
-use automerge_protocol::{ActorID, ChangeHash};
+use automerge_backend::{Backend, Change};
+use automerge_protocol::{ActorID, ChangeHash, UncompressedChange};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
