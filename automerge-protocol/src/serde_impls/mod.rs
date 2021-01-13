@@ -18,11 +18,6 @@ pub(crate) fn make_false() -> bool {
     false
 }
 
-// Factory method for use in #[serde(default=..)] annotations
-pub(crate) fn make_true() -> bool {
-    true
-}
-
 // Helper method for use in custom deserialize impls
 pub(crate) fn read_field<'de, T, M>(
     name: &'static str,

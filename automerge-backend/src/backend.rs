@@ -4,10 +4,11 @@ use crate::internal::ObjectID;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::pending_diff::PendingDiff;
-use crate::{Change, UnencodedChange};
+use crate::Change;
 use automerge_protocol as amp;
-use std::collections::{HashMap, HashSet};
 use core::cmp::max;
+use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -38,9 +39,14 @@ impl Backend {
         diffs: Option<amp::Diff>,
         actor_seq: Option<(amp::ActorID, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut deps : Vec<_> = if let Some((ref actor,ref seq)) = actor_seq {
+        let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
             let last_hash = self.get_hash(actor, *seq)?;
-            self.op_set.deps.iter().cloned().filter(|dep| dep != &last_hash).collect()
+            self.op_set
+                .deps
+                .iter()
+                .cloned()
+                .filter(|dep| dep != &last_hash)
+                .collect()
         } else {
             self.op_set.deps.iter().cloned().collect()
         };
@@ -92,13 +98,17 @@ impl Backend {
         self.make_patch(diffs, actor)
     }
 
-    fn get_hash(&self, actor: &amp::ActorID, seq: u64) -> Result<amp::ChangeHash,AutomergeError> {
-        self.states.get(actor).and_then(|v| v.get(seq as usize - 1)).map(|c| c.hash).ok_or(AutomergeError::InvalidSeq(seq))
+    fn get_hash(&self, actor: &amp::ActorID, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+        self.states
+            .get(actor)
+            .and_then(|v| v.get(seq as usize - 1))
+            .map(|c| c.hash)
+            .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
     pub fn apply_local_change(
         &mut self,
-        mut change: UnencodedChange
+        mut change: amp::UncompressedChange,
     ) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
         self.check_for_duplicate(&change)?; // Change has already been applied
 
@@ -111,13 +121,13 @@ impl Backend {
             }
         }
 
-        let bin_change : Rc<Change> = Rc::new(change.into());
-        let patch : amp::Patch = self.apply(vec![ bin_change.clone() ], Some(actor_seq))?;
+        let bin_change: Rc<Change> = Rc::new(change.try_into()?);
+        let patch: amp::Patch = self.apply(vec![bin_change.clone()], Some(actor_seq))?;
 
         Ok((patch, bin_change))
     }
 
-    fn check_for_duplicate(&self, change: &UnencodedChange) -> Result<(), AutomergeError> {
+    fn check_for_duplicate(&self, change: &amp::UncompressedChange) -> Result<(), AutomergeError> {
         if self
             .states
             .get(&change.actor_id)
@@ -179,11 +189,7 @@ impl Backend {
 
         op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
 
-        op_set.apply_ops(
-            ops,
-            diffs,
-            &self.actors,
-        )?;
+        op_set.apply_ops(ops, diffs, &self.actors)?;
 
         Ok(())
     }
@@ -271,4 +277,3 @@ impl Backend {
             .collect()
     }
 }
-

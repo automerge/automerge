@@ -1,9 +1,9 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend, UnencodedChange};
-use automerge_backend::{OpType, Operation};
+use automerge_backend::{Backend, Change};
+use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID, Patch, ScalarValue,
-    SeqDiff, SequenceType,
+    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjectID, Op, Patch, ScalarValue,
+    SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -11,56 +11,60 @@ use std::convert::TryInto;
 #[test]
 fn test_include_most_recent_value_for_key() {
     let actor: ActorID = "ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
         message: None,
-        operations: vec![Operation {
-            action: OpType::Set("magpie".into()),
+        operations: vec![Op {
+            action: amp::OpType::Set,
+            value: Some("magpie".into()),
+            datatype: None,
             key: "bird".into(),
-            obj: ObjectID::Root,
+            obj: ObjectID::Root.to_string(),
             pred: Vec::new(),
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
-    let change2 = UnencodedChange {
+    let change2: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
         time: 0,
         message: None,
         deps: vec![change1.hash],
-        operations: vec![Operation {
-            obj: ObjectID::Root,
-            action: OpType::Set("blackbird".into()),
+        operations: vec![Op {
+            obj: ObjectID::Root.to_string(),
+            action: amp::OpType::Set,
+            value: Some("blackbird".into()),
+            datatype: Some(amp::DataType::Undefined),
             key: "bird".into(),
-            pred: vec!["1@ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap()],
+            pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
         actor: None,
         seq: None,
-        version: 0,
+        max_op: 2,
         clock: hashmap! {
-            actor => 2,
+            actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    "2@ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap() => Diff::Value("blackbird".into())
+                    actor.op_id_at(2) => Diff::Value("blackbird".into()),
                 }
             },
         })),
@@ -76,58 +80,62 @@ fn test_include_most_recent_value_for_key() {
 fn test_includes_conflicting_values_for_key() {
     let actor1: ActorID = "111111".try_into().unwrap();
     let actor2: ActorID = "222222".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
         message: None,
-        operations: vec![Operation {
-            action: OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+        operations: vec![Op {
+            action: amp::OpType::Set,
+            value: Some("magpie".into()),
+            datatype: Some(amp::DataType::Undefined),
+            obj: ObjectID::Root.to_string(),
             key: "bird".into(),
             pred: Vec::new(),
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
-    let change2 = UnencodedChange {
+    let change2: Change = UncompressedChange {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        operations: vec![Operation {
-            action: OpType::Set("blackbird".into()),
+        operations: vec![Op {
+            action: amp::OpType::Set,
+            value: Some("blackbird".into()),
+            datatype: Some(amp::DataType::Undefined),
             key: "bird".into(),
-            obj: ObjectID::Root,
+            obj: ObjectID::Root.to_string(),
             pred: Vec::new(),
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor1 => 1,
-            actor2 => 1,
+            actor1.clone() => 1,
+            actor2.clone() => 1,
         },
+        max_op: 1,
         seq: None,
         actor: None,
-        can_undo: false,
-        can_redo: false,
         deps: vec![change2.hash, change1.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    "1@111111".try_into().unwrap() => Diff::Value("magpie".into()),
-                    "1@222222".try_into().unwrap() => Diff::Value("blackbird".into()),
+                    actor1.op_id_at(1) => Diff::Value("magpie".into()),
+                    actor2.op_id_at(1) => Diff::Value("blackbird".into()),
                 },
             },
         })),
@@ -142,56 +150,60 @@ fn test_includes_conflicting_values_for_key() {
 #[test]
 fn test_handles_counter_increment_at_keys_in_a_map() {
     let actor: ActorID = "46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        operations: vec![Operation {
-            action: OpType::Set(ScalarValue::Counter(1)),
-            obj: ObjectID::Root,
+        operations: vec![Op {
+            action: amp::OpType::Set,
+            value: Some(ScalarValue::Counter(1)),
+            datatype: Some(amp::DataType::Undefined),
+            obj: ObjectID::Root.to_string(),
             key: "counter".into(),
             pred: Vec::new(),
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
-    let change2 = UnencodedChange {
+    let change2: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
         time: 0,
         deps: vec![change1.hash],
         message: None,
-        operations: vec![Operation {
-            action: OpType::Inc(2),
-            obj: ObjectID::Root,
+        operations: vec![Op {
+            action: amp::OpType::Inc,
+            value: Some(2.into()),
+            datatype: Some(amp::DataType::Undefined),
+            obj: ObjectID::Root.to_string(),
             key: "counter".into(),
-            pred: vec!["1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap()],
+            pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         seq: None,
         actor: None,
         clock: hashmap! {
-            actor => 2,
+            actor.clone() => 2,
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 2,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "counter".into() => hashmap!{
-                    "1@46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap() => Diff::Value(ScalarValue::Counter(3))
+                    actor.op_id_at(1) => Diff::Value(ScalarValue::Counter(3))
                 }
             },
         })),
@@ -206,7 +218,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
 #[test]
 fn test_creates_nested_maps() {
     let actor: ActorID = "06148f9422cb40579fd02f1975c34a51".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -214,25 +226,30 @@ fn test_creates_nested_maps() {
         message: None,
         deps: Vec::new(),
         operations: vec![
-            Operation {
-                action: OpType::Make(ObjType::Map(MapType::Map)),
-                obj: ObjectID::Root,
+            Op {
+                action: amp::OpType::MakeMap,
+                value: None,
+                datatype: None,
+                obj: ObjectID::Root.to_string(),
                 key: "birds".into(),
                 pred: Vec::new(),
                 insert: false,
             },
-            Operation {
-                action: OpType::Set(ScalarValue::F64(3.0)),
+            Op {
+                action: amp::OpType::Set,
+                value: Some(ScalarValue::F64(3.0)),
+                datatype: Some(amp::DataType::Undefined),
                 key: "wrens".into(),
-                obj: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
                 pred: Vec::new(),
                 insert: false,
             },
         ],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
-    let change2 = UnencodedChange {
+    let change2: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -240,45 +257,48 @@ fn test_creates_nested_maps() {
         deps: vec![change1.hash],
         message: None,
         operations: vec![
-            Operation {
-                action: OpType::Del,
-                obj: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
+                action: amp::OpType::Del,
+                value: None,
+                datatype: None,
                 key: "wrens".into(),
-                pred: vec!["2@06148f9422cb40579fd02f1975c34a51".try_into().unwrap()],
+                pred: vec![actor.op_id_at(2)],
                 insert: false,
             },
-            Operation {
-                action: OpType::Set(ScalarValue::F64(15.0)),
-                obj: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
+                action: amp::OpType::Set,
+                value: Some(ScalarValue::F64(15.0)),
+                datatype: None,
                 key: "sparrows".into(),
                 pred: Vec::new(),
                 insert: false,
             },
         ],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor => 2,
+            actor.clone() => 2,
         },
         actor: None,
         seq: None,
-        can_undo: false,
-        can_redo: false,
+        max_op: 4,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectID::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Map(MapDiff{
-                        object_id: "1@06148f9422cb40579fd02f1975c34a51".try_into().unwrap(),
+                    actor.op_id_at(1) => Diff::Map(MapDiff{
+                        object_id: ObjectID::from(actor.op_id_at(1)),
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                "4@06148f9422cb40579fd02f1975c34a51".try_into().unwrap() => Diff::Value(ScalarValue::F64(15.0))
+                                actor.op_id_at(4) => Diff::Value(ScalarValue::F64(15.0))
                             }
                         }
                     })
@@ -296,7 +316,7 @@ fn test_creates_nested_maps() {
 #[test]
 fn test_create_lists() {
     let actor: ActorID = "90bf7df682f747fa82ac604b35010906".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -304,31 +324,34 @@ fn test_create_lists() {
         message: None,
         deps: Vec::new(),
         operations: vec![
-            Operation {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
-                obj: ObjectID::Root,
+            Op {
+                action: amp::OpType::MakeList,
+                value: None,
+                datatype: None,
+                obj: ObjectID::Root.to_string(),
                 key: "birds".into(),
                 pred: Vec::new(),
                 insert: false,
             },
-            Operation {
-                action: OpType::Set("chaffinch".into()),
-                obj: "1@90bf7df682f747fa82ac604b35010906".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
+                action: amp::OpType::Set,
+                value: Some("chaffinch".into()),
+                datatype: Some(amp::DataType::Undefined),
                 key: ElementID::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
         ],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor => 1,
+            actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 2,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -337,10 +360,13 @@ fn test_create_lists() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    "1@90bf7df682f747fa82ac604b35010906".try_into().unwrap() => Diff::Seq(SeqDiff{
-                        object_id: "1@90bf7df682f747fa82ac604b35010906".try_into().unwrap(),
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: ObjectID::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert { index :0 }],
+                        edits: vec![DiffEdit::Insert {
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into()
+                        }],
                         props: hashmap!{
                             0 => hashmap!{
                                 "2@90bf7df682f747fa82ac604b35010906".try_into().unwrap() => Diff::Value("chaffinch".into())
@@ -361,7 +387,7 @@ fn test_create_lists() {
 #[test]
 fn test_includes_latests_state_of_list() {
     let actor: ActorID = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -369,45 +395,52 @@ fn test_includes_latests_state_of_list() {
         message: None,
         deps: Vec::new(),
         operations: vec![
-            Operation {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
-                obj: ObjectID::Root,
+            Op {
+                action: amp::OpType::MakeList,
+                value: None,
+                datatype: None,
+                obj: ObjectID::Root.to_string(),
                 key: "todos".into(),
                 pred: Vec::new(),
                 insert: false,
             },
-            Operation {
-                action: OpType::Make(ObjType::Map(MapType::Map)),
-                obj: "1@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
+            Op {
+                action: amp::OpType::MakeMap,
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
+                value: None,
+                datatype: None,
                 key: ElementID::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
-            Operation {
-                action: OpType::Set("water plants".into()),
-                obj: "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(2)).to_string(),
+                action: amp::OpType::Set,
+                value: Some("water plants".into()),
+                datatype: Some(amp::DataType::Undefined),
                 key: "title".into(),
                 pred: Vec::new(),
                 insert: false,
             },
-            Operation {
-                action: OpType::Set(false.into()),
-                obj: "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(2)).to_string(),
+                action: amp::OpType::Set,
+                value: Some(false.into()),
+                datatype: Some(amp::DataType::Undefined),
                 key: "done".into(),
                 pred: Vec::new(),
                 insert: false,
             },
         ],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor => 1
+            actor.clone() => 1
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 4,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -416,21 +449,21 @@ fn test_includes_latests_state_of_list() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "todos".into() => hashmap!{
-                    "1@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Seq(SeqDiff{
-                        object_id: "1@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: ObjectID::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert{index: 0}],
+                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Map(MapDiff{
+                                actor.op_id_at(2) => Diff::Map(MapDiff{
                                     object_id: "2@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap(),
                                     obj_type: MapType::Map,
                                     props: hashmap!{
                                         "title".into() => hashmap!{
-                                            "3@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Value("water plants".into()),
+                                            actor.op_id_at(3) => Diff::Value("water plants".into()),
                                         },
                                         "done".into() => hashmap!{
-                                            "4@6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap() => Diff::Value(false.into())
+                                            actor.op_id_at(4) => Diff::Value(false.into())
                                         }
                                     }
                                 })
@@ -451,30 +484,31 @@ fn test_includes_latests_state_of_list() {
 #[test]
 fn test_includes_date_objects_at_root() {
     let actor: ActorID = "90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
         time: 0,
         message: None,
         deps: Vec::new(),
-        operations: vec![Operation {
-            action: OpType::Set(ScalarValue::Timestamp(1_586_541_033_457)),
-            obj: ObjectID::Root,
+        operations: vec![Op {
+            obj: ObjectID::Root.to_string(),
+            action: amp::OpType::Set,
+            value: Some(ScalarValue::Timestamp(1_586_541_033_457)),
+            datatype: Some(amp::DataType::Timestamp),
             key: "now".into(),
             pred: Vec::new(),
             insert: false,
         }],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor => 1,
+            actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 1,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -483,7 +517,7 @@ fn test_includes_date_objects_at_root() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "now".into() => hashmap!{
-                    "1@90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_541_033_457))
+                    actor.op_id_at(1) => Diff::Value(ScalarValue::Timestamp(1_586_541_033_457))
                 }
             },
         })),
@@ -498,7 +532,7 @@ fn test_includes_date_objects_at_root() {
 #[test]
 fn test_includes_date_objects_in_a_list() {
     let actor: ActorID = "08b050f976a249349021a2e63d99c8e8".try_into().unwrap();
-    let change1 = UnencodedChange {
+    let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -506,31 +540,34 @@ fn test_includes_date_objects_in_a_list() {
         message: None,
         deps: Vec::new(),
         operations: vec![
-            Operation {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
-                obj: ObjectID::Root,
+            Op {
+                obj: ObjectID::Root.to_string(),
+                action: amp::OpType::MakeList,
+                value: None,
+                datatype: None,
                 key: "list".into(),
                 pred: Vec::new(),
                 insert: false,
             },
-            Operation {
-                action: OpType::Set(ScalarValue::Timestamp(1_586_541_089_595)),
-                obj: "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap(),
+            Op {
+                obj: ObjectID::from(actor.op_id_at(1)).to_string(),
+                action: amp::OpType::Set,
+                value: Some(ScalarValue::Timestamp(1_586_541_089_595)),
+                datatype: Some(amp::DataType::Timestamp),
                 key: ElementID::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
         ],
     }
-    .encode();
+    .try_into()
+    .unwrap();
 
     let expected_patch = Patch {
-        version: 0,
         clock: hashmap! {
-            actor => 1,
+            actor.clone() => 1,
         },
-        can_undo: false,
-        can_redo: false,
+        max_op: 2,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -539,13 +576,13 @@ fn test_includes_date_objects_in_a_list() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "list".into() => hashmap!{
-                    "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Seq(SeqDiff{
-                        object_id: "1@08b050f976a249349021a2e63d99c8e8".try_into().unwrap(),
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: ObjectID::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert {index: 0}],
+                        edits: vec![DiffEdit::Insert {index: 0, elem_id: actor.op_id_at(2).into()}],
                         props: hashmap!{
                             0 => hashmap!{
-                                "2@08b050f976a249349021a2e63d99c8e8".try_into().unwrap() => Diff::Value(ScalarValue::Timestamp(1_586_541_089_595))
+                                actor.op_id_at(2) => Diff::Value(ScalarValue::Timestamp(1_586_541_089_595))
                             }
                         }
                     })

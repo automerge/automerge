@@ -60,7 +60,6 @@ impl Encodable for &[u8] {
 pub struct OperationIterator<'a> {
     pub(crate) action: RLEDecoder<'a, Action>,
     pub(crate) objs: ObjIterator<'a>,
-    pub(crate) chld: ObjIterator<'a>,
     pub(crate) keys: KeyIterator<'a>,
     pub(crate) insert: BooleanDecoder<'a>,
     pub(crate) value: ValueIterator<'a>,
@@ -226,7 +225,6 @@ impl<'a> Iterator for OperationIterator<'a> {
         let key = self.keys.next()?;
         let pred = self.pred.next()?;
         let value = self.value.next()?;
-        let child = self.chld.next()?;
         let action = match action {
             Action::Set => OpType::Set(value),
             Action::MakeList => OpType::Make(amp::ObjType::list()),
@@ -235,7 +233,6 @@ impl<'a> Iterator for OperationIterator<'a> {
             Action::MakeTable => OpType::Make(amp::ObjType::table()),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
-            Action::Link => OpType::Link(child),
         };
         Some(Operation {
             action,
@@ -454,16 +451,6 @@ impl ChildEncoder {
         self.ctr.append_null();
     }
 
-    fn append(&mut self, obj: &amp::ObjectID, actors: &mut Vec<amp::ActorID>) {
-        match obj {
-            amp::ObjectID::Root => self.append_null(),
-            amp::ObjectID::ID(amp::OpID(ctr, actor)) => {
-                self.actor.append_value(map_actor(&actor, actors));
-                self.ctr.append_value(*ctr);
-            }
-        }
-    }
-
     fn finish(self) -> Vec<ColData> {
         vec![
             self.actor.finish(COL_CHILD_ACTOR),
@@ -483,7 +470,10 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops(ops: &[Operation], actors: &mut Vec<amp::ActorID>) -> Vec<u8> {
+    pub fn encode_ops<'a, 'b, I>(ops: I, actors: &'a mut Vec<amp::ActorID>) -> Vec<u8>
+    where
+        I: IntoIterator<Item = &'b Operation>,
+    {
         let mut e = Self::new();
         e.encode(ops, actors);
         e.finish()
@@ -501,7 +491,10 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode(&mut self, ops: &[Operation], actors: &mut Vec<amp::ActorID>) {
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorID>)
+    where
+        I: IntoIterator<Item = &'c Operation>,
+    {
         for op in ops {
             self.append(op, actors)
         }
@@ -527,11 +520,6 @@ impl ColumnEncoder {
                 self.val.append_null();
                 self.chld.append_null();
                 Action::Del
-            }
-            OpType::Link(child) => {
-                self.val.append_null();
-                self.chld.append(child, actors);
-                Action::Link
             }
             OpType::Make(kind) => {
                 self.val.append_null();
@@ -602,9 +590,8 @@ pub(crate) enum Action {
     MakeText,
     Inc,
     MakeTable,
-    Link,
 }
-const ACTIONS: [Action; 8] = [
+const ACTIONS: [Action; 7] = [
     Action::MakeMap,
     Action::Set,
     Action::MakeList,
@@ -612,7 +599,6 @@ const ACTIONS: [Action; 8] = [
     Action::MakeText,
     Action::Inc,
     Action::MakeTable,
-    Action::Link,
 ];
 
 impl Decodable for Action {
