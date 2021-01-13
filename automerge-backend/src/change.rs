@@ -98,6 +98,7 @@ fn encode_chunk_body(
     actors[1..].encode(&mut buf).unwrap();
 
     buf.write_all(&ops_buf).unwrap();
+    buf.write_all(&uncompressed_change.extra_bytes).unwrap();
 
     Ok(buf)
 }
@@ -247,6 +248,7 @@ impl Change {
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
             operations: self.iter_ops().collect(),
+            extra_bytes: self.extra_bytes().into(),
         }
     }
 
@@ -286,6 +288,10 @@ impl Change {
             insert: self.col_iter(columnar::COL_INSERT),
             action: self.col_iter(columnar::COL_ACTION),
         }
+    }
+
+    pub fn extra_bytes(&self) -> &[u8] {
+        &self.bytes[self.extra_bytes.clone()]
     }
 }
 
@@ -348,6 +354,7 @@ mod tests {
             actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
+            extra_bytes: vec![1,1,1],
         };
         let bin1: Change = change1.clone().try_into().unwrap();
         let change2 = bin1.decode();
@@ -455,6 +462,7 @@ mod tests {
                     pred: vec![opid4, opid5],
                 },
             ],
+            extra_bytes: vec![1,2,3],
         };
         let bin1 = Change::try_from(change1.clone()).unwrap();
         let change2 = bin1.decode();

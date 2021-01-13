@@ -410,6 +410,7 @@ pub struct UncompressedChange {
     pub time: i64,
     pub message: Option<String>,
     pub deps: Vec<ChangeHash>,
+    pub extra_bytes: Vec<u8>,
 }
 
 impl UncompressedChange {
