@@ -1,3 +1,4 @@
+use crate::{ScalarValue, DataType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -19,3 +20,12 @@ pub struct InvalidActorID(pub String);
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid change hash slice: {0:?}")]
 pub struct InvalidChangeHashSlice(pub Vec<u8>);
+
+#[derive(Error, Debug, PartialEq)]
+#[error("Invalid scalar value, expected {expected} but received {unexpected}")]
+pub struct InvalidScalarValue{
+    pub raw_value: ScalarValue,
+    pub datatype: DataType,
+    pub unexpected: String,
+    pub expected: String,
+}

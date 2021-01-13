@@ -10,13 +10,10 @@ mod element_id;
 mod key;
 mod object_id;
 mod opid;
-mod request_key;
 mod scalar_value;
+mod op_type;
+mod op;
 
-// Factory method for use in #[serde(default=..)] annotations
-pub(crate) fn make_false() -> bool {
-    false
-}
 
 // Helper method for use in custom deserialize impls
 pub(crate) fn read_field<'de, T, M>(
