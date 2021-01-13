@@ -4,7 +4,7 @@ use thiserror::Error;
 #[error("Invalid OpID: {0}")]
 pub struct InvalidOpID(pub String);
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 #[error("Invalid object ID: {0}")]
 pub struct InvalidObjectID(pub String);
 
@@ -16,6 +16,6 @@ pub struct InvalidElementID(pub String);
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorID(pub String);
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 #[error("Invalid change hash slice: {0:?}")]
 pub struct InvalidChangeHashSlice(pub Vec<u8>);

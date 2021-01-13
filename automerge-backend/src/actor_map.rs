@@ -1,6 +1,4 @@
-use crate::internal::{
-    ActorID, ElementID, InternalOp, InternalOpType, Key, ObjectID, OpID,
-};
+use crate::internal::{ActorID, ElementID, InternalOp, InternalOpType, Key, ObjectID, OpID};
 use crate::op_type::OpType;
 use crate::Operation;
 use automerge_protocol as amp;
@@ -66,7 +64,6 @@ impl ActorMap {
         match optype {
             OpType::Make(val) => InternalOpType::Make(*val),
             OpType::Del => InternalOpType::Del,
-            OpType::Link(obj) => InternalOpType::Link(self.import_obj(&obj)),
             OpType::Inc(val) => InternalOpType::Inc(*val),
             OpType::Set(val) => InternalOpType::Set(val.clone()),
         }

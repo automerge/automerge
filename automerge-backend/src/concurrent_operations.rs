@@ -59,7 +59,7 @@ impl ConcurrentOperations {
         }
 
         match new_op.action {
-            InternalOpType::Set(_) | InternalOpType::Link(_) | InternalOpType::Make(_) => {
+            InternalOpType::Set(_) | InternalOpType::Make(_) => {
                 self.ops.push(new_op.clone());
             }
             _ => {}

@@ -31,7 +31,7 @@ mod pending_diff;
 mod time;
 
 pub use backend::Backend;
-pub use change::{Change, UnencodedChange};
+pub use change::Change;
 pub use error::AutomergeError;
 pub use op::Operation;
 pub use op_type::OpType;

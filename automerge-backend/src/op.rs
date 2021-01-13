@@ -1,4 +1,5 @@
 // FIXME
+use crate::error::InvalidChangeError;
 use crate::op_type::OpType;
 use automerge_protocol as amp;
 use serde::ser::SerializeStruct;
@@ -6,6 +7,8 @@ use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::convert::TryFrom;
+use std::str::FromStr;
 
 fn read_field<'de, T, M>(
     name: &'static str,
@@ -106,7 +109,7 @@ impl Serialize for Operation {
         match &self.action {
             OpType::Set(amp::ScalarValue::Timestamp(_)) => fields += 2,
             OpType::Set(amp::ScalarValue::Counter(_)) => fields += 2,
-            OpType::Link(_) | OpType::Inc(_) | OpType::Set(_) => fields += 1,
+            OpType::Inc(_) | OpType::Set(_) => fields += 1,
             _ => {}
         }
 
@@ -118,7 +121,6 @@ impl Serialize for Operation {
             op.serialize_field("insert", &self.insert)?;
         }
         match &self.action {
-            OpType::Link(child) => op.serialize_field("child", &child)?,
             OpType::Inc(n) => op.serialize_field("value", &n)?,
             OpType::Set(amp::ScalarValue::Counter(value)) => {
                 op.serialize_field("value", &value)?;
@@ -161,7 +163,6 @@ impl<'de> Deserialize<'de> for Operation {
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<amp::DataType> = None;
                 let mut value: Option<Option<amp::ScalarValue>> = None;
-                let mut child: Option<amp::ObjectID> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -172,7 +173,6 @@ impl<'de> Deserialize<'de> for Operation {
                         "insert" => read_field("insert", &mut insert, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
-                        "child" => read_field("child", &mut child, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
                 }
@@ -192,9 +192,6 @@ impl<'de> Deserialize<'de> for Operation {
                         OpType::Make(amp::ObjType::Sequence(amp::SequenceType::Text))
                     }
                     amp::OpType::Del => OpType::Del,
-                    amp::OpType::Link => {
-                        OpType::Link(child.ok_or_else(|| Error::missing_field("pred"))?)
-                    }
                     amp::OpType::Set => OpType::Set(value.unwrap_or(amp::ScalarValue::Null)),
                     amp::OpType::Inc => match value {
                         Some(amp::ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
@@ -228,3 +225,56 @@ impl<'de> Deserialize<'de> for Operation {
     }
 }
 
+impl TryFrom<&amp::Op> for Operation {
+    type Error = InvalidChangeError;
+    fn try_from(op: &amp::Op) -> Result<Self, Self::Error> {
+        let op_type = OpType::try_from(op)?;
+        let obj_id = amp::ObjectID::from_str(&op.obj)?;
+        Ok(Operation {
+            action: op_type,
+            obj: obj_id,
+            key: op.key.clone(),
+            pred: op.pred.clone(),
+            insert: op.insert,
+        })
+    }
+}
+
+impl Into<amp::Op> for &Operation {
+    fn into(self) -> amp::Op {
+        let value = match &self.action {
+            OpType::Del => None,
+            OpType::Set(v) => Some(v.clone()),
+            OpType::Make(_) => None,
+            OpType::Inc(i) => Some(amp::ScalarValue::Counter(*i)),
+        };
+        let datatype = value
+            .as_ref()
+            .and_then(|v| match (v.datatype(), &self.action) {
+                (Some(d), _) => Some(d),
+                (None, OpType::Set(..)) => Some(amp::DataType::Undefined),
+                _ => None,
+            });
+        amp::Op {
+            obj: self.obj.to_string(),
+            value,
+            action: match self.action {
+                OpType::Inc(_) => amp::OpType::Inc,
+                OpType::Make(amp::ObjType::Map(amp::MapType::Map)) => amp::OpType::MakeMap,
+                OpType::Make(amp::ObjType::Map(amp::MapType::Table)) => amp::OpType::MakeTable,
+                OpType::Make(amp::ObjType::Sequence(amp::SequenceType::List)) => {
+                    amp::OpType::MakeList
+                }
+                OpType::Make(amp::ObjType::Sequence(amp::SequenceType::Text)) => {
+                    amp::OpType::MakeText
+                }
+                OpType::Set(..) => amp::OpType::Set,
+                OpType::Del => amp::OpType::Del,
+            },
+            pred: self.pred.clone(),
+            insert: self.insert,
+            key: self.key.clone(),
+            datatype,
+        }
+    }
+}

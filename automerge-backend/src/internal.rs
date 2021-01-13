@@ -44,14 +44,12 @@ impl InternalOp {
     pub fn is_inc(&self) -> bool {
         matches!(self.action, InternalOpType::Inc(_))
     }
-
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) enum InternalOpType {
     Make(amp::ObjType),
     Del,
-    Link(ObjectID),
     Inc(i64),
     Set(amp::ScalarValue),
 }

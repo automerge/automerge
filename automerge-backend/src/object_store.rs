@@ -1,13 +1,12 @@
 use crate::actor_map::ActorMap;
 use crate::concurrent_operations::ConcurrentOperations;
-use crate::error::AutomergeError;
 use crate::internal::{ElementID, Key, OpID};
 use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
-use fxhash::FxBuildHasher;
 use automerge_protocol as amp;
+use fxhash::FxBuildHasher;
 //use im_rc::{HashMap, HashSet};
-use std::collections::{ HashMap, HashSet };
+use std::collections::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
@@ -52,38 +51,44 @@ impl ObjState {
     }
 
     // this is the efficient way to do it for a SkipList
-    pub fn index_of(&self, id: OpID) -> Result<usize, AutomergeError> {
+    pub fn index_of(&self, id: OpID) -> Option<usize> {
         let mut prev_id = id.into();
         let mut index = None;
         // reverse walk through the following/insertions and looking for something that not deleted
         while index.is_none() {
-            prev_id = self.get_previous(&prev_id)?;
+            prev_id = match self.get_previous(&prev_id) {
+                Some(p) => p,
+                None => return None,
+            };
             match prev_id {
                 ElementID::ID(id) => {
                     // FIXME maybe I can speed this up with self.props.get before looking for
                     index = self.seq.index_of(&id)
                 }
-                ElementID::Head => break,
+                ElementID::Head => return None,
             }
         }
-        Ok(index.map(|i| i + 1).unwrap_or(0))
+        index.map(|i| i + 1)
     }
 
-    fn get_previous(&self, element: &ElementID) -> Result<ElementID, AutomergeError> {
-        let parent_id = self.get_parent(element).unwrap();
+    fn get_previous(&self, element: &ElementID) -> Option<ElementID> {
+        let parent_id = match self.get_parent(element) {
+            Some(p) => p,
+            None => return None,
+        };
         let children = self.insertions_after(&parent_id);
-        let pos = children
-            .iter()
-            .position(|k| k == element)
-            .ok_or_else(|| AutomergeError::GeneralError("get_previous".to_string()))?;
+        let pos = match children.iter().position(|k| k == element) {
+            Some(p) => p,
+            None => return None,
+        };
         if pos == 0 {
-            Ok(parent_id)
+            Some(parent_id)
         } else {
             let mut prev_id = children[pos - 1]; // FIXME - use refs here
             loop {
                 match self.insertions_after(&prev_id).last() {
                     Some(id) => prev_id = *id,
-                    None => return Ok(prev_id),
+                    None => return Some(prev_id),
                 }
             }
         }
