@@ -1,7 +1,5 @@
 use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
-use crate::op::Operation;
-use crate::op_type::OpType;
 use automerge_protocol as amp;
 use core::fmt::Debug;
 use std::io;
@@ -217,8 +215,8 @@ impl<'a> Iterator for ObjIterator<'a> {
 }
 
 impl<'a> Iterator for OperationIterator<'a> {
-    type Item = Operation;
-    fn next(&mut self) -> Option<Operation> {
+    type Item = amp::Op;
+    fn next(&mut self) -> Option<amp::Op> {
         let action = self.action.next()??;
         let insert = self.insert.next()?;
         let obj = self.objs.next()?;
@@ -226,15 +224,15 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => OpType::Set(value),
-            Action::MakeList => OpType::Make(amp::ObjType::list()),
-            Action::MakeText => OpType::Make(amp::ObjType::text()),
-            Action::MakeMap => OpType::Make(amp::ObjType::map()),
-            Action::MakeTable => OpType::Make(amp::ObjType::table()),
-            Action::Del => OpType::Del,
-            Action::Inc => OpType::Inc(value.to_i64()?),
+            Action::Set => amp::OpType::Set(value),
+            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
+            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
+            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
+            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
+            Action::Del => amp::OpType::Del,
+            Action::Inc => amp::OpType::Inc(value.to_i64()?),
         };
-        Some(Operation {
+        Some(amp::Op {
             action,
             obj,
             key,
@@ -472,7 +470,7 @@ pub(crate) struct ColumnEncoder {
 impl ColumnEncoder {
     pub fn encode_ops<'a, 'b, I>(ops: I, actors: &'a mut Vec<amp::ActorID>) -> Vec<u8>
     where
-        I: IntoIterator<Item = &'b Operation>,
+        I: IntoIterator<Item = &'b amp::Op>,
     {
         let mut e = Self::new();
         e.encode(ops, actors);
@@ -493,35 +491,35 @@ impl ColumnEncoder {
 
     fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorID>)
     where
-        I: IntoIterator<Item = &'c Operation>,
+        I: IntoIterator<Item = &'c amp::Op>,
     {
         for op in ops {
             self.append(op, actors)
         }
     }
 
-    fn append(&mut self, op: &Operation, actors: &mut Vec<amp::ActorID>) {
+    fn append(&mut self, op: &amp::Op, actors: &mut Vec<amp::ActorID>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
-            OpType::Set(value) => {
+            amp::OpType::Set(value) => {
                 self.val.append_value(value);
                 self.chld.append_null();
                 Action::Set
             }
-            OpType::Inc(val) => {
+            amp::OpType::Inc(val) => {
                 self.val.append_value(&amp::ScalarValue::Int(*val));
                 self.chld.append_null();
                 Action::Inc
             }
-            OpType::Del => {
+            amp::OpType::Del => {
                 self.val.append_null();
                 self.chld.append_null();
                 Action::Del
             }
-            OpType::Make(kind) => {
+            amp::OpType::Make(kind) => {
                 self.val.append_null();
                 self.chld.append_null();
                 match kind {
@@ -547,7 +545,12 @@ impl ColumnEncoder {
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut result = Vec::new();
-        coldata.iter().filter(|&d| !d.data.is_empty()).count().encode(&mut result).ok();
+        coldata
+            .iter()
+            .filter(|&d| !d.data.is_empty())
+            .count()
+            .encode(&mut result)
+            .ok();
         for d in coldata.iter() {
             d.encode_col_len(&mut result).ok();
         }

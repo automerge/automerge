@@ -186,11 +186,46 @@ pub enum ScalarValue {
 }
 
 impl ScalarValue {
-    pub fn from(val: Option<ScalarValue>, datatype: Option<DataType>) -> Option<ScalarValue> {
-        match datatype {
-            Some(DataType::Counter) => Some(ScalarValue::Counter(val?.to_i64()?)),
-            Some(DataType::Timestamp) => Some(ScalarValue::Timestamp(val?.to_i64()?)),
-            _ => val,
+
+    pub fn as_datatype(&self, datatype: DataType) -> Result<ScalarValue, error::InvalidScalarValue> {
+        match (datatype, self) {
+            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i)),
+            (DataType::Counter, ScalarValue::Uint(u)) => {
+                match i64::try_from(*u) {
+                    Ok(i) => Ok(ScalarValue::Counter(i)),
+                    Err(_) => Err(error::InvalidScalarValue{
+                        raw_value: self.clone(),
+                        expected: "an integer".to_string(),
+                        unexpected: "an integer larger than i64::max_value".to_string(),
+                        datatype,
+                    }),
+                }
+            },
+            (DataType::Counter, v) => Err(error::InvalidScalarValue{
+                raw_value: self.clone(),
+                expected: "an integer".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Timestamp, ScalarValue::Int(i)) => Ok(ScalarValue::Timestamp(*i)),
+            (DataType::Timestamp, ScalarValue::Uint(u)) => {
+                match i64::try_from(*u) {
+                    Ok(i) => Ok(ScalarValue::Timestamp(i)),
+                    Err(_) => Err(error::InvalidScalarValue{
+                        raw_value: self.clone(),
+                        expected: "an integer".to_string(),
+                        unexpected: "an integer larger than i64::max_value".to_string(),
+                        datatype,
+                    }),
+                }
+            }
+            (DataType::Timestamp, v) => Err(error::InvalidScalarValue{
+                raw_value: self.clone(),
+                expected: "an integer".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Undefined, _) => Ok(self.clone())
         }
     }
 
@@ -216,59 +251,55 @@ impl ScalarValue {
     }
 }
 
-#[derive(Serialize, Debug, PartialEq, Clone)]
-pub enum RequestKey {
-    Str(String),
-    Num(u64),
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+#[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
-    MakeMap,
-    MakeTable,
-    MakeList,
-    MakeText,
+    Make(ObjType),
     Del,
-    Inc,
-    Set,
+    Inc(i64),
+    Set(ScalarValue),
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+//#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+//pub struct Op {
+    //pub action: OpType,
+    ////TODO make this an ObjectID
+    //pub obj: String,
+    //pub key: Key,
+    //pub value: Option<ScalarValue>,
+    //pub datatype: Option<DataType>,
+    //#[serde(default = "serde_impls::make_false")]
+    //pub insert: bool,
+    //#[serde(default)]
+    //pub pred: Vec<OpID>,
+//}
+
+#[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
-    //TODO make this an ObjectID
-    pub obj: String,
+    pub obj: ObjectID,
     pub key: Key,
-    pub value: Option<ScalarValue>,
-    pub datatype: Option<DataType>,
-    #[serde(default = "serde_impls::make_false")]
-    pub insert: bool,
-    #[serde(default)]
     pub pred: Vec<OpID>,
+    pub insert: bool,
 }
 
 impl Op {
-    pub fn primitive_value(&self) -> ScalarValue {
-        match (self.value.as_ref().and_then(|v| v.to_i64()), self.datatype) {
-            (Some(n), Some(DataType::Counter)) => ScalarValue::Counter(n),
-            (Some(n), Some(DataType::Timestamp)) => ScalarValue::Timestamp(n),
-            _ => self.value.clone().unwrap_or(ScalarValue::Null),
+    pub fn primitive_value(&self) -> Option<ScalarValue> {
+        match &self.action {
+            OpType::Set(v) => Some(v.clone()),
+            OpType::Inc(i) => Some(ScalarValue::Int(*i)),
+            _ => None,
         }
     }
 
     pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
-            OpType::MakeMap => Some(ObjType::Map(MapType::Map)),
-            OpType::MakeTable => Some(ObjType::Map(MapType::Table)),
-            OpType::MakeList => Some(ObjType::Sequence(SequenceType::List)),
-            OpType::MakeText => Some(ObjType::Sequence(SequenceType::Text)),
+            OpType::Make(o) => Some(o),
             _ => None,
         }
     }
 
     pub fn to_i64(&self) -> Option<i64> {
-        self.value.as_ref().and_then(|v| v.to_i64())
+        self.primitive_value().as_ref().and_then(|v| v.to_i64())
     }
 }
 

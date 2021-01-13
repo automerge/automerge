@@ -4,7 +4,6 @@ use crate::columnar::{
 };
 use crate::encoding::{Decodable, Encodable};
 use crate::error::{AutomergeError, InvalidChangeError};
-use crate::op::Operation;
 use automerge_protocol as amp;
 use core::fmt::Debug;
 use sha2::{Digest, Sha256};
@@ -94,13 +93,7 @@ fn encode_chunk_body(
     uncompressed_change.time.encode(&mut buf).unwrap();
     uncompressed_change.message.encode(&mut buf).unwrap();
 
-    let ops: Vec<Operation> = uncompressed_change
-        .operations
-        .iter()
-        .map(Operation::try_from)
-        .collect::<Result<Vec<Operation>, InvalidChangeError>>()?;
-
-    let ops_buf = ColumnEncoder::encode_ops(&ops, &mut actors);
+    let ops_buf = ColumnEncoder::encode_ops(uncompressed_change.operations.iter(), &mut actors);
 
     actors[1..].encode(&mut buf).unwrap();
 
@@ -253,7 +246,7 @@ impl Change {
             message: self.message(),
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
-            operations: self.iter_ops().map(|o| (&o).into()).collect(),
+            operations: self.iter_ops().collect(),
         }
     }
 
@@ -392,91 +385,71 @@ mod tests {
             deps: vec![],
             operations: vec![
                 amp::Op {
-                    action: amp::OpType::Set,
+                    action: amp::OpType::Set(amp::ScalarValue::F64(10.0)),
                     key: key1,
-                    obj: obj1.to_string(),
-                    value: Some(amp::ScalarValue::F64(10.0)),
+                    obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
-                    datatype: Some(amp::DataType::Undefined),
                 },
                 amp::Op {
-                    action: amp::OpType::Set,
-                    value: Some(amp::ScalarValue::Counter(-11)),
-                    datatype: Some(amp::DataType::Counter),
+                    action: amp::OpType::Set(amp::ScalarValue::Counter(-11)),
                     key: key2.clone(),
-                    obj: obj1.to_string(),
+                    obj: obj1.clone(),
                     insert,
                     pred: vec![opid1.clone(), opid2.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Set,
-                    value: Some(amp::ScalarValue::Timestamp(20)),
-                    datatype: Some(amp::DataType::Timestamp),
+                    action: amp::OpType::Set(amp::ScalarValue::Timestamp(20)),
                     key: key3,
-                    obj: obj1.to_string(),
+                    obj: obj1,
                     insert,
                     pred: vec![opid1.clone(), opid2],
                 },
                 amp::Op {
-                    action: amp::OpType::Set,
-                    value: Some(amp::ScalarValue::Str("some value".into())),
-                    datatype: Some(amp::DataType::Undefined),
+                    action: amp::OpType::Set(amp::ScalarValue::Str("some value".into())),
                     key: key2.clone(),
-                    obj: obj2.to_string(),
+                    obj: obj2.clone(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::MakeMap,
-                    value: None,
-                    datatype: None,
+                    action: amp::OpType::Make(amp::ObjType::map()),
                     key: key2.clone(),
-                    obj: obj2.to_string(),
+                    obj: obj2.clone(),
                     insert,
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Set,
-                    value: Some(amp::ScalarValue::Str("val1".into())),
-                    datatype: Some(amp::DataType::Undefined),
+                    action: amp::OpType::Set(amp::ScalarValue::Str("val1".into())),
                     key: head.clone(),
-                    obj: obj3.to_string(),
+                    obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid3, opid4.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Set,
-                    value: Some(amp::ScalarValue::Str("val2".into())),
-                    datatype: Some(amp::DataType::Undefined),
+                    action: amp::OpType::Set(amp::ScalarValue::Str("val2".into())),
                     key: head,
-                    obj: obj3.to_string(),
+                    obj: obj3.clone(),
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Inc,
-                    value: Some(amp::ScalarValue::Counter(10)),
-                    datatype: Some(amp::DataType::Counter),
+                    action: amp::OpType::Inc(10),
                     key: key2,
-                    obj: obj2.to_string(),
+                    obj: obj2,
                     insert,
                     pred: vec![opid1, opid5.clone()],
                 },
                 amp::Op {
                     action: amp::OpType::Del,
-                    value: None,
-                    datatype: None,
-                    obj: obj3.to_string(),
+                    obj: obj3.clone(),
                     key: keyseq1,
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
                 amp::Op {
                     action: amp::OpType::Del,
-                    value: None,
-                    datatype: None,
-                    obj: obj3.to_string(),
+                    obj: obj3,
                     key: keyseq2,
                     insert: true,
                     pred: vec![opid4, opid5],

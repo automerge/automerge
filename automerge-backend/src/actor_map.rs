@@ -1,6 +1,4 @@
 use crate::internal::{ActorID, ElementID, InternalOp, InternalOpType, Key, ObjectID, OpID};
-use crate::op_type::OpType;
-use crate::Operation;
 use automerge_protocol as amp;
 use std::cmp::Ordering;
 
@@ -46,7 +44,7 @@ impl ActorMap {
         }
     }
 
-    pub fn import_op(&mut self, op: Operation) -> InternalOp {
+    pub fn import_op(&mut self, op: amp::Op) -> InternalOp {
         InternalOp {
             action: self.import_optype(&op.action),
             obj: self.import_obj(&op.obj),
@@ -60,12 +58,12 @@ impl ActorMap {
         }
     }
 
-    pub fn import_optype(&mut self, optype: &OpType) -> InternalOpType {
+    pub fn import_optype(&mut self, optype: &amp::OpType) -> InternalOpType {
         match optype {
-            OpType::Make(val) => InternalOpType::Make(*val),
-            OpType::Del => InternalOpType::Del,
-            OpType::Inc(val) => InternalOpType::Inc(*val),
-            OpType::Set(val) => InternalOpType::Set(val.clone()),
+            amp::OpType::Make(val) => InternalOpType::Make(*val),
+            amp::OpType::Del => InternalOpType::Del,
+            amp::OpType::Inc(val) => InternalOpType::Inc(*val),
+            amp::OpType::Set(val) => InternalOpType::Set(val.clone()),
         }
     }
 
