@@ -26,6 +26,7 @@ fn test_incremental_diffs_in_a_map() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -67,6 +68,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -85,6 +87,7 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
             insert: false,
             pred: vec![actor.op_id_at(1)],
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -131,6 +134,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -150,6 +154,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -199,6 +204,7 @@ fn delete_key_from_map() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -217,6 +223,7 @@ fn delete_key_from_map() {
             pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -268,6 +275,7 @@ fn create_nested_maps() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -328,6 +336,7 @@ fn test_assign_to_nested_keys_in_map() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -346,6 +355,7 @@ fn test_assign_to_nested_keys_in_map() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -409,6 +419,7 @@ fn test_create_lists() {
                 pred: Vec::new(),
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -472,6 +483,7 @@ fn test_apply_updates_inside_lists() {
                 insert: true,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -490,6 +502,7 @@ fn test_apply_updates_inside_lists() {
             pred: vec![actor.op_id_at(2)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -554,6 +567,7 @@ fn test_delete_list_elements() {
                 pred: Vec::new(),
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -572,6 +586,7 @@ fn test_delete_list_elements() {
             pred: vec![actor.op_id_at(2)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -623,6 +638,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -650,6 +666,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -705,6 +722,7 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -723,6 +741,7 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -741,6 +760,7 @@ fn test_handle_changes_within_conflicted_objects() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -801,6 +821,7 @@ fn test_support_date_objects_at_root() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -855,6 +876,7 @@ fn test_support_date_objects_in_a_list() {
                 pred: Vec::new(),
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();

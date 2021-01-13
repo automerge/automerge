@@ -28,6 +28,7 @@ fn test_apply_local_change() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
 
     let mut backend = Backend::init();
@@ -48,6 +49,7 @@ fn test_apply_local_change() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -91,6 +93,7 @@ fn test_error_on_duplicate_requests() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
 
     let change_request2 = UncompressedChange {
@@ -107,6 +110,7 @@ fn test_error_on_duplicate_requests() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
     let mut backend = Backend::init();
     backend.apply_local_change(change_request1.clone()).unwrap();
@@ -132,6 +136,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
 
     let local2 = UncompressedChange {
@@ -148,6 +153,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             insert: false,
             pred: vec![actor.op_id_at(1)],
         }],
+        extra_bytes: Vec::new(),
     };
     let remote_actor: ActorID = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
     let remote1 = UncompressedChange {
@@ -164,6 +170,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -182,6 +189,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     };
 
     let mut expected_change2 = UncompressedChange {
@@ -198,6 +206,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     };
 
     let mut expected_change3 = UncompressedChange {
@@ -214,6 +223,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     };
     let mut backend = Backend::init();
     backend.apply_local_change(local1).unwrap();
@@ -259,6 +269,7 @@ fn test_transform_list_indexes_into_element_ids() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -277,6 +288,7 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -295,6 +307,7 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
     let local2 = UncompressedChange {
         actor_id: actor.clone(),
@@ -310,6 +323,7 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
 
     let local3 = UncompressedChange {
@@ -335,6 +349,7 @@ fn test_transform_list_indexes_into_element_ids() {
                 pred: vec![actor.op_id_at(2)],
             },
         ],
+        extra_bytes: Vec::new(),
     };
 
     let mut expected_change1 = UncompressedChange {
@@ -351,6 +366,7 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
     let mut expected_change2 = UncompressedChange {
         actor_id: actor.clone(),
@@ -366,6 +382,7 @@ fn test_transform_list_indexes_into_element_ids() {
             insert: true,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
     let mut expected_change3 = UncompressedChange {
         actor_id: actor.clone(),
@@ -390,6 +407,7 @@ fn test_transform_list_indexes_into_element_ids() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     };
 
     let mut backend = Backend::init();
@@ -438,6 +456,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     };
 
     let local2 = UncompressedChange {
@@ -463,6 +482,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                 pred: vec![actor.op_id_at(2)],
             },
         ],
+        extra_bytes: Vec::new(),
     };
 
     let mut expected_patch = Patch {
@@ -517,6 +537,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             insert: false,
             pred: Vec::new(),
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -544,6 +565,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();

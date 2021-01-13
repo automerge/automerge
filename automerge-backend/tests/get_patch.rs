@@ -25,6 +25,7 @@ fn test_include_most_recent_value_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -43,6 +44,7 @@ fn test_include_most_recent_value_for_key() {
             pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -90,6 +92,7 @@ fn test_includes_conflicting_values_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -108,6 +111,7 @@ fn test_includes_conflicting_values_for_key() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -156,6 +160,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -174,6 +179,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             pred: vec![actor.op_id_at(1)],
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -229,6 +235,7 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -256,6 +263,7 @@ fn test_creates_nested_maps() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -319,6 +327,7 @@ fn test_create_lists() {
                 pred: Vec::new(),
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -400,6 +409,7 @@ fn test_includes_latests_state_of_list() {
                 insert: false,
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -466,6 +476,7 @@ fn test_includes_date_objects_at_root() {
             pred: Vec::new(),
             insert: false,
         }],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
@@ -521,6 +532,7 @@ fn test_includes_date_objects_in_a_list() {
                 pred: Vec::new(),
             },
         ],
+        extra_bytes: Vec::new(),
     }
     .try_into()
     .unwrap();
