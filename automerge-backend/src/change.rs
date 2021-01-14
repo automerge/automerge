@@ -16,6 +16,8 @@ use std::str;
 
 const HASH_BYTES: usize = 32;
 const CHUNK_TYPE: u8 = 1;
+const CHUNK_START: usize = 8;
+const HASH_RANGE: Range<usize> = 4..8;
 
 impl From<amp::UncompressedChange> for Change {
     fn from(value: amp::UncompressedChange) -> Self {
@@ -27,123 +29,122 @@ fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
     let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
-    let (chunk, mut body, actors, mut message, mut ops, mut extra_bytes, chunk_prefix) =
-        encode_chunk(uncompressed_change);
-
-    hasher.input(&chunk);
-
-    let hash_result = hasher.result();
-    let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
-    let mini_hash = &hash_result[0..4];
-
-    bytes.extend(&MAGIC_BYTES);
-    bytes.extend(mini_hash);
-
-    increment_range(&mut body, bytes.len() + chunk_prefix);
-    increment_range(&mut message, bytes.len() + chunk_prefix);
-    increment_range(&mut extra_bytes, bytes.len() + chunk_prefix);
-    increment_range_map(&mut ops, bytes.len() + chunk_prefix);
-
-    bytes.extend(&chunk);
-
     let mut deps = uncompressed_change.deps.clone();
     deps.sort_unstable();
-    let seq = uncompressed_change.seq;
-    let start_op = uncompressed_change.start_op;
-    let time = uncompressed_change.time;
 
-    //let assert_equals_change = Change::from_bytes(bytes.clone()).unwrap();
+    let mut chunk = encode_chunk(uncompressed_change, &deps);
+
+    bytes.extend(&MAGIC_BYTES);
+
+    bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
+
+    bytes.push(CHUNK_TYPE);
+
+    leb128::write::unsigned(&mut bytes, chunk.bytes.len() as u64).unwrap();
+
+    increment_range(&mut chunk.body, bytes.len());
+    increment_range(&mut chunk.message, bytes.len());
+    increment_range(&mut chunk.extra_bytes, bytes.len());
+    increment_range_map(&mut chunk.ops, bytes.len());
+
+    bytes.extend(&chunk.bytes);
+
+    hasher.input(&bytes[CHUNK_START..bytes.len()]);
+    let hash_result = hasher.result();
+    let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
+
+    bytes.splice(HASH_RANGE, hash_result[0..4].iter().cloned());
+
+    // any time I make changes to the encoder decoder its a good idea
+    // to run it through a round trip to detect errors the tests might not
+    // catch
+    // let c0 = Change::from_bytes(bytes.clone()).unwrap();
+    // std::assert_eq!(c1, c0);
+    // perhaps we should add something like this to the test suite
 
     Change {
         bytes,
         hash,
-        body,
-        seq,
-        start_op,
-        time,
-        actors,
-        message,
+        body: chunk.body,
+        seq: uncompressed_change.seq,
+        start_op: uncompressed_change.start_op,
+        time: uncompressed_change.time,
+        actors: chunk.actors,
+        message: chunk.message,
         deps,
-        ops,
-        extra_bytes,
+        ops: chunk.ops,
+        extra_bytes: chunk.extra_bytes,
     }
+}
+
+struct ChunkIntermediate {
+    bytes: Vec<u8>,
+    body: Range<usize>,
+    actors: Vec<amp::ActorID>,
+    message: Range<usize>,
+    ops: HashMap<u32, Range<usize>>,
+    extra_bytes: Range<usize>,
 }
 
 fn encode_chunk(
     uncompressed_change: &amp::UncompressedChange,
-) -> (
-    Vec<u8>,
-    Range<usize>,
-    Vec<amp::ActorID>,
-    Range<usize>,
-    HashMap<u32, Range<usize>>,
-    Range<usize>,
-    usize,
-) {
-    let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
-    let (data, body, actors, message, ops_ranges, extra_bytes) =
-        encode_chunk_body(uncompressed_change);
-    leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
-    let chunk_prefix = chunk.len();
-    chunk.extend(&data);
-    (
-        chunk,
-        body,
-        actors,
-        message,
-        ops_ranges,
-        extra_bytes,
-        chunk_prefix,
-    )
-}
+    deps: &[amp::ChangeHash],
+) -> ChunkIntermediate {
+    let mut bytes = Vec::new();
 
-fn encode_chunk_body(
-    uncompressed_change: &amp::UncompressedChange,
-) -> (
-    Vec<u8>,
-    Range<usize>,
-    Vec<amp::ActorID>,
-    Range<usize>,
-    HashMap<u32, Range<usize>>,
-    Range<usize>,
-) {
-    let mut buf = Vec::new();
-    let mut deps = uncompressed_change.deps.clone();
-    deps.sort_unstable();
-    deps.len().encode(&mut buf).unwrap();
+    // All these unwraps are okay because we're writing to an in memory buffer so io erros should
+    // not happen
+
+    // encode deps
+    deps.len().encode(&mut bytes).unwrap();
     for hash in deps.iter() {
-        buf.write_all(&hash.0).unwrap();
+        bytes.write_all(&hash.0).unwrap();
     }
+
+    // encode first actor
     let mut actors = Vec::new();
-
     actors.push(uncompressed_change.actor_id.clone());
-
-    // All these unwraps are okay because we're writing to an in memory buffer
     uncompressed_change
         .actor_id
         .to_bytes()
-        .encode(&mut buf)
+        .encode(&mut bytes)
         .unwrap();
-    uncompressed_change.seq.encode(&mut buf).unwrap();
-    uncompressed_change.start_op.encode(&mut buf).unwrap();
-    uncompressed_change.time.encode(&mut buf).unwrap();
-    let message = buf.len() + 1;
-    uncompressed_change.message.encode(&mut buf).unwrap();
-    let message = message..buf.len();
 
-    let (ops_buf, mut ops_ranges) =
+    // encode seq, start_op, time, message
+    uncompressed_change.seq.encode(&mut bytes).unwrap();
+    uncompressed_change.start_op.encode(&mut bytes).unwrap();
+    uncompressed_change.time.encode(&mut bytes).unwrap();
+    let message = bytes.len() + 1;
+    uncompressed_change.message.encode(&mut bytes).unwrap();
+    let message = message..bytes.len();
+
+    // encode ops into a side buffer - collect all other actors
+    let (ops_buf, mut ops) =
         ColumnEncoder::encode_ops(uncompressed_change.operations.iter(), &mut actors);
 
-    actors[1..].encode(&mut buf).unwrap();
+    // encode all other actors
+    actors[1..].encode(&mut bytes).unwrap();
 
-    increment_range_map(&mut ops_ranges, buf.len());
+    // now we know how many bytes ops are offset by so we can adjust the ranges
+    increment_range_map(&mut ops, bytes.len());
 
-    buf.write_all(&ops_buf).unwrap();
-    let extra_bytes = buf.len()..buf.len() + uncompressed_change.extra_bytes.len();
-    buf.write_all(&uncompressed_change.extra_bytes).unwrap();
-    let body = 0..buf.len();
+    // write out the ops
 
-    (buf, body, actors, message, ops_ranges, extra_bytes)
+    bytes.write_all(&ops_buf).unwrap();
+
+    // write out the extra bytes
+    let extra_bytes = bytes.len()..bytes.len() + uncompressed_change.extra_bytes.len();
+    bytes.write_all(&uncompressed_change.extra_bytes).unwrap();
+    let body = 0..bytes.len();
+
+    ChunkIntermediate {
+        bytes,
+        body,
+        actors,
+        message,
+        ops,
+        extra_bytes,
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -384,7 +385,7 @@ fn increment_range(range: &mut Range<usize>, len: usize) {
 }
 
 fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
-    for (_, range) in ranges {
+    for range in ranges.values_mut() {
         increment_range(range, len)
     }
 }
