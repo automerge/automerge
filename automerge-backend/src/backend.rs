@@ -8,7 +8,6 @@ use crate::Change;
 use automerge_protocol as amp;
 use core::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::convert::TryInto;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -121,7 +120,7 @@ impl Backend {
             }
         }
 
-        let bin_change: Rc<Change> = Rc::new(change.try_into()?);
+        let bin_change: Rc<Change> = Rc::new(change.into());
         let patch: amp::Patch = self.apply(vec![bin_change.clone()], Some(actor_seq))?;
 
         Ok((patch, bin_change))

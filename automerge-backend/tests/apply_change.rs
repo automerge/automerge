@@ -2,8 +2,8 @@ extern crate automerge_backend;
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Op,
-    Patch, ScalarValue, SeqDiff, SequenceType, UncompressedChange,
+    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Op, Patch,
+    ScalarValue, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
 use std::convert::TryInto;

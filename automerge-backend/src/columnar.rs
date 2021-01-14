@@ -2,8 +2,10 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use automerge_protocol as amp;
 use core::fmt::Debug;
+use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
+use std::ops::Range;
 use std::str;
 
 impl Encodable for Action {
@@ -468,7 +470,10 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops<'a, 'b, I>(ops: I, actors: &'a mut Vec<amp::ActorID>) -> Vec<u8>
+    pub fn encode_ops<'a, 'b, I>(
+        ops: I,
+        actors: &'a mut Vec<amp::ActorID>,
+    ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = &'b amp::Op>,
     {
@@ -533,7 +538,7 @@ impl ColumnEncoder {
         self.action.append_value(action);
     }
 
-    fn finish(self) -> Vec<u8> {
+    fn finish(self) -> (Vec<u8>, HashMap<u32, Range<usize>>) {
         let mut coldata = Vec::new();
         coldata.push(self.insert.finish(COL_INSERT));
         coldata.push(self.action.finish(COL_ACTION));
@@ -545,6 +550,7 @@ impl ColumnEncoder {
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut result = Vec::new();
+        let mut rangemap = HashMap::new();
         coldata
             .iter()
             .filter(|&d| !d.data.is_empty())
@@ -555,9 +561,13 @@ impl ColumnEncoder {
             d.encode_col_len(&mut result).ok();
         }
         for d in coldata.iter() {
+            let begin = result.len();
             result.write_all(d.data.as_slice()).ok();
+            if !d.data.is_empty() {
+                rangemap.insert(d.col, begin..result.len());
+            }
         }
-        result
+        (result, rangemap)
     }
 }
 

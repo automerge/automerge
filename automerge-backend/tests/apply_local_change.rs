@@ -4,8 +4,8 @@ use automerge_backend::Change;
 use automerge_protocol as protocol;
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorID, ChangeHash, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjectID, Op,
-    Patch, SeqDiff, SequenceType, UncompressedChange,
+    ActorID, ChangeHash, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjectID, Op, Patch, SeqDiff,
+    SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
 use std::collections::HashSet;

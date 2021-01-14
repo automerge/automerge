@@ -17,56 +17,96 @@ use std::str;
 const HASH_BYTES: usize = 32;
 const CHUNK_TYPE: u8 = 1;
 
-impl TryFrom<&amp::UncompressedChange> for Change {
-    type Error = AutomergeError;
-
-    fn try_from(value: &amp::UncompressedChange) -> Result<Self, Self::Error> {
-        encode(value).map_err(|e| AutomergeError::InvalidChange { source: e })
-    }
-}
-
-impl TryFrom<amp::UncompressedChange> for Change {
-    type Error = InvalidChangeError;
-
-    fn try_from(value: amp::UncompressedChange) -> Result<Self, Self::Error> {
+impl From<amp::UncompressedChange> for Change {
+    fn from(value: amp::UncompressedChange) -> Self {
         encode(&value)
     }
 }
 
-fn encode(uncompressed_change: &amp::UncompressedChange) -> Result<Change, InvalidChangeError> {
-    let mut buf: Vec<u8> = Vec::new();
+fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
+    let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
-    let chunk = encode_chunk(uncompressed_change)?;
+    let (chunk, mut body, actors, mut message, mut ops, mut extra_bytes, chunk_prefix) =
+        encode_chunk(uncompressed_change);
 
     hasher.input(&chunk);
 
-    buf.extend(&MAGIC_BYTES);
-    buf.extend(&hasher.result()[0..4]);
-    buf.extend(&chunk);
+    let hash_result = hasher.result();
+    let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
+    let mini_hash = &hash_result[0..4];
 
-    // possible optimization here - i can assemble the metadata without having to parse
-    // the generated object
-    // ---
-    // unwrap :: we generated this binchange so there's no chance of bad format
-    // ---
-    Ok(Change::from_bytes(buf).unwrap())
+    bytes.extend(&MAGIC_BYTES);
+    bytes.extend(mini_hash);
+
+    increment_range(&mut body, bytes.len() + chunk_prefix);
+    increment_range(&mut message, bytes.len() + chunk_prefix);
+    increment_range(&mut extra_bytes, bytes.len() + chunk_prefix);
+    increment_range_map(&mut ops, bytes.len() + chunk_prefix);
+
+    bytes.extend(&chunk);
+
+    let mut deps = uncompressed_change.deps.clone();
+    deps.sort_unstable();
+    let seq = uncompressed_change.seq;
+    let start_op = uncompressed_change.start_op;
+    let time = uncompressed_change.time;
+
+    //let assert_equals_change = Change::from_bytes(bytes.clone()).unwrap();
+
+    Change {
+        bytes,
+        hash,
+        body,
+        seq,
+        start_op,
+        time,
+        actors,
+        message,
+        deps,
+        ops,
+        extra_bytes,
+    }
 }
 
 fn encode_chunk(
     uncompressed_change: &amp::UncompressedChange,
-) -> Result<Vec<u8>, InvalidChangeError> {
+) -> (
+    Vec<u8>,
+    Range<usize>,
+    Vec<amp::ActorID>,
+    Range<usize>,
+    HashMap<u32, Range<usize>>,
+    Range<usize>,
+    usize,
+) {
     let mut chunk = vec![CHUNK_TYPE]; // chunk type is always 1
-    let data = encode_chunk_body(uncompressed_change)?;
-    // Unwrap is fine as we're writing to in memory data
+    let (data, body, actors, message, ops_ranges, extra_bytes) =
+        encode_chunk_body(uncompressed_change);
     leb128::write::unsigned(&mut chunk, data.len() as u64).unwrap();
+    let chunk_prefix = chunk.len();
     chunk.extend(&data);
-    Ok(chunk)
+    (
+        chunk,
+        body,
+        actors,
+        message,
+        ops_ranges,
+        extra_bytes,
+        chunk_prefix,
+    )
 }
 
 fn encode_chunk_body(
     uncompressed_change: &amp::UncompressedChange,
-) -> Result<Vec<u8>, InvalidChangeError> {
+) -> (
+    Vec<u8>,
+    Range<usize>,
+    Vec<amp::ActorID>,
+    Range<usize>,
+    HashMap<u32, Range<usize>>,
+    Range<usize>,
+) {
     let mut buf = Vec::new();
     let mut deps = uncompressed_change.deps.clone();
     deps.sort_unstable();
@@ -87,16 +127,23 @@ fn encode_chunk_body(
     uncompressed_change.seq.encode(&mut buf).unwrap();
     uncompressed_change.start_op.encode(&mut buf).unwrap();
     uncompressed_change.time.encode(&mut buf).unwrap();
+    let message = buf.len() + 1;
     uncompressed_change.message.encode(&mut buf).unwrap();
+    let message = message..buf.len();
 
-    let ops_buf = ColumnEncoder::encode_ops(uncompressed_change.operations.iter(), &mut actors);
+    let (ops_buf, mut ops_ranges) =
+        ColumnEncoder::encode_ops(uncompressed_change.operations.iter(), &mut actors);
 
     actors[1..].encode(&mut buf).unwrap();
 
-    buf.write_all(&ops_buf).unwrap();
-    buf.write_all(&uncompressed_change.extra_bytes).unwrap();
+    increment_range_map(&mut ops_ranges, buf.len());
 
-    Ok(buf)
+    buf.write_all(&ops_buf).unwrap();
+    let extra_bytes = buf.len()..buf.len() + uncompressed_change.extra_bytes.len();
+    buf.write_all(&uncompressed_change.extra_bytes).unwrap();
+    let body = 0..buf.len();
+
+    (buf, body, actors, message, ops_ranges, extra_bytes)
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -331,6 +378,17 @@ fn slice_bytes(bytes: &[u8], cursor: &mut Range<usize>) -> Result<Range<usize>, 
     Ok(start..end)
 }
 
+fn increment_range(range: &mut Range<usize>, len: usize) {
+    range.end += len;
+    range.start += len;
+}
+
+fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
+    for (_, range) in ranges {
+        increment_range(range, len)
+    }
+}
+
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
 const PREAMBLE_BYTES: usize = 8;
 const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
@@ -350,7 +408,7 @@ mod tests {
             actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
-            extra_bytes: vec![1,1,1],
+            extra_bytes: vec![1, 1, 1],
         };
         let bin1: Change = change1.clone().try_into().unwrap();
         let change2 = bin1.decode();
@@ -458,7 +516,7 @@ mod tests {
                     pred: vec![opid4, opid5],
                 },
             ],
-            extra_bytes: vec![1,2,3],
+            extra_bytes: vec![1, 2, 3],
         };
         let bin1 = Change::try_from(change1.clone()).unwrap();
         let change2 = bin1.decode();
