@@ -395,6 +395,7 @@ pub struct UncompressedChange {
     pub time: i64,
     pub message: Option<String>,
     pub deps: Vec<ChangeHash>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
 }
 
