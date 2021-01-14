@@ -23,10 +23,6 @@ impl TryFrom<&amp::UncompressedChange> for Change {
     fn try_from(value: &amp::UncompressedChange) -> Result<Self, Self::Error> {
         encode(value).map_err(|e| AutomergeError::InvalidChange { source: e })
     }
-
-    //pub fn max_op(&self) -> u64 {
-    //self.start_op + (self.operations.len() as u64) - 1
-    //}
 }
 
 impl TryFrom<amp::UncompressedChange> for Change {

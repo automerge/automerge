@@ -25,6 +25,7 @@ impl<'de> Deserialize<'de> for ScalarValue {
             where
                 E: de::Error,
             {
+                println!("Visiting u64");
                 Ok(ScalarValue::Uint(value))
             }
 
@@ -47,6 +48,13 @@ impl<'de> Deserialize<'de> for ScalarValue {
                 E: de::Error,
             {
                 Ok(ScalarValue::Str(value.to_string()))
+            }
+
+            fn visit_none<E>(self) -> Result<ScalarValue, E> 
+            where
+                E: de::Error
+            {
+                Ok(ScalarValue::Null)
             }
         }
         deserializer.deserialize_any(ValueVisitor)
