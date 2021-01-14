@@ -113,7 +113,6 @@ impl<'de> Deserialize<'de> for Op {
                 let key = key.ok_or_else(|| Error::missing_field("key"))?;
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
-                let value = value.flatten();
                 let action = match action {
                     RawOpType::MakeMap => OpType::Make(ObjType::Map(MapType::Map)),
                     RawOpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
@@ -121,7 +120,7 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
                     RawOpType::Del => OpType::Del,
                     RawOpType::Set => {
-                        let raw_value = value.ok_or_else(|| Error::missing_field("value"))?;
+                        let raw_value = value.ok_or_else(|| Error::missing_field("value"))?.unwrap_or(ScalarValue::Null);
                         let value = if let Some(datatype) = datatype {
                             raw_value.as_datatype(datatype).map_err(|e| Error::invalid_value(
                                 Unexpected::Other(e.unexpected.as_str()),
@@ -132,7 +131,7 @@ impl<'de> Deserialize<'de> for Op {
                         };
                         OpType::Set(value)
                     }
-                    RawOpType::Inc => match value {
+                    RawOpType::Inc => match value.flatten() {
                         Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
                         Some(ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
@@ -365,7 +364,24 @@ mod tests {
                     "pred": []
                 }),
                 expected: Err(serde_json::Error::missing_field("value")),
-            }
+            },
+            Scenario {
+                name: "Set with null",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "value": null,
+                    "pred": []
+                }),
+                expected: Ok(Op {
+                    action: OpType::Set(ScalarValue::Null),
+                    obj: ObjectID::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                })
+            },
         ];
 
         for scenario in scenarios.into_iter() {

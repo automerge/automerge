@@ -43,15 +43,8 @@ describe('Automerge.Backend', () => {
                           pred: [],
                           value: 'bold'
                         },
-                  {
-                          action: 'set',
-                          obj: '1@55f250d0f76b4e15923600f98ebed8d7',
-                          key: 'link',
-                          insert: false,
-                          pred: [],
-                          value: null
-                        }
-                ]
+                ],
+          extra_bytes: []
       }
       const doc2 = Backend.applyLocalChange(doc1, change)
     })

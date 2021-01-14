@@ -170,7 +170,6 @@ impl DataType {
     }
 }
 
-// TODO I feel like a clearer name for this enum would be `ScalarValue`
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
@@ -258,20 +257,6 @@ pub enum OpType {
     Inc(i64),
     Set(ScalarValue),
 }
-
-//#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-//pub struct Op {
-    //pub action: OpType,
-    ////TODO make this an ObjectID
-    //pub obj: String,
-    //pub key: Key,
-    //pub value: Option<ScalarValue>,
-    //pub datatype: Option<DataType>,
-    //#[serde(default = "serde_impls::make_false")]
-    //pub insert: bool,
-    //#[serde(default)]
-    //pub pred: Vec<OpID>,
-//}
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {

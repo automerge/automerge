@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 02e8e182d4b700f74561c0138ed7b768a2039296c69f06abb81457cca6f46466 # shrinks to change = UncompressedChange { operations: [Op { action: Set(F64(70479975446914830000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0)), obj: Root, key: Seq(ID(4852513845@ad999170f0589bb21da7bdd579bf2b1c9b2e21f10ec5f4b5820706747decdfc1)), pred: [14606136356063527063@a4eeade829979d5725f346030ccb664fb773e2ef771deb542fa20bfc0aeee693, 10134556369421082380@2541103e1ec34f51a34c0f4080ccd24535ff133b6c0cde0598bbe9246ab7c2c2, 11547931935572099531@8f3c2ff498e7e081371444ca4cffc1fae9f3525350e03dfd7f30b26aff197465, 1472714774316515586@a949a7d84df845fdabf586737d091b004ca5c0a3885aa64d50893e604bea6f94], insert: false }], actor_id: ActorID([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), seq: 0, start_op: 0, time: 0, message: None, deps: [], extra_bytes: [] }
