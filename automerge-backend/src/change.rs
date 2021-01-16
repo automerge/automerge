@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_change() -> Result<(), AutomergeError> {
+    fn test_complex_change() {
         let actor1 = amp::ActorID::from_str("deadbeefdeadbeef").unwrap();
         let actor2 = amp::ActorID::from_str("feeddefaff").unwrap();
         let actor3 = amp::ActorID::from_str("00101010fafafafa").unwrap();
@@ -524,6 +524,5 @@ mod tests {
         let bin2 = Change::try_from(change2.clone()).unwrap();
         assert_eq!(bin1, bin2);
         assert_eq!(change1, change2);
-        Ok(())
     }
 }

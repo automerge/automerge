@@ -131,12 +131,8 @@ impl MutableDocument for MutationTracker {
         match &change.operation {
             LocalOperation::Set(value) => {
                 //TODO double resolving is ugly here
-                if let Some(target) = self.state.resolve_path(&change.path) {
-                    if let ResolvedPath::Counter(_) = target {
-                        return Err(InvalidChangeRequest::CannotOverwriteCounter {
-                            path: change.path,
-                        });
-                    }
+                if let Some(ResolvedPath::Counter(_)) = self.state.resolve_path(&change.path) {
+                    return Err(InvalidChangeRequest::CannotOverwriteCounter { path: change.path });
                 };
                 if let Some(name) = change.path.name() {
                     if let Some(parent) = self.state.resolve_path(&change.path.parent()) {

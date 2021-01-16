@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use automerge_backend::{AutomergeError, Backend, Change};
+use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
     ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Op, Patch,
@@ -52,7 +52,7 @@ fn test_incremental_diffs_in_a_map() {
 }
 
 #[test]
-fn test_increment_key_in_map() -> Result<(), AutomergeError> {
+fn test_increment_key_in_map() {
     let actor: ActorID = "cdee6963c1664645920be8b41a933c2b".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
@@ -114,7 +114,6 @@ fn test_increment_key_in_map() -> Result<(), AutomergeError> {
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch);
-    Ok(())
 }
 
 #[test]

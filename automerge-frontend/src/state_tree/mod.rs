@@ -471,9 +471,9 @@ impl StateTreeMap {
         }
     }
 
-    fn apply_diff<'a, 'b>(
-        &'a self,
-        prop_diffs: &'b HashMap<String, HashMap<amp::OpID, amp::Diff>>,
+    fn apply_diff(
+        &self,
+        prop_diffs: &HashMap<String, HashMap<amp::OpID, amp::Diff>>,
     ) -> Result<StateTreeChange<StateTreeMap>, error::InvalidPatch> {
         let init_changed_props = Ok(StateTreeChange::pure(self.props.clone()));
         let changed_props =
