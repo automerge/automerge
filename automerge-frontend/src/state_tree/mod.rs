@@ -642,17 +642,17 @@ impl StateTreeText {
         index: usize,
         value: MultiChar,
     ) -> Result<StateTreeText, error::MissingIndexError> {
-        if self.chars.len() > index {
+        if index > self.chars.len() {
+            Err(error::MissingIndexError {
+                missing_index: index,
+                size_of_collection: self.chars.len(),
+            })
+        } else {
             let mut new_chars = self.chars.clone();
             new_chars.insert(index, value);
             Ok(StateTreeText {
                 object_id: self.object_id.clone(),
                 chars: new_chars,
-            })
-        } else {
-            Err(error::MissingIndexError {
-                missing_index: index,
-                size_of_collection: self.chars.len(),
             })
         }
     }

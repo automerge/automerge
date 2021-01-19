@@ -732,6 +732,60 @@ fn test_inserts_characters_in_text() {
 }
 
 #[test]
+fn test_inserts_characters_at_start_of_text() {
+    let mut doc = Frontend::new();
+    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+        doc.add_change(LocalChange::set(
+            Path::root().key("text"),
+            Value::Text(Vec::new()),
+        ))?;
+        Ok(())
+    })
+    .unwrap()
+    .unwrap();
+
+    let request = doc
+        .change::<_, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::insert(
+                Path::root().key("text").index(0),
+                Value::Primitive("i".into()),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+
+    let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
+
+    let expected_change_request = amp::UncompressedChange {
+        actor_id: doc.actor_id.clone(),
+        seq: 2,
+        start_op: 2,
+        time: request.time,
+        message: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Str("i".into())),
+            obj: text_id,
+            key: amp::ElementID::Head.into(),
+            insert: true,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(request, expected_change_request);
+
+    let value = doc.get_value(&Path::root()).unwrap();
+    let expected_value: Value = Value::Map(
+        hashmap! {
+            "text".into() => Value::Text(vec!['i']),
+        },
+        amp::MapType::Map,
+    );
+    assert_eq!(value, expected_value);
+}
+
+#[test]
 fn test_inserts_at_end_of_lists() {
     let mut doc = Frontend::new();
     doc.change::<_, InvalidChangeRequest>(None, |doc| {
