@@ -438,7 +438,26 @@ impl StateTreeValue {
             }
             .apply_diff(diff)
             .map(|d| d.map(StateTreeValue::Composite)),
-            amp::Diff::Unchanged(..) => Err(error::InvalidPatch::UnchangedDiffForNonExistentObject),
+            amp::Diff::Unchanged(amp::ObjDiff {
+                obj_type,
+                object_id,
+            }) => match obj_type {
+                amp::ObjType::Sequence(seq_type) => {
+                    StateTreeValue::new_from_diff(&amp::Diff::Seq(amp::SeqDiff {
+                        object_id: object_id.clone(),
+                        obj_type: *seq_type,
+                        edits: Vec::new(),
+                        props: HashMap::new(),
+                    }))
+                }
+                amp::ObjType::Map(map_type) => {
+                    StateTreeValue::new_from_diff(&amp::Diff::Map(amp::MapDiff {
+                        object_id: object_id.clone(),
+                        obj_type: *map_type,
+                        props: HashMap::new(),
+                    }))
+                }
+            },
         }
     }
 
