@@ -1,8 +1,8 @@
 use automerge_protocol as amp;
 
 use super::{
-    StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable,
-    StateTreeText, StateTreeValue,
+    DiffableSequence, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
+    StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::error;
 use crate::value::Value;
@@ -147,7 +147,7 @@ impl MultiValue {
             }
             Value::Sequence(vals) => {
                 let make_list_opid = amp::OpID::new(start_op, actor);
-                let elems = im::Vector::new();
+                let elems = DiffableSequence::new();
                 let make_op = amp::Op {
                     action: amp::OpType::Make(amp::ObjType::list()),
                     obj: parent_id,
@@ -155,7 +155,7 @@ impl MultiValue {
                     insert,
                     pred,
                 };
-                let newvalue: NewValue<im::Vector<MultiValue>> =
+                let newvalue: NewValue<DiffableSequence<MultiValue>> =
                     NewValue::init(elems, make_op, start_op);
                 vals.iter()
                     .fold(
@@ -201,8 +201,8 @@ impl MultiValue {
                     insert,
                     pred,
                 };
-                let newvalue: NewValue<im::Vector<MultiChar>> =
-                    NewValue::init(im::Vector::new(), make_op, start_op);
+                let newvalue: NewValue<DiffableSequence<MultiChar>> =
+                    NewValue::init(DiffableSequence::new(), make_op, start_op);
                 chars
                     .iter()
                     .fold(
@@ -443,78 +443,93 @@ impl MultiChar {
 
     pub(super) fn new_from_diff(
         parent_object_id: &amp::ObjectID,
-        diff: &std::collections::HashMap<amp::OpID, amp::Diff>,
+        opid: &amp::OpID,
+        diff: &amp::Diff,
     ) -> Result<MultiChar, error::InvalidPatch> {
-        let mut opids_and_values_vec: Vec<(amp::OpID, char)> = Vec::new();
-        for (opid, subdiff) in diff.iter() {
-            match subdiff {
-                amp::Diff::Value(amp::ScalarValue::Str(s)) => {
-                    if s.len() != 1 {
-                        return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                            object_id: parent_object_id.clone(),
-                            diff: subdiff.clone(),
-                        });
-                    } else {
-                        opids_and_values_vec.push((opid.clone(), s.chars().next().unwrap()));
-                    }
-                }
-                _ => {
+        let winning_value = match diff {
+            amp::Diff::Value(amp::ScalarValue::Str(s)) => {
+                if s.len() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: parent_object_id.clone(),
-                        diff: subdiff.clone(),
+                        diff: diff.clone(),
                     });
+                } else {
+                    s.chars().next().unwrap()
                 }
             }
-        }
-        opids_and_values_vec.sort_by(|(o1, _), (o2, _)| o1.cmp(o2));
-        opids_and_values_vec.reverse();
-        match opids_and_values_vec.split_first() {
-            Some(((opid, value), rest)) => Ok(MultiChar {
-                winning_value: (opid.clone(), *value),
-                conflicts: rest.into(),
-            }),
-            None => Err(error::InvalidPatch::DiffCreatedObjectWithNoValue),
-        }
+            _ => {
+                return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                    object_id: parent_object_id.clone(),
+                    diff: diff.clone(),
+                });
+            }
+        };
+        Ok(MultiChar {
+            winning_value: (opid.clone(), winning_value),
+            conflicts: im::HashMap::new(),
+        })
     }
 
     pub(super) fn apply_diff(
         &self,
         parent_object_id: &amp::ObjectID,
-        diff: &std::collections::HashMap<amp::OpID, amp::Diff>,
+        opid: &amp::OpID,
+        diff: &amp::Diff,
     ) -> Result<MultiChar, error::InvalidPatch> {
         let mut opids_and_values = self.values();
-        for (opid, subdiff) in diff.iter() {
-            match subdiff {
+        match diff {
+            amp::Diff::Value(amp::ScalarValue::Str(s)) => {
+                if s.len() != 1 {
+                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                        object_id: parent_object_id.clone(),
+                        diff: diff.clone(),
+                    });
+                } else {
+                    opids_and_values =
+                        opids_and_values.update(opid.clone(), s.chars().next().unwrap());
+                }
+            }
+            _ => {
+                return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                    object_id: parent_object_id.clone(),
+                    diff: diff.clone(),
+                });
+            }
+        }
+        Self::multichar_from_opids_and_values(opids_and_values)
+    }
+
+    pub(super) fn apply_diff_iter<'a, 'b, I>(
+        &'a self,
+        parent_object_id: &amp::ObjectID,
+        diff: &mut I,
+    ) -> Result<StateTreeChange<MultiChar>, error::InvalidPatch>
+    where
+        I: Iterator<Item = (&'b amp::OpID, &'b amp::Diff)>,
+    {
+        let init = Ok(StateTreeChange::pure(self.values()));
+        let updated = diff.fold(init, move |updated_so_far, (opid, subdiff)| {
+            updated_so_far?.fallible_map(|updated| match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.len() != 1 {
-                        return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                        Err(error::InvalidPatch::InsertNonTextInTextObject {
                             object_id: parent_object_id.clone(),
                             diff: subdiff.clone(),
-                        });
+                        })
                     } else {
-                        opids_and_values =
-                            opids_and_values.update(opid.clone(), s.chars().next().unwrap());
+                        let c = s.chars().next().unwrap();
+                        Ok(updated.update(opid.clone(), c))
                     }
                 }
                 _ => {
-                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                    Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: parent_object_id.clone(),
                         diff: subdiff.clone(),
-                    });
+                    })
                 }
-            }
-        }
-        let mut opids_and_values_vec: Vec<(amp::OpID, char)> =
-            opids_and_values.into_iter().collect();
-        opids_and_values_vec.sort_by(|(o1, _), (o2, _)| o1.cmp(o2));
-        opids_and_values_vec.reverse();
-        match opids_and_values_vec.split_first() {
-            Some(((opid, value), rest)) => Ok(MultiChar {
-                winning_value: (opid.clone(), *value),
-                conflicts: rest.into(),
-            }),
-            None => Err(error::InvalidPatch::DiffCreatedObjectWithNoValue),
-        }
+            })
+        })?;
+        updated.fallible_map(Self::multichar_from_opids_and_values)
     }
 
     pub(super) fn default_char(&self) -> char {
@@ -528,5 +543,25 @@ impl MultiChar {
     pub fn values(&self) -> im::HashMap<amp::OpID, char> {
         self.conflicts
             .update(self.winning_value.0.clone(), self.winning_value.1)
+    }
+
+    fn multichar_from_opids_and_values<I>(
+        opids_and_values: I,
+    ) -> Result<MultiChar, error::InvalidPatch>
+    where
+        I: IntoIterator<Item = (amp::OpID, char)>,
+    {
+        let mut opids_and_values_vec: Vec<(amp::OpID, char)> =
+            opids_and_values.into_iter().collect();
+        opids_and_values_vec.sort_by(|(o1, _), (o2, _)| o1.cmp(o2));
+        opids_and_values_vec.reverse();
+        //updates_vec.sort_by_key(|(o, _)| o.clone());
+        match opids_and_values_vec.split_first() {
+            Some(((opid, value), rest)) => Ok(MultiChar {
+                winning_value: (opid.clone(), *value),
+                conflicts: rest.into(),
+            }),
+            None => Err(error::InvalidPatch::DiffCreatedObjectWithNoValue),
+        }
     }
 }

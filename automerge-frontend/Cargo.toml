@@ -18,3 +18,8 @@ im = "15.0.0"
 
 [dev-dependencies]
 automerge-backend = { path = "../automerge-backend" }
+criterion = "0.3.3"
+
+[[bench]]
+name = "statetree_apply_diff"
+harness = false

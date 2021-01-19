@@ -31,6 +31,12 @@ impl From<bool> for ScalarValue {
     }
 }
 
+impl From<char> for ScalarValue {
+    fn from(c: char) -> Self {
+        ScalarValue::Str(c.to_string())
+    }
+}
+
 impl fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

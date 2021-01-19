@@ -6,10 +6,13 @@ use im::hashmap;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+mod diffable_sequence;
 mod focus;
 mod multivalue;
 mod resolved_path;
 mod state_tree_change;
+
+use diffable_sequence::DiffableSequence;
 use multivalue::{MultiChar, MultiValue, NewValueRequest};
 pub use resolved_path::ResolvedPath;
 pub(crate) use resolved_path::SetOrInsertPayload;
@@ -429,11 +432,11 @@ impl StateTreeValue {
             }) => match obj_type {
                 amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                     object_id: object_id.clone(),
-                    chars: im::Vector::new(),
+                    chars: DiffableSequence::new(),
                 }),
                 amp::SequenceType::List => StateTreeComposite::List(StateTreeList {
                     object_id: object_id.clone(),
-                    elements: im::Vector::new(),
+                    elements: DiffableSequence::new(),
                 }),
             }
             .apply_diff(diff)
@@ -605,7 +608,7 @@ impl StateTreeTable {
 #[derive(Debug, Clone)]
 struct StateTreeText {
     object_id: amp::ObjectID,
-    chars: im::Vector<MultiChar>,
+    chars: DiffableSequence<MultiChar>,
 }
 
 impl StateTreeText {
@@ -681,80 +684,16 @@ impl StateTreeText {
         edits: &[amp::DiffEdit],
         props: &HashMap<usize, HashMap<amp::OpID, amp::Diff>>,
     ) -> Result<StateTreeChange<StateTreeText>, error::InvalidPatch> {
-        let mut new_chars: im::Vector<(amp::OpID, Option<MultiChar>)> = self
-            .chars
-            .iter()
-            .map(|c| (c.default_opid().clone(), Some(c.clone())))
-            .collect();
-        //let mut new_chars = self.chars.clone();
-        for edit in edits.iter() {
-            match edit {
-                amp::DiffEdit::Remove { index } => {
-                    if *index >= new_chars.len() {
-                        return Err(error::InvalidPatch::InvalidIndex {
-                            object_id: self.object_id.clone(),
-                            index: *index,
-                        });
-                    } else {
-                        new_chars.remove(*index);
-                    }
-                }
-                amp::DiffEdit::Insert { index, elem_id } => {
-                    if *index > new_chars.len() {
-                        return Err(error::InvalidPatch::InvalidIndex {
-                            object_id: self.object_id.clone(),
-                            index: *index,
-                        });
-                    } else {
-                        match elem_id {
-                            amp::ElementID::Head => {
-                                return Err(error::InvalidPatch::DiffEditWithHeadElemID)
-                            }
-                            amp::ElementID::ID(opid) => {
-                                new_chars.insert(*index, (opid.clone(), None))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for (index, prop_diff) in props {
-            if let Some((opid, maybe_char)) = new_chars.get(*index) {
-                let new_char = match maybe_char {
-                    Some(c) => c.apply_diff(&self.object_id, prop_diff)?,
-                    None => MultiChar::new_from_diff(&self.object_id, prop_diff)?,
-                };
-                new_chars = new_chars.update(*index, (opid.clone(), Some(new_char)));
-            } else {
-                return Err(error::InvalidPatch::InvalidIndex {
-                    object_id: self.object_id.clone(),
-                    index: *index,
-                });
-            }
-        }
-        let mut new_chars_2: im::Vector<MultiChar> = im::Vector::new();
-        for (index, (_, maybe_char)) in new_chars.into_iter().enumerate() {
-            match maybe_char {
-                Some(c) => {
-                    new_chars_2.push_back(c.clone());
-                }
-                None => {
-                    return Err(error::InvalidPatch::InvalidIndex {
-                        object_id: self.object_id.clone(),
-                        index,
-                    });
-                }
+        let new_chars = self.chars.apply_diff(&self.object_id, edits, props)?;
+        Ok(new_chars.and_then(|new_chars| {
+            let text = StateTreeText {
+                object_id: self.object_id.clone(),
+                chars: new_chars,
             };
-        }
-        let text = StateTreeText {
-            object_id: self.object_id.clone(),
-            chars: new_chars_2,
-        };
-        let object_index_updates = im::HashMap::new().update(
-            self.object_id.clone(),
-            StateTreeComposite::Text(text.clone()),
-        );
-        Ok(StateTreeChange::pure(text).with_updates(Some(object_index_updates)))
+            StateTreeChange::pure(text.clone()).with_updates(Some(hashmap! {
+                self.object_id.clone() => StateTreeComposite::Text(text)
+            }))
+        }))
     }
 
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpID> {
@@ -768,7 +707,7 @@ impl StateTreeText {
 #[derive(Debug, Clone)]
 struct StateTreeList {
     object_id: amp::ObjectID,
-    elements: im::Vector<MultiValue>,
+    elements: DiffableSequence<MultiValue>,
 }
 
 impl StateTreeList {
@@ -831,92 +770,18 @@ impl StateTreeList {
         edits: &[amp::DiffEdit],
         new_props: &HashMap<usize, HashMap<amp::OpID, amp::Diff>>,
     ) -> Result<StateTreeChange<StateTreeList>, error::InvalidPatch> {
-        let mut init_new_elements: im::Vector<(amp::OpID, Option<MultiValue>)> = self
+        let new_elements = self
             .elements
-            .iter()
-            .map(|e| (e.default_opid(), Some(e.clone())))
-            .collect();
-        for edit in edits.iter() {
-            match edit {
-                amp::DiffEdit::Remove { index } => {
-                    init_new_elements.remove(*index);
-                }
-                amp::DiffEdit::Insert { index, elem_id } => {
-                    let op_id = match elem_id {
-                        amp::ElementID::Head => {
-                            return Err(error::InvalidPatch::DiffEditWithHeadElemID)
-                        }
-                        amp::ElementID::ID(oid) => oid.clone(),
-                    };
-                    if (*index) == init_new_elements.len() {
-                        init_new_elements.push_back((op_id, None));
-                    } else {
-                        init_new_elements.insert(*index, (op_id, None));
-                    }
-                }
-            };
-        }
-        let init_changed_props = Ok(StateTreeChange::pure(init_new_elements));
-        let updated =
-            new_props
-                .iter()
-                .fold(init_changed_props, |changes_so_far, (index, prop_diff)| {
-                    let mut diff_iter = prop_diff.iter();
-                    match diff_iter.next() {
-                        None => changes_so_far.map(|cr| {
-                            cr.map(|c| {
-                                let mut result = c;
-                                result.remove(*index);
-                                result
-                            })
-                        }),
-                        Some((opid, diff)) => {
-                            changes_so_far?.fallible_and_then(move |changes_so_far| {
-                                let mut node = match changes_so_far.get(*index) {
-                                    Some((_, Some(n))) => n.apply_diff(opid, diff)?,
-                                    Some((_, None)) => {
-                                        MultiValue::new_from_diff(opid.clone(), diff)?
-                                    }
-                                    None => {
-                                        return Err(error::InvalidPatch::InvalidIndex {
-                                            object_id: self.object_id.clone(),
-                                            index: *index,
-                                        })
-                                    }
-                                };
-                                node = node.fallible_and_then(move |n| {
-                                    n.apply_diff_iter(&mut diff_iter)
-                                })?;
-                                Ok(node.map(|n| {
-                                    changes_so_far.update(*index, (n.default_opid(), Some(n)))
-                                }))
-                            })
-                        }
-                    }
-                })?;
-        updated.fallible_and_then(|new_elements_and_opids| {
-            let mut new_elements: im::Vector<MultiValue> = im::Vector::new();
-            for (index, (_, maybe_elem)) in new_elements_and_opids.into_iter().enumerate() {
-                match maybe_elem {
-                    Some(e) => {
-                        new_elements.push_back(e.clone());
-                    }
-                    None => {
-                        return Err(error::InvalidPatch::InvalidIndex {
-                            object_id: self.object_id.clone(),
-                            index,
-                        });
-                    }
-                }
-            }
+            .apply_diff(&self.object_id, edits, new_props)?;
+        Ok(new_elements.and_then(|new_elements| {
             let new_list = StateTreeList {
                 object_id: self.object_id.clone(),
                 elements: new_elements,
             };
-            Ok(StateTreeChange::pure(new_list.clone()).with_updates(Some(
+            StateTreeChange::pure(new_list.clone()).with_updates(Some(
                 hashmap! {self.object_id.clone() => StateTreeComposite::List(new_list)},
-            )))
-        })
+            ))
+        }))
     }
 
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpID> {
