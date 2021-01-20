@@ -521,12 +521,10 @@ impl MultiChar {
                         Ok(updated.update(opid.clone(), c))
                     }
                 }
-                _ => {
-                    Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        object_id: parent_object_id.clone(),
-                        diff: subdiff.clone(),
-                    })
-                }
+                _ => Err(error::InvalidPatch::InsertNonTextInTextObject {
+                    object_id: parent_object_id.clone(),
+                    diff: subdiff.clone(),
+                }),
             })
         })?;
         updated.fallible_map(Self::multichar_from_opids_and_values)

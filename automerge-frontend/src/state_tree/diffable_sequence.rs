@@ -230,6 +230,7 @@ where
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
+        // Making this unwrap safe is the entire point of this data structure
         self.underlying.iter().map(|(_, v)| v.as_ref().unwrap())
     }
 
