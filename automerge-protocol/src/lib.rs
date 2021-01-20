@@ -1,13 +1,22 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
+use std::fmt;
 use std::convert::TryFrom;
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
-#[derive(Eq, PartialEq, Hash, Debug, Clone, PartialOrd, Ord)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorID(Vec<u8>);
+
+impl fmt::Debug for ActorID {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ActorID")
+         .field(&hex::encode(&self.0))
+         .finish()
+    }
+}
 
 impl ActorID {
     pub fn random() -> ActorID {
@@ -286,8 +295,16 @@ impl Op {
     }
 }
 
-#[derive(Eq, PartialEq, Debug, Hash, Clone, PartialOrd, Ord, Copy)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
+
+impl fmt::Debug for ChangeHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ChangeHash")
+         .field(&hex::encode(&self.0))
+         .finish()
+    }
+}
 
 // The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
 // Diff {

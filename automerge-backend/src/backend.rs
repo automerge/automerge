@@ -261,7 +261,7 @@ impl Backend {
     }
 
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
-        let changes = Change::parse(&data)?;
+        let changes = Change::load_document(&data)?;
         let mut backend = Self::init();
         backend.load_changes(changes)?;
         Ok(backend)

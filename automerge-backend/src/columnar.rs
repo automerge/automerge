@@ -2,6 +2,7 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
 use automerge_protocol as amp;
 use core::fmt::Debug;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
@@ -66,22 +67,232 @@ pub struct OperationIterator<'a> {
     pub(crate) pred: PredIterator<'a>,
 }
 
+impl<'a> OperationIterator<'a> {
+    pub(crate) fn new(
+        bytes: &'a [u8],
+        actors: &'a [amp::ActorID],
+        ops: &'a HashMap<u32, Range<usize>>,
+    ) -> OperationIterator<'a> {
+        OperationIterator {
+            objs: ObjIterator {
+                actors,
+                actor: col_iter(bytes, ops, COL_OBJ_ACTOR),
+                ctr: col_iter(bytes, ops, COL_OBJ_CTR),
+            },
+            keys: KeyIterator {
+                actors,
+                actor: col_iter(bytes, ops, COL_KEY_ACTOR),
+                ctr: col_iter(bytes, ops, COL_KEY_CTR),
+                str: col_iter(bytes, ops, COL_KEY_STR),
+            },
+            value: ValueIterator {
+                val_len: col_iter(bytes, ops, COL_VAL_LEN),
+                val_raw: col_iter(bytes, ops, COL_VAL_RAW),
+            },
+            pred: PredIterator {
+                actors,
+                pred_num: col_iter(bytes, ops, COL_PRED_NUM),
+                pred_actor: col_iter(bytes, ops, COL_PRED_ACTOR),
+                pred_ctr: col_iter(bytes, ops, COL_PRED_CTR),
+            },
+            insert: col_iter(bytes, ops, COL_INSERT),
+            action: col_iter(bytes, ops, COL_ACTION),
+        }
+    }
+}
+
+impl<'a> Iterator for OperationIterator<'a> {
+    type Item = amp::Op;
+    fn next(&mut self) -> Option<amp::Op> {
+        let action = self.action.next()??;
+        let insert = self.insert.next()?;
+        let obj = self.objs.next()?;
+        let key = self.keys.next()?;
+        let pred = self.pred.next()?;
+        let value = self.value.next()?;
+        let action = match action {
+            Action::Set => amp::OpType::Set(value),
+            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
+            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
+            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
+            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
+            Action::Del => amp::OpType::Del,
+            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+        };
+        Some(amp::Op {
+            action,
+            obj,
+            key,
+            pred,
+            insert,
+        })
+    }
+}
+
+pub(crate) struct DocOpIterator<'a> {
+    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) ctr: DeltaDecoder<'a>,
+    pub(crate) action: RLEDecoder<'a, Action>,
+    pub(crate) objs: ObjIterator<'a>,
+    pub(crate) keys: KeyIterator<'a>,
+    pub(crate) insert: BooleanDecoder<'a>,
+    pub(crate) value: ValueIterator<'a>,
+    pub(crate) succ: SuccIterator<'a>,
+}
+
+impl<'a> Iterator for DocOpIterator<'a> {
+    type Item = DocOp;
+    fn next(&mut self) -> Option<DocOp> {
+        let action = self.action.next()??;
+        let actor = self.actor.next()??;
+        let ctr = self.ctr.next()??;
+        let insert = self.insert.next()?;
+        let obj = self.objs.next()?;
+        let key = self.keys.next()?;
+        let succ = self.succ.next()?;
+        let value = self.value.next()?;
+        let action = match action {
+            Action::Set => amp::OpType::Set(value),
+            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
+            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
+            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
+            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
+            Action::Del => amp::OpType::Del,
+            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+        };
+        Some(DocOp {
+            actor,
+            ctr,
+            action,
+            obj,
+            key,
+            succ,
+            pred: Vec::new(),
+            insert,
+        })
+    }
+}
+
+impl<'a> DocOpIterator<'a> {
+    pub(crate) fn new(
+        bytes: &'a [u8],
+        actors: &'a [amp::ActorID],
+        ops: &'a HashMap<u32, Range<usize>>,
+    ) -> DocOpIterator<'a> {
+        DocOpIterator {
+            actor: col_iter(bytes, ops, COL_ID_ACTOR),
+            ctr: col_iter(bytes, ops, COL_ID_CTR),
+            objs: ObjIterator {
+                actors,
+                actor: col_iter(bytes, ops, COL_OBJ_ACTOR),
+                ctr: col_iter(bytes, ops, COL_OBJ_CTR),
+            },
+            keys: KeyIterator {
+                actors,
+                actor: col_iter(bytes, ops, COL_KEY_ACTOR),
+                ctr: col_iter(bytes, ops, COL_KEY_CTR),
+                str: col_iter(bytes, ops, COL_KEY_STR),
+            },
+            value: ValueIterator {
+                val_len: col_iter(bytes, ops, COL_VAL_LEN),
+                val_raw: col_iter(bytes, ops, COL_VAL_RAW),
+            },
+            succ: SuccIterator {
+                succ_num: col_iter(bytes, ops, COL_SUCC_NUM),
+                succ_actor: col_iter(bytes, ops, COL_SUCC_ACTOR),
+                succ_ctr: col_iter(bytes, ops, COL_SUCC_CTR),
+            },
+            insert: col_iter(bytes, ops, COL_INSERT),
+            action: col_iter(bytes, ops, COL_ACTION),
+        }
+    }
+}
+
+pub(crate) struct ChangeIterator<'a> {
+    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) seq: DeltaDecoder<'a>,
+    pub(crate) max_op: DeltaDecoder<'a>,
+    pub(crate) time: DeltaDecoder<'a>,
+    pub(crate) message: RLEDecoder<'a, String>,
+    pub(crate) deps: DepsIterator<'a>,
+    pub(crate) extra: ExtraIterator<'a>,
+}
+
+impl<'a> ChangeIterator<'a> {
+    pub(crate) fn new(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>) -> ChangeIterator<'a> {
+        ChangeIterator {
+            actor: col_iter(bytes, ops, DOC_ACTOR),
+            seq: col_iter(bytes, ops, DOC_SEQ),
+            max_op: col_iter(bytes, ops, DOC_MAX_OP),
+            time: col_iter(bytes, ops, DOC_TIME),
+            message: col_iter(bytes, ops, DOC_MESSAGE),
+            deps: DepsIterator {
+                num: col_iter(bytes, ops, DOC_DEPS_NUM),
+                dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
+            },
+            extra: ExtraIterator {
+                len: col_iter(bytes, ops, DOC_EXTRA_LEN),
+                extra: col_iter(bytes, ops, DOC_EXTRA_RAW),
+            },
+        }
+    }
+}
+
+impl<'a> Iterator for ChangeIterator<'a> {
+    type Item = DocChange;
+    fn next(&mut self) -> Option<DocChange> {
+        let actor = self.actor.next()??;
+        let seq = self.seq.next()??;
+        let max_op = self.max_op.next()??;
+        let time = self.time.next()?? as i64;
+        let message = self.message.next()?;
+        let deps = self.deps.next()?;
+        let extra_bytes = self.extra.next()?;
+        Some(DocChange {
+            actor,
+            seq,
+            max_op,
+            time,
+            message,
+            deps,
+            extra_bytes,
+            ops: Vec::new(),
+        })
+    }
+}
+
 pub struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
-    pub(crate) actors: &'a Vec<amp::ActorID>,
+    pub(crate) actors: &'a [amp::ActorID],
     pub(crate) actor: RLEDecoder<'a, usize>,
     pub(crate) ctr: RLEDecoder<'a, u64>,
 }
 
+pub struct DepsIterator<'a> {
+    pub(crate) num: RLEDecoder<'a, usize>,
+    pub(crate) dep: DeltaDecoder<'a>,
+}
+
+pub struct ExtraIterator<'a> {
+    pub(crate) len: RLEDecoder<'a, usize>,
+    pub(crate) extra: Decoder<'a>,
+}
+
 pub struct PredIterator<'a> {
-    pub(crate) actors: &'a Vec<amp::ActorID>,
+    pub(crate) actors: &'a [amp::ActorID],
     pub(crate) pred_num: RLEDecoder<'a, usize>,
     pub(crate) pred_actor: RLEDecoder<'a, usize>,
     pub(crate) pred_ctr: DeltaDecoder<'a>,
 }
 
+pub struct SuccIterator<'a> {
+    pub(crate) succ_num: RLEDecoder<'a, usize>,
+    pub(crate) succ_actor: RLEDecoder<'a, usize>,
+    pub(crate) succ_ctr: DeltaDecoder<'a>,
+}
+
 pub struct KeyIterator<'a> {
-    pub(crate) actors: &'a Vec<amp::ActorID>,
+    pub(crate) actors: &'a [amp::ActorID],
     pub(crate) actor: RLEDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
     pub(crate) str: RLEDecoder<'a, String>,
@@ -90,6 +301,30 @@ pub struct KeyIterator<'a> {
 pub struct ValueIterator<'a> {
     pub(crate) val_len: RLEDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,
+}
+
+impl<'a> Iterator for DepsIterator<'a> {
+    type Item = Vec<usize>;
+    fn next(&mut self) -> Option<Vec<usize>> {
+        let num = self.num.next()??;
+        // I bet there's something simple like `self.dep.take(num).collect()`
+        let mut p = Vec::with_capacity(num);
+        for _ in 0..num {
+            let dep = self.dep.next()??;
+            p.push(dep as usize);
+        }
+        Some(p)
+    }
+}
+
+impl<'a> Iterator for ExtraIterator<'a> {
+    type Item = Vec<u8>;
+    fn next(&mut self) -> Option<Vec<u8>> {
+        let v = self.len.next()??;
+        // if v % 16 == VALUE_TYPE_BYTES => { // this should be bytes
+        let len = v >> 4;
+        self.extra.read_bytes(len).ok().map(|s| s.to_vec())
+    }
 }
 
 impl<'a> Iterator for PredIterator<'a> {
@@ -103,6 +338,20 @@ impl<'a> Iterator for PredIterator<'a> {
             let actor_id = self.actors.get(actor)?.clone();
             let op_id = amp::OpID::new(ctr, &actor_id);
             p.push(op_id)
+        }
+        Some(p)
+    }
+}
+
+impl<'a> Iterator for SuccIterator<'a> {
+    type Item = Vec<(u64, usize)>;
+    fn next(&mut self) -> Option<Vec<(u64, usize)>> {
+        let num = self.succ_num.next()??;
+        let mut p = Vec::with_capacity(num);
+        for _ in 0..num {
+            let actor = self.succ_actor.next()??;
+            let ctr = self.succ_ctr.next()??;
+            p.push((ctr, actor))
         }
         Some(p)
     }
@@ -216,33 +465,49 @@ impl<'a> Iterator for ObjIterator<'a> {
     }
 }
 
-impl<'a> Iterator for OperationIterator<'a> {
-    type Item = amp::Op;
-    fn next(&mut self) -> Option<amp::Op> {
-        let action = self.action.next()??;
-        let insert = self.insert.next()?;
-        let obj = self.objs.next()?;
-        let key = self.keys.next()?;
-        let pred = self.pred.next()?;
-        let value = self.value.next()?;
-        let action = match action {
-            Action::Set => amp::OpType::Set(value),
-            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
-            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
-            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
-            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
-            Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
-        };
-        Some(amp::Op {
-            action,
-            obj,
-            key,
-            pred,
-            insert,
-        })
+#[derive(PartialEq, Debug, Clone)]
+pub(crate) struct DocChange {
+    pub actor: usize,
+    pub seq: u64,
+    pub max_op: u64,
+    pub time: i64,
+    pub message: Option<String>,
+    pub deps: Vec<usize>,
+    pub extra_bytes: Vec<u8>,
+    pub ops: Vec<DocOp>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DocOp {
+    pub actor: usize,
+    pub ctr: u64,
+    pub action: amp::OpType,
+    pub obj: amp::ObjectID,
+    pub key: amp::Key,
+    pub succ: Vec<(u64, usize)>,
+    pub pred: Vec<(u64, usize)>,
+    pub insert: bool,
+}
+
+impl Ord for DocOp {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.ctr.cmp(&other.ctr)
     }
 }
+
+impl PartialOrd for DocOp {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for DocOp {
+    fn eq(&self, other: &Self) -> bool {
+        self.ctr == other.ctr
+    }
+}
+
+impl Eq for DocOp {}
 
 struct ValEncoder {
     len: RLEEncoder<usize>,
@@ -571,6 +836,15 @@ impl ColumnEncoder {
     }
 }
 
+fn col_iter<'a, T>(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>, col_id: u32) -> T
+where
+    T: From<&'a [u8]>,
+{
+    ops.get(&col_id)
+        .map(|r| T::from(&bytes[r.clone()]))
+        .unwrap_or_else(|| T::from(&[] as &[u8]))
+}
+
 const VALUE_TYPE_NULL: usize = 0;
 const VALUE_TYPE_FALSE: usize = 1;
 const VALUE_TYPE_TRUE: usize = 2;
@@ -624,22 +898,46 @@ impl Decodable for Action {
     }
 }
 
-pub(crate) const COL_OBJ_ACTOR: u32 = COLUMN_TYPE_ACTOR_ID;
-pub(crate) const COL_OBJ_CTR: u32 = COLUMN_TYPE_INT_RLE;
-pub(crate) const COL_KEY_ACTOR: u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
-pub(crate) const COL_KEY_CTR: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
-pub(crate) const COL_KEY_STR: u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
-//pub(crate) const COL_ID_ACTOR : u32 = 2 << 3 | COLUMN_TYPE_ACTOR_ID;
-//pub(crate) const COL_ID_CTR : u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
-pub(crate) const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
-pub(crate) const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
-pub(crate) const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
-pub(crate) const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
-pub(crate) const COL_CHILD_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
-pub(crate) const COL_CHILD_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
-pub(crate) const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
-pub(crate) const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
-pub(crate) const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
-//pub(crate) const COL_SUCC_NUM : u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
-//pub(crate) const COL_SUCC_ACTOR : u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
-//pub(crate) const COL_SUCC_CTR : u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_OBJ_ACTOR: u32 = COLUMN_TYPE_ACTOR_ID;
+const COL_OBJ_CTR: u32 = COLUMN_TYPE_INT_RLE;
+const COL_KEY_ACTOR: u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_KEY_CTR: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_KEY_STR: u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
+const COL_ID_ACTOR: u32 = 2 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_ID_CTR: u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
+const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
+const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
+const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
+const COL_CHILD_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_CHILD_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
+const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_SUCC_NUM: u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
+const COL_SUCC_ACTOR: u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_SUCC_CTR: u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
+
+const DOC_ACTOR: u32 = /* 0 << 3 */ COLUMN_TYPE_ACTOR_ID;
+const DOC_SEQ: u32 = /* 0 << 3 */ COLUMN_TYPE_INT_DELTA;
+const DOC_MAX_OP: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
+const DOC_TIME: u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
+const DOC_MESSAGE: u32 = 3 << 3 | COLUMN_TYPE_STRING_RLE;
+const DOC_DEPS_NUM: u32 = 4 << 3 | COLUMN_TYPE_GROUP_CARD;
+const DOC_DEPS_INDEX: u32 = 4 << 3 | COLUMN_TYPE_INT_DELTA;
+const DOC_EXTRA_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
+const DOC_EXTRA_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
+
+/*
+const DOCUMENT_COLUMNS = {
+  actor:     0 << 3 | COLUMN_TYPE.ACTOR_ID,
+  seq:       0 << 3 | COLUMN_TYPE.INT_DELTA,
+  maxOp:     1 << 3 | COLUMN_TYPE.INT_DELTA,
+  time:      2 << 3 | COLUMN_TYPE.INT_DELTA,
+  message:   3 << 3 | COLUMN_TYPE.STRING_RLE,
+  depsNum:   4 << 3 | COLUMN_TYPE.GROUP_CARD,
+  depsIndex: 4 << 3 | COLUMN_TYPE.INT_DELTA,
+  extraLen:  5 << 3 | COLUMN_TYPE.VALUE_LEN,
+  extraRaw:  5 << 3 | COLUMN_TYPE.VALUE_RAW
+}
+*/

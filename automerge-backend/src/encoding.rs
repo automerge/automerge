@@ -296,6 +296,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct RLEDecoder<'a, T> {
     pub decoder: Decoder<'a>,
     last_value: Option<T>,
