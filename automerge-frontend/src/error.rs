@@ -76,8 +76,6 @@ pub enum InvalidPatch {
     },
     #[error("Patch attempted to reference an index which did not exist for object {object_id}")]
     InvalidIndex { object_id: ObjectID, index: usize },
-    #[error("Patch sent us a diff which referenced an object which does not exist but had no details on how to create it")]
-    UnchangedDiffForNonExistentObject,
     #[error("The patch tried to create an object but specified no value for the new object")]
     DiffCreatedObjectWithNoValue,
     #[error("The patch contained a diff with a list edit which referenced the '_head' of a list, rather than a specific element ID")]

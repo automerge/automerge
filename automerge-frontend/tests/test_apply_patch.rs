@@ -1,6 +1,7 @@
 use automerge_frontend::{Frontend, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
+use std::convert::TryInto;
 
 #[test]
 fn set_object_root_properties() {
@@ -919,5 +920,37 @@ fn test_text_objects() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {"name" => Value::Text("bi".to_string().chars().collect())})
+    );
+}
+
+#[test]
+fn test_unchanged_diff_creates_empty_objects() {
+    let mut doc = Frontend::new();
+    let patch = amp::Patch {
+        actor: Some(doc.actor_id.clone()),
+        seq: Some(1),
+        clock: hashmap! {doc.actor_id.clone() => 1},
+        deps: Vec::new(),
+        max_op: 1,
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectID::Root,
+            obj_type: amp::MapType::Map,
+            props: hashmap! {
+                "text".to_string() => hashmap!{
+                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Unchanged(amp::ObjDiff{
+                        object_id: "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap(),
+                        obj_type: amp::ObjType::Sequence(amp::SequenceType::Text)
+                    })
+                }
+            },
+        })),
+    };
+    doc.apply_patch(patch).unwrap();
+    assert_eq!(
+        doc.state(),
+        &Value::Map(
+            hashmap! {"text".to_string() => Value::Text(Vec::new())},
+            amp::MapType::Map
+        ),
     );
 }
