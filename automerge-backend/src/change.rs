@@ -174,8 +174,8 @@ impl Change {
     }
 
     pub fn load_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
-        // FIXME this does not handle changes and docs mixed together 
-        // this could happen if files are concatonated with each other 
+        // FIXME this does not handle changes and docs mixed together
+        // this could happen if files are concatonated with each other
         if Some(&0) == bytes.get(PREAMBLE_BYTES) {
             decode_document(bytes)
         } else {
@@ -432,7 +432,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 fn group_doc_change_and_doc_ops(
     changes: &mut [DocChange],
     ops: &mut Vec<DocOp>,
-    max_actor: usize,
+    actors: &[amp::ActorID],
 ) -> Result<(), AutomergeError> {
     let mut change_actors = HashMap::new();
     let mut actor_max = HashMap::new();
@@ -443,7 +443,7 @@ fn group_doc_change_and_doc_ops(
                 "Doc Seq Invalid".into(),
             ));
         }
-        if change.actor >= max_actor {
+        if change.actor >= actors.len() {
             return Err(AutomergeError::ChangeDecompressError(
                 "Doc Actor Invalid".into(),
             ));
@@ -453,26 +453,34 @@ fn group_doc_change_and_doc_ops(
     }
 
     let mut op_by_id = HashMap::new();
+    ops.iter()
+        .enumerate()
+        .for_each(|(i, op)| { op_by_id.insert((op.ctr, op.actor), i); });
     for i in 0..ops.len() {
         let op = ops[i].clone(); // this is safe - avoid borrow checker issues
-        let id = (op.ctr, op.actor);
-        op_by_id.insert(id, i);
+        //let id = (op.ctr, op.actor);
+        //op_by_id.insert(id, i);
         for succ in op.succ.iter() {
             if !op_by_id.contains_key(&succ) {
+                let key = if op.insert {
+                    amp::OpID(op.ctr, actors[op.actor].clone()).into()
+                } else {
+                    op.key.clone()
+                };
                 let del = DocOp {
                     actor: succ.1,
                     ctr: succ.0,
                     action: amp::OpType::Del,
                     obj: op.obj.clone(),
-                    key: op.key.clone(),
+                    key,
                     succ: Vec::new(),
-                    pred: vec![*succ],
+                    pred: vec![(op.ctr, op.actor)],
                     insert: false,
                 };
                 op_by_id.insert(*succ, ops.len());
                 ops.push(del);
             } else if let Some(index) = op_by_id.get(&succ) {
-                ops[*index].pred.push(*succ)
+                ops[*index].pred.push((op.ctr, op.actor))
             } else {
                 return Err(AutomergeError::ChangeDecompressError(
                     "Doc Succ Invalid".into(),
@@ -565,7 +573,7 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
     let ops_data = decode_columns(&mut cursor, ops_info);
     let mut doc_ops: Vec<_> = DocOpIterator::new(&bytes, &actors, &ops_data).collect();
 
-    group_doc_change_and_doc_ops(&mut doc_changes, &mut doc_ops, actors.len())?;
+    group_doc_change_and_doc_ops(&mut doc_changes, &mut doc_ops, &actors)?;
 
     let mut uncompressed_changes = doc_changes_to_uncompressed_changes(&doc_changes, &actors);
 
