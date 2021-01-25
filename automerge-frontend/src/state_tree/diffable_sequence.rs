@@ -104,7 +104,7 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    underlying: im::Vector<(amp::OpID, Option<T>)>,
+    underlying: im_rc::Vector<(amp::OpID, Option<T>)>,
 }
 
 impl<T> DiffableSequence<T>
@@ -114,7 +114,16 @@ where
 {
     pub fn new() -> DiffableSequence<T> {
         DiffableSequence {
-            underlying: im::Vector::new(),
+            underlying: im_rc::Vector::new(),
+        }
+    }
+
+    pub(super) fn new_from<I>(i: I) -> DiffableSequence<T>
+    where
+        I: IntoIterator<Item = (amp::OpID, T)>,
+    {
+        DiffableSequence {
+            underlying: i.into_iter().map(|(oid, v)| (oid, Some(v))).collect(),
         }
     }
 
@@ -150,44 +159,46 @@ where
             };
         }
         let init_changed_props = Ok(StateTreeChange::pure(new_underlying));
-        let updated =
-            new_props
-                .iter()
-                .fold(init_changed_props, |changes_so_far, (index, prop_diff)| {
-                    let mut diff_iter = prop_diff.iter();
-                    match diff_iter.next() {
-                        None => changes_so_far.map(|cr| {
-                            cr.map(|c| {
-                                let mut result = c;
-                                result.remove(*index);
-                                result
-                            })
-                        }),
-                        Some((opid, diff)) => {
-                            changes_so_far?.fallible_and_then(move |changes_so_far| {
-                                let mut node = match changes_so_far.get(*index) {
-                                    Some((_, Some(n))) => n.apply_diff(object_id, opid, diff)?,
-                                    Some((_, None)) => T::construct(object_id, opid, diff)?,
-                                    None => {
-                                        return Err(InvalidPatch::InvalidIndex {
-                                            object_id: object_id.clone(),
-                                            index: *index,
-                                        })
-                                    }
-                                };
-                                node = node.fallible_and_then(move |n| {
-                                    n.apply_diff_iter(object_id, &mut diff_iter)
-                                })?;
-                                Ok(node.map(|n| {
-                                    changes_so_far.update(*index, (n.default_opid(), Some(n)))
-                                }))
-                            })
-                        }
+        let updated = new_props.iter().fold(
+            init_changed_props,
+            move |changes_so_far, (index, prop_diff)| {
+                let mut diff_iter = prop_diff.iter();
+                match diff_iter.next() {
+                    None => changes_so_far.map(|cr| {
+                        cr.map(|c| {
+                            let mut result = c;
+                            result.remove(*index);
+                            result
+                        })
+                    }),
+                    Some((opid, diff)) => {
+                        changes_so_far?.fallible_and_then(move |mut changes_so_far| {
+                            let mut node = match changes_so_far.get(*index) {
+                                Some((_, Some(n))) => n.apply_diff(object_id, opid, diff)?,
+                                Some((_, None)) => T::construct(object_id, opid, diff)?,
+                                None => {
+                                    return Err(InvalidPatch::InvalidIndex {
+                                        object_id: object_id.clone(),
+                                        index: *index,
+                                    })
+                                }
+                            };
+                            node = node.fallible_and_then(move |n| {
+                                n.apply_diff_iter(object_id, &mut diff_iter)
+                            })?;
+                            Ok(node.map(move |n| {
+                                let mut focus = changes_so_far.focus_mut();
+                                focus.set(*index, (n.default_opid(), Some(n)));
+                                changes_so_far
+                            }))
+                        })
                     }
-                })?;
+                }
+            },
+        )?;
         //This is where we maintain the invariant that allows us to provide an iterator over T
         //rather than Option<T>
-        updated.fallible_and_then(|new_elements_and_opids| {
+        updated.fallible_and_then(move |new_elements_and_opids| {
             for (index, (_, maybe_elem)) in new_elements_and_opids.iter().enumerate() {
                 if maybe_elem.is_none() {
                     return Err(InvalidPatch::InvalidIndex {

@@ -2,7 +2,7 @@ use crate::error;
 use crate::Value;
 use crate::{Path, PathElement};
 use automerge_protocol as amp;
-use im::hashmap;
+use im_rc::hashmap;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -12,7 +12,7 @@ mod multivalue;
 mod resolved_path;
 mod state_tree_change;
 
-use diffable_sequence::DiffableSequence;
+use diffable_sequence::{DiffableSequence, DiffableValue};
 use multivalue::{MultiChar, MultiValue, NewValueRequest};
 pub use resolved_path::ResolvedPath;
 pub(crate) use resolved_path::SetOrInsertPayload;
@@ -33,15 +33,15 @@ pub(crate) struct LocalOperationResult {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StateTree {
-    root_map: im::HashMap<String, MultiValue>,
-    object_index: im::HashMap<amp::ObjectID, StateTreeComposite>,
+    root_map: im_rc::HashMap<String, MultiValue>,
+    object_index: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
 }
 
 impl StateTree {
     pub fn new() -> StateTree {
         StateTree {
-            root_map: im::HashMap::new(),
-            object_index: im::HashMap::new(),
+            root_map: im_rc::HashMap::new(),
+            object_index: im_rc::HashMap::new(),
         }
     }
 
@@ -416,11 +416,11 @@ impl StateTreeValue {
             }) => match obj_type {
                 amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                     object_id: object_id.clone(),
-                    props: im::HashMap::new(),
+                    props: im_rc::HashMap::new(),
                 }),
                 amp::MapType::Table => StateTreeComposite::Table(StateTreeTable {
                     object_id: object_id.clone(),
-                    props: im::HashMap::new(),
+                    props: im_rc::HashMap::new(),
                 }),
             }
             .apply_diff(diff)
@@ -475,7 +475,7 @@ impl StateTreeValue {
 #[derive(Debug, Clone)]
 struct StateTreeMap {
     object_id: amp::ObjectID,
-    props: im::HashMap<String, MultiValue>,
+    props: im_rc::HashMap<String, MultiValue>,
 }
 
 impl StateTreeMap {
@@ -542,7 +542,7 @@ impl StateTreeMap {
 #[derive(Debug, Clone)]
 struct StateTreeTable {
     object_id: amp::ObjectID,
-    props: im::HashMap<String, MultiValue>,
+    props: im_rc::HashMap<String, MultiValue>,
 }
 
 impl StateTreeTable {

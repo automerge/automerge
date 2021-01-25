@@ -7,7 +7,7 @@ use super::{
 use crate::error;
 use crate::Value;
 use automerge_protocol as amp;
-use im::hashmap;
+use im_rc::hashmap;
 use std::convert::TryInto;
 
 pub enum ResolvedPath {
@@ -178,7 +178,7 @@ impl ResolvedMap {
                 .multivalue
                 .update_default(StateTreeValue::Composite(new_composite.clone()));
             StateTreeChange::pure(new_mv).with_updates(Some(
-                im::HashMap::new().update(self.value.object_id.clone(), new_composite),
+                im_rc::HashMap::new().update(self.value.object_id.clone(), new_composite),
             ))
         });
         LocalOperationResult {

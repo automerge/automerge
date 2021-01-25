@@ -1,8 +1,8 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::fmt;
 use std::convert::TryFrom;
+use std::fmt;
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
@@ -13,8 +13,8 @@ pub struct ActorID(Vec<u8>);
 impl fmt::Debug for ActorID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ActorID")
-         .field(&hex::encode(&self.0))
-         .finish()
+            .field(&hex::encode(&self.0))
+            .finish()
     }
 }
 
@@ -301,8 +301,8 @@ pub struct ChangeHash(pub [u8; 32]);
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ChangeHash")
-         .field(&hex::encode(&self.0))
-         .finish()
+            .field(&hex::encode(&self.0))
+            .finish()
     }
 }
 

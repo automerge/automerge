@@ -1,8 +1,8 @@
 use automerge_protocol as amp;
 
 use super::{
-    DiffableSequence, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
-    StateTreeTable, StateTreeText, StateTreeValue,
+    DiffableSequence, DiffableValue, StateTreeChange, StateTreeComposite, StateTreeList,
+    StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::error;
 use crate::value::Value;
@@ -22,14 +22,14 @@ pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
 #[derive(Debug, Clone)]
 pub(super) struct MultiValue {
     winning_value: (amp::OpID, StateTreeValue),
-    conflicts: im::HashMap<amp::OpID, StateTreeValue>,
+    conflicts: im_rc::HashMap<amp::OpID, StateTreeValue>,
 }
 
 impl MultiValue {
     pub(super) fn new_from_statetree_value(opid: amp::OpID, value: StateTreeValue) -> MultiValue {
         MultiValue {
             winning_value: (opid, value),
-            conflicts: im::HashMap::new(),
+            conflicts: im_rc::HashMap::new(),
         }
     }
 
@@ -40,7 +40,7 @@ impl MultiValue {
         StateTreeValue::new_from_diff(diff)?.fallible_map(move |value| {
             Ok(MultiValue {
                 winning_value: (opid, value),
-                conflicts: im::HashMap::new(),
+                conflicts: im_rc::HashMap::new(),
             })
         })
     }
@@ -76,8 +76,8 @@ impl MultiValue {
                     insert,
                     pred,
                 };
-                let map = im::HashMap::new();
-                let newvalue: NewValue<im::HashMap<String, MultiValue>> =
+                let map = im_rc::HashMap::new();
+                let newvalue: NewValue<im_rc::HashMap<String, MultiValue>> =
                     NewValue::init(map, make_op, start_op);
                 props
                     .iter()
@@ -108,7 +108,7 @@ impl MultiValue {
             }
             Value::Map(props, amp::MapType::Table) => {
                 let make_table_opid = amp::OpID::new(start_op, actor);
-                let table = im::HashMap::new();
+                let table = im_rc::HashMap::new();
                 let make_op = amp::Op {
                     action: amp::OpType::Make(amp::ObjType::table()),
                     obj: parent_id,
@@ -116,7 +116,7 @@ impl MultiValue {
                     insert,
                     pred,
                 };
-                let newvalue: NewValue<im::HashMap<String, MultiValue>> =
+                let newvalue: NewValue<im_rc::HashMap<String, MultiValue>> =
                     NewValue::init(table, make_op, start_op);
                 props
                     .iter()
@@ -194,58 +194,40 @@ impl MultiValue {
             }
             Value::Text(chars) => {
                 let make_text_opid = amp::OpID(start_op, actor.clone());
-                let make_op = amp::Op {
+                let mut ops: Vec<amp::Op> = vec![amp::Op {
                     action: amp::OpType::Make(amp::ObjType::text()),
                     obj: parent_id,
                     key: key.clone(),
                     insert,
                     pred,
-                };
-                let newvalue: NewValue<DiffableSequence<MultiChar>> =
-                    NewValue::init(DiffableSequence::new(), make_op, start_op);
-                chars
-                    .iter()
-                    .fold(
-                        (newvalue, amp::ElementID::Head),
-                        |(newvalue_so_far, last_elemid), c| {
-                            let char_start_op = newvalue_so_far.max_op + 1;
-                            let create_char_op = amp::OpID(char_start_op, actor.clone());
-                            let updated_newvalue = newvalue_so_far.and_then(|newval_chars| {
-                                NewValue::init(
-                                    MultiChar::new_from_char(create_char_op.clone(), *c),
-                                    amp::Op {
-                                        action: amp::OpType::Set(amp::ScalarValue::Str(
-                                            c.to_string(),
-                                        )),
-                                        obj: make_text_opid.clone().into(),
-                                        key: last_elemid.clone().into(),
-                                        insert: true,
-                                        pred: Vec::new(),
-                                    },
-                                    char_start_op,
-                                )
-                                .map(|newchar| {
-                                    let mut chars = newval_chars.clone();
-                                    chars.push_back(newchar);
-                                    chars
-                                })
-                            });
-                            (
-                                updated_newvalue,
-                                amp::OpID::new(char_start_op, actor).into(),
-                            )
-                        },
-                    )
-                    .0
-                    .map(|newchars| {
+                }];
+                let mut last_elemid = amp::ElementID::Head;
+                let mut multichars: Vec<(amp::OpID, MultiChar)> = Vec::with_capacity(chars.len());
+                for (index, c) in chars.iter().enumerate() {
+                    let opid = actor.op_id_at(start_op + (index as u64) + 1);
+                    let op = amp::Op {
+                        action: amp::OpType::Set(amp::ScalarValue::Str(c.to_string())),
+                        obj: make_text_opid.clone().into(),
+                        key: last_elemid.clone().into(),
+                        insert: true,
+                        pred: Vec::new(),
+                    };
+                    multichars.push((opid.clone(), MultiChar::new_from_char(opid.clone(), *c)));
+                    ops.push(op);
+                    last_elemid = opid.clone().into();
+                }
+
+                NewValue::init_sequence(DiffableSequence::new_from(multichars), start_op, ops).map(
+                    move |chars| {
                         MultiValue::new_from_statetree_value(
                             make_text_opid.clone(),
                             StateTreeValue::Composite(StateTreeComposite::Text(StateTreeText {
-                                object_id: make_text_opid.clone().into(),
-                                chars: newchars,
+                                object_id: make_text_opid.into(),
+                                chars,
                             })),
                         )
-                    })
+                    },
+                )
             }
             Value::Primitive(v) => {
                 let make_op_id = amp::OpID(start_op, actor.clone());
@@ -283,9 +265,7 @@ impl MultiValue {
         } else {
             StateTreeValue::new_from_diff(subdiff)
         }?;
-        update_for_opid.fallible_map(|update| {
-            Self::multivalue_from_opids_and_values(current.update(opid.clone(), update))
-        })
+        Ok(update_for_opid.map(|update| current.update(opid, &update).result()))
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, I>(
@@ -309,10 +289,10 @@ impl MultiValue {
                 } else {
                     StateTreeValue::new_from_diff(subdiff)
                 }?;
-                Ok(update_for_opid.map(|u| updated.update(opid.clone(), u)))
+                Ok(update_for_opid.map(|u| updated.update(opid, &u)))
             })
         })?;
-        updated.fallible_map(Self::multivalue_from_opids_and_values)
+        Ok(updated.map(|treevalues| treevalues.result()))
     }
 
     pub(super) fn default_statetree_value(&self) -> StateTreeValue {
@@ -334,9 +314,10 @@ impl MultiValue {
         }
     }
 
-    fn tree_values(&self) -> im::HashMap<amp::OpID, StateTreeValue> {
-        self.conflicts
-            .update(self.winning_value.0.clone(), self.winning_value.1.clone())
+    fn tree_values(&self) -> MultiValueTreeValues {
+        MultiValueTreeValues {
+            current: self.clone(),
+        }
     }
 
     pub(super) fn values(&self) -> std::collections::HashMap<amp::OpID, Value> {
@@ -345,76 +326,108 @@ impl MultiValue {
             .map(|(opid, v)| (opid.clone(), v.value()))
             .collect()
     }
+}
 
-    fn multivalue_from_opids_and_values<I>(
-        opids_and_values: I,
-    ) -> Result<MultiValue, error::InvalidPatch>
-    where
-        I: IntoIterator<Item = (amp::OpID, StateTreeValue)>,
-    {
-        let mut opids_and_values_vec: Vec<(amp::OpID, StateTreeValue)> =
-            opids_and_values.into_iter().collect();
-        opids_and_values_vec.sort_by(|(o1, _), (o2, _)| o1.cmp(o2));
-        opids_and_values_vec.reverse();
-        //updates_vec.sort_by_key(|(o, _)| o.clone());
-        match opids_and_values_vec.split_first() {
-            Some(((opid, value), rest)) => Ok(MultiValue {
-                winning_value: (opid.clone(), value.clone()),
-                conflicts: rest.into(),
-            }),
-            None => Err(error::InvalidPatch::DiffCreatedObjectWithNoValue),
+#[derive(Clone)]
+struct MultiValueTreeValues {
+    current: MultiValue,
+}
+
+impl MultiValueTreeValues {
+    fn get(&self, opid: &amp::OpID) -> Option<&StateTreeValue> {
+        if opid == &self.current.winning_value.0 {
+            Some(&self.current.winning_value.1)
+        } else {
+            self.current.conflicts.get(opid)
         }
+    }
+
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpID, &StateTreeValue)> {
+        std::iter::once((
+            &(self.current.winning_value).0,
+            &(self.current.winning_value.1),
+        ))
+        .chain(self.current.conflicts.iter())
+    }
+
+    fn update(mut self, key: &amp::OpID, value: &StateTreeValue) -> MultiValueTreeValues {
+        if *key >= self.current.winning_value.0 {
+            self.current
+                .conflicts
+                .insert(self.current.winning_value.0, self.current.winning_value.1);
+            self.current.winning_value.0 = key.clone();
+            self.current.winning_value.1 = value.clone();
+        } else {
+            self.current.conflicts.insert(key.clone(), value.clone());
+        }
+        self
+    }
+
+    fn result(self) -> MultiValue {
+        self.current
     }
 }
 
 pub(super) struct NewValue<T> {
     value: T,
     ops: Vec<amp::Op>,
-    index_updates: im::HashMap<amp::ObjectID, StateTreeComposite>,
+    index_updates: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
     max_op: u64,
 }
 
 impl<T> NewValue<T> {
-    pub(super) fn state_tree_change(&self) -> StateTreeChange<T>
-    where
-        T: Clone,
-    {
-        StateTreeChange::pure(self.value.clone()).with_updates(Some(self.index_updates.clone()))
-    }
-
     pub(super) fn ops(self) -> Vec<amp::Op> {
         self.ops
     }
 
-    fn init(t: T, op: amp::Op, start_op: u64) -> NewValue<T> {
+    pub fn init(t: T, op: amp::Op, start_op: u64) -> NewValue<T> {
         NewValue {
             value: t,
             ops: vec![op],
-            index_updates: im::HashMap::new(),
+            index_updates: im_rc::HashMap::new(),
             max_op: start_op,
         }
     }
 
-    fn and_then<F, G>(&self, f: F) -> NewValue<G>
+    pub(crate) fn init_sequence<I>(
+        value: DiffableSequence<T>,
+        start_op: u64,
+        ops: I,
+    ) -> NewValue<DiffableSequence<T>>
     where
+        T: DiffableValue,
         T: Clone,
-        F: Fn(T) -> NewValue<G>,
+        I: IntoIterator<Item = amp::Op>,
     {
-        let newvalue = (f)(self.value.clone());
+        let ops: Vec<amp::Op> = ops.into_iter().collect();
+        let num_ops = ops.len() as u64;
+        NewValue {
+            value,
+            ops,
+            index_updates: im_rc::HashMap::new(),
+            max_op: start_op + num_ops,
+        }
+    }
+
+    pub(crate) fn and_then<F, G>(self, f: F) -> NewValue<G>
+    where
+        F: FnOnce(T) -> NewValue<G>,
+    {
+        let newvalue = (f)(self.value);
         let num_newops = newvalue.ops.len();
-        let mut newops = self.ops.clone();
+        let mut newops = self.ops;
         newops.extend(newvalue.ops);
         NewValue {
             value: newvalue.value,
             ops: newops,
-            index_updates: newvalue.index_updates.union(self.index_updates.clone()),
+            index_updates: newvalue.index_updates.union(self.index_updates),
             max_op: self.max_op + (num_newops as u64),
         }
     }
 
-    fn map<F, G>(self, f: F) -> NewValue<G>
+    pub(crate) fn map<F, G>(self, f: F) -> NewValue<G>
     where
-        F: Fn(T) -> G,
+        F: FnOnce(T) -> G,
     {
         NewValue {
             value: f(self.value),
@@ -425,19 +438,28 @@ impl<T> NewValue<T> {
     }
 }
 
+impl<T> NewValue<T>
+where
+    T: Clone,
+{
+    pub(super) fn state_tree_change(&self) -> StateTreeChange<T> {
+        StateTreeChange::pure(self.value.clone()).with_updates(Some(self.index_updates.clone()))
+    }
+}
+
 /// This struct exists to constrain the values of a text type to just containing
 /// sequences of chars
 #[derive(Debug, Clone)]
 pub(super) struct MultiChar {
     winning_value: (amp::OpID, char),
-    conflicts: im::HashMap<amp::OpID, char>,
+    conflicts: Option<im_rc::HashMap<amp::OpID, char>>,
 }
 
 impl MultiChar {
     pub(super) fn new_from_char(opid: amp::OpID, c: char) -> MultiChar {
         MultiChar {
             winning_value: (opid, c),
-            conflicts: im::HashMap::new(),
+            conflicts: None,
         }
     }
 
@@ -466,7 +488,7 @@ impl MultiChar {
         };
         Ok(MultiChar {
             winning_value: (opid.clone(), winning_value),
-            conflicts: im::HashMap::new(),
+            conflicts: None,
         })
     }
 
@@ -485,8 +507,7 @@ impl MultiChar {
                         diff: diff.clone(),
                     });
                 } else {
-                    opids_and_values =
-                        opids_and_values.update(opid.clone(), s.chars().next().unwrap());
+                    opids_and_values = opids_and_values.update(opid, s.chars().next().unwrap());
                 }
             }
             _ => {
@@ -496,7 +517,7 @@ impl MultiChar {
                 });
             }
         }
-        Self::multichar_from_opids_and_values(opids_and_values)
+        Ok(opids_and_values.result())
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, I>(
@@ -518,7 +539,7 @@ impl MultiChar {
                         })
                     } else {
                         let c = s.chars().next().unwrap();
-                        Ok(updated.update(opid.clone(), c))
+                        Ok(updated.update(opid, c))
                     }
                 }
                 _ => Err(error::InvalidPatch::InsertNonTextInTextObject {
@@ -527,7 +548,7 @@ impl MultiChar {
                 }),
             })
         })?;
-        updated.fallible_map(Self::multichar_from_opids_and_values)
+        Ok(updated.map(|u| u.result()))
     }
 
     pub(super) fn default_char(&self) -> char {
@@ -538,28 +559,44 @@ impl MultiChar {
         &self.winning_value.0
     }
 
-    pub fn values(&self) -> im::HashMap<amp::OpID, char> {
-        self.conflicts
-            .update(self.winning_value.0.clone(), self.winning_value.1)
+    fn values(&self) -> MultiCharValues {
+        MultiCharValues {
+            current: self.clone(),
+        }
+    }
+}
+
+struct MultiCharValues {
+    current: MultiChar,
+}
+
+impl MultiCharValues {
+    //fn get(&self, opid: &amp::OpID) -> Option<char> {
+    //if opid == &self.current.winning_value.0 {
+    //Some(self.current.winning_value.1)
+    //} else {
+    //self.current.conflicts.get(opid).copied()
+    //}
+    //}
+
+    //fn iter(&self) -> impl std::iter::Iterator<Item=(&amp::OpID, char)> {
+    //std::iter::once((&(self.current.winning_value).0, self.current.winning_value.1)).chain(self.current.conflicts.iter().map(|(o, cref)| (o, *cref)))
+    //}
+
+    fn update(mut self, key: &amp::OpID, value: char) -> MultiCharValues {
+        let mut conflicts = self.current.conflicts.unwrap_or_else(im_rc::HashMap::new);
+        if *key >= self.current.winning_value.0 {
+            conflicts.insert(self.current.winning_value.0, self.current.winning_value.1);
+            self.current.winning_value.0 = key.clone();
+            self.current.winning_value.1 = value;
+        } else {
+            conflicts.insert(key.clone(), value);
+        }
+        self.current.conflicts = Some(conflicts);
+        self
     }
 
-    fn multichar_from_opids_and_values<I>(
-        opids_and_values: I,
-    ) -> Result<MultiChar, error::InvalidPatch>
-    where
-        I: IntoIterator<Item = (amp::OpID, char)>,
-    {
-        let mut opids_and_values_vec: Vec<(amp::OpID, char)> =
-            opids_and_values.into_iter().collect();
-        opids_and_values_vec.sort_by(|(o1, _), (o2, _)| o1.cmp(o2));
-        opids_and_values_vec.reverse();
-        //updates_vec.sort_by_key(|(o, _)| o.clone());
-        match opids_and_values_vec.split_first() {
-            Some(((opid, value), rest)) => Ok(MultiChar {
-                winning_value: (opid.clone(), *value),
-                conflicts: rest.into(),
-            }),
-            None => Err(error::InvalidPatch::DiffCreatedObjectWithNoValue),
-        }
+    fn result(self) -> MultiChar {
+        self.current
     }
 }

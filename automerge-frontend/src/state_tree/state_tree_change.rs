@@ -8,13 +8,10 @@ use automerge_protocol as amp;
 #[derive(Clone)]
 pub struct StateTreeChange<T> {
     value: T,
-    index_updates: Option<im::HashMap<amp::ObjectID, StateTreeComposite>>,
+    index_updates: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
 }
 
-impl<T> StateTreeChange<T>
-where
-    T: Clone,
-{
+impl<T> StateTreeChange<T> {
     pub(super) fn pure(value: T) -> StateTreeChange<T> {
         StateTreeChange {
             value,
@@ -26,7 +23,9 @@ where
         &self.value
     }
 
-    pub(super) fn index_updates(&self) -> Option<&im::HashMap<amp::ObjectID, StateTreeComposite>> {
+    pub(super) fn index_updates(
+        &self,
+    ) -> Option<&im_rc::HashMap<amp::ObjectID, StateTreeComposite>> {
         self.index_updates.as_ref()
     }
 
@@ -54,11 +53,11 @@ where
     where
         F: FnOnce(T) -> StateTreeChange<G>,
     {
-        let diff = f(self.value.clone());
-        let result = self.with_updates(diff.index_updates.clone());
+        let diff = f(self.value);
+        let index_updates = Self::merge_updates(self.index_updates, diff.index_updates);
         StateTreeChange {
             value: diff.value,
-            index_updates: result.index_updates,
+            index_updates,
         }
     }
 
@@ -66,35 +65,33 @@ where
     where
         F: FnOnce(T) -> Result<StateTreeChange<G>, E>,
     {
-        let diff = f(self.value.clone())?;
-        let result = self.with_updates(diff.index_updates.clone());
+        let diff = f(self.value)?;
+        let updates = Self::merge_updates(self.index_updates, diff.index_updates);
         Ok(StateTreeChange {
             value: diff.value,
-            index_updates: result.index_updates,
+            index_updates: updates,
         })
     }
 
     pub(super) fn with_updates(
         self,
-        updates: Option<im::HashMap<amp::ObjectID, StateTreeComposite>>,
+        updates: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
     ) -> StateTreeChange<T> {
-        match (updates, self.index_updates) {
-            (Some(updates), Some(existing_updates)) => StateTreeChange {
-                value: self.value,
-                index_updates: Some(updates.union(existing_updates)),
-            },
-            (Some(updates), None) => StateTreeChange {
-                value: self.value,
-                index_updates: Some(updates),
-            },
-            (None, Some(existing_updates)) => StateTreeChange {
-                value: self.value,
-                index_updates: Some(existing_updates),
-            },
-            (None, None) => StateTreeChange {
-                value: self.value,
-                index_updates: None,
-            },
+        StateTreeChange {
+            value: self.value,
+            index_updates: Self::merge_updates(self.index_updates, updates),
+        }
+    }
+
+    fn merge_updates(
+        before: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
+        after: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
+    ) -> Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>> {
+        match (before, after) {
+            (Some(before), Some(after)) => Some(after.union(before)),
+            (Some(before), None) => Some(before),
+            (None, Some(after)) => Some(after),
+            (None, None) => None,
         }
     }
 }

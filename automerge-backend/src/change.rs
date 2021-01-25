@@ -453,13 +453,13 @@ fn group_doc_change_and_doc_ops(
     }
 
     let mut op_by_id = HashMap::new();
-    ops.iter()
-        .enumerate()
-        .for_each(|(i, op)| { op_by_id.insert((op.ctr, op.actor), i); });
+    ops.iter().enumerate().for_each(|(i, op)| {
+        op_by_id.insert((op.ctr, op.actor), i);
+    });
     for i in 0..ops.len() {
         let op = ops[i].clone(); // this is safe - avoid borrow checker issues
-        //let id = (op.ctr, op.actor);
-        //op_by_id.insert(id, i);
+                                 //let id = (op.ctr, op.actor);
+                                 //op_by_id.insert(id, i);
         for succ in op.succ.iter() {
             if !op_by_id.contains_key(&succ) {
                 let key = if op.insert {

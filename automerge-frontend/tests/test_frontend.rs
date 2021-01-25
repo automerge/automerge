@@ -5,7 +5,7 @@ use std::convert::TryInto;
 
 #[test]
 fn test_should_be_empty_after_init() {
-    let frontend = Frontend::new();
+    let mut frontend = Frontend::new();
     let result_state = frontend.state().to_json();
     let expected_state: serde_json::Value = serde_json::from_str("{}").unwrap();
     assert_eq!(result_state, expected_state);
@@ -26,7 +26,7 @@ fn test_init_with_state() {
     )
     .unwrap();
     let value = Value::from_json(&initial_state_json);
-    let (frontend, _) = Frontend::new_with_initial_state(value).unwrap();
+    let (mut frontend, _) = Frontend::new_with_initial_state(value).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }
@@ -35,7 +35,7 @@ fn test_init_with_state() {
 fn test_init_with_empty_state() {
     let initial_state_json: serde_json::Value = serde_json::from_str("{}").unwrap();
     let value = Value::from_json(&initial_state_json);
-    let (frontend, _) = Frontend::new_with_initial_state(value).unwrap();
+    let (mut frontend, _) = Frontend::new_with_initial_state(value).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }

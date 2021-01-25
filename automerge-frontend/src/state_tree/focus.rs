@@ -2,7 +2,7 @@ use super::{
     MultiValue, StateTree, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
     StateTreeTable, StateTreeValue,
 };
-use im::hashmap;
+use im_rc::hashmap;
 
 #[derive(Clone)]
 pub(crate) struct Focus(FocusInner);
