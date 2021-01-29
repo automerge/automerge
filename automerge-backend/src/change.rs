@@ -597,7 +597,7 @@ fn split_blocks(bytes: &[u8]) -> Vec<&[u8]> {
 }
 
 fn pop_block(bytes: &[u8]) -> Option<Range<usize>> {
-    if bytes[0..4] != MAGIC_BYTES {
+    if bytes.len() < 4 || bytes[0..4] != MAGIC_BYTES {
         // not reporting error here - file got corrupted?
         return None;
     }

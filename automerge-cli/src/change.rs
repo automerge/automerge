@@ -217,7 +217,7 @@ mod tests {
         struct Scenario {
             input: &'static str,
             expected: amf::LocalChange,
-        };
+        }
         let scenarios = vec![
             Scenario {
                 input: "set $[\"map\"][0] {\"some\": \"value\"}",
