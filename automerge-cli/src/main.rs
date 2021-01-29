@@ -4,6 +4,7 @@ use std::fs::File;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+mod change;
 mod export;
 mod import;
 
@@ -56,6 +57,17 @@ enum Command {
         /// Path to write Automerge changes to
         #[clap(parse(from_os_str), long("out"), short('o'))]
         changes_file: Option<PathBuf>,
+    },
+
+    Change {
+        script: String,
+
+        #[clap(parse(from_os_str))]
+        input_file: Option<PathBuf>,
+
+        /// Path to write Automerge changes to
+        #[clap(parse(from_os_str), long("out"), short('o'))]
+        output_file: Option<PathBuf>,
     },
 }
 
@@ -111,5 +123,15 @@ fn main() -> Result<()> {
             }
             ExportFormat::TOML => unimplemented!(),
         },
+        Command::Change {
+            input_file,
+            output_file,
+            script,
+        } => {
+            let in_buffer = open_file_or_stdin(input_file)?;
+            let mut out_buffer = create_file_or_stdout(output_file)?;
+            change::change(in_buffer, &mut out_buffer, script.as_str())
+                .map_err(|e| anyhow::format_err!("Unable to make changes: {:?}", e))
+        }
     }
 }
