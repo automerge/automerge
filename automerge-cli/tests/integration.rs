@@ -4,15 +4,12 @@ use std::env;
 #[test]
 fn import_stdin() {
     let bin = env!("CARGO_BIN_EXE_automerge");
-    let initial_state_json: serde_json::Value = serde_json::from_str(
-        r#"{
-    "birds": {
-        "wrens": 3.0,
-        "sparrows": 15.0
-    }
-}"#,
-    )
-    .unwrap();
+    let initial_state_json = serde_json::json!({
+        "birds": {
+            "wrens": 3.0,
+            "sparrows": 15.0
+        }
+    });
     let json_bytes = serde_json::to_string_pretty(&initial_state_json).unwrap();
 
     let no_pipe_no_file = cmd!(bin, "import").stdin_bytes(json_bytes.clone()).run();
@@ -47,15 +44,12 @@ fn export_stdout() {
 #[test]
 fn import_export_isomorphic() {
     let bin = env!("CARGO_BIN_EXE_automerge");
-    let initial_state_json: serde_json::Value = serde_json::from_str(
-        r#"{
-    "birds": {
-        "wrens": 3.0,
-        "sparrows": 15.0
-    }
-}"#,
-    )
-    .unwrap();
+    let initial_state_json = serde_json::json!({
+        "birds": {
+            "wrens": 3.0,
+            "sparrows": 15.0
+        }
+    });
     let json_bytes = serde_json::to_string_pretty(&initial_state_json).unwrap();
 
     let stdout = cmd!(bin, "import")
@@ -64,4 +58,33 @@ fn import_export_isomorphic() {
         .read()
         .unwrap();
     assert_eq!(stdout, json_bytes);
+}
+
+#[test]
+fn import_change_export() {
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let initial_state_json = serde_json::json!({
+        "birds": {
+            "wrens": 3.0,
+            "sparrows": 15.0
+        }
+    });
+    let json_bytes = serde_json::to_string_pretty(&initial_state_json).unwrap();
+
+    let stdout = cmd!(bin, "import")
+        .stdin_bytes(json_bytes.clone())
+        .pipe(cmd!(bin, "change", "set $[\"birds\"][\"owls\"] 12.0"))
+        .stdin_bytes(json_bytes)
+        .pipe(cmd!(bin, "export"))
+        .read()
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_str(stdout.as_str()).unwrap();
+    let expected = serde_json::json!({
+        "birds": {
+            "wrens": 3.0,
+            "sparrows": 15.0,
+            "owls": 12.0,
+        }
+    });
+    assert_eq!(result, expected);
 }

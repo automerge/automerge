@@ -9,13 +9,15 @@ pub trait MutableDocument {
     fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest>;
 }
 
-pub(crate) enum LocalOperation {
+#[derive(Debug, PartialEq, Clone)]
+pub enum LocalOperation {
     Set(Value),
     Delete,
     Increment(u32),
     Insert(Value),
 }
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct LocalChange {
     path: Path,
     operation: LocalOperation,

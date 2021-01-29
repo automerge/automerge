@@ -21,6 +21,27 @@ pub enum ResolvedPath {
     Primitive(ResolvedPrimitive),
 }
 
+impl std::fmt::Debug for ResolvedPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ResolvedPath::Map(maptarget) => write!(f, "MapTarget {:?}", maptarget.value.object_id),
+            ResolvedPath::Root(_) => write!(f, "Root"),
+            ResolvedPath::Table(tabletarget) => {
+                write!(f, "Table {:?}", tabletarget.value.object_id)
+            }
+            ResolvedPath::List(listtarget) => write!(f, "list {:?}", listtarget.value.object_id),
+            ResolvedPath::Text(texttarget) => write!(f, "text {:?}", texttarget.value.object_id),
+            ResolvedPath::Counter(countertarget) => write!(
+                f,
+                "counter {0}:{1:?}",
+                countertarget.containing_object_id, countertarget.key_in_container
+            ),
+            ResolvedPath::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
+            ResolvedPath::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
+        }
+    }
+}
+
 impl ResolvedPath {
     pub fn default_value(&self) -> Value {
         match self {
