@@ -1,7 +1,25 @@
 use crate::error::InvalidObjectID;
 use crate::{ObjectID, OpID};
+use std::cmp::{Ordering, PartialOrd};
 use std::fmt;
 use std::{convert::TryFrom, str::FromStr};
+
+impl PartialOrd for ObjectID {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ObjectID {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (ObjectID::Root, ObjectID::Root) => Ordering::Equal,
+            (ObjectID::Root, _) => Ordering::Less,
+            (_, ObjectID::Root) => Ordering::Greater,
+            (ObjectID::ID(a), ObjectID::ID(b)) => a.cmp(b),
+        }
+    }
+}
 
 impl From<&OpID> for ObjectID {
     fn from(o: &OpID) -> Self {

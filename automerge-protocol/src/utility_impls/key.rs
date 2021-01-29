@@ -1,4 +1,22 @@
 use crate::{ElementID, Key, OpID};
+use std::cmp::{Ordering, PartialOrd};
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Key::Map(a), Key::Map(b)) => a.cmp(b),
+            (Key::Seq(a), Key::Seq(b)) => a.cmp(b),
+            (Key::Map(_), _) => Ordering::Less,
+            (_, Key::Map(_)) => Ordering::Greater,
+        }
+    }
+}
 
 impl From<OpID> for Key {
     fn from(id: OpID) -> Self {

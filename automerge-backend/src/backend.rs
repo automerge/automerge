@@ -1,4 +1,5 @@
 use crate::actor_map::ActorMap;
+use crate::change::encode_document;
 use crate::error::AutomergeError;
 use crate::internal::ObjectID;
 use crate::op_handle::OpHandle;
@@ -251,17 +252,18 @@ impl Backend {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let bytes: Vec<&[u8]> = self
+        let changes: Vec<amp::UncompressedChange> = self
             .history
             .iter()
             .filter_map(|hash| self.hashes.get(&hash))
-            .map(|r| r.bytes.as_slice())
+            .map(|r| r.as_ref().into())
             .collect();
-        Ok(bytes.concat())
+        Ok(encode_document(changes)?)
     }
 
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
+        log!("loaded {:?} changes", changes.len());
         let mut backend = Self::init();
         backend.load_changes(changes)?;
         Ok(backend)

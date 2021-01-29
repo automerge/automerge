@@ -18,6 +18,7 @@ fn test_incremental_diffs_in_a_map() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -60,6 +61,7 @@ fn test_increment_key_in_map() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -79,6 +81,7 @@ fn test_increment_key_in_map() {
         start_op: 2,
         time: 2,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -123,6 +126,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
         actor_id: actor_1.clone(),
         seq: 1,
         message: None,
+        hash: None,
         start_op: 1,
         time: 0,
         deps: Vec::new(),
@@ -144,6 +148,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
         start_op: 2,
         seq: 1,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         time: 0,
         operations: vec![Op {
@@ -195,6 +200,7 @@ fn delete_key_from_map() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -214,6 +220,7 @@ fn delete_key_from_map() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -258,6 +265,7 @@ fn create_nested_maps() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::map()),
@@ -318,6 +326,7 @@ fn test_assign_to_nested_keys_in_map() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -347,6 +356,7 @@ fn test_assign_to_nested_keys_in_map() {
         time: 0,
         deps: vec![change1.hash],
         message: None,
+        hash: None,
         operations: vec![Op {
             obj: ObjectID::from(actor.op_id_at(1)),
             action: amp::OpType::Set(ScalarValue::F64(15.0)),
@@ -401,6 +411,7 @@ fn test_create_lists() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -465,6 +476,7 @@ fn test_apply_updates_inside_lists() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -494,6 +506,7 @@ fn test_apply_updates_inside_lists() {
         time: 0,
         deps: vec![change1.hash],
         message: None,
+        hash: None,
         operations: vec![Op {
             action: amp::OpType::Set("greenfinch".into()),
             obj: ObjectID::from(actor.op_id_at(1)),
@@ -549,6 +562,7 @@ fn test_delete_list_elements() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -577,6 +591,7 @@ fn test_delete_list_elements() {
         start_op: 3,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
             action: amp::OpType::Del,
@@ -629,6 +644,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Make(amp::ObjType::list()),
@@ -648,6 +664,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -713,6 +730,7 @@ fn test_handle_changes_within_conflicted_objects() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Make(amp::ObjType::list()),
@@ -732,6 +750,7 @@ fn test_handle_changes_within_conflicted_objects() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Make(amp::ObjType::map()),
@@ -751,6 +770,7 @@ fn test_handle_changes_within_conflicted_objects() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![change2.hash],
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::F64(12.0)),
@@ -813,6 +833,7 @@ fn test_support_date_objects_at_root() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::Timestamp(1_586_528_122_277)),
             obj: ObjectID::Root,
@@ -859,6 +880,7 @@ fn test_support_date_objects_in_a_list() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::list()),

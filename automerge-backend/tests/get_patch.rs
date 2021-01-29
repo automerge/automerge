@@ -18,6 +18,7 @@ fn test_include_most_recent_value_for_key() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             key: "bird".into(),
@@ -36,6 +37,7 @@ fn test_include_most_recent_value_for_key() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -85,6 +87,7 @@ fn test_includes_conflicting_values_for_key() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             obj: ObjectID::Root,
@@ -103,6 +106,7 @@ fn test_includes_conflicting_values_for_key() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Set("blackbird".into()),
@@ -152,6 +156,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::Counter(1)),
@@ -172,6 +177,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         time: 0,
         deps: vec![change1.hash],
         message: None,
+        hash: None,
         operations: vec![Op {
             action: amp::OpType::Inc(2),
             obj: ObjectID::Root,
@@ -218,6 +224,7 @@ fn test_creates_nested_maps() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -247,6 +254,7 @@ fn test_creates_nested_maps() {
         time: 0,
         deps: vec![change1.hash],
         message: None,
+        hash: None,
         operations: vec![
             Op {
                 obj: ObjectID::from(actor.op_id_at(1)),
@@ -310,6 +318,7 @@ fn test_create_lists() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -378,6 +387,7 @@ fn test_includes_latests_state_of_list() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -468,6 +478,7 @@ fn test_includes_date_objects_at_root() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -515,6 +526,7 @@ fn test_includes_date_objects_in_a_list() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {

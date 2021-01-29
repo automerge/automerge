@@ -106,6 +106,7 @@ prop_compose! {
                 actor_id,
                 start_op,
                 time,
+                hash: None,
                 message,
                 deps,
                 operations,

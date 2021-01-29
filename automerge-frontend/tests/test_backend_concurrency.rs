@@ -58,6 +58,7 @@ fn use_version_and_sequence_number_from_backend() {
         start_op: 5,
         time: req.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Int(1)),
@@ -497,6 +498,7 @@ fn allow_interleaving_of_patches_and_changes() {
             seq: 1,
             start_op: 1,
             message: None,
+            hash: None,
             time: req1.time,
             deps: Vec::new(),
             operations: vec![amp::Op {
@@ -517,6 +519,7 @@ fn allow_interleaving_of_patches_and_changes() {
             seq: 2,
             start_op: 2,
             message: None,
+            hash: None,
             time: req2.time,
             deps: Vec::new(),
             operations: vec![amp::Op {
@@ -552,6 +555,7 @@ fn allow_interleaving_of_patches_and_changes() {
             seq: 3,
             start_op: 3,
             message: None,
+            hash: None,
             time: req3.time,
             deps: Vec::new(),
             operations: vec![amp::Op {
@@ -646,6 +650,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         seq: 1,
         time: change2.time,
         message: None,
+        hash: None,
         deps: vec![binchange1.hash],
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(2)),
@@ -664,6 +669,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         seq: 2,
         time: change3.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(3)),
@@ -704,6 +710,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         seq: 3,
         time: change4.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(4)),

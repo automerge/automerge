@@ -17,6 +17,7 @@ fn test_apply_local_change() {
         actor_id: actor.clone(),
         time: 0,
         message: None,
+        hash: None,
         seq: 1,
         deps: Vec::new(),
         start_op: 1,
@@ -40,6 +41,7 @@ fn test_apply_local_change() {
         start_op: 1,
         time: changes[0].time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: OpType::Set("magpie".into()),
@@ -82,6 +84,7 @@ fn test_error_on_duplicate_requests() {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
+        hash: None,
         time: 0,
         deps: Vec::new(),
         start_op: 1,
@@ -99,6 +102,7 @@ fn test_error_on_duplicate_requests() {
         actor_id: actor,
         seq: 2,
         message: None,
+        hash: None,
         time: 0,
         deps: Vec::new(),
         start_op: 2,
@@ -127,6 +131,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         start_op: 1,
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
@@ -145,6 +150,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![Op {
             action: protocol::OpType::Set("jay".into()),
             obj: ObjectID::Root,
@@ -162,6 +168,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         time: 0,
         deps: Vec::new(),
         message: None,
+        hash: None,
         operations: vec![Op {
             action: protocol::OpType::Set("goldfish".into()),
             obj: ObjectID::Root,
@@ -180,6 +187,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
@@ -197,6 +205,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Set("goldfish".into()),
@@ -214,6 +223,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Set("jay".into()),
@@ -260,6 +270,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 1,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Make(ObjType::list()),
@@ -279,6 +290,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
@@ -296,6 +308,7 @@ fn test_transform_list_indexes_into_element_ids() {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
+        hash: None,
         time: 0,
         deps: vec![remote1.hash],
         start_op: 2,
@@ -312,6 +325,7 @@ fn test_transform_list_indexes_into_element_ids() {
         actor_id: actor.clone(),
         seq: 2,
         message: None,
+        hash: None,
         deps: Vec::new(),
         time: 0,
         start_op: 3,
@@ -329,6 +343,7 @@ fn test_transform_list_indexes_into_element_ids() {
         actor_id: actor.clone(),
         seq: 3,
         message: None,
+        hash: None,
         deps: vec![remote2.hash],
         time: 0,
         start_op: 4,
@@ -357,6 +372,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 2,
         time: 0,
         message: None,
+        hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
             obj: ObjectID::from(remote_actor.op_id_at(1)),
@@ -373,6 +389,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 3,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::from(remote_actor.op_id_at(1)),
@@ -389,6 +406,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 4,
         time: 0,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
@@ -445,6 +463,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
+        hash: None,
         time: 0,
         deps: Vec::new(),
         start_op: 1,
@@ -462,6 +481,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         actor_id: actor.clone(),
         seq: 2,
         message: None,
+        hash: None,
         time: 0,
         deps: Vec::new(),
         start_op: 2,
@@ -528,6 +548,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         start_op: 1,
         time: change1.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectID::Root,
@@ -547,6 +568,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         start_op: 2,
         time: change2.time,
         message: None,
+        hash: None,
         deps: vec![change1.hash],
         operations: vec![
             Op {

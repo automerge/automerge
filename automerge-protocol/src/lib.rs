@@ -397,13 +397,14 @@ pub struct Patch {
     pub diffs: Option<Diff>,
 }
 
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct UncompressedChange {
     #[serde(rename = "ops")]
     pub operations: Vec<Op>,
     #[serde(rename = "actor")]
     pub actor_id: ActorID,
-    //pub hash: amp::ChangeHash,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub hash: Option<ChangeHash>,
     pub seq: u64,
     #[serde(rename = "startOp")]
     pub start_op: u64,
@@ -412,6 +413,20 @@ pub struct UncompressedChange {
     pub deps: Vec<ChangeHash>,
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
+}
+
+impl PartialEq for UncompressedChange {
+    // everything but hash (its computed and not always present)
+    fn eq(&self, other: &Self) -> bool {
+        self.operations == other.operations
+            && self.actor_id == other.actor_id
+            && self.seq == other.seq
+            && self.start_op == other.start_op
+            && self.time == other.time
+            && self.message == other.message
+            && self.deps == other.deps
+            && self.extra_bytes == other.extra_bytes
+    }
 }
 
 impl UncompressedChange {

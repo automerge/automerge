@@ -632,6 +632,38 @@ impl KeyEncoder {
     }
 }
 
+struct SuccEncoder {
+    num: RLEEncoder<usize>,
+    actor: RLEEncoder<usize>,
+    ctr: DeltaEncoder,
+}
+
+impl SuccEncoder {
+    fn new() -> SuccEncoder {
+        SuccEncoder {
+            num: RLEEncoder::new(),
+            actor: RLEEncoder::new(),
+            ctr: DeltaEncoder::new(),
+        }
+    }
+
+    fn append(&mut self, succ: &[(u64, usize)]) {
+        self.num.append_value(succ.len());
+        for s in succ.iter() {
+            self.ctr.append_value(s.0);
+            self.actor.append_value(s.1);
+        }
+    }
+
+    fn finish(self) -> Vec<ColData> {
+        vec![
+            self.num.finish(COL_SUCC_NUM),
+            self.actor.finish(COL_SUCC_ACTOR),
+            self.ctr.finish(COL_SUCC_CTR),
+        ]
+    }
+}
+
 struct PredEncoder {
     num: RLEEncoder<usize>,
     actor: RLEEncoder<usize>,
@@ -703,6 +735,9 @@ struct ChildEncoder {
     ctr: DeltaEncoder,
 }
 
+// FIXME - child decoder is missing - are there no tests for this?
+// or was this only needed for undo/redo?
+
 impl ChildEncoder {
     fn new() -> ChildEncoder {
         ChildEncoder {
@@ -723,6 +758,214 @@ impl ChildEncoder {
         ]
     }
 }
+
+pub(crate) struct ChangeEncoder {
+    actor: RLEEncoder<usize>,
+    seq: DeltaEncoder,
+    max_op: DeltaEncoder,
+    time: DeltaEncoder,
+    message: RLEEncoder<Option<String>>,
+    deps_num: RLEEncoder<usize>,
+    deps_index: DeltaEncoder,
+    extra_len: RLEEncoder<usize>,
+    extra_raw: Vec<u8>,
+}
+
+impl ChangeEncoder {
+    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorID]) -> (Vec<u8>, Vec<u8>)
+    where
+        I: IntoIterator<Item = &'b amp::UncompressedChange>,
+    {
+        let mut e = Self::new();
+        e.encode(changes, actors);
+        e.finish()
+    }
+
+    fn new() -> ChangeEncoder {
+        ChangeEncoder {
+            actor: RLEEncoder::new(),
+            seq: DeltaEncoder::new(),
+            max_op: DeltaEncoder::new(),
+            time: DeltaEncoder::new(),
+            message: RLEEncoder::new(),
+            deps_num: RLEEncoder::new(),
+            deps_index: DeltaEncoder::new(),
+            extra_len: RLEEncoder::new(),
+            extra_raw: Vec::new(),
+        }
+    }
+
+    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [amp::ActorID])
+    where
+        I: IntoIterator<Item = &'c amp::UncompressedChange>,
+    {
+        //let hashes : Vec<_> = changes.clone().into_iter().filter_map(|c| c.hash).collect();
+        for change in changes {
+            self.actor
+                .append_value(actors.iter().position(|a| a == &change.actor_id).unwrap());
+            self.seq.append_value(change.seq);
+            self.max_op
+                .append_value(change.start_op + change.operations.len() as u64 - 1);
+            self.time.append_value(change.time as u64);
+            self.message.append_value(change.message.clone());
+            self.deps_num.append_value(change.deps.len());
+            for _d in change.deps.iter() {
+                // FIXME
+                //	    self.deps_index.append_value(hashes.into_iter().position(|h| &h == d).unwrap() as u64);
+                self.deps_index.append_value(0);
+            }
+            self.extra_len.append_value(change.extra_bytes.len());
+            self.extra_raw.extend(&change.extra_bytes);
+        }
+    }
+
+    fn finish(self) -> (Vec<u8>, Vec<u8>) {
+        let mut coldata = Vec::new();
+        coldata.push(self.actor.finish(DOC_ACTOR));
+        coldata.push(self.seq.finish(DOC_SEQ));
+        coldata.push(self.max_op.finish(DOC_MAX_OP));
+        coldata.push(self.time.finish(DOC_TIME));
+        coldata.push(self.message.finish(DOC_MESSAGE));
+        coldata.push(self.deps_num.finish(DOC_DEPS_NUM));
+        coldata.push(self.deps_index.finish(DOC_DEPS_INDEX));
+        coldata.push(self.extra_len.finish(DOC_EXTRA_LEN));
+        coldata.push(ColData {
+            col: DOC_EXTRA_RAW,
+            data: self.extra_raw,
+        });
+        coldata.sort_by(|a, b| a.col.cmp(&b.col));
+
+        let mut data = Vec::new();
+        let mut info = Vec::new();
+        coldata
+            .iter()
+            .filter(|&d| !d.data.is_empty())
+            .count()
+            .encode(&mut info)
+            .ok();
+        for d in coldata.iter() {
+            d.encode_col_len(&mut info).ok();
+        }
+        for d in coldata.iter() {
+            data.write_all(d.data.as_slice()).ok();
+        }
+        (data, info)
+    }
+}
+
+pub(crate) struct DocOpEncoder {
+    actor: RLEEncoder<usize>,
+    ctr: DeltaEncoder,
+    obj: ObjEncoder,
+    key: KeyEncoder,
+    insert: BooleanEncoder,
+    action: RLEEncoder<Action>,
+    val: ValEncoder,
+    succ: SuccEncoder,
+}
+
+// FIXME - actors should not be mut here
+
+impl DocOpEncoder {
+    pub(crate) fn encode_doc_ops<'a, 'b, I>(
+        ops: I,
+        actors: &'a mut Vec<amp::ActorID>,
+    ) -> (Vec<u8>, Vec<u8>)
+    where
+        I: IntoIterator<Item = &'b DocOp>,
+    {
+        let mut e = Self::new();
+        e.encode(ops, actors);
+        e.finish()
+    }
+
+    fn new() -> DocOpEncoder {
+        DocOpEncoder {
+            actor: RLEEncoder::new(),
+            ctr: DeltaEncoder::new(),
+            obj: ObjEncoder::new(),
+            key: KeyEncoder::new(),
+            insert: BooleanEncoder::new(),
+            action: RLEEncoder::new(),
+            val: ValEncoder::new(),
+            succ: SuccEncoder::new(),
+        }
+    }
+
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorID>)
+    where
+        I: IntoIterator<Item = &'c DocOp>,
+    {
+        for op in ops {
+            self.actor.append_value(op.actor);
+            self.ctr.append_value(op.ctr);
+            self.obj.append(&op.obj, actors);
+            self.key.append(&op.key, actors);
+            self.insert.append(op.insert);
+            self.succ.append(&op.succ);
+            let action = match &op.action {
+                amp::OpType::Set(value) => {
+                    self.val.append_value(value);
+                    //self.chld.append_null();
+                    Action::Set
+                }
+                amp::OpType::Inc(val) => {
+                    self.val.append_value(&amp::ScalarValue::Int(*val));
+                    //self.chld.append_null();
+                    Action::Inc
+                }
+                amp::OpType::Del => {
+                    // FIXME throw error
+                    self.val.append_null();
+                    //self.chld.append_null();
+                    Action::Del
+                }
+                amp::OpType::Make(kind) => {
+                    self.val.append_null();
+                    //self.chld.append_null();
+                    match kind {
+                        amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,
+                        amp::ObjType::Map(amp::MapType::Map) => Action::MakeMap,
+                        amp::ObjType::Map(amp::MapType::Table) => Action::MakeTable,
+                        amp::ObjType::Sequence(amp::SequenceType::Text) => Action::MakeText,
+                    }
+                }
+            };
+            self.action.append_value(action);
+        }
+    }
+
+    fn finish(self) -> (Vec<u8>, Vec<u8>) {
+        let mut coldata = Vec::new();
+        coldata.push(self.actor.finish(COL_ID_ACTOR));
+        coldata.push(self.ctr.finish(COL_ID_CTR));
+        coldata.push(self.insert.finish(COL_INSERT));
+        coldata.push(self.action.finish(COL_ACTION));
+        coldata.extend(self.obj.finish());
+        coldata.extend(self.key.finish());
+        coldata.extend(self.val.finish());
+        coldata.extend(self.succ.finish());
+        coldata.sort_by(|a, b| a.col.cmp(&b.col));
+
+        let mut info = Vec::new();
+        let mut data = Vec::new();
+        coldata
+            .iter()
+            .filter(|&d| !d.data.is_empty())
+            .count()
+            .encode(&mut info)
+            .ok();
+        for d in coldata.iter() {
+            d.encode_col_len(&mut info).ok();
+        }
+        for d in coldata.iter() {
+            data.write_all(d.data.as_slice()).ok();
+        }
+        (data, info)
+    }
+}
+
+//pub(crate) encode_cols(a) -> (Vec<u8>, HashMap<u32, Range<usize>>) { }
 
 pub(crate) struct ColumnEncoder {
     obj: ObjEncoder,
@@ -814,25 +1057,25 @@ impl ColumnEncoder {
         coldata.extend(self.pred.finish());
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
-        let mut result = Vec::new();
+        let mut data = Vec::new();
         let mut rangemap = HashMap::new();
         coldata
             .iter()
             .filter(|&d| !d.data.is_empty())
             .count()
-            .encode(&mut result)
+            .encode(&mut data)
             .ok();
         for d in coldata.iter() {
-            d.encode_col_len(&mut result).ok();
+            d.encode_col_len(&mut data).ok();
         }
         for d in coldata.iter() {
-            let begin = result.len();
-            result.write_all(d.data.as_slice()).ok();
+            let begin = data.len();
+            data.write_all(d.data.as_slice()).ok();
             if !d.data.is_empty() {
-                rangemap.insert(d.col, begin..result.len());
+                rangemap.insert(d.col, begin..data.len());
             }
         }
-        (result, rangemap)
+        (data, rangemap)
     }
 }
 

@@ -63,6 +63,7 @@ fn test_set_root_object_properties() {
         seq: 1,
         time: 0,
         message: Some("set root object".into()),
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("magpie".to_string())),
@@ -107,6 +108,7 @@ fn it_should_create_nested_maps() {
         seq: 1,
         time: change_request.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             amp::Op {
@@ -180,6 +182,7 @@ fn apply_updates_inside_nested_maps() {
         start_op: 3,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::F64(15.0)),
@@ -236,6 +239,7 @@ fn delete_keys_in_a_map() {
         start_op: 3,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Del,
@@ -290,6 +294,7 @@ fn create_lists() {
         start_op: 1,
         time: req1.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             amp::Op {
@@ -353,6 +358,7 @@ fn apply_updates_inside_lists() {
         start_op: 3,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set("greenfinch".into()),
@@ -404,6 +410,7 @@ fn delete_list_elements() {
         start_op: 4,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Del,
@@ -468,6 +475,7 @@ fn handle_counters_inside_maps() {
         start_op: 1,
         time: req1.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Counter(0)),
@@ -486,6 +494,7 @@ fn handle_counters_inside_maps() {
         start_op: 2,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Inc(1),
@@ -553,6 +562,7 @@ fn handle_counters_inside_lists() {
         seq: 1,
         time: req1.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         start_op: 1,
         operations: vec![
@@ -581,6 +591,7 @@ fn handle_counters_inside_lists() {
         start_op: 3,
         time: req2.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Inc(2),
@@ -655,6 +666,7 @@ fn test_sets_characters_in_text() {
         start_op: 6,
         time: request.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("a".into())),
@@ -709,6 +721,7 @@ fn test_inserts_characters_in_text() {
         start_op: 6,
         time: request.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("h".into())),
@@ -763,6 +776,7 @@ fn test_inserts_characters_at_start_of_text() {
         start_op: 2,
         time: request.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("i".into())),
@@ -821,6 +835,7 @@ fn test_inserts_at_end_of_lists() {
         start_op: 2,
         time: request.time,
         message: None,
+        hash: None,
         deps: Vec::new(),
         operations: vec![
             amp::Op {

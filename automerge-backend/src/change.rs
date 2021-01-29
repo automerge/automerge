@@ -1,13 +1,15 @@
 //use crate::columnar;
 use crate::columnar::{
-    ChangeIterator, ColumnEncoder, DocChange, DocOp, DocOpIterator, OperationIterator,
+    ChangeEncoder, ChangeIterator, ColumnEncoder, DocChange, DocOp, DocOpEncoder, DocOpIterator,
+    OperationIterator,
 };
 use crate::encoding::{Decodable, Encodable};
 use crate::error::{AutomergeError, InvalidChangeError};
 use automerge_protocol as amp;
 use core::fmt::Debug;
+use itertools::Itertools;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::io::Write;
@@ -15,7 +17,8 @@ use std::ops::Range;
 use std::str;
 
 const HASH_BYTES: usize = 32;
-const CHUNK_TYPE: u8 = 1;
+const BLOCK_TYPE_DOC: u8 = 0;
+const BLOCK_TYPE_CHANGE: u8 = 1;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
@@ -44,7 +47,7 @@ fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
 
     bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
 
-    bytes.push(CHUNK_TYPE);
+    bytes.push(BLOCK_TYPE_CHANGE);
 
     leb128::write::unsigned(&mut bytes, chunk.bytes.len() as u64).unwrap();
 
@@ -174,9 +177,11 @@ impl Change {
     }
 
     pub fn load_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+        load_blocks(bytes)
+        /*
         // FIXME this does not handle changes and docs mixed together
         // this could happen if files are concatonated with each other
-        if Some(&0) == bytes.get(PREAMBLE_BYTES) {
+        if Some(&BLOCK_TYPE_DOC) == bytes.get(PREAMBLE_BYTES) {
             decode_document(bytes)
         } else {
             let mut changes = Vec::new();
@@ -189,6 +194,7 @@ impl Change {
             }
             Ok(changes)
         }
+        */
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
@@ -215,6 +221,7 @@ impl Change {
             start_op: self.start_op,
             seq: self.seq,
             time: self.time,
+            hash: Some(self.hash),
             message: self.message(),
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
@@ -387,10 +394,24 @@ fn decode_columns(
     ops
 }
 
+fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), AutomergeError> {
+    match bytes[PREAMBLE_BYTES] {
+        BLOCK_TYPE_DOC => {
+            changes.extend(decode_document(bytes)?);
+            Ok(())
+        }
+        BLOCK_TYPE_CHANGE => {
+            changes.push(decode_change(bytes.to_vec())?);
+            Ok(())
+        }
+        _ => Err(AutomergeError::EncodingError),
+    }
+}
+
 fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
     let (chunktype, hash, body) = decode_header(&bytes)?;
 
-    if chunktype != 1 {
+    if chunktype != BLOCK_TYPE_CHANGE {
         return Err(AutomergeError::EncodingError);
     }
 
@@ -533,6 +554,7 @@ fn doc_changes_to_uncompressed_changes(
             seq: change.seq,
             time: change.time,
             start_op: change.max_op - change.ops.len() as u64 + 1,
+            hash: None,
             message: change.message.clone(),
             operations: change
                 .ops
@@ -550,6 +572,42 @@ fn doc_changes_to_uncompressed_changes(
             extra_bytes: change.extra_bytes.clone(),
         })
         .collect()
+}
+
+fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+    let mut changes = Vec::new();
+    for slice in split_blocks(bytes).into_iter() {
+        decode_block(slice, &mut changes)?;
+    }
+    Ok(changes)
+}
+
+fn split_blocks(bytes: &[u8]) -> Vec<&[u8]> {
+    // split off all valid blocks - ignore the rest if its corrupted or truncated
+    let mut blocks = Vec::new();
+    let mut cursor = &bytes[..];
+    while let Some(block) = pop_block(cursor) {
+        blocks.push(&cursor[block.clone()]);
+        if cursor.len() <= block.end {
+            break;
+        }
+        cursor = &cursor[block.end..];
+    }
+    blocks
+}
+
+fn pop_block(bytes: &[u8]) -> Option<Range<usize>> {
+    if bytes[0..4] != MAGIC_BYTES {
+        // not reporting error here - file got corrupted?
+        return None;
+    }
+    let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..]).unwrap();
+    let end = HEADER_BYTES + len + val;
+    if end > bytes.len() {
+        // not reporting error here - file got truncated?
+        return None;
+    }
+    Some(0..end)
 }
 
 fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
@@ -600,8 +658,177 @@ fn compress_doc_changes(
     Some(changes)
 }
 
-fn _encode_document(_changes: Vec<Change>) -> Result<Vec<u8>, AutomergeError> {
-    unimplemented!()
+fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorID]) -> Vec<DocOp> {
+    let mut by_obj_id = HashMap::<amp::ObjectID, HashMap<amp::Key, HashMap<amp::OpID, _>>>::new();
+    let mut by_ref = HashMap::<amp::ObjectID, HashMap<amp::Key, Vec<amp::OpID>>>::new();
+    let mut is_seq = HashSet::<amp::ObjectID>::new();
+    let mut ops = Vec::new();
+
+    for change in changes {
+        for (i, op) in change.operations.iter().enumerate() {
+            let opid = amp::OpID(change.start_op + i as u64, change.actor_id.clone());
+            let objid = op.obj.clone();
+            if let amp::OpType::Make(amp::ObjType::Sequence(_)) = op.action {
+                is_seq.insert(opid.clone().into());
+            }
+
+            let key = if !op.insert {
+                op.key.clone()
+            } else {
+                by_ref
+                    .entry(objid.clone())
+                    .or_default()
+                    .entry(op.key.clone())
+                    .or_default()
+                    .push(opid.clone());
+                opid.clone().into()
+            };
+
+            by_obj_id
+                .entry(objid.clone())
+                .or_default()
+                .entry(key.clone())
+                .or_default()
+                .insert(
+                    opid.clone(),
+                    DocOp {
+                        actor: actors.iter().position(|a| a == &opid.1).unwrap(),
+                        ctr: opid.0,
+                        action: op.action.clone(),
+                        obj: op.obj.clone(),
+                        key: op.key.clone(),
+                        succ: Vec::new(),
+                        pred: Vec::new(),
+                        insert: op.insert,
+                    },
+                );
+
+            for pred in &op.pred {
+                by_obj_id
+                    .entry(objid.clone())
+                    .or_default()
+                    .entry(key.clone())
+                    .or_default()
+                    .get_mut(pred)
+                    .unwrap()
+                    .succ
+                    .push((opid.0, actors.iter().position(|a| a == &opid.1).unwrap()));
+            }
+        }
+    }
+
+    for objid in by_obj_id.keys().sorted() {
+        let mut keys = Vec::new();
+        if is_seq.contains(objid) {
+            let mut stack = vec![amp::ElementID::Head];
+            while !stack.is_empty() {
+                let key = stack.pop().unwrap();
+                if key != amp::ElementID::Head {
+                    keys.push(amp::Key::Seq(key.clone()))
+                }
+                for opid in by_ref
+                    .entry(objid.clone())
+                    .or_default()
+                    .entry(key.into())
+                    .or_default()
+                    .iter()
+                    .sorted()
+                {
+                    stack.push(opid.into())
+                }
+            }
+        } else {
+            keys = by_obj_id
+                .get(objid)
+                .map(|d| d.keys().sorted().cloned().collect())
+                .unwrap_or_default()
+        }
+
+        for key in keys {
+            if let Some(key_ops) = by_obj_id.get(objid).and_then(|d| d.get(&key)) {
+                for opid in key_ops.keys().sorted() {
+                    let op = key_ops.get(opid).unwrap();
+                    if op.action != amp::OpType::Del {
+                        ops.push(op.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    ops
+}
+
+fn get_heads(changes: &[amp::UncompressedChange]) -> HashSet<amp::ChangeHash> {
+    changes.iter().fold(HashSet::new(), |mut acc, c| {
+        if let Some(hash) = c.hash {
+            acc.insert(hash);
+        }
+        for dep in c.deps.iter() {
+            acc.remove(&dep);
+        }
+        acc
+    })
+}
+
+pub(crate) fn encode_document(
+    changes: Vec<amp::UncompressedChange>,
+) -> Result<Vec<u8>, AutomergeError> {
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut hasher = Sha256::new();
+
+    let heads = get_heads(&changes);
+
+    // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
+    // so long as we have a full history
+    let mut actors: Vec<_> = changes
+        .iter()
+        .map(|c| &c.actor_id)
+        .unique()
+        .sorted()
+        .cloned()
+        .collect();
+
+    let (change_bytes, change_info) = ChangeEncoder::encode_changes(&changes, &actors);
+
+    let doc_ops = group_doc_ops(&changes, &actors);
+
+    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(&doc_ops, &mut actors);
+
+    bytes.extend(&MAGIC_BYTES);
+    bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
+    bytes.push(BLOCK_TYPE_DOC);
+
+    let mut chunk = Vec::new();
+
+    actors.len().encode(&mut chunk)?;
+
+    for a in actors.iter() {
+        a.to_bytes().encode(&mut chunk)?;
+    }
+
+    heads.len().encode(&mut chunk)?;
+    for head in heads.iter().sorted() {
+        chunk.write_all(&head.0).unwrap();
+    }
+
+    chunk.extend(change_info);
+    chunk.extend(ops_info);
+
+    chunk.extend(change_bytes);
+    chunk.extend(ops_bytes);
+
+    leb128::write::unsigned(&mut bytes, chunk.len() as u64).unwrap();
+
+    bytes.extend(&chunk);
+
+    hasher.input(&bytes[CHUNK_START..bytes.len()]);
+    let hash_result = hasher.result();
+    //let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
+
+    bytes.splice(HASH_RANGE, hash_result[0..4].iter().cloned());
+
+    Ok(bytes)
 }
 
 pub(crate) const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
@@ -620,6 +847,7 @@ mod tests {
             seq: 2,
             time: 1234,
             message: None,
+            hash: None,
             actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
@@ -657,6 +885,7 @@ mod tests {
             seq: 29291,
             time: 12_341_231,
             message: Some("This is my message".into()),
+            hash: None,
             actor_id: actor1,
             deps: vec![],
             operations: vec![
