@@ -60,6 +60,29 @@ enum Command {
     },
 
     Change {
+        /// Read an automerge document from a file or stdin, perform a change on it and write a new
+        /// document to stdout or the specified output file.
+        ///
+        /// Change scripts have the form <command> <path> [<JSON value>]. The possible commands are
+        /// 'set', 'insert', 'delete', and 'increment'.
+        ///
+        /// Paths look like this: $["mapkey"][0]. They always lways start with a '$', then each
+        /// subsequent segment of the path is either a string in double quotes to index a key in a
+        /// map, or an integer index to address an array element.
+        ///
+        /// Examples
+        ///
+        /// ## set
+        /// > automerge change somefile 'set $["someobject"] {"items": []}'
+        ///
+        /// ## insert
+        /// > automerge change somefile 'insert $["someobject"]["items"][0] "item1"'
+        ///
+        /// ## increment
+        /// > automerge change somefile 'increment $["mycounter"]'
+        ///
+        /// ## delete
+        /// > automerge change somefile 'delete $["someobject"]["items"]
         script: String,
 
         #[clap(parse(from_os_str))]
