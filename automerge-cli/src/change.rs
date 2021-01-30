@@ -213,7 +213,7 @@ mod tests {
     use maplit::hashmap;
 
     #[test]
-    fn test_parse_changes() {
+    fn test_parse_change_script() {
         struct Scenario {
             input: &'static str,
             expected: amf::LocalChange,

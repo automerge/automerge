@@ -7,6 +7,7 @@ use std::str::FromStr;
 mod change;
 mod export;
 mod import;
+mod examine;
 
 #[derive(Debug, Clap)]
 #[clap(about = "Automerge CLI")]
@@ -59,12 +60,11 @@ enum Command {
         changes_file: Option<PathBuf>,
     },
 
+    /// Read an automerge document from a file or stdin, perform a change on it and write a new
+    /// document to stdout or the specified output file.
     Change {
-        /// Read an automerge document from a file or stdin, perform a change on it and write a new
-        /// document to stdout or the specified output file.
-        ///
-        /// Change scripts have the form <command> <path> [<JSON value>]. The possible commands are
-        /// 'set', 'insert', 'delete', and 'increment'.
+        /// The change script to perform. Change scripts have the form <command> <path> [<JSON value>]. 
+        /// The possible commands are 'set', 'insert', 'delete', and 'increment'.
         ///
         /// Paths look like this: $["mapkey"][0]. They always lways start with a '$', then each
         /// subsequent segment of the path is either a string in double quotes to index a key in a
@@ -92,6 +92,11 @@ enum Command {
         #[clap(parse(from_os_str), long("out"), short('o'))]
         output_file: Option<PathBuf>,
     },
+
+    /// Read an automerge document and print a JSON representation of the changes in it to stdout
+    Examine {
+        input_file: Option<PathBuf>
+    }
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
@@ -129,7 +134,7 @@ fn main() -> Result<()> {
         } => match format {
             ExportFormat::JSON => {
                 let mut in_buffer = open_file_or_stdin(changes_file)?;
-                export::export_json(&mut in_buffer, &mut std::io::stdout())
+                export::export_json(&mut in_buffer, &mut std::io::stdout(), atty::is(atty::Stream::Stdout))
             }
             ExportFormat::TOML => unimplemented!(),
         },
@@ -156,5 +161,15 @@ fn main() -> Result<()> {
             change::change(in_buffer, &mut out_buffer, script.as_str())
                 .map_err(|e| anyhow::format_err!("Unable to make changes: {:?}", e))
         }
+        Command::Examine { input_file } => {
+            let in_buffer = open_file_or_stdin(input_file)?;
+            let out_buffer = std::io::stdout();
+            match examine::examine(in_buffer, out_buffer, atty::is(atty::Stream::Stdout)) {
+                Ok(()) => {},
+                Err(e) => { eprintln!("Error: {:?}", e);},
+            }
+            Ok(())
+        }
+
     }
 }

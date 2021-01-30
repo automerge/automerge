@@ -14,16 +14,21 @@ fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
 pub fn export_json(
     mut changes_reader: impl std::io::Read,
     mut writer: impl std::io::Write,
+    is_tty: bool,
 ) -> Result<()> {
     let mut input_data = vec![];
     changes_reader.read_to_end(&mut input_data)?;
 
     let state_json = get_state_json(input_data)?;
-    writeln!(
-        writer,
-        "{}",
-        serde_json::to_string_pretty(&state_json).unwrap()
-    )?;
+    if is_tty {
+        colored_json::write_colored_json(&state_json, &mut writer).unwrap()
+    } else {
+        writeln!(
+            writer,
+            "{}",
+            serde_json::to_string_pretty(&state_json).unwrap()
+        )?;
+    }
     Ok(())
 }
 
