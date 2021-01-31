@@ -33,7 +33,7 @@ use std::rc::Rc;
 ///
 /// When we want to get the state of the CRDT we walk through the
 /// object store, starting with the root object ID and constructing the value
-/// at each node by examining the concurrent operationsi which are active for
+/// at each node by examining the concurrent operations which are active for
 /// that node.
 ///
 
@@ -262,7 +262,7 @@ impl OpSet {
         }
     }
 
-    // this recursivly walks through all the objects touched by the changes
+    // this recursively walks through all the objects touched by the changes
     // to generate a diff in a single pass
     pub fn finalize_diffs(
         &self,

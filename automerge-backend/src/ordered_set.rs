@@ -589,7 +589,7 @@ where
 
 // this is an experiment to if I can change request processing
 // index lookups by not mutating the skip list
-// throuput was quite signifigant actually - about 1.5x over in the
+// throughput was quite significant actually - about 1.5x over in the
 // mass edit perf test
 // ideally we can speed up the skip list enough to not need this
 // also this could perform worse if the ops per change were huge

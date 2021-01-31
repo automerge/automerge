@@ -446,7 +446,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 }
 
 //
-// group all the ops togther with the appropriate change and reconstitute the del ops
+// group all the ops together with the appropriate change and reconstitute the del ops
 // mutates the arguments - returns nothing
 //
 
