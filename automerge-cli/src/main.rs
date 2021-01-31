@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 mod change;
+mod examine;
 mod export;
 mod import;
-mod examine;
 
 #[derive(Debug, Clap)]
 #[clap(about = "Automerge CLI")]
@@ -63,7 +63,7 @@ enum Command {
     /// Read an automerge document from a file or stdin, perform a change on it and write a new
     /// document to stdout or the specified output file.
     Change {
-        /// The change script to perform. Change scripts have the form <command> <path> [<JSON value>]. 
+        /// The change script to perform. Change scripts have the form <command> <path> [<JSON value>].
         /// The possible commands are 'set', 'insert', 'delete', and 'increment'.
         ///
         /// Paths look like this: $["mapkey"][0]. They always lways start with a '$', then each
@@ -94,9 +94,7 @@ enum Command {
     },
 
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
-    Examine {
-        input_file: Option<PathBuf>
-    }
+    Examine { input_file: Option<PathBuf> },
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
@@ -134,7 +132,11 @@ fn main() -> Result<()> {
         } => match format {
             ExportFormat::JSON => {
                 let mut in_buffer = open_file_or_stdin(changes_file)?;
-                export::export_json(&mut in_buffer, &mut std::io::stdout(), atty::is(atty::Stream::Stdout))
+                export::export_json(
+                    &mut in_buffer,
+                    &mut std::io::stdout(),
+                    atty::is(atty::Stream::Stdout),
+                )
             }
             ExportFormat::TOML => unimplemented!(),
         },
@@ -165,11 +167,12 @@ fn main() -> Result<()> {
             let in_buffer = open_file_or_stdin(input_file)?;
             let out_buffer = std::io::stdout();
             match examine::examine(in_buffer, out_buffer, atty::is(atty::Stream::Stdout)) {
-                Ok(()) => {},
-                Err(e) => { eprintln!("Error: {:?}", e);},
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Error: {:?}", e);
+                }
             }
             Ok(())
         }
-
     }
 }

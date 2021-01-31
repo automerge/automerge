@@ -142,7 +142,7 @@ fn encode_chunk(
     bytes.write_all(&ops_buf).unwrap();
 
     // write out the extra bytes
-    let extra_bytes = bytes.len()..bytes.len() + uncompressed_change.extra_bytes.len();
+    let extra_bytes = bytes.len()..(bytes.len() + uncompressed_change.extra_bytes.len());
     bytes.write_all(&uncompressed_change.extra_bytes).unwrap();
     let body = 0..bytes.len();
 
@@ -967,5 +967,65 @@ mod tests {
         let bin2 = Change::try_from(change2.clone()).unwrap();
         assert_eq!(bin1, bin2);
         assert_eq!(change1, change2);
+    }
+
+    #[test]
+    fn test_encode_decode_document() {
+        let mut backend = crate::Backend::init();
+        let change1 = amp::UncompressedChange {
+            start_op: 1,
+            seq: 1,
+            time: 0,
+            message: None,
+            hash: None,
+            actor_id: amp::ActorID::random(),
+            deps: Vec::new(),
+            operations: vec![amp::Op {
+                action: amp::OpType::Set("somevalue".into()),
+                obj: amp::ObjectID::Root,
+                key: "somekey".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: vec![1, 2, 3],
+        };
+        let binchange1: Change = Change::try_from(change1.clone()).unwrap();
+        backend.apply_changes(vec![binchange1.clone()]).unwrap();
+
+        let change2 = amp::UncompressedChange {
+            start_op: 2,
+            seq: 2,
+            time: 0,
+            message: None,
+            hash: None,
+            actor_id: change1.actor_id,
+            deps: vec![binchange1.hash],
+            operations: vec![amp::Op {
+                action: amp::OpType::Set("someothervalue".into()),
+                obj: amp::ObjectID::Root,
+                key: "someotherkey".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: vec![],
+        };
+        let binchange2: Change = Change::try_from(change2).unwrap();
+        backend.apply_changes(vec![binchange2]).unwrap();
+
+        let changes = backend.get_changes(&[]);
+        let encoded = backend.save().unwrap();
+        let loaded_changes = Change::load_document(&encoded).unwrap();
+        let decoded_loaded: Vec<amp::UncompressedChange> = loaded_changes
+            .clone()
+            .into_iter()
+            .map(|c| c.decode())
+            .collect();
+        let decoded_preload: Vec<amp::UncompressedChange> =
+            changes.clone().into_iter().map(|c| c.decode()).collect();
+        assert_eq!(decoded_loaded, decoded_preload);
+        assert_eq!(
+            loaded_changes,
+            changes.into_iter().cloned().collect::<Vec<Change>>()
+        );
     }
 }

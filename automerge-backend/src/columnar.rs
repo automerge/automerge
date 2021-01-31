@@ -247,7 +247,7 @@ impl<'a> Iterator for ChangeIterator<'a> {
         let time = self.time.next()?? as i64;
         let message = self.message.next()?;
         let deps = self.deps.next()?;
-        let extra_bytes = self.extra.next()?;
+        let extra_bytes = self.extra.next().unwrap_or_else(Vec::new);
         Some(DocChange {
             actor,
             seq,
@@ -799,8 +799,12 @@ impl ChangeEncoder {
     where
         I: IntoIterator<Item = &'c amp::UncompressedChange>,
     {
+        let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
         //let hashes : Vec<_> = changes.clone().into_iter().filter_map(|c| c.hash).collect();
-        for change in changes {
+        for (index, change) in changes.into_iter().enumerate() {
+            if let Some(hash) = change.hash {
+                index_by_hash.insert(hash, index);
+            }
             self.actor
                 .append_value(actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq);
@@ -809,12 +813,20 @@ impl ChangeEncoder {
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message.clone());
             self.deps_num.append_value(change.deps.len());
-            for _d in change.deps.iter() {
-                // FIXME
-                //	    self.deps_index.append_value(hashes.into_iter().position(|h| &h == d).unwrap() as u64);
-                self.deps_index.append_value(0);
+            for dep in change.deps.iter() {
+                if let Some(dep_index) = index_by_hash.get(dep) {
+                    self.deps_index.append_value(*dep_index as u64)
+                } else {
+                    // FIXME This relies on the changes being in causal order, which they may not
+                    // be, we could probably do something cleverer like accumulate the values to
+                    // write and the dependency tree in an intermediate value, then write it to the
+                    // encoder in a second pass over the intermediates
+                    panic!("Missing dependency for hash: {:?}", dep);
+                }
+                //self.deps_index.append_value(0);
             }
-            self.extra_len.append_value(change.extra_bytes.len());
+            self.extra_len
+                .append_value(change.extra_bytes.len() << 4 | VALUE_TYPE_BYTES);
             self.extra_raw.extend(&change.extra_bytes);
         }
     }
