@@ -73,22 +73,27 @@ enum Command {
         /// Examples
         ///
         /// ## set
+        ///
         /// > automerge change somefile 'set $["someobject"] {"items": []}'
         ///
         /// ## insert
+        ///
         /// > automerge change somefile 'insert $["someobject"]["items"][0] "item1"'
         ///
         /// ## increment
+        ///
         /// > automerge change somefile 'increment $["mycounter"]'
         ///
         /// ## delete
+        ///
         /// > automerge change somefile 'delete $["someobject"]["items"]
         script: String,
 
+        /// The file to change, if omitted will assume stdin
         #[clap(parse(from_os_str))]
         input_file: Option<PathBuf>,
 
-        /// Path to write Automerge changes to
+        /// Path to write Automerge changes to, if omitted will write to stdout
         #[clap(parse(from_os_str), long("out"), short('o'))]
         output_file: Option<PathBuf>,
     },
