@@ -45,7 +45,7 @@ pub enum AutomergeError {
     HeadToOpID,
     #[error("Doc format not implemented yet")]
     DocFormatUnimplemented,
-    #[error("Divergeentchange {0}")]
+    #[error("Divergent change {0}")]
     DivergentChange(String),
     #[error("Encode failed")]
     EncodeFailed,
