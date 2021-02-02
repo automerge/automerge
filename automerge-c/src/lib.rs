@@ -3,8 +3,10 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
+use core::fmt::Debug;
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::UncompressedChange;
+use automerge_protocol::{ ChangeHash, UncompressedChange };
+use std::rc::Rc;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use std::convert::TryInto;
@@ -17,10 +19,13 @@ use std::ptr;
 pub struct Backend {
     handle: automerge_backend::Backend,
     text: Option<String>,
+    last_local_change: Option<Rc<Change>>,
     binary: Vec<Vec<u8>>,
     queue: Option<Vec<Vec<u8>>>,
     error: Option<CString>,
 }
+
+struct BinaryResults (Result<Vec<Vec<u8>>,AutomergeError>);
 
 impl Deref for Backend {
     type Target = automerge_backend::Backend;
@@ -37,49 +42,78 @@ unsafe fn from_buf_raw<T>(ptr: *const T, elts: usize) -> Vec<T> {
     dst
 }
 
+fn err<T,V: Debug>(result: Result<T,V>) -> Result<T,String> {
+    match result {
+        Ok(val) => Ok(val),
+        Err(err) => Err(format!("{:?}",err).into())
+    }
+}
+
 impl Backend {
     fn init(handle: automerge_backend::Backend) -> Backend {
         Backend {
             handle,
             text: None,
+            last_local_change: None,
             binary: Vec::new(),
             queue: None,
             error: None,
         }
     }
 
+    fn handle_result(&mut self, result: Result<isize, String>) -> isize {
+        match result {
+            Ok(len) => {
+                self.error = None;
+                len
+            }
+            Err(err) => self.handle_error(err)
+        }
+    }
+
     fn generate_json<T: Serialize>(&mut self, val: Result<T, AutomergeError>) -> isize {
-        if let Ok(val) = val {
-            if let Ok(text) = serde_json::to_string(&val) {
+        let result = err(val).and_then(|val| err(serde_json::to_string(&val))).map(|text| {
                 let len = (text.len() + 1) as isize;
                 self.text = Some(text);
-                return len;
-            }
-        }
-        -1
+                len
+        });
+        self.handle_result(result)
     }
 
     fn handle_binary(&mut self, b: Result<Vec<u8>, AutomergeError>) -> isize {
-        // throw an error here if self.binary is not empty()
-        if let Ok(bin) = b {
+        let result = err(b).map(|bin| {
             let len = bin.len();
             self.binary = vec![bin];
             len as isize
-        } else {
-            -1
-        }
+        });
+        self.handle_result(result)
     }
 
-    fn handle_binaries(&mut self, b: Result<Vec<&Change>, AutomergeError>) -> isize {
-        // throw an error here if self.binary is not empty()
-        if let Ok(bin) = b {
-            let len = bin[0].bytes.len();
-            self.binary = bin.iter().map(|b| b.bytes.clone()).collect();
-            self.binary.reverse();
-            len as isize
-        } else {
-            -1
-        }
+    fn handle_ok(&mut self) -> isize {
+        self.error = None;
+        0
+    }
+
+    fn handle_error<E: Debug>(&mut self, err: E) -> isize {
+       // in theory - if an error string had embedded nulls
+       // we could get a error = None and -1
+       self.error = CString::new(format!("{:?}",err)).ok();
+       -1
+    }
+
+    fn handle_binaries(&mut self, b: BinaryResults) -> isize {
+        let result = err(b.0).map(|bin| {
+            self.error = None;
+            if bin.len() > 0 {
+                let len = bin[0].len();
+                self.binary = bin;
+                self.binary.reverse();
+                len as isize
+            } else {
+                0
+            }
+        });
+        self.handle_result(result)
     }
 }
 
@@ -92,6 +126,24 @@ impl DerefMut for Backend {
 impl From<Backend> for *mut Backend {
     fn from(b: Backend) -> Self {
         Box::into_raw(Box::new(b))
+    }
+}
+
+impl From<Vec<&Change>> for BinaryResults {
+    fn from(changes: Vec<&Change>) -> Self {
+        BinaryResults(Ok(changes.iter().map(|b| b.bytes.clone()).collect()))
+    }
+}
+
+impl From<Result<Vec<&Change>,AutomergeError>> for BinaryResults {
+    fn from(result: Result<Vec<&Change>,AutomergeError>) -> Self {
+        BinaryResults(result.map(|changes| changes.iter().map(|b| b.bytes.clone()).collect()))
+    }
+}
+
+impl From<Vec<ChangeHash>> for BinaryResults {
+    fn from(heads: Vec<ChangeHash>) -> Self {
+        BinaryResults(Ok(heads.iter().map(|head| head.0.to_vec()).collect())) 
     }
 }
 
@@ -108,8 +160,6 @@ impl From<Backend> for *mut Backend {
   getChangesForActor => automerge_get_changes_for_actor
   getChanges => automerge_get_changes
   getMissingDeps => automerge_get_missing_deps
-  getUndoStack => ..
-  getRedoStack => ..
 */
 
 #[no_mangle]
@@ -136,15 +186,22 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
     let request: Result<UncompressedChange, _> = serde_json::from_str(&request);
-    if let Ok(request) = request {
-        // FIXME - need to update the c api to all receiving the binary change here
-        if let Ok((patch, _change)) = (*backend).apply_local_change(request) {
-            (*backend).generate_json(Ok(patch))
-        } else {
-            -1
+    match request {
+        Ok(request) => {
+            let result = (*backend).apply_local_change(request);
+            match result {
+                Ok((patch, change)) => {
+                    (*backend).last_local_change = Some(change);
+                    (*backend).generate_json(Ok(patch))
+                },
+                Err(err) => {
+                    (*backend).handle_error(err)
+                }
+            }
+        },
+        Err(err) => {
+            (*backend).handle_error(err)
         }
-    } else {
-        -1
     }
 }
 
@@ -169,16 +226,18 @@ pub unsafe extern "C" fn automerge_write_change(
 /// This must me called with a valid backend pointer
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize {
-    if let Some(changes) = (*backend).queue.take() {
-        // FIXME
-        let changes = changes
-            .iter()
-            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
-            .collect();
-        let patch = (*backend).apply_changes(changes);
-        (*backend).generate_json(patch)
-    } else {
-        -1
+    match (*backend).queue.take() {
+        Some(changes) => {
+            let changes = changes
+                .iter()
+                .map(|c| Change::from_bytes(c.to_vec()).unwrap())
+                .collect();
+            let patch = (*backend).apply_changes(changes);
+            (*backend).generate_json(patch)
+        },
+        None => {
+            (*backend).handle_error("no changes queued")
+        }
     }
 }
 
@@ -195,16 +254,15 @@ pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend) -> isize {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize {
     if let Some(changes) = (*backend).queue.take() {
-        // FIXME
         let changes = changes
             .iter()
             .map(|c| Change::from_bytes(c.to_vec()).unwrap())
             .collect();
         if (*backend).load_changes(changes).is_ok() {
-            return 0;
+            return (*backend).handle_ok()
         }
     }
-    -1
+    (*backend).handle_error("no changes queued")
 }
 
 /// # Safety
@@ -245,12 +303,14 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 ) -> isize {
     let actor: &CStr = CStr::from_ptr(actor);
     let actor = actor.to_string_lossy();
-    if let Ok(actor) = actor.as_ref().try_into() {
-        let changes = (*backend).get_changes_for_actor_id(&actor);
-        (*backend).handle_binaries(changes)
-    } else {
-        // bad actor error
-        -1
+    match actor.as_ref().try_into() {
+        Ok(actor) => {
+            let changes = (*backend).get_changes_for_actor_id(&actor);
+            (*backend).handle_binaries(changes.into())
+        },
+        Err(err) => {
+            (*backend).handle_error(err)
+        }
     }
 }
 
@@ -282,6 +342,16 @@ pub unsafe extern "C" fn automerge_encode_change(
 }
 
 /// # Safety
+/// This must me called with a valid pointer a json string of a change
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_heads(
+    backend: *mut Backend
+) -> isize {
+    let heads = (*backend).get_heads();
+    (*backend).handle_binaries(heads.into())
+}
+
+/// # Safety
 /// This must me called with a valid backend pointer
 /// binary must be a valid pointer to len bytes
 #[no_mangle]
@@ -300,7 +370,7 @@ pub unsafe extern "C" fn automerge_get_changes(
         )
     }
     let changes = (*backend).get_changes(&have_deps);
-    (*backend).handle_binaries(Ok(changes))
+    (*backend).handle_binaries(Ok(changes).into())
 }
 
 /// # Safety
@@ -313,6 +383,7 @@ pub unsafe extern "C" fn automerge_get_missing_deps(backend: *mut Backend) -> is
 
 /// # Safety
 /// This must me called with a valid backend pointer
+#[no_mangle]
 pub unsafe extern "C" fn automerge_error(backend: *mut Backend) -> *const c_char {
     (*backend)
         .error
@@ -335,7 +406,7 @@ pub unsafe extern "C" fn automerge_read_json(backend: *mut Backend, buffer: *mut
         0
     } else {
         (*buffer) = 0;
-        -1
+        (*backend).handle_error("no json to be read")
     }
 }
 
@@ -355,6 +426,6 @@ pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *m
             0
         }
     } else {
-        -1
+        (*backend).handle_error("no binary to be read")
     }
 }

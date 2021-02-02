@@ -43,6 +43,12 @@ intptr_t automerge_encode_change(Backend *backend, const char *change);
  * # Safety
  * This must me called with a valid backend pointer
  */
+const char *automerge_error(Backend *backend);
+
+/**
+ * # Safety
+ * This must me called with a valid backend pointer
+ */
 void automerge_free(Backend *backend);
 
 /**
@@ -57,6 +63,12 @@ intptr_t automerge_get_changes(Backend *backend, uintptr_t len, const uint8_t *b
  * This must me called with a valid backend pointer
  */
 intptr_t automerge_get_changes_for_actor(Backend *backend, const char *actor);
+
+/**
+ * # Safety
+ * This must me called with a valid pointer a json string of a change
+ */
+intptr_t automerge_get_heads(Backend *backend);
 
 /**
  * # Safety

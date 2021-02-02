@@ -38,6 +38,10 @@ int main() {
   automerge_read_json(dbA, buff);
   printf("*** patchA1 ***\n\n%s\n\n",buff);
 
+  len = automerge_apply_local_change(dbA, "{}");
+  assert(len == -1);
+  printf("*** patchA2 expected error string ***\n\n%s\n\n",automerge_error(dbA));
+
   len = automerge_apply_local_change(dbA, requestA2);
   assert(len <= BUFSIZE);
   automerge_read_json(dbA, buff);
@@ -102,6 +106,18 @@ int main() {
   }
   automerge_apply_changes(dbB);
 
+  printf("*** get head from dbB ***\n\n");
+  int num_heads = 0;
+  len = automerge_get_heads(dbB);
+  while (len > 0) {
+    assert(len == 32);
+    int nextlen = automerge_read_binary(dbB,buff + (num_heads * 32));
+    num_heads++;
+    len = nextlen;
+  }
+  assert(num_heads == 2);
+  len = automerge_get_changes(dbB,num_heads,buff);
+  assert(len == 0);
 
   printf("*** copy changes from dbB to A ***\n\n");
   len = automerge_get_changes_for_actor(dbB,"222222");
@@ -122,7 +138,7 @@ int main() {
   printf("*** get_patch of dbA & dbB -- equal? *** --> %s\n\n",strlen(buff) == strlen(buff2) ? "true" : "false");
   assert(strlen(buff) == strlen(buff2));
 
-  printf("*** copy changes from dbB to E using load ***\n\n");
+  printf("*** copy changes from dbA to E using load ***\n\n");
   Backend * dbE = automerge_init();
   len = automerge_get_changes(dbA,0,NULL);
   while (len > 0) {
