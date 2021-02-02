@@ -72,6 +72,12 @@ intptr_t automerge_get_heads(Backend *backend);
 
 /**
  * # Safety
+ * This must me called with a valid pointer to a backend
+ */
+intptr_t automerge_get_last_local_change(Backend *backend);
+
+/**
+ * # Safety
  * This must me called with a valid backend pointer
  */
 intptr_t automerge_get_missing_deps(Backend *backend);

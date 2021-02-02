@@ -4,13 +4,6 @@
 #include <assert.h>
 #include "automerge.h"
 
-/*
- * need to test: 
- *
-  automerge_get_missing_deps
-  automerge_error
-*/
-
 #define BUFSIZE 4096
 
 int main() {
@@ -33,14 +26,24 @@ int main() {
 
   printf("*** requestA1 ***\n\n%s\n\n",requestA1);
 
+  len = automerge_get_last_local_change(dbA);
+  assert(len == -1);
+  printf("*** last_local expected error string ** (%s)\n\n",automerge_error(dbA));
+
   len = automerge_apply_local_change(dbA, requestA1);
   assert(len <= BUFSIZE);
   automerge_read_json(dbA, buff);
   printf("*** patchA1 ***\n\n%s\n\n",buff);
 
+  len = automerge_get_last_local_change(dbA);
+  assert(len > 0);
+  assert(len <= BUFSIZE);
+  len = automerge_read_binary(dbA, buff);
+  assert(len == 0);
+
   len = automerge_apply_local_change(dbA, "{}");
   assert(len == -1);
-  printf("*** patchA2 expected error string ***\n\n%s\n\n",automerge_error(dbA));
+  printf("*** patchA2 expected error string ** (%s)\n\n",automerge_error(dbA));
 
   len = automerge_apply_local_change(dbA, requestA2);
   assert(len <= BUFSIZE);

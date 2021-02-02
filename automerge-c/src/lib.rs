@@ -342,6 +342,21 @@ pub unsafe extern "C" fn automerge_encode_change(
 }
 
 /// # Safety
+/// This must me called with a valid pointer to a backend
+/// the automerge api changed to return a change and a patch 
+/// this C api was not designed to returned mixed values so i borrowed the
+/// get_last_local_change call from the javascript api to solve the same problem
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_last_local_change(
+    backend: *mut Backend
+) -> isize {
+    match (*backend).last_local_change.as_ref() {
+        Some(change) => (*backend).handle_binary(Ok(change.bytes.clone())),
+        None => (*backend).handle_error("no last change")
+    }
+}
+
+/// # Safety
 /// This must me called with a valid pointer a json string of a change
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_heads(
