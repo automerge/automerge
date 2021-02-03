@@ -74,19 +74,19 @@ enum Command {
         ///
         /// ## set
         ///
-        /// > automerge change somefile 'set $["someobject"] {"items": []}'
+        /// > automerge change 'set $["someobject"] {"items": []}' somefile
         ///
         /// ## insert
         ///
-        /// > automerge change somefile 'insert $["someobject"]["items"][0] "item1"'
+        /// > automerge change 'insert $["someobject"]["items"][0] "item1"' somefile
         ///
         /// ## increment
         ///
-        /// > automerge change somefile 'increment $["mycounter"]'
+        /// > automerge change 'increment $["mycounter"]'
         ///
         /// ## delete
         ///
-        /// > automerge change somefile 'delete $["someobject"]["items"]
+        /// > automerge change 'delete $["someobject"]["items"]' somefile
         script: String,
 
         /// The file to change, if omitted will assume stdin

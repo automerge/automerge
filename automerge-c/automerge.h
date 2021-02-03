@@ -73,6 +73,9 @@ intptr_t automerge_get_heads(Backend *backend);
 /**
  * # Safety
  * This must me called with a valid pointer to a backend
+ * the automerge api changed to return a change and a patch
+ * this C api was not designed to returned mixed values so i borrowed the
+ * get_last_local_change call from the javascript api to solve the same problem
  */
 intptr_t automerge_get_last_local_change(Backend *backend);
 
