@@ -15,7 +15,7 @@
     "automerge_backend_wasm_bg.wasm",
     "automerge_backend_wasm.js"
   ],
-  "main": "./index.js",
+  "main": "./pkg/index.js",
   "scripts": {
     "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --out-name index",
     "release": "rm -rf pkg && wasm-pack build --target nodejs --release --out-name index",
@@ -26,6 +26,8 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "mocha": "^7.1.1"
+    "mocha": "^7.1.1",
+    "webpack": "^5.20.0",
+    "webpack-cli": "^4.5.0"
   }
 }

@@ -1,6 +1,6 @@
 //#![feature(set_stdio)]
 
-use automerge_backend::{Backend, Change};
+use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol::{ActorID, ChangeHash, UncompressedChange};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
@@ -17,11 +17,19 @@ macro_rules! log {
     };
 }
 
+fn array<T: Serialize>(data: &[T]) -> Result<Array, JsValue> {
+    let result = Array::new();
+    for d in data {
+        result.push(&rust_to_js(d)?);
+    }
+    Ok(result)
+}
+
 #[cfg(feature = "wee_alloc")]
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-fn js_to_rust<T: DeserializeOwned>(value: JsValue) -> Result<T, JsValue> {
+fn js_to_rust<T: DeserializeOwned>(value: &JsValue) -> Result<T, JsValue> {
     value.into_serde().map_err(json_error_to_js)
 }
 
@@ -31,128 +39,227 @@ fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 #[derive(PartialEq, Debug)]
-pub struct State {
-    backend: Backend,
+pub struct State(Backend);
+
+#[wasm_bindgen]
+extern "C" {
+    pub type Object;
+
+    #[wasm_bindgen(constructor)]
+    fn new() -> Object;
+
+    #[wasm_bindgen(method, getter)]
+    fn state(this: &Object) -> State;
+
+    #[wasm_bindgen(method, setter)]
+    fn set_state(this: &Object, state: State);
+
+    #[wasm_bindgen(method, getter)]
+    fn frozen(this: &Object) -> bool;
+
+    #[wasm_bindgen(method, setter)]
+    fn set_frozen(this: &Object, frozen: bool);
+
+    #[wasm_bindgen(method, getter)]
+    fn heads(this: &Object) -> Array;
+
+    #[wasm_bindgen(method, setter)]
+    fn set_heads(this: &Object, heads: Array);
 }
 
-#[allow(clippy::new_without_default)]
+
 #[wasm_bindgen]
-impl State {
-    #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: Array) -> Result<Array, JsValue> {
-        let mut ch = Vec::with_capacity(changes.length() as usize);
-        for c in changes.iter() {
-            let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
-            ch.push(Change::from_bytes(bytes).map_err(to_js_err)?);
-        }
-        let patch = self.backend.apply_changes(ch).map_err(to_js_err)?;
-        let heads = self.backend.get_heads();
-        let p = rust_to_js(&patch)?;
-        let h = rust_to_js(&heads)?;
-        let result = Array::new();
-        result.push(&p);
-        result.push(&h);
-        Ok(result)
-    }
+pub fn init() -> Result<Object, JsValue> {
+    Ok(wrapper(
+        State(Backend::init()),
+        false,
+        Vec::new(),
+    ))
+}
 
-    #[wasm_bindgen(js_name = loadChanges)]
-    pub fn load_changes(&mut self, changes: Array) -> Result<JsValue, JsValue> {
-        let mut ch = Vec::with_capacity(changes.length() as usize);
-        for c in changes.iter() {
-            let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
-            ch.push(Change::from_bytes(bytes).unwrap())
-        }
-        self.backend.load_changes(ch).map_err(to_js_err)?;
-        let heads = self.backend.get_heads();
-        rust_to_js(&heads)
-    }
+#[wasm_bindgen(js_name = getHeads)]
+pub fn get_heads(input: Object) -> Result<Array, JsValue> {
+    Ok(input.heads())
+}
 
-    #[wasm_bindgen(js_name = applyLocalChange)]
-    pub fn apply_local_change(&mut self, change: JsValue) -> Result<Array, JsValue> {
-        let c: UncompressedChange = js_to_rust(change)?;
-        let (patch, change) = self.backend.apply_local_change(c).map_err(to_js_err)?;
-        let heads = self.backend.get_heads();
+#[wasm_bindgen(js_name = free)]
+pub fn free(input: Object) -> Result<(), JsValue> {
+    let state: State = get_state(&input)?;
+    std::mem::drop(state);
+    input.set_frozen(true);
+    input.set_heads(Array::new());
+    Ok(())
+}
+
+#[wasm_bindgen(js_name = applyLocalChange)]
+pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsValue> {
+    get_mut_input(input, |state| { 
+        // FIXME unwrap
+        let change: UncompressedChange = js_to_rust(&change).unwrap();
+        let (patch, change) = state.0.apply_local_change(change)?;
         let result = Array::new();
         let bytes: Uint8Array = change.bytes.as_slice().into();
-        let p = rust_to_js(&patch)?;
-        let h = rust_to_js(&heads)?;
+        // FIXME unwrap
+        let p = rust_to_js(&patch).unwrap();
         result.push(&p);
         result.push(bytes.as_ref());
-        result.push(&h);
         Ok(result)
+    })
+}
+
+#[wasm_bindgen(js_name = applyChanges)]
+pub fn apply_changes(input: Object, changes: Array) -> Result<JsValue, JsValue> {
+    get_mut_input(input, |state| {
+        let ch = import_changes(&changes)?;
+        let patch = state.0.apply_changes(ch)?;
+        Ok(array(&vec![patch]).unwrap())
+    })
+}
+
+#[wasm_bindgen(js_name = loadChanges)]
+pub fn load_changes(input: Object, changes: Array) -> Result<JsValue, JsValue> {
+    get_mut_input(input, |state| {
+        let ch = import_changes(&changes)?;
+        state.0.load_changes(ch)?;
+        Ok(Array::new())
+    })
+}
+
+#[wasm_bindgen(js_name = load)]
+pub fn load(data: JsValue) -> Result<JsValue, JsValue> {
+    let data = data.dyn_into::<Uint8Array>().unwrap().to_vec();
+    let backend = Backend::load(data).map_err(to_js_err)?;
+    let heads = backend.get_heads();
+    Ok(wrapper(State ( backend ), false, heads).into())
+}
+
+#[wasm_bindgen(js_name = getPatch)]
+pub fn get_patch(input: Object) -> Result<JsValue, JsValue> {
+    get_input(input, |state| {
+        state
+            .0
+            .get_patch()
+            .map_err(to_js_err)
+            .and_then(rust_to_js)
+    })
+}
+
+#[wasm_bindgen(js_name = clone)]
+pub fn clone(input: Object) -> Result<Object, JsValue> {
+    let old_state = get_state(&input)?;
+    let state = State (old_state.0.clone());
+    let heads = state.0.get_heads();
+    input.set_state(old_state);
+    Ok(wrapper(state, false, heads))
+}
+
+#[wasm_bindgen(js_name = save)]
+pub fn save(input: Object) -> Result<JsValue, JsValue> {
+    get_input(input, |state| {
+        state
+            .0
+            .save()
+            .map(|data| data.as_slice().into())
+            .map(|data: Uint8Array| data.into())
+            .map_err(to_js_err)
+    })
+}
+
+#[wasm_bindgen(js_name = getChanges)]
+pub fn get_changes(input: Object, have_deps: JsValue) -> Result<JsValue, JsValue> {
+    let deps: Vec<ChangeHash> = js_to_rust(&have_deps)?;
+    get_input(input, |state| {
+        Ok(export_changes(state.0.get_changes(&deps)).into())
+    })
+}
+
+#[wasm_bindgen(js_name = getChangesForActor)]
+pub fn get_changes_for_actor(input: Object, actorid: JsValue) -> Result<JsValue, JsValue> {
+    let actorid: ActorID = js_to_rust(&actorid)?;
+    get_input(input, |state| {
+        state
+            .0
+            .get_changes_for_actor_id(&actorid)
+            .map(|changes| export_changes(changes).into())
+            .map_err(to_js_err)
+    })
+}
+
+#[wasm_bindgen(js_name = getMissingDeps)]
+pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
+    get_input(input, |state| rust_to_js(state.0.get_missing_deps()))
+}
+
+fn import_changes(changes: &Array) -> Result<Vec<Change>,AutomergeError> {
+    let mut ch = Vec::with_capacity(changes.length() as usize);
+    for c in changes.iter() {
+        let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
+        ch.push(Change::from_bytes(bytes)?);
+    }
+    Ok(ch)
+}
+
+fn export_changes(changes: Vec<&Change>) -> Array {
+    let result = Array::new();
+    for c in changes {
+        let bytes: Uint8Array = c.bytes.as_slice().into();
+        result.push(bytes.as_ref());
+    }
+    result
+}
+
+fn get_state(input: &Object) -> Result<State, JsValue> {
+    if input.frozen() {
+        Err(js_sys::Error::new("Attempting to use an outdated Automerge document that has already been updated. Please use the latest document state, or call Automerge.clone() if you really need to use this old document state.").into())
+    } else {
+        Ok(input.state())
+    }
+}
+
+fn wrapper(state: State, frozen: bool, heads: Vec<ChangeHash>) -> Object {
+    let heads_array = Array::new();
+    for h in heads {
+        heads_array.push(&rust_to_js(h).unwrap());
     }
 
-    #[wasm_bindgen(js_name = getPatch)]
-    pub fn get_patch(&self) -> Result<JsValue, JsValue> {
-        let patch = self.backend.get_patch().map_err(to_js_err)?;
-        rust_to_js(&patch)
-    }
+    let wrapper = Object::new();
+    wrapper.set_heads(heads_array);
+    wrapper.set_frozen(frozen);
+    wrapper.set_state(state);
+    wrapper
+}
 
-    #[wasm_bindgen(js_name = getHeads)]
-    pub fn get_heads(&self) -> Result<JsValue, JsValue> {
-        let heads = self.backend.get_heads();
-        rust_to_js(&heads)
-    }
+fn get_input<F>(input: Object, action: F) -> Result<JsValue, JsValue>
+where
+    F: Fn(&State) -> Result<JsValue, JsValue>,
+{
+    let state: State = get_state(&input)?;
+    let result = action(&state);
+    input.set_state(state);
+    result
+}
 
-    #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&self, have_deps: JsValue) -> Result<Array, JsValue> {
-        let deps: Vec<ChangeHash> = js_to_rust(have_deps)?;
-        let changes = self.backend.get_changes(&deps);
-        let result = Array::new();
-        for c in changes {
-            let bytes: Uint8Array = c.bytes.as_slice().into();
-            result.push(bytes.as_ref());
+fn get_mut_input<F>(input: Object, action: F) -> Result<JsValue, JsValue>
+where
+    F: Fn(&mut State) -> Result<Array, AutomergeError>,
+{
+    let mut state: State = get_state(&input)?;
+
+    match action(&mut state) {
+        Ok(result) => {
+            let heads = state.0.get_heads();
+            let new_state = wrapper(state, false, heads);
+            input.set_frozen(true);
+            if result.length() == 0 {
+                Ok(new_state.into())
+            } else {
+                result.unshift(&new_state.into());
+                Ok(result.into())
+            }
         }
-        Ok(result)
-    }
-
-    #[wasm_bindgen(js_name = getChangesForActor)]
-    pub fn get_changes_for_actorid(&self, actorid: JsValue) -> Result<Array, JsValue> {
-        let a: ActorID = js_to_rust(actorid)?;
-        let changes = self
-            .backend
-            .get_changes_for_actor_id(&a)
-            .map_err(to_js_err)?;
-        let result = Array::new();
-        for c in changes {
-            let bytes: Uint8Array = c.bytes.as_slice().into();
-            result.push(bytes.as_ref());
-        }
-        Ok(result)
-    }
-
-    #[wasm_bindgen(js_name = getMissingDeps)]
-    pub fn get_missing_deps(&self) -> Result<JsValue, JsValue> {
-        let hashes = self.backend.get_missing_deps();
-        rust_to_js(&hashes)
-    }
-
-    #[allow(clippy::should_implement_trait)]
-    #[wasm_bindgen(js_name = clone)]
-    pub fn clone(&self) -> Result<State, JsValue> {
-        Ok(State {
-            backend: self.backend.clone(),
-        })
-    }
-
-    #[wasm_bindgen(js_name = save)]
-    pub fn save(&self) -> Result<JsValue, JsValue> {
-        let data = self.backend.save().map_err(to_js_err)?;
-        let js_bytes: Uint8Array = data.as_slice().into();
-        Ok(js_bytes.into())
-    }
-
-    #[wasm_bindgen(js_name = load)]
-    pub fn load(data: JsValue) -> Result<State, JsValue> {
-        let data = data.dyn_into::<Uint8Array>().unwrap().to_vec();
-        let backend = Backend::load(data).map_err(to_js_err)?;
-        Ok(State { backend })
-    }
-
-    #[wasm_bindgen]
-    pub fn new() -> State {
-        State {
-            backend: Backend::init(),
+        Err(err) => {
+            input.set_state(state);
+            Err(to_js_err(err))
         }
     }
 }
@@ -164,23 +271,3 @@ fn to_js_err<T: Display>(err: T) -> JsValue {
 fn json_error_to_js(err: serde_json::Error) -> JsValue {
     js_sys::Error::new(&std::format!("serde_json error: {}", err)).into()
 }
-
-/*
-struct WasmSTDIO {}
-
-impl std::io::Write for WasmSTDIO {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let string = String::from_utf8_lossy(&buf).into_owned();
-        web_sys::console::log_1(&string.into());
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[wasm_bindgen(start)]
-pub fn main() {
-}
-*/

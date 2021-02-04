@@ -2,19 +2,18 @@ var path = require('path');
 var webpack = require('webpack');
   
 module.exports  = {
-  entry: './build/entry.js',
+  entry: './pkg/index.js',
   mode: 'development',
   output: {
     filename: 'index.js',
     library: 'automerge-backend-wasm',
     libraryTarget: 'umd',
+    publicPath: '',
     path: path.resolve(__dirname, 'dist'),
     globalObject: 'this'
   },
-  plugins: [
-         new webpack.optimize.LimitChunkCountPlugin({
-            maxChunks: 1,
-          })
-  ],
+  experiments: {
+    asyncWebAssembly: true
+  },
   module: { }
 }
