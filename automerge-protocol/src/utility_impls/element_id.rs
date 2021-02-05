@@ -52,3 +52,12 @@ impl TryFrom<&str> for ElementID {
         ElementID::from_str(value)
     }
 }
+
+impl std::fmt::Display for ElementID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementID::Head => write!(f, "_head"),
+            ElementID::ID(id) => write!(f, "{}", id.to_string()),
+        }
+    }
+}
