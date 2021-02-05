@@ -13,6 +13,7 @@ mod op;
 mod op_type;
 mod opid;
 mod scalar_value;
+mod cursor_diff;
 
 // Helper method for use in custom deserialize impls
 pub(crate) fn read_field<'de, T, M>(
