@@ -95,6 +95,7 @@ impl<'de> Deserialize<'de> for Op {
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
+                let mut ref_id: Option<OpID> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -105,6 +106,7 @@ impl<'de> Deserialize<'de> for Op {
                         "insert" => read_field("insert", &mut insert, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
+                        "ref" => read_field("ref", &mut ref_id, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
                 }
@@ -120,18 +122,32 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
                     RawOpType::Del => OpType::Del,
                     RawOpType::Set => {
-                        let raw_value = value
-                            .ok_or_else(|| Error::missing_field("value"))?
-                            .unwrap_or(ScalarValue::Null);
                         let value = if let Some(datatype) = datatype {
-                            raw_value.as_datatype(datatype).map_err(|e| {
-                                Error::invalid_value(
-                                    Unexpected::Other(e.unexpected.as_str()),
-                                    &e.expected.as_str(),
-                                )
-                            })?
+                            match datatype {
+                                DataType::Cursor => {
+                                    match ref_id {
+                                        Some(opid) => ScalarValue::Cursor(
+                                            opid.into()
+                                        ),
+                                        None => return Err(Error::missing_field("ref"))
+                                    }
+                                }
+                                _ => {
+                                    let raw_value = value
+                                        .ok_or_else(|| Error::missing_field("value"))?
+                                        .unwrap_or(ScalarValue::Null);
+                                    raw_value.as_datatype(datatype).map_err(|e| {
+                                        Error::invalid_value(
+                                            Unexpected::Other(e.unexpected.as_str()),
+                                            &e.expected.as_str(),
+                                        )
+                                    })?
+                                }
+                            }
                         } else {
-                            raw_value
+                            value
+                                .ok_or_else(|| Error::missing_field("value"))?
+                                .unwrap_or(ScalarValue::Null)
                         };
                         OpType::Set(value)
                     }
@@ -151,6 +167,9 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }
+                        Some(ScalarValue::Cursor(..)) => {
+                            Err(Error::invalid_value(Unexpected::Other("a cursor"), &"a number"))
+                        },
                         None => Err(Error::missing_field("value")),
                     }?,
                 };
@@ -174,6 +193,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_action() {
+        let actor = crate::ActorID::random();
         struct Scenario {
             name: &'static str,
             json: serde_json::Value,
@@ -386,6 +406,50 @@ mod tests {
                     pred: Vec::new(),
                 }),
             },
+            Scenario {
+                name: "Set with cursor",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "ref": actor.op_id_at(2).to_string(),
+                    "datatype": "cursor",
+                    "pred": []
+                }),
+                expected: Ok(Op {
+                    action: OpType::Set(ScalarValue::Cursor(actor.op_id_at(2).into())),
+                    obj: ObjectID::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                }),
+            },
+            Scenario{
+                name: "Set with cursor datatype but no ref",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "datatype": "cursor",
+                    "pred": []
+                }),
+                expected: Err(serde_json::Error::missing_field("ref")),
+            },
+            Scenario {
+                name: "Set with cursor datatype but ref which is not a valid object op ID",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "ref": "blahblahblah",
+                    "datatype": "cursor",
+                    "pred": []
+                }),
+                expected: Err(serde_json::Error::invalid_value(
+                    Unexpected::Str("blahblahblah"),
+                    &"A valid OpID",
+                )),
+            }
         ];
 
         for scenario in scenarios.into_iter() {

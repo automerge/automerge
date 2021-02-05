@@ -168,6 +168,8 @@ pub enum DataType {
     Counter,
     #[serde(rename = "timestamp")]
     Timestamp,
+    #[serde(rename = "cursor")]
+    Cursor,
     #[serde(rename = "undefined")]
     Undefined,
 }
@@ -189,6 +191,7 @@ pub enum ScalarValue {
     F32(f32),
     Counter(i64),
     Timestamp(i64),
+    Cursor(ElementID),
     Boolean(bool),
     Null,
 }
@@ -228,6 +231,12 @@ impl ScalarValue {
             (DataType::Timestamp, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
                 expected: "an integer".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Cursor, v) => Err(error::InvalidScalarValue{
+                raw_value: self.clone(),
+                expected: "a cursor".to_string(),
                 unexpected: v.to_string(),
                 datatype,
             }),
