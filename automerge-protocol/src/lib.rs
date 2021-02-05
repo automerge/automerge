@@ -346,6 +346,7 @@ pub enum Diff {
     Seq(SeqDiff),
     Unchanged(ObjDiff),
     Value(ScalarValue),
+    Cursor(CursorDiff),
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
@@ -374,6 +375,13 @@ pub struct ObjDiff {
     pub object_id: ObjectID,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct CursorDiff {
+    object_id: ObjectID,
+    elem_id: ElementID,
+    index: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
