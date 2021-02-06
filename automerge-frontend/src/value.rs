@@ -116,6 +116,9 @@ impl Value {
                     serde_json::Value::Number(serde_json::Number::from(*t))
                 }
                 amp::ScalarValue::Null => serde_json::Value::Null,
+                amp::ScalarValue::Cursor(eid) => {
+                    eid.to_string().into()
+                }
             },
         }
     }
