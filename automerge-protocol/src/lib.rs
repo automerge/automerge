@@ -191,7 +191,7 @@ pub enum ScalarValue {
     F32(f32),
     Counter(i64),
     Timestamp(i64),
-    Cursor(ElementID),
+    Cursor(OpID),
     Boolean(bool),
     Null,
 }
@@ -379,9 +379,9 @@ pub struct ObjDiff {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CursorDiff {
-    object_id: ObjectID,
-    elem_id: ElementID,
-    index: u32,
+    pub object_id: ObjectID,
+    pub elem_id: ElementID,
+    pub index: u32,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]

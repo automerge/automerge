@@ -178,23 +178,6 @@ impl Change {
 
     pub fn load_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
         load_blocks(bytes)
-        /*
-        // FIXME this does not handle changes and docs mixed together
-        // this could happen if files are concatonated with each other
-        if Some(&BLOCK_TYPE_DOC) == bytes.get(PREAMBLE_BYTES) {
-            decode_document(bytes)
-        } else {
-            let mut changes = Vec::new();
-            let mut cursor = &bytes[..];
-            while !cursor.is_empty() {
-                let (val, len) = read_leb128(&mut &cursor[HEADER_BYTES..])?;
-                let (data, rest) = cursor.split_at(HEADER_BYTES + val + len);
-                changes.push(Self::from_bytes(data.to_vec())?);
-                cursor = rest;
-            }
-            Ok(changes)
-        }
-        */
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
@@ -943,7 +926,7 @@ mod tests {
                     key: key2,
                     obj: obj2,
                     insert,
-                    pred: vec![opid1, opid5.clone()],
+                    pred: vec![opid1.clone(), opid5.clone()],
                 },
                 amp::Op {
                     action: amp::OpType::Del,
@@ -954,11 +937,18 @@ mod tests {
                 },
                 amp::Op {
                     action: amp::OpType::Del,
-                    obj: obj3,
+                    obj: obj3.clone(),
                     key: keyseq2,
                     insert: true,
                     pred: vec![opid4, opid5],
                 },
+                amp::Op {
+                    action: amp::OpType::Set(amp::ScalarValue::Cursor(opid1.into())),
+                    obj: obj3,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                }
             ],
             extra_bytes: vec![1, 2, 3],
         };
@@ -971,6 +961,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_document() {
+        let actor = amp::ActorID::random();
         let mut backend = crate::Backend::init();
         let change1 = amp::UncompressedChange {
             start_op: 1,
@@ -978,22 +969,45 @@ mod tests {
             time: 0,
             message: None,
             hash: None,
-            actor_id: amp::ActorID::random(),
+            actor_id: actor.clone(),
             deps: Vec::new(),
-            operations: vec![amp::Op {
-                action: amp::OpType::Set("somevalue".into()),
-                obj: amp::ObjectID::Root,
-                key: "somekey".into(),
-                insert: false,
-                pred: Vec::new(),
-            }],
+            operations: vec![
+                amp::Op {
+                    action: amp::OpType::Set("somevalue".into()),
+                    obj: amp::ObjectID::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                },
+                amp::Op {
+                    action: amp::OpType::Make(amp::ObjType::list()),
+                    obj: amp::ObjectID::Root,
+                    key: "somelist".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                },
+                amp::Op {
+                    action: amp::OpType::Set(amp::ScalarValue::Str("elem".into()).into()),
+                    obj: actor.op_id_at(2).into(),
+                    key: amp::ElementID::Head.into(),
+                    insert: true,
+                    pred: Vec::new(),
+                },
+                amp::Op {
+                    action: amp::OpType::Set(amp::ScalarValue::Cursor(actor.op_id_at(3))),
+                    obj: amp::ObjectID::Root,
+                    key: "cursor".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                },
+            ],
             extra_bytes: vec![1, 2, 3],
         };
         let binchange1: Change = Change::try_from(change1.clone()).unwrap();
         backend.apply_changes(vec![binchange1.clone()]).unwrap();
 
         let change2 = amp::UncompressedChange {
-            start_op: 2,
+            start_op: 5,
             seq: 2,
             time: 0,
             message: None,

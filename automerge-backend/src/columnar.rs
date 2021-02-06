@@ -65,6 +65,7 @@ pub struct OperationIterator<'a> {
     pub(crate) insert: BooleanDecoder<'a>,
     pub(crate) value: ValueIterator<'a>,
     pub(crate) pred: PredIterator<'a>,
+    pub(crate) refs: RefIterator<'a>,
 }
 
 impl<'a> OperationIterator<'a> {
@@ -97,6 +98,11 @@ impl<'a> OperationIterator<'a> {
             },
             insert: col_iter(bytes, ops, COL_INSERT),
             action: col_iter(bytes, ops, COL_ACTION),
+            refs: RefIterator {
+                actors,
+                actor: col_iter(bytes, ops, COL_REF_ACTOR),
+                ctr: col_iter(bytes, ops, COL_REF_CTR),
+            }
         }
     }
 }
@@ -109,15 +115,24 @@ impl<'a> Iterator for OperationIterator<'a> {
         let obj = self.objs.next()?;
         let key = self.keys.next()?;
         let pred = self.pred.next()?;
-        let value = self.value.next()?;
+        let value = self.value.next();
+        let ref_opid = self.refs.next();
         let action = match action {
-            Action::Set => amp::OpType::Set(value),
+            Action::Set => {
+                let actual_value = match (value, ref_opid) {
+                    (Some(_), Some(_)) => panic!("Op had both a reference and a value"),
+                    (Some(v), None) => v,
+                    (None, Some(opid)) => amp::ScalarValue::Cursor(opid),
+                    (None, None) => panic!("Set action with no value"),
+                };
+                amp::OpType::Set(actual_value)
+            },
             Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
             Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
             Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
             Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
             Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+            Action::Inc => amp::OpType::Inc(value.expect("no value for inc operation").to_i64()?),
         };
         Some(amp::Op {
             action,
@@ -138,6 +153,7 @@ pub(crate) struct DocOpIterator<'a> {
     pub(crate) insert: BooleanDecoder<'a>,
     pub(crate) value: ValueIterator<'a>,
     pub(crate) succ: SuccIterator<'a>,
+    pub(crate) refs: RefIterator<'a>,
 }
 
 impl<'a> Iterator for DocOpIterator<'a> {
@@ -150,15 +166,24 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let obj = self.objs.next()?;
         let key = self.keys.next()?;
         let succ = self.succ.next()?;
-        let value = self.value.next()?;
+        let value = self.value.next();
+        let ref_opid = self.refs.next();
         let action = match action {
-            Action::Set => amp::OpType::Set(value),
+            Action::Set => {
+                let actual_value = match (value, ref_opid) {
+                    (Some(_), Some(_)) => panic!("Set operation with both ref and value"),
+                    (Some(v), None) => v,
+                    (None, Some(opid)) => amp::ScalarValue::Cursor(opid),
+                    (None, None) => panic!("Set operation with no value or ref"),
+                };
+                amp::OpType::Set(actual_value)
+            },
             Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
             Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
             Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
             Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
             Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+            Action::Inc => amp::OpType::Inc(value.expect("Inc operation with no value").to_i64()?),
         };
         Some(DocOp {
             actor,
@@ -204,6 +229,11 @@ impl<'a> DocOpIterator<'a> {
             },
             insert: col_iter(bytes, ops, COL_INSERT),
             action: col_iter(bytes, ops, COL_ACTION),
+            refs: RefIterator{
+                actors,
+                actor: col_iter(bytes, ops, COL_REF_ACTOR),
+                ctr: col_iter(bytes, ops, COL_REF_CTR)
+            },
         }
     }
 }
@@ -301,6 +331,12 @@ pub struct KeyIterator<'a> {
 pub struct ValueIterator<'a> {
     pub(crate) val_len: RLEDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,
+}
+
+pub struct RefIterator<'a> {
+    pub(crate) actors: &'a [amp::ActorID],
+    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) ctr: RLEDecoder<'a, u64>,
 }
 
 impl<'a> Iterator for DepsIterator<'a> {
@@ -465,6 +501,19 @@ impl<'a> Iterator for ObjIterator<'a> {
     }
 }
 
+impl <'a> Iterator for RefIterator<'a> {
+    type Item = amp::OpID;
+
+    fn next(&mut self) -> Option<amp::OpID> {
+        if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
+            let actor_id = self.actors.get(actor)?;
+            Some(amp::OpID(ctr, actor_id.clone()))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct DocChange {
     pub actor: usize,
@@ -563,7 +612,12 @@ impl ValEncoder {
             amp::ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
-            } /*
+            } 
+            amp::ScalarValue::Cursor(_) => {
+                // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
+                self.len.append_value(VALUE_TYPE_CURSOR)
+            }
+              /*
               amp::Value::Unknown(num,bytes) => {
                   let len = bytes.len();
                   self.raw.extend(bytes);
@@ -730,35 +784,6 @@ impl ObjEncoder {
     }
 }
 
-struct ChildEncoder {
-    actor: RLEEncoder<usize>,
-    ctr: DeltaEncoder,
-}
-
-// FIXME - child decoder is missing - are there no tests for this?
-// or was this only needed for undo/redo?
-
-impl ChildEncoder {
-    fn new() -> ChildEncoder {
-        ChildEncoder {
-            actor: RLEEncoder::new(),
-            ctr: DeltaEncoder::new(),
-        }
-    }
-
-    fn append_null(&mut self) {
-        self.actor.append_null();
-        self.ctr.append_null();
-    }
-
-    fn finish(self) -> Vec<ColData> {
-        vec![
-            self.actor.finish(COL_CHILD_ACTOR),
-            self.ctr.finish(COL_CHILD_CTR),
-        ]
-    }
-}
-
 pub(crate) struct ChangeEncoder {
     actor: RLEEncoder<usize>,
     seq: DeltaEncoder,
@@ -823,7 +848,6 @@ impl ChangeEncoder {
                     // encoder in a second pass over the intermediates
                     panic!("Missing dependency for hash: {:?}", dep);
                 }
-                //self.deps_index.append_value(0);
             }
             self.extra_len
                 .append_value(change.extra_bytes.len() << 4 | VALUE_TYPE_BYTES);
@@ -874,6 +898,8 @@ pub(crate) struct DocOpEncoder {
     action: RLEEncoder<Action>,
     val: ValEncoder,
     succ: SuccEncoder,
+    ref_actor: RLEEncoder<usize>,
+    ref_counter: RLEEncoder<usize>,
 }
 
 // FIXME - actors should not be mut here
@@ -901,6 +927,8 @@ impl DocOpEncoder {
             action: RLEEncoder::new(),
             val: ValEncoder::new(),
             succ: SuccEncoder::new(),
+            ref_actor: RLEEncoder::new(),
+            ref_counter: RLEEncoder::new(),
         }
     }
 
@@ -917,24 +945,31 @@ impl DocOpEncoder {
             self.succ.append(&op.succ);
             let action = match &op.action {
                 amp::OpType::Set(value) => {
+                    if let amp::ScalarValue::Cursor(opid) = value {
+                        let actor_index = map_actor(&opid.1, actors);
+                        self.ref_actor.append_value(actor_index);
+                        self.ref_counter.append_value(opid.0 as usize);
+                    }
                     self.val.append_value(value);
-                    //self.chld.append_null();
                     Action::Set
                 }
                 amp::OpType::Inc(val) => {
                     self.val.append_value(&amp::ScalarValue::Int(*val));
-                    //self.chld.append_null();
+                    self.ref_actor.append_null();
+                    self.ref_counter.append_null();
                     Action::Inc
                 }
                 amp::OpType::Del => {
                     // FIXME throw error
                     self.val.append_null();
-                    //self.chld.append_null();
+                    self.ref_actor.append_null();
+                    self.ref_counter.append_null();
                     Action::Del
                 }
                 amp::OpType::Make(kind) => {
                     self.val.append_null();
-                    //self.chld.append_null();
+                    self.ref_actor.append_null();
+                    self.ref_counter.append_null();
                     match kind {
                         amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,
                         amp::ObjType::Map(amp::MapType::Map) => Action::MakeMap,
@@ -953,6 +988,8 @@ impl DocOpEncoder {
         coldata.push(self.ctr.finish(COL_ID_CTR));
         coldata.push(self.insert.finish(COL_INSERT));
         coldata.push(self.action.finish(COL_ACTION));
+        coldata.push(self.ref_counter.finish(COL_REF_CTR));
+        coldata.push(self.ref_actor.finish(COL_REF_ACTOR));
         coldata.extend(self.obj.finish());
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());
@@ -985,8 +1022,9 @@ pub(crate) struct ColumnEncoder {
     insert: BooleanEncoder,
     action: RLEEncoder<Action>,
     val: ValEncoder,
-    chld: ChildEncoder,
     pred: PredEncoder,
+    ref_actor: RLEEncoder<usize>,
+    ref_counter: RLEEncoder<usize>,
 }
 
 impl ColumnEncoder {
@@ -1009,8 +1047,9 @@ impl ColumnEncoder {
             insert: BooleanEncoder::new(),
             action: RLEEncoder::new(),
             val: ValEncoder::new(),
-            chld: ChildEncoder::new(),
             pred: PredEncoder::new(),
+            ref_actor: RLEEncoder::new(),
+            ref_counter: RLEEncoder::new(),
         }
     }
 
@@ -1030,23 +1069,33 @@ impl ColumnEncoder {
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
             amp::OpType::Set(value) => {
+                if let amp::ScalarValue::Cursor(opid) = value {
+                    let actor_index = map_actor(&opid.1, actors);
+                    self.ref_actor.append_value(actor_index);
+                    self.ref_counter.append_value(opid.0 as usize);
+                } else {
+                    self.ref_actor.append_null();
+                    self.ref_counter.append_null();
+                }
                 self.val.append_value(value);
-                self.chld.append_null();
                 Action::Set
             }
             amp::OpType::Inc(val) => {
                 self.val.append_value(&amp::ScalarValue::Int(*val));
-                self.chld.append_null();
+                self.ref_actor.append_null();
+                self.ref_counter.append_null();
                 Action::Inc
             }
             amp::OpType::Del => {
                 self.val.append_null();
-                self.chld.append_null();
+                self.ref_actor.append_null();
+                self.ref_counter.append_null();
                 Action::Del
             }
             amp::OpType::Make(kind) => {
                 self.val.append_null();
-                self.chld.append_null();
+                self.ref_actor.append_null();
+                self.ref_counter.append_null();
                 match kind {
                     amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,
                     amp::ObjType::Map(amp::MapType::Map) => Action::MakeMap,
@@ -1062,10 +1111,11 @@ impl ColumnEncoder {
         let mut coldata = Vec::new();
         coldata.push(self.insert.finish(COL_INSERT));
         coldata.push(self.action.finish(COL_ACTION));
+        coldata.push(self.ref_counter.finish(COL_REF_CTR));
+        coldata.push(self.ref_actor.finish(COL_REF_ACTOR));
         coldata.extend(self.obj.finish());
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());
-        coldata.extend(self.chld.finish());
         coldata.extend(self.pred.finish());
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
@@ -1110,7 +1160,8 @@ const VALUE_TYPE_UTF8: usize = 6;
 const VALUE_TYPE_BYTES: usize = 7;
 const VALUE_TYPE_COUNTER: usize = 8;
 const VALUE_TYPE_TIMESTAMP: usize = 9;
-const VALUE_TYPE_MIN_UNKNOWN: usize = 10;
+const VALUE_TYPE_CURSOR: usize = 10;
+const VALUE_TYPE_MIN_UNKNOWN: usize = 11;
 const VALUE_TYPE_MAX_UNKNOWN: usize = 15;
 
 pub(crate) const COLUMN_TYPE_GROUP_CARD: u32 = 0;
@@ -1164,14 +1215,14 @@ const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
 const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
 const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
 const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
-const COL_CHILD_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_CHILD_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_DELTA;
 const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
 const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
 const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
 const COL_SUCC_NUM: u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
 const COL_SUCC_ACTOR: u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
 const COL_SUCC_CTR: u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
+const COL_REF_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_RLE;
+const COL_REF_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
 
 const DOC_ACTOR: u32 = /* 0 << 3 */ COLUMN_TYPE_ACTOR_ID;
 const DOC_SEQ: u32 = /* 0 << 3 */ COLUMN_TYPE_INT_DELTA;
