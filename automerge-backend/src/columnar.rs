@@ -102,7 +102,7 @@ impl<'a> OperationIterator<'a> {
                 actors,
                 actor: col_iter(bytes, ops, COL_REF_ACTOR),
                 ctr: col_iter(bytes, ops, COL_REF_CTR),
-            }
+            },
         }
     }
 }
@@ -126,7 +126,7 @@ impl<'a> Iterator for OperationIterator<'a> {
                     (None, None) => panic!("Set action with no value"),
                 };
                 amp::OpType::Set(actual_value)
-            },
+            }
             Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
             Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
             Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
@@ -177,7 +177,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
                     (None, None) => panic!("Set operation with no value or ref"),
                 };
                 amp::OpType::Set(actual_value)
-            },
+            }
             Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
             Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
             Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
@@ -229,10 +229,10 @@ impl<'a> DocOpIterator<'a> {
             },
             insert: col_iter(bytes, ops, COL_INSERT),
             action: col_iter(bytes, ops, COL_ACTION),
-            refs: RefIterator{
+            refs: RefIterator {
                 actors,
                 actor: col_iter(bytes, ops, COL_REF_ACTOR),
-                ctr: col_iter(bytes, ops, COL_REF_CTR)
+                ctr: col_iter(bytes, ops, COL_REF_CTR),
             },
         }
     }
@@ -501,7 +501,7 @@ impl<'a> Iterator for ObjIterator<'a> {
     }
 }
 
-impl <'a> Iterator for RefIterator<'a> {
+impl<'a> Iterator for RefIterator<'a> {
     type Item = amp::OpID;
 
     fn next(&mut self) -> Option<amp::OpID> {
@@ -612,12 +612,11 @@ impl ValEncoder {
             amp::ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
-            } 
+            }
             amp::ScalarValue::Cursor(_) => {
                 // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
                 self.len.append_value(VALUE_TYPE_CURSOR)
-            }
-              /*
+            } /*
               amp::Value::Unknown(num,bytes) => {
                   let len = bytes.len();
                   self.raw.extend(bytes);

@@ -94,7 +94,8 @@ impl Backend {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
-        let diffs = self.op_set.finalize_diffs(pending_diffs, &self.actors)?;
+        let op_set = Rc::make_mut(&mut self.op_set);
+        let diffs = op_set.finalize_diffs(pending_diffs, &mut self.actors)?;
         self.make_patch(diffs, actor)
     }
 
@@ -189,7 +190,7 @@ impl Backend {
 
         op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
 
-        op_set.apply_ops(ops, diffs, &self.actors)?;
+        op_set.apply_ops(ops, diffs, &mut self.actors)?;
 
         Ok(())
     }

@@ -1,9 +1,5 @@
 use crate::CursorDiff;
-use serde::{
-    ser::SerializeStruct,
-    Serialize, Serializer,
-};
-
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 
 impl Serialize for CursorDiff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

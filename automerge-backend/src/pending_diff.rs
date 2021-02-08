@@ -8,6 +8,7 @@ pub(crate) enum PendingDiff {
     SeqInsert(OpHandle, usize, OpID),
     SeqRemove(OpHandle, usize),
     Set(OpHandle),
+    CursorChange(Key),
 }
 
 impl PendingDiff {
@@ -16,6 +17,7 @@ impl PendingDiff {
             Self::SeqInsert(op, _, _) => op.operation_key(),
             Self::SeqRemove(op, _) => op.operation_key(),
             Self::Set(op) => op.operation_key(),
+            Self::CursorChange(k) => k.clone(),
         }
     }
 

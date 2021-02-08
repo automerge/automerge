@@ -234,7 +234,7 @@ impl ScalarValue {
                 unexpected: v.to_string(),
                 datatype,
             }),
-            (DataType::Cursor, v) => Err(error::InvalidScalarValue{
+            (DataType::Cursor, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
                 expected: "a cursor".to_string(),
                 unexpected: v.to_string(),

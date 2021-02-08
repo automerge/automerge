@@ -124,14 +124,10 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             match datatype {
-                                DataType::Cursor => {
-                                    match ref_id {
-                                        Some(opid) => ScalarValue::Cursor(
-                                            opid.into()
-                                        ),
-                                        None => return Err(Error::missing_field("ref"))
-                                    }
-                                }
+                                DataType::Cursor => match ref_id {
+                                    Some(opid) => ScalarValue::Cursor(opid),
+                                    None => return Err(Error::missing_field("ref")),
+                                },
                                 _ => {
                                     let raw_value = value
                                         .ok_or_else(|| Error::missing_field("value"))?
@@ -167,9 +163,10 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Null) => {
                             Err(Error::invalid_value(Unexpected::Other("null"), &"a number"))
                         }
-                        Some(ScalarValue::Cursor(..)) => {
-                            Err(Error::invalid_value(Unexpected::Other("a cursor"), &"a number"))
-                        },
+                        Some(ScalarValue::Cursor(..)) => Err(Error::invalid_value(
+                            Unexpected::Other("a cursor"),
+                            &"a number",
+                        )),
                         None => Err(Error::missing_field("value")),
                     }?,
                 };
@@ -417,14 +414,14 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Cursor(actor.op_id_at(2).into())),
+                    action: OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
                     obj: ObjectID::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
                 }),
             },
-            Scenario{
+            Scenario {
                 name: "Set with cursor datatype but no ref",
                 json: serde_json::json!({
                     "action": "set",
@@ -449,7 +446,7 @@ mod tests {
                     Unexpected::Str("blahblahblah"),
                     &"A valid OpID",
                 )),
-            }
+            },
         ];
 
         for scenario in scenarios.into_iter() {
