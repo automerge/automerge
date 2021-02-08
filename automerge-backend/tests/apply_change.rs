@@ -1,9 +1,9 @@
 extern crate automerge_backend;
-use automerge_backend::{Backend, Change};
+use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjDiff, ObjType, ObjectID, Op, Patch,
-    ScalarValue, SeqDiff, SequenceType, UncompressedChange,
+    ActorID, CursorDiff, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjDiff, ObjType, ObjectID,
+    Op, Patch, ScalarValue, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -933,4 +933,305 @@ fn test_support_date_objects_in_a_list() {
     let mut backend = Backend::init();
     let patch = backend.apply_changes(vec![change]).unwrap();
     assert_eq!(patch, expected_patch)
+}
+
+#[test]
+fn test_cursor_objects() {
+    let actor = ActorID::random();
+    let change = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        message: None,
+        hash: None,
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: ObjectID::Root,
+                key: "list".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Str("something".into())),
+                obj: actor.op_id_at(1).into(),
+                key: amp::ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+                obj: ObjectID::Root,
+                key: "cursor".into(),
+                insert: false,
+                pred: Vec::new(),
+            },
+        ],
+        extra_bytes: Vec::new(),
+    };
+    let binchange: Change = (&change).try_into().unwrap();
+    let mut backend = Backend::init();
+    let patch = backend.apply_changes(vec![Change::from(change)]).unwrap();
+    let expected_patch = amp::Patch {
+        clock: hashmap! {
+            actor.clone() => 1,
+        },
+        max_op: 3,
+        deps: vec![binchange.hash],
+        actor: None,
+        seq: None,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root,
+            obj_type: MapType::Map,
+            props: hashmap! {
+                "list".into() => hashmap!{
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()}],
+                        props: hashmap!{
+                            0 => hashmap!{
+                                actor.op_id_at(2) => Diff::Value(ScalarValue::Str("something".into())),
+                            }
+                        }
+                    })
+                },
+                "cursor".into() => hashmap!{
+                    actor.op_id_at(3) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        elem_id: actor.op_id_at(2).into(),
+                        index: 0,
+                    }),
+                },
+            },
+        })),
+    };
+    assert_eq!(patch, expected_patch);
+}
+
+#[test]
+fn test_throws_on_attempt_to_create_missing_cursor() {
+    let actor = ActorID::random();
+    let change = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        message: None,
+        hash: None,
+        operations: vec![Op {
+            action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+            obj: ObjectID::Root,
+            key: "cursor".into(),
+            insert: false,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    };
+    let mut backend = Backend::init();
+    let err = backend
+        .apply_changes(vec![Change::from(change)])
+        .expect_err("Should be an error");
+    assert_eq!(
+        err,
+        AutomergeError::InvalidCursor {
+            opid: actor.op_id_at(2)
+        }
+    );
+}
+
+#[test]
+fn test_updating_sequences_updates_referring_cursors() {
+    let actor = ActorID::random();
+    let change1 = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        message: None,
+        hash: None,
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: ObjectID::Root,
+                key: "list".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Str("something".into())),
+                obj: actor.op_id_at(1).into(),
+                key: amp::ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+                obj: ObjectID::Root,
+                key: "cursor".into(),
+                insert: false,
+                pred: Vec::new(),
+            },
+        ],
+        extra_bytes: Vec::new(),
+    };
+    let binchange1: Change = (&change1).try_into().unwrap();
+    let change2 = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 4,
+        time: 0,
+        deps: vec![binchange1.hash],
+        message: None,
+        hash: None,
+        operations: vec![Op {
+            action: amp::OpType::Set(ScalarValue::Str("something else".into())),
+            obj: actor.op_id_at(1).into(),
+            key: amp::ElementID::Head.into(),
+            insert: true,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    };
+    let binchange2: Change = change2.try_into().unwrap();
+    let mut backend = Backend::init();
+    backend.apply_changes(vec![binchange1]).unwrap();
+    let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
+    let expected_patch = amp::Patch {
+        clock: hashmap! {
+            actor.clone() => 2,
+        },
+        max_op: 4,
+        deps: vec![binchange2.hash],
+        actor: None,
+        seq: None,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root,
+            obj_type: MapType::Map,
+            props: hashmap! {
+                "list".into() => hashmap!{
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(4).into()}],
+                        props: hashmap!{
+                            0 => hashmap!{
+                                actor.op_id_at(4) => Diff::Value(ScalarValue::Str("something else".into())),
+                            }
+                        }
+                    })
+                },
+                "cursor".into() => hashmap!{
+                    actor.op_id_at(3) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        elem_id: actor.op_id_at(2).into(),
+                        index: 1,
+                    }),
+                },
+            },
+        })),
+    };
+    assert_eq!(patch, expected_patch);
+}
+
+#[test]
+fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
+    let actor = ActorID::random();
+    let change1 = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        deps: Vec::new(),
+        message: None,
+        hash: None,
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: ObjectID::Root,
+                key: "list".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Str("something".into())),
+                obj: actor.op_id_at(1).into(),
+                key: amp::ElementID::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Str("something else".into())),
+                obj: actor.op_id_at(1).into(),
+                key: actor.op_id_at(2).into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+            Op {
+                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(3))),
+                obj: ObjectID::Root,
+                key: "cursor".into(),
+                insert: false,
+                pred: Vec::new(),
+            },
+        ],
+        extra_bytes: Vec::new(),
+    };
+    let binchange1: Change = (&change1).try_into().unwrap();
+    let change2 = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 2,
+        start_op: 5,
+        time: 0,
+        deps: vec![binchange1.hash],
+        message: None,
+        hash: None,
+        operations: vec![Op {
+            action: amp::OpType::Del,
+            obj: actor.op_id_at(1).into(),
+            key: actor.op_id_at(2).into(),
+            insert: false,
+            pred: vec![actor.op_id_at(2)],
+        }],
+        extra_bytes: Vec::new(),
+    };
+    let binchange2: Change = change2.try_into().unwrap();
+    let mut backend = Backend::init();
+    backend.apply_changes(vec![binchange1]).unwrap();
+    let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
+    let expected_patch = amp::Patch {
+        clock: hashmap! {
+            actor.clone() => 2,
+        },
+        max_op: 5,
+        deps: vec![binchange2.hash],
+        actor: None,
+        seq: None,
+        diffs: Some(Diff::Map(MapDiff {
+            object_id: ObjectID::Root,
+            obj_type: MapType::Map,
+            props: hashmap! {
+                "list".into() => hashmap!{
+                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: vec![DiffEdit::Remove{index: 0 }],
+                        props: hashmap!{}
+                    })
+                },
+                "cursor".into() => hashmap!{
+                    actor.op_id_at(4) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        elem_id: actor.op_id_at(3).into(),
+                        index: 0,
+                    }),
+                },
+            },
+        })),
+    };
+    assert_eq!(patch, expected_patch);
 }

@@ -1,6 +1,7 @@
 use super::read_field;
 use crate::{
-    DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, ScalarValue, SeqDiff, CursorDiff
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, ScalarValue,
+    SeqDiff,
 };
 use serde::{
     de,
@@ -50,7 +51,17 @@ impl<'de> Deserialize<'de> for Diff {
         D: Deserializer<'de>,
     {
         struct DiffVisitor;
-        const FIELDS: &[&str] = &["edits", "objType", "objectId", "props", "value", "datatype", "refObjectId", "elemId", "index"];
+        const FIELDS: &[&str] = &[
+            "edits",
+            "objType",
+            "objectId",
+            "props",
+            "value",
+            "datatype",
+            "refObjectId",
+            "elemId",
+            "index",
+        ];
 
         impl<'de> de::Visitor<'de> for DiffVisitor {
             type Value = Diff;
@@ -73,7 +84,6 @@ impl<'de> Deserialize<'de> for Diff {
                 let mut index: Option<u32> = None;
                 let mut ref_object_id: Option<ObjectID> = None;
 
-
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "edits" => read_field("edits", &mut edits, &mut map)?,
@@ -92,10 +102,11 @@ impl<'de> Deserialize<'de> for Diff {
                     let datatype = datatype.unwrap_or(DataType::Undefined);
                     match datatype {
                         DataType::Cursor => {
-                            let ref_object_id = ref_object_id.ok_or_else(|| Error::missing_field("refObjectId"))?;
+                            let ref_object_id =
+                                ref_object_id.ok_or_else(|| Error::missing_field("refObjectId"))?;
                             let elem_id = elem_id.ok_or_else(|| Error::missing_field("elemId"))?;
                             let index = index.ok_or_else(|| Error::missing_field("index"))?;
-                            Ok(Diff::Cursor(CursorDiff{
+                            Ok(Diff::Cursor(CursorDiff {
                                 object_id: ref_object_id,
                                 elem_id: elem_id.into(),
                                 index,
@@ -169,10 +180,10 @@ fn maybe_add_datatype_to_value(value: ScalarValue, datatype: DataType) -> Scalar
 
 #[cfg(test)]
 mod tests {
-    use crate::{Diff, MapDiff, MapType, ObjectID, OpID, SeqDiff, SequenceType, CursorDiff};
+    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectID, OpID, SeqDiff, SequenceType};
     use maplit::hashmap;
-    use std::str::FromStr;
     use std::convert::TryInto;
+    use std::str::FromStr;
 
     #[test]
     fn map_diff_serialization_round_trip() {
@@ -238,13 +249,12 @@ mod tests {
             "elemId": "2@4a093244de2b4fd0a4203724e15dfc16",
             "index": 0,
         });
-        let diff = Diff::Cursor(CursorDiff{
+        let diff = Diff::Cursor(CursorDiff {
             object_id: "1@4a093244de2b4fd0a4203724e15dfc16".try_into().unwrap(),
             elem_id: "2@4a093244de2b4fd0a4203724e15dfc16".try_into().unwrap(),
             index: 0,
         });
         assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());
         assert_eq!(serde_json::from_value::<Diff>(json).unwrap(), diff);
-
     }
 }

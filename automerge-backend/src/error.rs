@@ -63,6 +63,8 @@ pub enum AutomergeError {
     },
     #[error("Encoding error")]
     EncodingError,
+    #[error("Attempted to create a cursor for opid {opid} which was not an element in a sequence")]
+    InvalidCursor { opid: amp::OpID },
 }
 
 #[derive(Error, Debug)]

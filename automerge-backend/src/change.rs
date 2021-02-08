@@ -943,12 +943,12 @@ mod tests {
                     pred: vec![opid4, opid5],
                 },
                 amp::Op {
-                    action: amp::OpType::Set(amp::ScalarValue::Cursor(opid1.into())),
+                    action: amp::OpType::Set(amp::ScalarValue::Cursor(opid1)),
                     obj: obj3,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
-                }
+                },
             ],
             extra_bytes: vec![1, 2, 3],
         };
@@ -987,7 +987,7 @@ mod tests {
                     pred: Vec::new(),
                 },
                 amp::Op {
-                    action: amp::OpType::Set(amp::ScalarValue::Str("elem".into()).into()),
+                    action: amp::OpType::Set(amp::ScalarValue::Str("elem".into())),
                     obj: actor.op_id_at(2).into(),
                     key: amp::ElementID::Head.into(),
                     insert: true,

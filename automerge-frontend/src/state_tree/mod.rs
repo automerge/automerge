@@ -356,6 +356,7 @@ impl StateTreeComposite {
             amp::Diff::Value(..) => {
                 panic!("SHould never be called")
             }
+            amp::Diff::Cursor(..) => unimplemented!(),
         }
     }
 
@@ -461,6 +462,7 @@ impl StateTreeValue {
                     }))
                 }
             },
+            amp::Diff::Cursor(..) => unimplemented!(),
         }
     }
 
@@ -812,6 +814,7 @@ fn diff_object_type(diff: &amp::Diff) -> Option<amp::ObjType> {
         amp::Diff::Seq(seqdiff) => Some(amp::ObjType::Sequence(seqdiff.obj_type)),
         amp::Diff::Unchanged(udiff) => Some(udiff.obj_type),
         amp::Diff::Value(..) => None,
+        amp::Diff::Cursor(..) => None,
     }
 }
 
@@ -822,6 +825,7 @@ fn diff_object_id(diff: &amp::Diff) -> Option<amp::ObjectID> {
         amp::Diff::Seq(seqdiff) => Some(seqdiff.object_id.clone()),
         amp::Diff::Unchanged(udiff) => Some(udiff.object_id.clone()),
         amp::Diff::Value(..) => None,
+        amp::Diff::Cursor(amp::CursorDiff { object_id, .. }) => Some(object_id.clone()),
     }
 }
 
