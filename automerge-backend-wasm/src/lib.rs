@@ -67,14 +67,9 @@ extern "C" {
     fn set_heads(this: &Object, heads: Array);
 }
 
-
 #[wasm_bindgen]
 pub fn init() -> Result<Object, JsValue> {
-    Ok(wrapper(
-        State(Backend::init()),
-        false,
-        Vec::new(),
-    ))
+    Ok(wrapper(State(Backend::init()), false, Vec::new()))
 }
 
 #[wasm_bindgen(js_name = getHeads)]
@@ -93,7 +88,7 @@ pub fn free(input: Object) -> Result<(), JsValue> {
 
 #[wasm_bindgen(js_name = applyLocalChange)]
 pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsValue> {
-    get_mut_input(input, |state| { 
+    get_mut_input(input, |state| {
         // FIXME unwrap
         let change: UncompressedChange = js_to_rust(&change).unwrap();
         let (patch, change) = state.0.apply_local_change(change)?;
@@ -130,24 +125,20 @@ pub fn load(data: JsValue) -> Result<JsValue, JsValue> {
     let data = data.dyn_into::<Uint8Array>().unwrap().to_vec();
     let backend = Backend::load(data).map_err(to_js_err)?;
     let heads = backend.get_heads();
-    Ok(wrapper(State ( backend ), false, heads).into())
+    Ok(wrapper(State(backend), false, heads).into())
 }
 
 #[wasm_bindgen(js_name = getPatch)]
 pub fn get_patch(input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        state
-            .0
-            .get_patch()
-            .map_err(to_js_err)
-            .and_then(rust_to_js)
+        state.0.get_patch().map_err(to_js_err).and_then(rust_to_js)
     })
 }
 
 #[wasm_bindgen(js_name = clone)]
 pub fn clone(input: Object) -> Result<Object, JsValue> {
     let old_state = get_state(&input)?;
-    let state = State (old_state.0.clone());
+    let state = State(old_state.0.clone());
     let heads = state.0.get_heads();
     input.set_state(old_state);
     Ok(wrapper(state, false, heads))
@@ -190,7 +181,7 @@ pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| rust_to_js(state.0.get_missing_deps()))
 }
 
-fn import_changes(changes: &Array) -> Result<Vec<Change>,AutomergeError> {
+fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
     let mut ch = Vec::with_capacity(changes.length() as usize);
     for c in changes.iter() {
         let bytes = c.dyn_into::<Uint8Array>().unwrap().to_vec();
