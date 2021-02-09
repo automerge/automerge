@@ -955,8 +955,8 @@ mod tests {
         let bin1 = Change::try_from(change1.clone()).unwrap();
         let change2 = bin1.decode();
         let bin2 = Change::try_from(change2.clone()).unwrap();
-        assert_eq!(bin1, bin2);
         assert_eq!(change1, change2);
+        assert_eq!(bin1, bin2);
     }
 
     #[test]
