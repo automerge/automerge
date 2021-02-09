@@ -95,7 +95,7 @@ impl Backend {
         }
 
         let op_set = Rc::make_mut(&mut self.op_set);
-        let diffs = op_set.finalize_diffs(pending_diffs, &mut self.actors)?;
+        let diffs = op_set.finalize_diffs(pending_diffs, &self.actors)?;
         self.make_patch(diffs, actor)
     }
 
