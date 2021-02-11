@@ -6,7 +6,7 @@ edition = "2018"
 
 [lib]
 name = "automerge"
-crate-type = ["staticlib"]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 automerge-backend = { path = "../automerge-backend" }
