@@ -1,10 +1,8 @@
 extern crate fxhash;
 extern crate hex;
-//extern crate im_rc;
 extern crate itertools;
 extern crate maplit;
 extern crate rand;
-extern crate uuid;
 extern crate web_sys;
 
 #[allow(unused_macros)]
@@ -27,7 +25,6 @@ mod op_handle;
 mod op_set;
 mod ordered_set;
 mod pending_diff;
-mod time;
 
 pub use backend::Backend;
 pub use change::Change;

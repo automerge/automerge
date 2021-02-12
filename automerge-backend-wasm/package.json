@@ -17,6 +17,8 @@
   ],
   "main": "./pkg/index.js",
   "scripts": {
+    "mjs": "wasm-pack build --target bundler --dev --out-name index -d mjs && cp package.json-mjs mjs/package.json",
+    "nodejs": "wasm-pack build --target nodejs --dev --out-name index -d nodejs && cp package.json-nodejs nodejs/package.json",
     "build": "rm -rf pkg && wasm-pack build --target nodejs --dev --out-name index",
     "release": "rm -rf pkg && wasm-pack build --target nodejs --release --out-name index",
     "profiling": "rm -rf pkg && wasm-pack build --target nodejs --profiling --out-name index",

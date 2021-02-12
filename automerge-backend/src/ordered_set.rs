@@ -1,9 +1,8 @@
 #![allow(dead_code)]
 
 use fxhash::FxBuildHasher;
-//use im_rc::HashMap;
-use rand::rngs::ThreadRng;
-use rand::Rng;
+use rand::{ Rng, SeedableRng};
+use rand::rngs::SmallRng;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -328,7 +327,7 @@ where
 {
     nodes: HashMap<K, Node<K>, FxBuildHasher>,
     head: Node<K>,
-    rng: ThreadRng,
+    rng: SmallRng,
     pub len: usize,
 }
 
@@ -353,7 +352,7 @@ where
             //is_head: true,
         };
         let len = 0;
-        let rng = rand::thread_rng();
+        let rng = SmallRng::seed_from_u64(0);
         SkipList {
             nodes,
             head,

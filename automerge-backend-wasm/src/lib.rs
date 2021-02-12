@@ -39,7 +39,7 @@ fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 #[derive(PartialEq, Debug)]
-pub struct State(Backend);
+struct State(Backend);
 
 #[wasm_bindgen]
 extern "C" {
