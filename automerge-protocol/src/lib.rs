@@ -380,7 +380,7 @@ pub struct ObjDiff {
 #[derive(Debug, PartialEq, Clone)]
 pub struct CursorDiff {
     pub object_id: ObjectID,
-    pub elem_id: ElementID,
+    pub elem_id: OpID,
     pub index: u32,
 }
 

@@ -476,6 +476,9 @@ where
     }
 
     pub fn insert_after(&mut self, predecessor: &K, key: K) -> bool {
+        // TODO add check that `predecessor` is actually in the list and is not identical to `K`.
+        // The latter point is especially important as allowing cycles leads to an infinite loop in
+        // `ObjState.index_of`
         self.insert(Some(predecessor), key)
     }
 

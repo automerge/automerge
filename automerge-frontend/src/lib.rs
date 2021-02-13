@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
 use std::time;
-pub use value::{Conflicts, Value};
+pub use value::{Conflicts, Cursor, Primitive, Value};
 
 /// Tracks the possible states of the frontend
 ///
@@ -239,6 +239,7 @@ impl FrontendState {
     }
 }
 
+#[derive(Debug)]
 pub struct Frontend {
     pub actor_id: ActorID,
     pub seq: u64,

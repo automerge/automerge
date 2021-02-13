@@ -1,16 +1,21 @@
 use super::focus::Focus;
 use super::{
-    random_op_id, LocalOperationResult, MultiChar, MultiValue, NewValueRequest, StateTree,
-    StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable,
-    StateTreeText, StateTreeValue,
+    random_op_id, DiffApplicationResult, LocalOperationResult, MultiChar, MultiValue,
+    NewValueRequest, StateTree, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
+    StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::error;
-use crate::Value;
+use crate::{Cursor, Primitive, Value};
 use automerge_protocol as amp;
-use im_rc::hashmap;
 use std::convert::TryInto;
 
-pub enum ResolvedPath {
+#[derive(Debug)]
+pub struct ResolvedPath<'a> {
+    root: &'a StateTree,
+    pub(crate) target: Target,
+}
+
+pub enum Target {
     Root(ResolvedRoot),
     Map(ResolvedMap),
     Table(ResolvedTable),
@@ -21,68 +26,177 @@ pub enum ResolvedPath {
     Primitive(ResolvedPrimitive),
 }
 
-impl std::fmt::Debug for ResolvedPath {
+impl std::fmt::Debug for Target {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            ResolvedPath::Map(maptarget) => write!(f, "MapTarget {:?}", maptarget.value.object_id),
-            ResolvedPath::Root(_) => write!(f, "Root"),
-            ResolvedPath::Table(tabletarget) => {
+            Target::Map(maptarget) => write!(f, "MapTarget {:?}", maptarget.value.object_id),
+            Target::Root(_) => write!(f, "Root"),
+            Target::Table(tabletarget) => {
                 write!(f, "Table {:?}", tabletarget.value.object_id)
             }
-            ResolvedPath::List(listtarget) => write!(f, "list {:?}", listtarget.value.object_id),
-            ResolvedPath::Text(texttarget) => write!(f, "text {:?}", texttarget.value.object_id),
-            ResolvedPath::Counter(countertarget) => write!(
+            Target::List(listtarget) => write!(f, "list {:?}", listtarget.value.object_id),
+            Target::Text(texttarget) => write!(f, "text {:?}", texttarget.value.object_id),
+            Target::Counter(countertarget) => write!(
                 f,
                 "counter {0}:{1:?}",
                 countertarget.containing_object_id, countertarget.key_in_container
             ),
-            ResolvedPath::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
-            ResolvedPath::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
+            Target::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
+            Target::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
         }
     }
 }
 
-impl ResolvedPath {
+impl<'a> ResolvedPath<'a> {
+    pub(super) fn new_root(tree: &StateTree) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Root(ResolvedRoot { root: tree.clone() }),
+        }
+    }
+
+    pub(super) fn new_map(
+        tree: &StateTree,
+        mv: MultiValue,
+        focus: Focus,
+        map: StateTreeMap,
+    ) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Map(ResolvedMap {
+                multivalue: mv,
+                value: map,
+                focus,
+            }),
+        }
+    }
+
+    pub(super) fn new_list(
+        tree: &StateTree,
+        mv: MultiValue,
+        focus: Focus,
+        list: StateTreeList,
+    ) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::List(ResolvedList {
+                multivalue: mv,
+                focus,
+                value: list,
+            }),
+        }
+    }
+
+    pub(super) fn new_text(
+        tree: &StateTree,
+        mv: MultiValue,
+        update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
+        text: StateTreeText,
+    ) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Text(ResolvedText {
+                multivalue: mv,
+                value: text,
+                update,
+            }),
+        }
+    }
+
+    pub(super) fn new_table(
+        tree: &StateTree,
+        mv: MultiValue,
+        focus: Focus,
+        table: StateTreeTable,
+    ) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Table(ResolvedTable {
+                multivalue: mv,
+                focus,
+                value: table,
+            }),
+        }
+    }
+
+    pub(super) fn new_counter(
+        tree: &StateTree,
+        object_id: amp::ObjectID,
+        key: amp::Key,
+        mv: MultiValue,
+        focus: Focus,
+        value: i64,
+    ) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Counter(ResolvedCounter {
+                multivalue: mv,
+                key_in_container: key,
+                containing_object_id: object_id,
+                current_value: value,
+                focus,
+            }),
+        }
+    }
+
+    pub(super) fn new_primitive(tree: &StateTree, value: MultiValue) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Primitive(ResolvedPrimitive { multivalue: value }),
+        }
+    }
+
+    pub(super) fn new_character(tree: &StateTree, c: MultiValue) -> ResolvedPath {
+        ResolvedPath {
+            root: tree,
+            target: Target::Character(ResolvedChar { multivalue: c }),
+        }
+    }
+
     pub fn default_value(&self) -> Value {
-        match self {
-            ResolvedPath::Map(maptarget) => maptarget.multivalue.default_value(),
-            ResolvedPath::Root(root) => root.root.value(),
-            ResolvedPath::Table(tabletarget) => tabletarget.multivalue.default_value(),
-            ResolvedPath::List(listtarget) => listtarget.multivalue.default_value(),
-            ResolvedPath::Text(texttarget) => texttarget.multivalue.default_value(),
-            ResolvedPath::Counter(countertarget) => countertarget.multivalue.default_value(),
-            ResolvedPath::Primitive(p) => p.multivalue.default_value(),
-            ResolvedPath::Character(ctarget) => ctarget.multivalue.default_value(),
+        match &self.target {
+            Target::Map(maptarget) => maptarget.multivalue.default_value(&self.root.objects),
+            Target::Root(root) => root.root.value(),
+            Target::Table(tabletarget) => tabletarget.multivalue.default_value(&self.root.objects),
+            Target::List(listtarget) => listtarget.multivalue.default_value(&self.root.objects),
+            Target::Text(texttarget) => texttarget.multivalue.default_value(&self.root.objects),
+            Target::Counter(countertarget) => {
+                countertarget.multivalue.default_value(&self.root.objects)
+            }
+            Target::Primitive(p) => p.multivalue.default_value(&self.root.objects),
+            Target::Character(ctarget) => ctarget.multivalue.default_value(&self.root.objects),
         }
     }
 
     pub fn values(&self) -> std::collections::HashMap<amp::OpID, Value> {
-        match self {
-            ResolvedPath::Map(maptarget) => maptarget.multivalue.values(),
-            ResolvedPath::Root(root) => {
+        match &self.target {
+            Target::Map(maptarget) => maptarget.multivalue.realise_values(&self.root.objects),
+            Target::Root(root) => {
                 let mut result = std::collections::HashMap::new();
                 result.insert(random_op_id(), root.root.value());
                 result
             }
-            ResolvedPath::Table(tabletarget) => tabletarget.multivalue.values(),
-            ResolvedPath::List(listtarget) => listtarget.multivalue.values(),
-            ResolvedPath::Text(texttarget) => texttarget.multivalue.values(),
-            ResolvedPath::Counter(countertarget) => countertarget.multivalue.values(),
-            ResolvedPath::Primitive(p) => p.multivalue.values(),
-            ResolvedPath::Character(ctarget) => ctarget.multivalue.values(),
+            Target::Table(tabletarget) => tabletarget.multivalue.realise_values(&self.root.objects),
+            Target::List(listtarget) => listtarget.multivalue.realise_values(&self.root.objects),
+            Target::Text(texttarget) => texttarget.multivalue.realise_values(&self.root.objects),
+            Target::Counter(countertarget) => {
+                countertarget.multivalue.realise_values(&self.root.objects)
+            }
+            Target::Primitive(p) => p.multivalue.realise_values(&self.root.objects),
+            Target::Character(ctarget) => ctarget.multivalue.realise_values(&self.root.objects),
         }
     }
 
     pub fn object_id(&self) -> Option<amp::ObjectID> {
-        match self {
-            ResolvedPath::Map(maptarget) => Some(maptarget.value.object_id.clone()),
-            ResolvedPath::Root(_) => Some(amp::ObjectID::Root),
-            ResolvedPath::Table(tabletarget) => Some(tabletarget.value.object_id.clone()),
-            ResolvedPath::List(listtarget) => Some(listtarget.value.object_id.clone()),
-            ResolvedPath::Text(texttarget) => Some(texttarget.value.object_id.clone()),
-            ResolvedPath::Counter(_) => None,
-            ResolvedPath::Primitive(_) => None,
-            ResolvedPath::Character(_) => None,
+        match &self.target {
+            Target::Map(maptarget) => Some(maptarget.value.object_id.clone()),
+            Target::Root(_) => Some(amp::ObjectID::Root),
+            Target::Table(tabletarget) => Some(tabletarget.value.object_id.clone()),
+            Target::List(listtarget) => Some(listtarget.value.object_id.clone()),
+            Target::Text(texttarget) => Some(texttarget.value.object_id.clone()),
+            Target::Counter(_) => None,
+            Target::Primitive(_) => None,
+            Target::Character(_) => None,
         }
     }
 }
@@ -112,14 +226,13 @@ impl ResolvedRoot {
             insert: false,
             pred: self
                 .root
-                .root_map
                 .get(key)
                 .map(|mv| vec![mv.default_opid()])
                 .unwrap_or_else(Vec::new),
         });
         let new_state = self
             .root
-            .update(key.to_string(), newvalue.state_tree_change());
+            .update(key.to_string(), newvalue.diff_app_result());
         LocalOperationResult {
             new_state,
             new_ops: newvalue.ops(),
@@ -127,7 +240,7 @@ impl ResolvedRoot {
     }
 
     pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
-        let existing_value = self.root.root_map.get(key);
+        let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()])
             .unwrap_or_else(Vec::new);
@@ -149,14 +262,14 @@ pub struct ResolvedCounter {
     pub(super) multivalue: MultiValue,
     pub(super) containing_object_id: amp::ObjectID,
     pub(super) key_in_container: amp::Key,
-    pub(super) focus: Box<Focus>,
+    pub(super) focus: Focus,
 }
 
 impl ResolvedCounter {
     pub(crate) fn increment(&self, by: i64) -> LocalOperationResult {
-        let diffapp = StateTreeChange::pure(self.multivalue.update_default(StateTreeValue::Leaf(
-            amp::ScalarValue::Counter(self.current_value + by),
-        )));
+        let diffapp = DiffApplicationResult::pure(self.multivalue.update_default(
+            StateTreeValue::Leaf(Primitive::Counter(self.current_value + by)),
+        ));
         let new_state = self.focus.update(diffapp);
         LocalOperationResult {
             new_state,
@@ -174,7 +287,7 @@ impl ResolvedCounter {
 pub struct ResolvedMap {
     pub(super) value: StateTreeMap,
     pub(super) multivalue: MultiValue,
-    pub(super) focus: Box<Focus>,
+    pub(super) focus: Focus,
 }
 
 impl ResolvedMap {
@@ -192,14 +305,15 @@ impl ResolvedMap {
             insert: false,
             pred: self.value.pred_for_key(key),
         });
-        let diffapp = newvalue.state_tree_change().and_then(|v| {
+        let diffapp = newvalue.diff_app_result().and_then(|v| {
             let new_value = self.value.update(key.to_string(), v);
             let new_composite = StateTreeComposite::Map(new_value);
             let new_mv = self
                 .multivalue
-                .update_default(StateTreeValue::Composite(new_composite.clone()));
-            StateTreeChange::pure(new_mv).with_updates(Some(
-                im_rc::HashMap::new().update(self.value.object_id.clone(), new_composite),
+                .update_default(StateTreeValue::Link(new_composite.object_id()));
+            DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
+                self.value.object_id.clone(),
+                new_composite,
             ))
         });
         LocalOperationResult {
@@ -213,8 +327,11 @@ impl ResolvedMap {
         let new_composite = StateTreeComposite::Map(new_value);
         let new_mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(new_composite));
-        let diffapp = StateTreeChange::pure(new_mv);
+            .update_default(StateTreeValue::Link(new_composite.object_id()));
+        let diffapp = DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
+            new_composite.object_id(),
+            new_composite,
+        ));
         LocalOperationResult {
             new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
@@ -231,7 +348,7 @@ impl ResolvedMap {
 pub struct ResolvedTable {
     pub(super) value: StateTreeTable,
     pub(super) multivalue: MultiValue,
-    pub(super) focus: Box<Focus>,
+    pub(super) focus: Focus,
 }
 
 impl ResolvedTable {
@@ -249,14 +366,15 @@ impl ResolvedTable {
             insert: false,
             pred: self.value.pred_for_key(key),
         });
-        let treechange = newvalue.state_tree_change().and_then(|v| {
+        let treechange = newvalue.diff_app_result().and_then(|v| {
             let new_value = self.value.update(key.to_string(), v);
             let new_composite = StateTreeComposite::Table(new_value);
             let new_mv = self
                 .multivalue
-                .update_default(StateTreeValue::Composite(new_composite.clone()));
-            StateTreeChange::pure(new_mv).with_updates(Some(
-                hashmap!(self.value.object_id.clone() => new_composite),
+                .update_default(StateTreeValue::Link(new_composite.object_id()));
+            DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
+                self.value.object_id.clone(),
+                new_composite,
             ))
         });
         LocalOperationResult {
@@ -270,8 +388,11 @@ impl ResolvedTable {
         let new_composite = StateTreeComposite::Table(new_value);
         let new_mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(new_composite));
-        let diffapp = StateTreeChange::pure(new_mv);
+            .update_default(StateTreeValue::Link(new_composite.object_id()));
+        let diffapp = DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
+            new_composite.object_id(),
+            new_composite,
+        ));
         LocalOperationResult {
             new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
@@ -288,7 +409,7 @@ impl ResolvedTable {
 pub struct ResolvedText {
     pub(super) value: StateTreeText,
     pub(super) multivalue: MultiValue,
-    pub(super) update: Box<dyn Fn(StateTreeChange<MultiValue>) -> StateTree>,
+    pub(super) update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
 }
 
 impl ResolvedText {
@@ -299,7 +420,7 @@ impl ResolvedText {
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
             0 => amp::ElementID::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0,
+            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
         };
         let insert_op = amp::OpID::new(payload.start_op, payload.actor);
         let c = MultiChar::new_from_char(insert_op, payload.value);
@@ -307,9 +428,11 @@ impl ResolvedText {
         let updated = StateTreeComposite::Text(new_text);
         let mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(updated.clone()));
-        let treechange = StateTreeChange::pure(mv)
-            .with_updates(Some(hashmap!(self.value.object_id.clone() => updated)));
+            .update_default(StateTreeValue::Link(updated.object_id()));
+        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+            self.value.object_id.clone(),
+            updated,
+        ));
         Ok(LocalOperationResult {
             new_state: (self.update)(treechange),
             new_ops: vec![amp::Op {
@@ -334,9 +457,11 @@ impl ResolvedText {
         let updated = StateTreeComposite::Text(self.value.set(index, c)?);
         let mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(updated.clone()));
-        let diffapp = StateTreeChange::pure(mv)
-            .with_updates(Some(hashmap!(self.value.object_id.clone() => updated)));
+            .update_default(StateTreeValue::Link(updated.object_id()));
+        let diffapp = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+            self.value.object_id.clone(),
+            updated,
+        ));
         let new_state = (self.update)(diffapp);
         Ok(LocalOperationResult {
             new_state,
@@ -358,9 +483,11 @@ impl ResolvedText {
         let updated = StateTreeComposite::Text(self.value.remove(index.try_into().unwrap())?);
         let mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(updated.clone()));
-        let diffapp = StateTreeChange::pure(mv)
-            .with_updates(Some(hashmap!(self.value.object_id.clone() => updated)));
+            .update_default(StateTreeValue::Link(updated.object_id()));
+        let diffapp = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+            self.value.object_id.clone(),
+            updated,
+        ));
         let new_state = (self.update)(diffapp);
         Ok(LocalOperationResult {
             new_state,
@@ -373,12 +500,21 @@ impl ResolvedText {
             }],
         })
     }
+
+    pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
+        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
+        Ok(Cursor::new(
+            index,
+            self.value.object_id.clone(),
+            current_elemid.clone(),
+        ))
+    }
 }
 
 pub struct ResolvedList {
     pub(super) value: StateTreeList,
     pub(super) multivalue: MultiValue,
-    pub(super) focus: Box<Focus>,
+    pub(super) focus: Focus,
 }
 
 impl ResolvedList {
@@ -397,13 +533,17 @@ impl ResolvedList {
             key: &current_elemid.into(),
             insert: false,
         });
-        let treechange = newvalue.state_tree_change().fallible_and_then(|v| {
+        let treechange = newvalue.diff_app_result().try_and_then(|v| {
             let new_value = StateTreeComposite::List(self.value.set(index.try_into().unwrap(), v)?);
             let mv = self
                 .multivalue
-                .update_default(StateTreeValue::Composite(new_value.clone()));
-            Ok(StateTreeChange::pure(mv)
-                .with_updates(Some(hashmap!(self.value.object_id.clone() => new_value))))
+                .update_default(StateTreeValue::Link(new_value.object_id()));
+            Ok(
+                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+                    self.value.object_id.clone(),
+                    new_value,
+                )),
+            )
         })?;
         let new_state = self.focus.update(treechange);
         Ok(LocalOperationResult {
@@ -419,7 +559,7 @@ impl ResolvedList {
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
             0 => amp::ElementID::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0,
+            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
         };
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -430,14 +570,18 @@ impl ResolvedList {
             insert: true,
             pred: Vec::new(),
         });
-        let treechange = newvalue.state_tree_change().fallible_and_then(|v| {
+        let treechange = newvalue.diff_app_result().try_and_then(|v| {
             let new_value =
                 StateTreeComposite::List(self.value.insert(index.try_into().unwrap(), v)?);
             let mv = self
                 .multivalue
-                .update_default(StateTreeValue::Composite(new_value.clone()));
-            Ok(StateTreeChange::pure(mv)
-                .with_updates(Some(hashmap!(self.value.object_id.clone() => new_value))))
+                .update_default(StateTreeValue::Link(new_value.object_id()));
+            Ok(
+                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+                    self.value.object_id.clone(),
+                    new_value,
+                )),
+            )
         })?;
         Ok(LocalOperationResult {
             new_state: self.focus.update(treechange),
@@ -453,9 +597,11 @@ impl ResolvedList {
         let new_value = StateTreeComposite::List(self.value.remove(index.try_into().unwrap())?);
         let mv = self
             .multivalue
-            .update_default(StateTreeValue::Composite(new_value.clone()));
-        let treechange = StateTreeChange::pure(mv)
-            .with_updates(Some(hashmap!(self.value.object_id.clone() => new_value)));
+            .update_default(StateTreeValue::Link(new_value.object_id()));
+        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+            self.value.object_id.clone(),
+            new_value,
+        ));
         Ok(LocalOperationResult {
             new_state: self.focus.update(treechange),
             new_ops: vec![amp::Op {
@@ -466,6 +612,15 @@ impl ResolvedList {
                 pred: self.value.pred_for_index(index),
             }],
         })
+    }
+
+    pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
+        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
+        Ok(Cursor::new(
+            index,
+            self.value.object_id.clone(),
+            current_elemid,
+        ))
     }
 }
 

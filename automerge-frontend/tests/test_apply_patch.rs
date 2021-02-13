@@ -1,4 +1,4 @@
-use automerge_frontend::{Frontend, Path, Value};
+use automerge_frontend::{Frontend, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -118,7 +118,7 @@ fn create_nested_maps() {
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"birds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}})
+        &Into::<Value>::into(hashmap! {"birds" => hashmap!{"wrens" => Primitive::Int(3)}})
     );
 }
 
@@ -188,7 +188,7 @@ fn apply_updates_inside_nested_maps() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => hashmap!{"wrens" => amp::ScalarValue::Int(3), "sparrows" => amp::ScalarValue::Int(15)}}
+            hashmap! {"birds" => hashmap!{"wrens" => Primitive::Int(3), "sparrows" => Primitive::Int(15)}}
         )
     );
 }
@@ -248,9 +248,7 @@ fn apply_updates_inside_map_conflicts() {
 
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(
-            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}}
-        )
+        &Into::<Value>::into(hashmap! {"favouriteBirds" => hashmap!{"wrens" => Primitive::Int(3)}})
     );
 
     assert_eq!(
@@ -258,8 +256,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::ScalarValue::Int(1)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => amp::ScalarValue::Int(3)}.into(),
+            actor1.op_id_at(1) => hashmap!{"blackbirds" => Primitive::Int(1)}.into(),
+            actor2.op_id_at(1) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
         }
     );
 
@@ -299,9 +297,7 @@ fn apply_updates_inside_map_conflicts() {
 
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(
-            hashmap! {"favouriteBirds" => hashmap!{"wrens" => amp::ScalarValue::Int(3)}}
-        )
+        &Into::<Value>::into(hashmap! {"favouriteBirds" => hashmap!{"wrens" => Primitive::Int(3)}})
     );
 
     assert_eq!(
@@ -309,8 +305,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => amp::ScalarValue::Int(2)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => amp::ScalarValue::Int(3)}.into(),
+            actor1.op_id_at(1) => hashmap!{"blackbirds" => Primitive::Int(2)}.into(),
+            actor2.op_id_at(1) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
         }
     );
 }
@@ -344,7 +340,7 @@ fn delete_keys_in_maps() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"magpies" => amp::ScalarValue::Int(2), "sparrows" => amp::ScalarValue::Int(15)}
+            hashmap! {"magpies" => Primitive::Int(2), "sparrows" => Primitive::Int(15)}
         )
     );
 
@@ -368,7 +364,7 @@ fn delete_keys_in_maps() {
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"sparrows" => amp::ScalarValue::Int(15)})
+        &Into::<Value>::into(hashmap! {"sparrows" => Primitive::Int(15)})
     );
 }
 
@@ -553,7 +549,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => amp::ScalarValue::Str("lapwing".to_string()), "numSeen" => amp::ScalarValue::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
         )
     );
 
@@ -563,12 +559,12 @@ fn apply_updates_inside_list_conflicts() {
             .unwrap(),
         hashmap! {
             actor1.op_id_at(2) => hashmap!{
-                "species" => amp::ScalarValue::Str("woodpecker".into()),
-                "numSeen" => amp::ScalarValue::Int(1),
+                "species" => Primitive::Str("woodpecker".into()),
+                "numSeen" => Primitive::Int(1),
             }.into(),
             actor2.op_id_at(2) => hashmap!{
-                "species" => amp::ScalarValue::Str("lapwing".into()),
-                "numSeen" => amp::ScalarValue::Int(2),
+                "species" => Primitive::Str("lapwing".into()),
+                "numSeen" => Primitive::Int(2),
             }.into(),
         }
     );
@@ -619,7 +615,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => amp::ScalarValue::Str("lapwing".to_string()), "numSeen" => amp::ScalarValue::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
         )
     );
 
@@ -629,12 +625,12 @@ fn apply_updates_inside_list_conflicts() {
             .unwrap(),
         hashmap! {
             actor1.op_id_at(2) => hashmap!{
-                "species" => amp::ScalarValue::Str("woodpecker".into()),
-                "numSeen" => amp::ScalarValue::Int(2),
+                "species" => Primitive::Str("woodpecker".into()),
+                "numSeen" => Primitive::Int(2),
             }.into(),
             actor2.op_id_at(2) => hashmap!{
-                "species" => amp::ScalarValue::Str("lapwing".into()),
-                "numSeen" => amp::ScalarValue::Int(2),
+                "species" => Primitive::Str("lapwing".into()),
+                "numSeen" => Primitive::Int(2),
             }.into(),
         }
     );
@@ -770,7 +766,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {
-            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::ScalarValue::Int(2)}),
+            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => Primitive::Int(2)}),
             "details" => vec![Into::<Value>::into(hashmap!{
                 "species" => "magpie",
                 "family" => "Corvidae",
@@ -828,7 +824,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {
-            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => amp::ScalarValue::Int(3)}),
+            "counts" => Into::<Value>::into(hashmap!{"magpie".to_string() => Primitive::Int(3)}),
             "details" => vec![Into::<Value>::into(hashmap!{
                 "species" => "Eurasian magpie",
                 "family" => "Corvidae",

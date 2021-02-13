@@ -17,7 +17,7 @@ fn test_delete_index_in_mutation() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("vals").index(0),
-                Value::Primitive("0".into()),
+                "0".into(),
             ))?;
             Ok(())
         })
@@ -27,7 +27,7 @@ fn test_delete_index_in_mutation() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("vals").index(1),
-                Value::Primitive("1".into()),
+                "1".into(),
             ))?;
             Ok(())
         })

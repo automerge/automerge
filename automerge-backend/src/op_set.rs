@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::convert::AsRef;
 use std::rc::Rc;
+use tracing::instrument;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order
@@ -82,6 +83,7 @@ impl OpSet {
         deps
     }
 
+    #[instrument(skip(self))]
     fn apply_op(
         &mut self,
         op: OpHandle,
@@ -93,6 +95,7 @@ impl OpSet {
         }
 
         if let InternalOpType::Set(amp::ScalarValue::Cursor(ref oid)) = op.op.action {
+            tracing::debug!(referred_opid=?oid, "Adding cursor");
             let internal_opid = actors.import_opid(oid);
             let mut target_found = false;
             for (obj_id, obj) in self.objs.iter() {
@@ -133,13 +136,17 @@ impl OpSet {
             let after = !ops.is_empty();
 
             let diff = match (before, after) {
-                (true, true) => Some(PendingDiff::Set(op.clone())),
+                (true, true) => {
+                    tracing::debug!("updating existing element");
+                    Some(PendingDiff::Set(op.clone()))
+                }
                 (true, false) => {
                     let opid = op
                         .operation_key()
                         .to_opid()
                         .ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.seq.remove_key(&opid).unwrap();
+                    tracing::debug!(opid=?opid, index=%index, "deleting element");
                     Some(PendingDiff::SeqRemove(op.clone(), index))
                 }
                 (false, true) => {
@@ -148,6 +155,7 @@ impl OpSet {
                         .to_opid()
                         .ok_or(AutomergeError::HeadToOpID)?;
                     let index = object.index_of(id).unwrap_or(0);
+                    tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
                     Some(PendingDiff::SeqInsert(op.clone(), index, op.id))
                 }
@@ -165,8 +173,10 @@ impl OpSet {
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
+                tracing::debug!(overwritten_ops=?overwritten_ops, "setting new value");
                 (Some(PendingDiff::Set(op)), overwritten_ops)
             } else {
+                tracing::debug!(overwritten_ops=?overwritten_ops, "deleting value");
                 (None, overwritten_ops)
             }
         };
@@ -225,7 +235,8 @@ impl OpSet {
                     if let Some(child_id) = op.child() {
                         opid_to_value.insert(amp_opid, self.construct_object(&child_id, actors)?);
                     } else {
-                        opid_to_value.insert(amp_opid, (&op.adjusted_value()).into());
+                        opid_to_value
+                            .insert(amp_opid, self.gen_value_diff(op, &op.adjusted_value()));
                     }
                 }
                 props.insert(actors.key_to_string(key), opid_to_value);
@@ -265,7 +276,8 @@ impl OpSet {
                             opid_to_value
                                 .insert(amp_opid, self.construct_object(&child_id, actors)?);
                         } else {
-                            opid_to_value.insert(amp_opid, (&op.adjusted_value()).into());
+                            opid_to_value
+                                .insert(amp_opid, self.gen_value_diff(op, &op.adjusted_value()));
                         }
                     }
                     props.insert(index, opid_to_value);
@@ -471,7 +483,7 @@ impl OpSet {
                 amp::Diff::Cursor(amp::CursorDiff {
                     object_id: cursor_state.referred_object_id.clone(),
                     index: cursor_state.index as u32,
-                    elem_id: oid.into(),
+                    elem_id: oid.clone(),
                 })
             }
             _ => op.adjusted_value().into(),

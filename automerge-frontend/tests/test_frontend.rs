@@ -1,4 +1,4 @@
-use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
+use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::convert::TryInto;
@@ -47,7 +47,7 @@ fn test_set_root_object_properties() {
         .change::<_, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
-                Value::Primitive(amp::ScalarValue::Str("magpie".to_string())),
+                Value::Primitive(Primitive::Str("magpie".to_string())),
             ))?;
             Ok(())
         })
@@ -151,7 +151,7 @@ fn apply_updates_inside_nested_maps() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").key("sparrows"),
-                Value::Primitive(amp::ScalarValue::F64(15.0)),
+                Value::Primitive(Primitive::F64(15.0)),
             ))?;
             Ok(())
         })
@@ -272,7 +272,7 @@ fn create_lists() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
-                "chaffinch".into(),
+                "chaffinch",
             ))?;
             Ok(())
         })
@@ -336,7 +336,7 @@ fn apply_updates_inside_lists() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
-                "greenfinch".into(),
+                "greenfinch",
             ))?;
             Ok(())
         })
@@ -380,7 +380,7 @@ fn delete_list_elements() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                vec!["chaffinch", "goldfinch"].into(),
+                vec!["chaffinch", "goldfinch"],
             ))?;
             Ok(())
         })
@@ -432,7 +432,7 @@ fn handle_counters_inside_maps() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("wrens"),
-                Value::Primitive(amp::ScalarValue::Counter(0)),
+                Value::Primitive(Primitive::Counter(0)),
             ))?;
             Ok(())
         })
@@ -453,7 +453,7 @@ fn handle_counters_inside_maps() {
         state_after_first_change,
         Value::Map(
             hashmap! {
-                "wrens".into() => Value::Primitive(amp::ScalarValue::Counter(0))
+                "wrens".into() => Value::Primitive(Primitive::Counter(0))
             },
             amp::MapType::Map
         )
@@ -463,7 +463,7 @@ fn handle_counters_inside_maps() {
         state_after_second_change,
         Value::Map(
             hashmap! {
-                "wrens".into() => Value::Primitive(amp::ScalarValue::Counter(1))
+                "wrens".into() => Value::Primitive(Primitive::Counter(1))
             },
             amp::MapType::Map
         )
@@ -515,7 +515,7 @@ fn handle_counters_inside_lists() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("counts"),
-                vec![Value::Primitive(amp::ScalarValue::Counter(1))].into(),
+                vec![Value::Primitive(Primitive::Counter(1))],
             ))?;
             Ok(())
         })
@@ -539,7 +539,7 @@ fn handle_counters_inside_lists() {
         state_after_first_change,
         Value::Map(
             hashmap! {
-                "counts".into() => vec![Value::Primitive(amp::ScalarValue::Counter(1))].into()
+                "counts".into() => vec![Value::Primitive(Primitive::Counter(1))].into()
             },
             amp::MapType::Map
         )
@@ -549,7 +549,7 @@ fn handle_counters_inside_lists() {
         state_after_second_change,
         Value::Map(
             hashmap! {
-                "counts".into() => vec![Value::Primitive(amp::ScalarValue::Counter(3))].into()
+                "counts".into() => vec![Value::Primitive(Primitive::Counter(3))].into()
             },
             amp::MapType::Map
         )
@@ -611,7 +611,7 @@ fn refuse_to_overwrite_counter_value() {
     doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
-            Value::Primitive(amp::ScalarValue::Counter(1)),
+            Value::Primitive(Primitive::Counter(1)),
         ))?;
         Ok(())
     })
@@ -621,7 +621,7 @@ fn refuse_to_overwrite_counter_value() {
     let result = doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
-            Value::Primitive("somethingelse".into()),
+            "somethingelse",
         ))?;
         Ok(())
     });
@@ -649,10 +649,7 @@ fn test_sets_characters_in_text() {
 
     let request = doc
         .change::<_, InvalidChangeRequest>(None, |doc| {
-            doc.add_change(LocalChange::set(
-                Path::root().key("text").index(1),
-                Value::Primitive("a".into()),
-            ))?;
+            doc.add_change(LocalChange::set(Path::root().key("text").index(1), "a"))?;
             Ok(())
         })
         .unwrap()
@@ -706,7 +703,7 @@ fn test_inserts_characters_in_text() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("text").index(1),
-                Value::Primitive("h".into()),
+                "h".into(),
             ))?;
             Ok(())
         })
@@ -761,7 +758,7 @@ fn test_inserts_characters_at_start_of_text() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("text").index(0),
-                Value::Primitive("i".into()),
+                "i".into(),
             ))?;
             Ok(())
         })

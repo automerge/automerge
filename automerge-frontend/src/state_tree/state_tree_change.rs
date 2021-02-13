@@ -1,97 +1,73 @@
-use super::StateTreeComposite;
+use super::{Cursors, StateTreeComposite};
 use automerge_protocol as amp;
+use std::ops::{Add, AddAssign};
 
-/// Represents a change to the state tree. This is used to represent values which have changed
-/// (the type T usually ends up being either a MultiValue or a StateTreeComposite) along with
-/// changes that need to be made to indexes maintained by the state tree (the object id -> object
-/// value index for example).
 #[derive(Clone)]
-pub struct StateTreeChange<T> {
-    value: T,
-    index_updates: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
+pub struct StateTreeChange {
+    objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+    new_cursors: Cursors,
 }
 
-impl<T> StateTreeChange<T> {
-    pub(super) fn pure(value: T) -> StateTreeChange<T> {
+impl StateTreeChange {
+    pub(super) fn empty() -> StateTreeChange {
         StateTreeChange {
-            value,
-            index_updates: None,
+            objects: im_rc::HashMap::new(),
+            new_cursors: Cursors::new(),
         }
     }
 
-    pub(super) fn value(&self) -> &T {
-        &self.value
-    }
-
-    pub(super) fn index_updates(
-        &self,
-    ) -> Option<&im_rc::HashMap<amp::ObjectID, StateTreeComposite>> {
-        self.index_updates.as_ref()
-    }
-
-    pub(super) fn map<F, G>(self, f: F) -> StateTreeChange<G>
-    where
-        F: FnOnce(T) -> G,
-    {
+    pub(super) fn single(object_id: amp::ObjectID, object: StateTreeComposite) -> StateTreeChange {
         StateTreeChange {
-            value: f(self.value),
-            index_updates: self.index_updates,
+            objects: im_rc::hashmap! {object_id => object},
+            new_cursors: Cursors::new(),
         }
     }
 
-    pub(super) fn fallible_map<F, G, E>(self, f: F) -> Result<StateTreeChange<G>, E>
-    where
-        F: FnOnce(T) -> Result<G, E>,
-    {
-        Ok(StateTreeChange {
-            value: f(self.value)?,
-            index_updates: self.index_updates,
-        })
-    }
-
-    pub(super) fn and_then<F, G>(self, f: F) -> StateTreeChange<G>
-    where
-        F: FnOnce(T) -> StateTreeChange<G>,
-    {
-        let diff = f(self.value);
-        let index_updates = Self::merge_updates(self.index_updates, diff.index_updates);
+    pub(super) fn from_updates(
+        objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+    ) -> StateTreeChange {
         StateTreeChange {
-            value: diff.value,
-            index_updates,
+            objects,
+            new_cursors: Cursors::new(),
         }
     }
 
-    pub(super) fn fallible_and_then<F, G, E>(self, f: F) -> Result<StateTreeChange<G>, E>
-    where
-        F: FnOnce(T) -> Result<StateTreeChange<G>, E>,
-    {
-        let diff = f(self.value)?;
-        let updates = Self::merge_updates(self.index_updates, diff.index_updates);
-        Ok(StateTreeChange {
-            value: diff.value,
-            index_updates: updates,
-        })
+    pub(super) fn with_cursors(mut self, cursors: Cursors) -> StateTreeChange {
+        self.new_cursors = cursors.union(self.new_cursors);
+        self
     }
 
-    pub(super) fn with_updates(
-        self,
-        updates: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
-    ) -> StateTreeChange<T> {
+    pub(super) fn objects(&self) -> im_rc::HashMap<amp::ObjectID, StateTreeComposite> {
+        self.objects.clone()
+    }
+
+    pub(super) fn new_cursors(&self) -> Cursors {
+        self.new_cursors.clone()
+    }
+}
+
+impl Add for &StateTreeChange {
+    type Output = StateTreeChange;
+
+    fn add(self, rhs: &StateTreeChange) -> Self::Output {
         StateTreeChange {
-            value: self.value,
-            index_updates: Self::merge_updates(self.index_updates, updates),
+            objects: self.objects.clone().union(rhs.objects.clone()),
+            new_cursors: self.new_cursors.clone().union(rhs.new_cursors.clone()),
         }
     }
+}
 
-    fn merge_updates(
-        before: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
-        after: Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>>,
-    ) -> Option<im_rc::HashMap<amp::ObjectID, StateTreeComposite>> {
-        match (before, after) {
-            (Some(before), Some(after)) => Some(after.union(before)),
-            (Some(before), None) => Some(before),
-            (None, Some(after)) => Some(after),
-            (None, None) => None,
-        }
+impl Add for StateTreeChange {
+    type Output = StateTreeChange;
+
+    fn add(self, rhs: StateTreeChange) -> Self::Output {
+        &self + &rhs
+    }
+}
+
+impl AddAssign for StateTreeChange {
+    fn add_assign(&mut self, rhs: StateTreeChange) {
+        self.objects = self.objects.clone().union(rhs.objects);
+        self.new_cursors = self.new_cursors.clone().union(rhs.new_cursors);
     }
 }

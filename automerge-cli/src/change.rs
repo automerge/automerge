@@ -223,7 +223,7 @@ mod tests {
                 input: "set $[\"map\"][0] {\"some\": \"value\"}",
                 expected: amf::LocalChange::set(
                     amf::Path::root().key("map").index(0),
-                    hashmap! {"some" => "value"}.into(),
+                    amf::Value::from(hashmap! {"some" => "value"}),
                 ),
             },
             Scenario {

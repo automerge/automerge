@@ -108,7 +108,7 @@ impl<'de> Deserialize<'de> for Diff {
                             let index = index.ok_or_else(|| Error::missing_field("index"))?;
                             Ok(Diff::Cursor(CursorDiff {
                                 object_id: ref_object_id,
-                                elem_id: elem_id.into(),
+                                elem_id,
                                 index,
                             }))
                         }

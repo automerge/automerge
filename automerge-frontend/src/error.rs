@@ -80,6 +80,8 @@ pub enum InvalidPatch {
     DiffCreatedObjectWithNoValue,
     #[error("The patch contained a diff with a list edit which referenced the '_head' of a list, rather than a specific element ID")]
     DiffEditWithHeadElemID,
+    #[error("Value diff containing cursor")]
+    ValueDiffContainedCursor,
 }
 
 #[derive(Error, Debug, PartialEq)]

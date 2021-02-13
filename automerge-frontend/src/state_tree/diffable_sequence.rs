@@ -1,58 +1,65 @@
-use super::{MultiChar, MultiValue, StateTreeChange};
+use super::{DiffApplicationResult, DiffToApply, MultiChar, MultiValue, StateTreeChange};
 use crate::error::InvalidPatch;
 use automerge_protocol as amp;
 use std::collections::HashMap;
 
 pub(super) trait DiffableValue: Sized {
-    fn construct(
-        parent_object_id: &amp::ObjectID,
+    fn construct<K>(
         opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch>;
-    fn apply_diff(
-        &self,
-        parent_object_id: &amp::ObjectID,
-        opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch>;
-    fn apply_diff_iter<'a, 'b, I>(
-        &'a self,
-        parent_object_id: &amp::ObjectID,
-        diff: &mut I,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch>
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpID, &'b amp::Diff)>;
+        K: Into<amp::Key>;
+    fn apply_diff<K>(
+        &self,
+        opid: &amp::OpID,
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>;
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
+        &'a self,
+        diff: &mut I,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>;
     fn default_opid(&self) -> amp::OpID;
 }
 
 impl DiffableValue for MultiChar {
-    fn construct(
-        parent_object_id: &amp::ObjectID,
+    fn construct<K>(
         opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch> {
-        let c = MultiChar::new_from_diff(parent_object_id, opid, diff)?;
-        Ok(StateTreeChange::pure(c))
-    }
-
-    fn apply_diff(
-        &self,
-        parent_object_id: &amp::ObjectID,
-        opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch> {
-        MultiChar::apply_diff(self, parent_object_id, opid, diff).map(StateTreeChange::pure)
-    }
-
-    fn apply_diff_iter<'a, 'b, I>(
-        &'a self,
-        parent_object_id: &amp::ObjectID,
-        diff: &mut I,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch>
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpID, &'b amp::Diff)>,
+        K: Into<amp::Key>,
     {
-        MultiChar::apply_diff_iter(self, parent_object_id, diff)
+        let c = MultiChar::new_from_diff(opid, diff)?;
+        Ok(DiffApplicationResult::pure(c))
+    }
+
+    fn apply_diff<K>(
+        &self,
+        opid: &amp::OpID,
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+    {
+        MultiChar::apply_diff(self, opid, diff).map(DiffApplicationResult::pure)
+    }
+
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
+        &'a self,
+        diff: &mut I,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
+    {
+        self.apply_diff_iter(diff)
+        //MultiChar::apply_diff_iter(self, diff)
     }
 
     fn default_opid(&self) -> amp::OpID {
@@ -61,30 +68,34 @@ impl DiffableValue for MultiChar {
 }
 
 impl DiffableValue for MultiValue {
-    fn construct(
-        _parent_object_id: &amp::ObjectID,
+    fn construct<K>(
         opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch> {
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+    {
         MultiValue::new_from_diff(opid.clone(), diff)
     }
 
-    fn apply_diff(
+    fn apply_diff<K>(
         &self,
-        _parent_object_id: &amp::ObjectID,
         opid: &amp::OpID,
-        diff: &amp::Diff,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch> {
+        diff: DiffToApply<K, &amp::Diff>,
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+    {
         self.apply_diff(opid, diff)
     }
 
-    fn apply_diff_iter<'a, 'b, I>(
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a self,
-        _parent_object_id: &amp::ObjectID,
         diff: &mut I,
-    ) -> Result<StateTreeChange<Self>, InvalidPatch>
+    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpID, &'b amp::Diff)>,
+        K: Into<amp::Key>,
+        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         self.apply_diff_iter(diff)
     }
@@ -129,12 +140,15 @@ where
         }
     }
 
-    pub fn apply_diff(
+    pub fn apply_diff<K>(
         &self,
         object_id: &amp::ObjectID,
         edits: &[amp::DiffEdit],
-        new_props: &HashMap<usize, HashMap<amp::OpID, amp::Diff>>,
-    ) -> Result<StateTreeChange<DiffableSequence<T>>, InvalidPatch> {
+        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpID, amp::Diff>>>,
+    ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch>
+    where
+        K: Into<amp::Key>,
+    {
         let mut new_underlying = self.underlying.clone();
         for edit in edits.iter() {
             match edit {
@@ -160,60 +174,79 @@ where
                 }
             };
         }
-        let init_changed_props = Ok(StateTreeChange::pure(new_underlying));
-        let updated = new_props.iter().fold(
-            init_changed_props,
-            move |changes_so_far, (index, prop_diff)| {
-                let mut diff_iter = prop_diff.iter();
-                match diff_iter.next() {
-                    None => changes_so_far.map(|cr| {
-                        cr.map(|c| {
-                            let mut result = c;
-                            result.remove(*index);
-                            result
-                        })
-                    }),
-                    Some((opid, diff)) => {
-                        changes_so_far?.fallible_and_then(move |mut changes_so_far| {
-                            let mut node = match changes_so_far.get(*index) {
-                                Some((_, Some(n))) => n.apply_diff(object_id, opid, diff)?,
-                                Some((_, None)) => T::construct(object_id, opid, diff)?,
-                                None => {
-                                    return Err(InvalidPatch::InvalidIndex {
-                                        object_id: object_id.clone(),
-                                        index: *index,
-                                    })
-                                }
-                            };
-                            node = node.fallible_and_then(move |n| {
-                                n.apply_diff_iter(object_id, &mut diff_iter)
-                            })?;
-                            Ok(node.map(move |n| {
-                                let mut focus = changes_so_far.focus_mut();
-                                focus.set(*index, (n.default_opid(), Some(n)));
-                                changes_so_far
-                            }))
-                        })
-                    }
+        let mut changes = StateTreeChange::empty();
+        for (index, prop_diff) in new_props.diff.iter() {
+            let mut diff_iter = prop_diff.iter();
+            match diff_iter.next() {
+                None => {
+                    new_underlying.remove(*index);
                 }
-            },
-        )?;
+                Some((opid, diff)) => {
+                    let current_objects =
+                        changes.objects().union(new_props.current_objects.clone());
+                    let entry = new_underlying.get_mut(*index);
+                    match entry {
+                        Some(e) => {
+                            let mut updated_node = match e {
+                                (_, Some(n)) => n.apply_diff(
+                                    opid,
+                                    DiffToApply {
+                                        current_objects: current_objects.clone(),
+                                        parent_object_id: object_id,
+                                        parent_key: opid,
+                                        diff,
+                                    },
+                                )?,
+                                (_, None) => T::construct(
+                                    opid,
+                                    DiffToApply {
+                                        current_objects: current_objects.clone(),
+                                        parent_object_id: object_id,
+                                        parent_key: opid,
+                                        diff,
+                                    },
+                                )?,
+                            };
+                            let mut diffiter2 = diff_iter.map(|(oid, diff)| {
+                                (
+                                    oid,
+                                    DiffToApply {
+                                        current_objects: current_objects.clone(),
+                                        parent_object_id: object_id,
+                                        parent_key: oid,
+                                        diff,
+                                    },
+                                )
+                            });
+                            updated_node = updated_node
+                                .try_and_then(move |n| n.apply_diff_iter(&mut diffiter2))?;
+                            changes += updated_node.change;
+                            e.1 = Some(updated_node.value);
+                        }
+                        None => {
+                            return Err(InvalidPatch::InvalidIndex {
+                                object_id: object_id.clone(),
+                                index: *index,
+                            })
+                        }
+                    };
+                }
+            };
+        }
         //This is where we maintain the invariant that allows us to provide an iterator over T
         //rather than Option<T>
-        updated.fallible_and_then(move |new_elements_and_opids| {
-            for (index, (_, maybe_elem)) in new_elements_and_opids.iter().enumerate() {
-                if maybe_elem.is_none() {
-                    return Err(InvalidPatch::InvalidIndex {
-                        object_id: object_id.clone(),
-                        index,
-                    });
-                }
+        for (index, (_, maybe_elem)) in new_underlying.iter().enumerate() {
+            if maybe_elem.is_none() {
+                return Err(InvalidPatch::InvalidIndex {
+                    object_id: object_id.clone(),
+                    index,
+                });
             }
-            let new_sequence = DiffableSequence {
-                underlying: new_elements_and_opids,
-            };
-            Ok(StateTreeChange::pure(new_sequence))
-        })
+        }
+        let new_sequence = DiffableSequence {
+            underlying: new_underlying,
+        };
+        Ok(DiffApplicationResult::pure(new_sequence).with_changes(changes))
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -243,13 +276,19 @@ where
             .insert(index, (value.default_opid(), Some(value)))
     }
 
+    pub(super) fn mutate<F>(&mut self, index: usize, f: F)
+    where
+        F: FnOnce(T) -> T,
+    {
+        if let Some(entry) = self.underlying.get_mut(index) {
+            if let Some(v) = entry.1.take() {
+                entry.1 = Some(f(v));
+            }
+        }
+    }
+
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
         self.underlying.iter().map(|(_, v)| v.as_ref().unwrap())
-    }
-
-    pub(super) fn push_back(&mut self, value: T) {
-        self.underlying
-            .push_back((value.default_opid(), Some(value)))
     }
 }

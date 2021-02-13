@@ -17,24 +17,88 @@ pub enum Value {
     Map(HashMap<String, Value>, amp::MapType),
     Sequence(Vec<Value>),
     Text(Vec<char>),
-    Primitive(amp::ScalarValue),
+    Primitive(Primitive),
 }
 
-impl From<amp::ScalarValue> for Value {
-    fn from(val: amp::ScalarValue) -> Self {
-        Value::Primitive(val)
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub enum Primitive {
+    Str(String),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    F32(f32),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Cursor(Cursor),
+    Null,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Cursor {
+    pub index: u32,
+    pub(crate) object: amp::ObjectID,
+    pub(crate) elem_opid: amp::OpID,
+}
+
+impl Cursor {
+    pub fn new(index: u32, obj: amp::ObjectID, op: amp::OpID) -> Cursor {
+        Cursor {
+            index,
+            object: obj,
+            elem_opid: op,
+        }
     }
 }
 
-impl From<&amp::ScalarValue> for Value {
-    fn from(val: &amp::ScalarValue) -> Self {
-        val.clone().into()
+impl From<Cursor> for Value {
+    fn from(c: Cursor) -> Self {
+        Value::Primitive(Primitive::Cursor(c))
+    }
+}
+
+impl Into<amp::ScalarValue> for &Primitive {
+    fn into(self) -> amp::ScalarValue {
+        match self {
+            Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
+            Primitive::Int(i) => amp::ScalarValue::Int(*i),
+            Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
+            Primitive::F64(f) => amp::ScalarValue::F64(*f),
+            Primitive::F32(f) => amp::ScalarValue::F32(*f),
+            Primitive::Counter(i) => amp::ScalarValue::Counter(*i),
+            Primitive::Timestamp(i) => amp::ScalarValue::Timestamp(*i),
+            Primitive::Boolean(b) => amp::ScalarValue::Boolean(*b),
+            Primitive::Null => amp::ScalarValue::Null,
+            Primitive::Cursor(c) => amp::ScalarValue::Cursor(c.elem_opid.clone()),
+        }
+    }
+}
+
+impl From<Primitive> for Value {
+    fn from(p: Primitive) -> Self {
+        Value::Primitive(p)
     }
 }
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::Primitive(amp::ScalarValue::Str(s.to_string()))
+        Value::Primitive(Primitive::Str(s.to_string()))
+    }
+}
+
+impl From<&amp::CursorDiff> for Primitive {
+    fn from(diff: &amp::CursorDiff) -> Self {
+        Primitive::Cursor(Cursor {
+            index: diff.index,
+            object: diff.object_id.clone(),
+            elem_opid: diff.elem_id.clone(),
+        })
+    }
+}
+
+impl From<char> for Value {
+    fn from(c: char) -> Value {
+        Value::Primitive(Primitive::Str(c.to_string()))
     }
 }
 
@@ -44,6 +108,12 @@ where
 {
     fn from(v: Vec<T>) -> Self {
         Value::Sequence(v.into_iter().map(|t| t.into()).collect())
+    }
+}
+
+impl From<i64> for Value {
+    fn from(v: i64) -> Self {
+        Value::Primitive(Primitive::Int(v))
     }
 }
 
@@ -75,12 +145,12 @@ impl Value {
             serde_json::Value::Array(vs) => {
                 Value::Sequence(vs.iter().map(Value::from_json).collect())
             }
-            serde_json::Value::String(s) => Value::Primitive(amp::ScalarValue::Str(s.clone())),
+            serde_json::Value::String(s) => Value::Primitive(Primitive::Str(s.clone())),
             serde_json::Value::Number(n) => {
-                Value::Primitive(amp::ScalarValue::F64(n.as_f64().unwrap_or(0.0)))
+                Value::Primitive(Primitive::F64(n.as_f64().unwrap_or(0.0)))
             }
-            serde_json::Value::Bool(b) => Value::Primitive(amp::ScalarValue::Boolean(*b)),
-            serde_json::Value::Null => Value::Primitive(amp::ScalarValue::Null),
+            serde_json::Value::Bool(b) => Value::Primitive(Primitive::Boolean(*b)),
+            serde_json::Value::Null => Value::Primitive(Primitive::Null),
         }
     }
 
@@ -96,27 +166,23 @@ impl Value {
             }
             Value::Text(chars) => serde_json::Value::String(chars.iter().collect()),
             Value::Primitive(v) => match v {
-                amp::ScalarValue::F64(n) => serde_json::Value::Number(
+                Primitive::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amp::ScalarValue::F32(n) => serde_json::Value::Number(
+                Primitive::F32(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(f64::from(*n))
                         .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
-                amp::ScalarValue::Uint(n) => {
-                    serde_json::Value::Number(serde_json::Number::from(*n))
+                Primitive::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                Primitive::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                Primitive::Str(s) => serde_json::Value::String(s.to_string()),
+                Primitive::Boolean(b) => serde_json::Value::Bool(*b),
+                Primitive::Counter(c) => serde_json::Value::Number(serde_json::Number::from(*c)),
+                Primitive::Timestamp(t) => serde_json::Value::Number(serde_json::Number::from(*t)),
+                Primitive::Null => serde_json::Value::Null,
+                Primitive::Cursor(c) => {
+                    serde_json::Value::Number(serde_json::Number::from(c.index))
                 }
-                amp::ScalarValue::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
-                amp::ScalarValue::Str(s) => serde_json::Value::String(s.to_string()),
-                amp::ScalarValue::Boolean(b) => serde_json::Value::Bool(*b),
-                amp::ScalarValue::Counter(c) => {
-                    serde_json::Value::Number(serde_json::Number::from(*c))
-                }
-                amp::ScalarValue::Timestamp(t) => {
-                    serde_json::Value::Number(serde_json::Number::from(*t))
-                }
-                amp::ScalarValue::Null => serde_json::Value::Null,
-                amp::ScalarValue::Cursor(eid) => eid.to_string().into(),
             },
         }
     }
@@ -230,7 +296,7 @@ pub(crate) fn value_to_op_requests(
         }
         Value::Primitive(prim_value) => {
             let ops = vec![amp::Op {
-                action: amp::OpType::Set(prim_value.clone()),
+                action: amp::OpType::Set(prim_value.into()),
                 obj: parent_object,
                 key: key.clone(),
                 insert,

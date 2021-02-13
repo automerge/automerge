@@ -20,6 +20,8 @@ im-rc = "15.0.0"
 automerge-backend = { path = "../automerge-backend" }
 criterion = "0.3.3"
 rand = "0.8.2"
+env_logger = "0.8.3"
+log = "0.4.14"
 
 [[bench]]
 name = "statetree_apply_diff"

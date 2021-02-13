@@ -1001,7 +1001,7 @@ fn test_cursor_objects() {
                 "cursor".into() => hashmap!{
                     actor.op_id_at(3) => Diff::Cursor(CursorDiff{
                         object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(2).into(),
+                        elem_id: actor.op_id_at(2),
                         index: 0,
                     }),
                 },
@@ -1128,7 +1128,7 @@ fn test_updating_sequences_updates_referring_cursors() {
                 "cursor".into() => hashmap!{
                     actor.op_id_at(3) => Diff::Cursor(CursorDiff{
                         object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(2).into(),
+                        elem_id: actor.op_id_at(2),
                         index: 1,
                     }),
                 },
@@ -1226,7 +1226,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
                 "cursor".into() => hashmap!{
                     actor.op_id_at(4) => Diff::Cursor(CursorDiff{
                         object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(3).into(),
+                        elem_id: actor.op_id_at(3),
                         index: 0,
                     }),
                 },

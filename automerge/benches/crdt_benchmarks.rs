@@ -1,5 +1,4 @@
-use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Value};
-use automerge_protocol as amp;
+use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
@@ -49,7 +48,7 @@ pub fn b1_1(c: &mut Criterion) {
                             .change::<_, InvalidChangeRequest>(None, |d| {
                                 d.add_change(LocalChange::insert(
                                     Path::root().key("text").index(index),
-                                    Value::Primitive(c.into()),
+                                    c.into(),
                                 ))?;
                                 Ok(())
                             })
@@ -167,7 +166,7 @@ pub fn b3_1(c: &mut Criterion) {
                             .change(None, |d| {
                                 d.add_change(LocalChange::set(
                                     Path::root().key("map").key("v"),
-                                    Value::Primitive(amp::ScalarValue::Int(index as i64 + 1)),
+                                    Value::Primitive(Primitive::Int(index as i64 + 1)),
                                 ))
                             })
                             .unwrap()

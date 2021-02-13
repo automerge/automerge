@@ -50,7 +50,7 @@ impl ObjState {
         self.following.get(parent).cloned().unwrap_or_default()
     }
 
-    // this is the efficient way to do it for a SkipList
+    #[tracing::instrument(skip(self))]
     pub fn index_of(&self, id: OpID) -> Option<usize> {
         let mut prev_id = id.into();
         let mut index = None;
@@ -63,7 +63,7 @@ impl ObjState {
             match prev_id {
                 ElementID::ID(id) => {
                     // FIXME maybe I can speed this up with self.props.get before looking for
-                    index = self.seq.index_of(&id)
+                    index = self.seq.index_of(&id);
                 }
                 ElementID::Head => return None,
             }

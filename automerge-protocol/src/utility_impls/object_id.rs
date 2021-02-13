@@ -27,6 +27,12 @@ impl From<&OpID> for ObjectID {
     }
 }
 
+impl From<&ObjectID> for ObjectID {
+    fn from(o: &ObjectID) -> Self {
+        o.clone()
+    }
+}
+
 impl FromStr for ObjectID {
     type Err = InvalidObjectID;
 

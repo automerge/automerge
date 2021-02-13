@@ -1,5 +1,7 @@
 use automerge_backend::Backend;
-use automerge_frontend::{Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Value};
+use automerge_frontend::{
+    Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Primitive, Value,
+};
 use automerge_protocol as amp;
 use maplit::hashmap;
 
@@ -45,7 +47,7 @@ fn use_version_and_sequence_number_from_backend() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                Value::Primitive(amp::ScalarValue::Int(1)),
+                Value::Primitive(Primitive::Int(1)),
             ))?;
             Ok(())
         })
@@ -82,7 +84,7 @@ fn remove_pending_requests_once_handled() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::ScalarValue::Int(24).into(),
+                Primitive::Int(24),
             ))?;
             Ok(())
         })
@@ -93,7 +95,7 @@ fn remove_pending_requests_once_handled() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
-                amp::ScalarValue::Int(1).into(),
+                Primitive::Int(1),
             ))?;
             Ok(())
         })
@@ -129,8 +131,8 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::ScalarValue::Int(24),
-            "partridges".to_string() => amp::ScalarValue::Int(1),
+            "blackbirds".to_string() => Primitive::Int(24),
+            "partridges".to_string() => Primitive::Int(1),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![2]);
@@ -164,8 +166,8 @@ fn remove_pending_requests_once_handled() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::ScalarValue::Int(24),
-            "partridges".to_string() => amp::ScalarValue::Int(1),
+            "blackbirds".to_string() => Primitive::Int(24),
+            "partridges".to_string() => Primitive::Int(1),
         })
     );
 
@@ -182,7 +184,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::ScalarValue::Int(24).into(),
+                Primitive::Int(24),
             ))?;
             Ok(())
         })
@@ -218,7 +220,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::ScalarValue::Int(24),
+            "blackbirds".to_string() => Primitive::Int(24),
         })
     );
     assert_eq!(doc.in_flight_requests(), vec![1]);
@@ -251,8 +253,8 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     assert_eq!(
         doc.state(),
         &Into::<Value>::into(hashmap! {
-            "blackbirds".to_string() => amp::ScalarValue::Int(24),
-            "pheasants".to_string() => amp::ScalarValue::Int(2),
+            "blackbirds".to_string() => Primitive::Int(24),
+            "pheasants".to_string() => Primitive::Int(2),
         })
     );
 
@@ -267,7 +269,7 @@ fn dont_allow_out_of_order_request_patches() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
-                amp::ScalarValue::Int(24).into(),
+                Primitive::Int(24),
             ))?;
             Ok(())
         })
@@ -309,7 +311,7 @@ fn handle_concurrent_insertions_into_lists() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                vec!["goldfinch"].into(),
+                vec!["goldfinch"],
             ))?;
             Ok(())
         })
@@ -473,7 +475,7 @@ fn allow_interleaving_of_patches_and_changes() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::Int(1).into(),
+                Primitive::Int(1),
             ))?;
             Ok(())
         })
@@ -484,7 +486,7 @@ fn allow_interleaving_of_patches_and_changes() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::Int(2).into(),
+                Primitive::Int(2),
             ))?;
             Ok(())
         })
@@ -541,7 +543,7 @@ fn allow_interleaving_of_patches_and_changes() {
         .change::<_, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::Int(3).into(),
+                Primitive::Int(3),
             ))?;
             Ok(())
         })
@@ -611,8 +613,7 @@ fn allow_interleaving_of_patches_and_changes() {
 #[test]
 fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     let (doc, change1) =
-        Frontend::new_with_initial_state(hashmap! {"number" => amp::ScalarValue::from(1)}.into())
-            .unwrap();
+        Frontend::new_with_initial_state(hashmap! {"number" => Primitive::Int(1)}.into()).unwrap();
 
     let mut backend1 = Backend::init();
     let (_, binchange1) = backend1.apply_local_change(change1).unwrap();
@@ -626,7 +627,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::from(2).into(),
+                Primitive::Int(2),
             ))?;
             Ok(())
         })
@@ -637,7 +638,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::from(3).into(),
+                Primitive::Int(3),
             ))?;
             Ok(())
         })
@@ -697,7 +698,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
-                amp::ScalarValue::from(4).into(),
+                Primitive::Int(4),
             ))?;
             Ok(())
         })
