@@ -2,7 +2,6 @@ language: rust
 rust:
 - stable
 - beta
-cache: cargo
 before_script:
 - rustup self update
 - rustup component add clippy 
