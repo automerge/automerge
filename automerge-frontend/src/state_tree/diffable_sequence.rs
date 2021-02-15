@@ -227,9 +227,10 @@ where
 
     pub(super) fn update(&self, index: usize, value: T) -> Self {
         DiffableSequence {
-            underlying: Box::new(self
-                .underlying
-                .update(index, (value.default_opid(), Some(value)))),
+            underlying: Box::new(
+                self.underlying
+                    .update(index, (value.default_opid(), Some(value))),
+            ),
         }
     }
 
