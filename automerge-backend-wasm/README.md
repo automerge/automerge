@@ -1,25 +1,22 @@
 ## automerge-backend-wasm
 
-This is a wrapper for the rust implementation of [automerge-backend](https://github.com/automerge/automerge-rs/tree/master/automerge-backend).
-It is currently experimental and in development against the Automerge performance branch.  
+This is a wrapper for the rust implementation of [automerge-backend](https://github.com/automerge/automerge-rs/tree/master/automerge-backend) to be used with [Automerge](https://github.com/automerge/automerge).
 
-### building
+### Using
 
-Make sure you have the latest rust compiler installed  (1.42.0 or later).
+You can require this syncronously as a CommonJS module or import it as a ES6 module
 
-```sh
-cargo install wasm-pack
-yarn install
+```js
+let Automerge = require("automerge")
+let Backend = require("automerge-backend-wasm")
+Automerge.setDefaultBackend(Backend)
 ```
 
-Then build the debug version with
-
-```sh
-yarn build
+```js
+import * as Automerge from "automerge"
+import * as Backend from "automerge-backend-wasm"
+Automerge.setDefaultBackend(Backend)
 ```
-or the release build with 
 
-```sh
-yarn release
-```
+Note that the first uses a syncronous filesystem load of the wasm and will not be transferable to a browser bundle.  The second uses ES6 wasm import statements which should work in all modern browsers but require a '--experimental-wasm-modules' flag on nodejs (v13 on) unless you pack/bundle the code into compatible format.
 

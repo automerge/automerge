@@ -1,0 +1,35 @@
+{
+  "name": "automerge-backend-wasm",
+  "collaborators": [
+    "Alex Good <alex@memoryandthought.me>",
+    "Orion Henry <orion@inkandswitch.com>",
+    "Martin Kleppmann"
+  ],
+  "description": "A js/wasm wrapper for the rust implementation of automerge-backend",
+  "version": "0.1.4",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/automerge/automerge-rs"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "cjs/index_bg.wasm",
+    "cjs/index.js",
+    "mjs/package.json",
+    "mjs/index_bg.wasm",
+    "mjs/index_bg.js",
+    "mjs/index.js"
+  ],
+  "type": "commonjs",
+  "exports": {
+    ".": { 
+      "require": "./cjs/index.js",
+      "default": "./mjs/index.js"
+    }
+  },
+  "main" : "./cjs/index.js",
+  "module" : "./mjs/index.js",
+  "sideEffects": false
+}

@@ -1,7 +1,4 @@
 node_modules
-/dist
-/target
-/pkg
 /wasm-pack.log
-mjs
-nodejs
+/build
+/dev
