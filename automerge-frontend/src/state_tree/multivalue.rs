@@ -9,25 +9,25 @@ use crate::value::{Primitive, Value};
 use std::iter::Iterator;
 
 pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
-    pub(crate) actor: &'a amp::ActorID,
+    pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
     pub(crate) key: &'b amp::Key,
     pub(crate) value: &'c Value,
-    pub(crate) parent_obj: &'d amp::ObjectID,
+    pub(crate) parent_obj: &'d amp::ObjectId,
     pub(crate) insert: bool,
-    pub(crate) pred: Vec<amp::OpID>,
+    pub(crate) pred: Vec<amp::OpId>,
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
 #[derive(Debug, Clone)]
 pub(super) struct MultiValue {
-    winning_value: (amp::OpID, StateTreeValue),
-    conflicts: im_rc::HashMap<amp::OpID, StateTreeValue>,
+    winning_value: (amp::OpId, StateTreeValue),
+    conflicts: im_rc::HashMap<amp::OpId, StateTreeValue>,
 }
 
 impl MultiValue {
     pub fn new_from_diff<K>(
-        opid: amp::OpID,
+        opid: amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
@@ -41,7 +41,7 @@ impl MultiValue {
         })
     }
 
-    pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpID) -> MultiValue {
+    pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
         MultiValue {
             winning_value: (opid, statetree_val),
             conflicts: im_rc::HashMap::new(),
@@ -61,13 +61,13 @@ impl MultiValue {
     }
 
     pub(super) fn new_from_value(
-        actor: &amp::ActorID,
+        actor: &amp::ActorId,
         start_op: u64,
-        parent_id: amp::ObjectID,
+        parent_id: amp::ObjectId,
         key: &amp::Key,
         value: &Value,
         insert: bool,
-        pred: Vec<amp::OpID>,
+        pred: Vec<amp::OpId>,
     ) -> NewValue {
         NewValueContext {
             start_op,
@@ -82,7 +82,7 @@ impl MultiValue {
 
     pub(super) fn apply_diff<K>(
         &self,
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         subdiff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
@@ -97,7 +97,7 @@ impl MultiValue {
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         let mut changes = StateTreeChange::empty();
         let mut updated = self.tree_values();
@@ -127,12 +127,12 @@ impl MultiValue {
 
     pub(super) fn default_value(
         &self,
-        objects: &im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Value {
         self.winning_value.1.realise_value(objects)
     }
 
-    pub(super) fn default_opid(&self) -> amp::OpID {
+    pub(super) fn default_opid(&self) -> amp::OpId {
         self.winning_value.0.clone()
     }
 
@@ -151,19 +151,19 @@ impl MultiValue {
 
     pub(super) fn realise_values(
         &self,
-        objects: &im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
-    ) -> std::collections::HashMap<amp::OpID, Value> {
+        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
+    ) -> std::collections::HashMap<amp::OpId, Value> {
         self.tree_values()
             .iter()
             .map(|(opid, v)| (opid.clone(), v.realise_value(objects)))
             .collect()
     }
 
-    pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpID> {
+    pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpId> {
         std::iter::once(&self.winning_value.0).chain(self.conflicts.keys())
     }
 
-    pub(super) fn has_opid(&self, opid: &amp::OpID) -> bool {
+    pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
         self.opids().any(|o| o == opid)
     }
 }
@@ -174,7 +174,7 @@ struct MultiValueTreeValues {
 }
 
 impl MultiValueTreeValues {
-    fn get(&self, opid: &amp::OpID) -> Option<&StateTreeValue> {
+    fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
         if opid == &self.current.winning_value.0 {
             Some(&self.current.winning_value.1)
         } else {
@@ -182,7 +182,7 @@ impl MultiValueTreeValues {
         }
     }
 
-    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpID, &StateTreeValue)> {
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
         std::iter::once((
             &(self.current.winning_value).0,
             &(self.current.winning_value.1),
@@ -190,7 +190,7 @@ impl MultiValueTreeValues {
         .chain(self.current.conflicts.iter())
     }
 
-    fn update(mut self, key: &amp::OpID, value: &StateTreeValue) -> MultiValueTreeValues {
+    fn update(mut self, key: &amp::OpId, value: &StateTreeValue) -> MultiValueTreeValues {
         if *key >= self.current.winning_value.0 {
             self.current
                 .conflicts
@@ -211,9 +211,9 @@ impl MultiValueTreeValues {
 #[derive(Debug)]
 pub(super) struct NewValue {
     value: StateTreeValue,
-    opid: amp::OpID,
+    opid: amp::OpId,
     ops: Vec<amp::Op>,
-    new_objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+    new_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     new_cursors: Cursors,
     max_op: u64,
 }
@@ -239,12 +239,12 @@ impl NewValue {
 /// sequences of chars
 #[derive(Debug, Clone)]
 pub(super) struct MultiChar {
-    winning_value: (amp::OpID, char),
-    conflicts: Option<im_rc::HashMap<amp::OpID, char>>,
+    winning_value: (amp::OpId, char),
+    conflicts: Option<im_rc::HashMap<amp::OpId, char>>,
 }
 
 impl MultiChar {
-    pub(super) fn new_from_char(opid: amp::OpID, c: char) -> MultiChar {
+    pub(super) fn new_from_char(opid: amp::OpId, c: char) -> MultiChar {
         MultiChar {
             winning_value: (opid, c),
             conflicts: None,
@@ -252,7 +252,7 @@ impl MultiChar {
     }
 
     pub(super) fn new_from_diff<K>(
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<MultiChar, error::InvalidPatch>
     where
@@ -284,7 +284,7 @@ impl MultiChar {
 
     pub(super) fn apply_diff<K>(
         &self,
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<MultiChar, error::InvalidPatch>
     where
@@ -300,7 +300,7 @@ impl MultiChar {
     ) -> Result<DiffApplicationResult<MultiChar>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         let mut updated = self.values();
         for (opid, subdiff) in diff {
@@ -331,7 +331,7 @@ impl MultiChar {
         self.winning_value.1
     }
 
-    pub fn default_opid(&self) -> &amp::OpID {
+    pub fn default_opid(&self) -> &amp::OpId {
         &self.winning_value.0
     }
 
@@ -341,7 +341,7 @@ impl MultiChar {
         }
     }
 
-    pub(super) fn has_opid(&self, opid: &amp::OpID) -> bool {
+    pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
         if let Some(ref conflicts) = self.conflicts {
             let mut opids = std::iter::once(&self.winning_value.0).chain(conflicts.keys());
             opids.any(|o| o == opid)
@@ -356,7 +356,7 @@ struct MultiCharValues {
 }
 
 impl MultiCharValues {
-    fn update(mut self, key: &amp::OpID, value: char) -> MultiCharValues {
+    fn update(mut self, key: &amp::OpId, value: char) -> MultiCharValues {
         let mut conflicts = self.current.conflicts.unwrap_or_else(im_rc::HashMap::new);
         if *key >= self.current.winning_value.0 {
             conflicts.insert(self.current.winning_value.0, self.current.winning_value.1);
@@ -377,20 +377,20 @@ impl MultiCharValues {
 #[derive(Clone)]
 pub(crate) struct NewValueContext<'a, 'b, O>
 where
-    O: Into<amp::ObjectID>,
+    O: Into<amp::ObjectId>,
     O: Clone,
 {
-    pub(crate) actor: &'a amp::ActorID,
+    pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
     pub(crate) key: &'b amp::Key,
     pub(crate) parent_obj: O,
     pub(crate) insert: bool,
-    pub(crate) pred: Vec<amp::OpID>,
+    pub(crate) pred: Vec<amp::OpId>,
 }
 
 impl<'a, 'b, O> NewValueContext<'a, 'b, O>
 where
-    O: Into<amp::ObjectID>,
+    O: Into<amp::ObjectId>,
     O: Clone,
 {
     fn create(self, value: &Value) -> NewValue {
@@ -407,7 +407,7 @@ where
         props: &std::collections::HashMap<String, Value>,
         map_type: &amp::MapType,
     ) -> NewValue {
-        let make_op_id = amp::OpID(self.start_op, self.actor.clone());
+        let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::Map(*map_type)),
             obj: self.parent_obj.clone().into(),
@@ -418,7 +418,7 @@ where
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite> = im_rc::HashMap::new();
+        let mut objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite> = im_rc::HashMap::new();
         let mut result_props: im_rc::HashMap<String, MultiValue> = im_rc::HashMap::new();
         for (prop, value) in props.iter() {
             let context = NewValueContext {
@@ -459,7 +459,7 @@ where
     }
 
     fn new_list(self, values: &[Value]) -> NewValue {
-        let make_list_opid = amp::OpID::new(self.start_op, self.actor);
+        let make_list_opid = amp::OpId::new(self.start_op, self.actor);
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::list()),
             obj: self.parent_obj.into(),
@@ -471,8 +471,8 @@ where
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut objects = im_rc::HashMap::new();
-        let mut result_elems: Vec<(amp::OpID, MultiValue)> = Vec::with_capacity(values.len());
-        let mut last_elemid = amp::ElementID::Head;
+        let mut result_elems: Vec<(amp::OpId, MultiValue)> = Vec::with_capacity(values.len());
+        let mut last_elemid = amp::ElementId::Head;
         for value in values.iter() {
             let elem_opid = self.actor.op_id_at(current_max_op + 1);
             let context = NewValueContext {
@@ -517,8 +517,8 @@ where
             pred: self.pred,
         }];
         let mut current_max_op = self.start_op;
-        let mut last_elemid = amp::ElementID::Head;
-        let mut multichars: Vec<(amp::OpID, MultiChar)> = Vec::with_capacity(chars.len());
+        let mut last_elemid = amp::ElementId::Head;
+        let mut multichars: Vec<(amp::OpId, MultiChar)> = Vec::with_capacity(chars.len());
         for c in chars.iter() {
             current_max_op += 1;
             let opid = self.actor.op_id_at(current_max_op);

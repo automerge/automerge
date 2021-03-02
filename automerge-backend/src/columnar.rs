@@ -1,5 +1,5 @@
-use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RLEDecoder};
-use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RLEEncoder};
+use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder};
+use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder};
 use automerge_protocol as amp;
 use core::fmt::Debug;
 use std::cmp::Ordering;
@@ -15,7 +15,7 @@ impl Encodable for Action {
     }
 }
 
-impl Encodable for [amp::ActorID] {
+impl Encodable for [amp::ActorId] {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = self.len().encode(buf)?;
         for i in self {
@@ -25,7 +25,7 @@ impl Encodable for [amp::ActorID] {
     }
 }
 
-fn map_actor(actor: &amp::ActorID, actors: &mut Vec<amp::ActorID>) -> usize {
+fn map_actor(actor: &amp::ActorId, actors: &mut Vec<amp::ActorId>) -> usize {
     if let Some(pos) = actors.iter().position(|a| a == actor) {
         pos
     } else {
@@ -34,11 +34,11 @@ fn map_actor(actor: &amp::ActorID, actors: &mut Vec<amp::ActorID>) -> usize {
     }
 }
 
-impl Encodable for amp::ActorID {
+impl Encodable for amp::ActorId {
     fn encode_with_actors<R: Write>(
         &self,
         buf: &mut R,
-        actors: &mut Vec<amp::ActorID>,
+        actors: &mut Vec<amp::ActorId>,
     ) -> io::Result<usize> {
         map_actor(self, actors).encode(buf)
     }
@@ -59,7 +59,7 @@ impl Encodable for &[u8] {
 }
 
 pub struct OperationIterator<'a> {
-    pub(crate) action: RLEDecoder<'a, Action>,
+    pub(crate) action: RleDecoder<'a, Action>,
     pub(crate) objs: ObjIterator<'a>,
     pub(crate) keys: KeyIterator<'a>,
     pub(crate) insert: BooleanDecoder<'a>,
@@ -70,7 +70,7 @@ pub struct OperationIterator<'a> {
 impl<'a> OperationIterator<'a> {
     pub(crate) fn new(
         bytes: &'a [u8],
-        actors: &'a [amp::ActorID],
+        actors: &'a [amp::ActorId],
         ops: &'a HashMap<u32, Range<usize>>,
     ) -> OperationIterator<'a> {
         OperationIterator {
@@ -133,9 +133,9 @@ impl<'a> Iterator for OperationIterator<'a> {
 }
 
 pub(crate) struct DocOpIterator<'a> {
-    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
-    pub(crate) action: RLEDecoder<'a, Action>,
+    pub(crate) action: RleDecoder<'a, Action>,
     pub(crate) objs: ObjIterator<'a>,
     pub(crate) keys: KeyIterator<'a>,
     pub(crate) insert: BooleanDecoder<'a>,
@@ -179,7 +179,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
 impl<'a> DocOpIterator<'a> {
     pub(crate) fn new(
         bytes: &'a [u8],
-        actors: &'a [amp::ActorID],
+        actors: &'a [amp::ActorId],
         ops: &'a HashMap<u32, Range<usize>>,
     ) -> DocOpIterator<'a> {
         DocOpIterator {
@@ -215,11 +215,11 @@ impl<'a> DocOpIterator<'a> {
 }
 
 pub(crate) struct ChangeIterator<'a> {
-    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) seq: DeltaDecoder<'a>,
     pub(crate) max_op: DeltaDecoder<'a>,
     pub(crate) time: DeltaDecoder<'a>,
-    pub(crate) message: RLEDecoder<'a, String>,
+    pub(crate) message: RleDecoder<'a, String>,
     pub(crate) deps: DepsIterator<'a>,
     pub(crate) extra: ExtraIterator<'a>,
 }
@@ -269,47 +269,47 @@ impl<'a> Iterator for ChangeIterator<'a> {
 
 pub struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
-    pub(crate) actors: &'a [amp::ActorID],
-    pub(crate) actor: RLEDecoder<'a, usize>,
-    pub(crate) ctr: RLEDecoder<'a, u64>,
+    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actor: RleDecoder<'a, usize>,
+    pub(crate) ctr: RleDecoder<'a, u64>,
 }
 
 pub struct DepsIterator<'a> {
-    pub(crate) num: RLEDecoder<'a, usize>,
+    pub(crate) num: RleDecoder<'a, usize>,
     pub(crate) dep: DeltaDecoder<'a>,
 }
 
 pub struct ExtraIterator<'a> {
-    pub(crate) len: RLEDecoder<'a, usize>,
+    pub(crate) len: RleDecoder<'a, usize>,
     pub(crate) extra: Decoder<'a>,
 }
 
 pub struct PredIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorID],
-    pub(crate) pred_num: RLEDecoder<'a, usize>,
-    pub(crate) pred_actor: RLEDecoder<'a, usize>,
+    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) pred_num: RleDecoder<'a, usize>,
+    pub(crate) pred_actor: RleDecoder<'a, usize>,
     pub(crate) pred_ctr: DeltaDecoder<'a>,
 }
 
 pub struct SuccIterator<'a> {
-    pub(crate) succ_num: RLEDecoder<'a, usize>,
-    pub(crate) succ_actor: RLEDecoder<'a, usize>,
+    pub(crate) succ_num: RleDecoder<'a, usize>,
+    pub(crate) succ_actor: RleDecoder<'a, usize>,
     pub(crate) succ_ctr: DeltaDecoder<'a>,
 }
 
 pub struct KeyIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorID],
-    pub(crate) actor: RLEDecoder<'a, usize>,
+    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
-    pub(crate) str: RLEDecoder<'a, String>,
+    pub(crate) str: RleDecoder<'a, String>,
 }
 
 pub struct ValueIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorID],
-    pub(crate) val_len: RLEDecoder<'a, usize>,
+    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) val_len: RleDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,
-    pub(crate) actor: RLEDecoder<'a, usize>,
-    pub(crate) ctr: RLEDecoder<'a, u64>,
+    pub(crate) actor: RleDecoder<'a, usize>,
+    pub(crate) ctr: RleDecoder<'a, u64>,
 }
 
 impl<'a> Iterator for DepsIterator<'a> {
@@ -337,15 +337,15 @@ impl<'a> Iterator for ExtraIterator<'a> {
 }
 
 impl<'a> Iterator for PredIterator<'a> {
-    type Item = Vec<amp::OpID>;
-    fn next(&mut self) -> Option<Vec<amp::OpID>> {
+    type Item = Vec<amp::OpId>;
+    fn next(&mut self) -> Option<Vec<amp::OpId>> {
         let num = self.pred_num.next()??;
         let mut p = Vec::with_capacity(num);
         for _ in 0..num {
             let actor = self.pred_actor.next()??;
             let ctr = self.pred_ctr.next()??;
             let actor_id = self.actors.get(actor)?.clone();
-            let op_id = amp::OpID::new(ctr, &actor_id);
+            let op_id = amp::OpId::new(ctr, &actor_id);
             p.push(op_id)
         }
         Some(p)
@@ -444,7 +444,7 @@ impl<'a> Iterator for ValueIterator<'a> {
             v if v % 16 == VALUE_TYPE_CURSOR => {
                 if let (Some(actor), Some(ctr)) = (actor, ctr) {
                     let actor_id = self.actors.get(actor)?;
-                    Some(amp::ScalarValue::Cursor(amp::OpID(ctr, actor_id.clone())))
+                    Some(amp::ScalarValue::Cursor(amp::OpId(ctr, actor_id.clone())))
                 } else {
                     None
                 }
@@ -465,7 +465,7 @@ impl<'a> Iterator for KeyIterator<'a> {
             (None, Some(0), None) => Some(amp::Key::head()),
             (Some(actor), Some(ctr), None) => {
                 let actor_id = self.actors.get(actor)?;
-                Some(amp::OpID::new(ctr, actor_id).into())
+                Some(amp::OpId::new(ctr, actor_id).into())
             }
             _ => None,
         }
@@ -473,13 +473,13 @@ impl<'a> Iterator for KeyIterator<'a> {
 }
 
 impl<'a> Iterator for ObjIterator<'a> {
-    type Item = amp::ObjectID;
-    fn next(&mut self) -> Option<amp::ObjectID> {
+    type Item = amp::ObjectId;
+    fn next(&mut self) -> Option<amp::ObjectId> {
         if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
             let actor_id = self.actors.get(actor)?;
-            Some(amp::ObjectID::ID(amp::OpID::new(ctr, &actor_id)))
+            Some(amp::ObjectId::Id(amp::OpId::new(ctr, &actor_id)))
         } else {
-            Some(amp::ObjectID::Root)
+            Some(amp::ObjectId::Root)
         }
     }
 }
@@ -501,7 +501,7 @@ pub(crate) struct DocOp {
     pub actor: usize,
     pub ctr: u64,
     pub action: amp::OpType,
-    pub obj: amp::ObjectID,
+    pub obj: amp::ObjectId,
     pub key: amp::Key,
     pub succ: Vec<(u64, usize)>,
     pub pred: Vec<(u64, usize)>,
@@ -529,23 +529,23 @@ impl PartialEq for DocOp {
 impl Eq for DocOp {}
 
 struct ValEncoder {
-    len: RLEEncoder<usize>,
-    ref_actor: RLEEncoder<usize>,
-    ref_counter: RLEEncoder<u64>,
+    len: RleEncoder<usize>,
+    ref_actor: RleEncoder<usize>,
+    ref_counter: RleEncoder<u64>,
     raw: Vec<u8>,
 }
 
 impl ValEncoder {
     fn new() -> ValEncoder {
         ValEncoder {
-            len: RLEEncoder::new(),
+            len: RleEncoder::new(),
             raw: Vec::new(),
-            ref_actor: RLEEncoder::new(),
-            ref_counter: RLEEncoder::new(),
+            ref_actor: RleEncoder::new(),
+            ref_counter: RleEncoder::new(),
         }
     }
 
-    fn append_value(&mut self, val: &amp::ScalarValue, actors: &mut Vec<amp::ActorID>) {
+    fn append_value(&mut self, val: &amp::ScalarValue, actors: &mut Vec<amp::ActorId>) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
@@ -620,33 +620,33 @@ impl ValEncoder {
 }
 
 struct KeyEncoder {
-    actor: RLEEncoder<usize>,
+    actor: RleEncoder<usize>,
     ctr: DeltaEncoder,
-    str: RLEEncoder<String>,
+    str: RleEncoder<String>,
 }
 
 impl KeyEncoder {
     fn new() -> KeyEncoder {
         KeyEncoder {
-            actor: RLEEncoder::new(),
+            actor: RleEncoder::new(),
             ctr: DeltaEncoder::new(),
-            str: RLEEncoder::new(),
+            str: RleEncoder::new(),
         }
     }
 
-    fn append(&mut self, key: &amp::Key, actors: &mut Vec<amp::ActorID>) {
+    fn append(&mut self, key: &amp::Key, actors: &mut Vec<amp::ActorId>) {
         match &key {
             amp::Key::Map(s) => {
                 self.actor.append_null();
                 self.ctr.append_null();
                 self.str.append_value(s.clone());
             }
-            amp::Key::Seq(amp::ElementID::Head) => {
+            amp::Key::Seq(amp::ElementId::Head) => {
                 self.actor.append_null();
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            amp::Key::Seq(amp::ElementID::ID(amp::OpID(ctr, actor))) => {
+            amp::Key::Seq(amp::ElementId::Id(amp::OpId(ctr, actor))) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
                 self.str.append_null();
@@ -664,16 +664,16 @@ impl KeyEncoder {
 }
 
 struct SuccEncoder {
-    num: RLEEncoder<usize>,
-    actor: RLEEncoder<usize>,
+    num: RleEncoder<usize>,
+    actor: RleEncoder<usize>,
     ctr: DeltaEncoder,
 }
 
 impl SuccEncoder {
     fn new() -> SuccEncoder {
         SuccEncoder {
-            num: RLEEncoder::new(),
-            actor: RLEEncoder::new(),
+            num: RleEncoder::new(),
+            actor: RleEncoder::new(),
             ctr: DeltaEncoder::new(),
         }
     }
@@ -696,21 +696,21 @@ impl SuccEncoder {
 }
 
 struct PredEncoder {
-    num: RLEEncoder<usize>,
-    actor: RLEEncoder<usize>,
+    num: RleEncoder<usize>,
+    actor: RleEncoder<usize>,
     ctr: DeltaEncoder,
 }
 
 impl PredEncoder {
     fn new() -> PredEncoder {
         PredEncoder {
-            num: RLEEncoder::new(),
-            actor: RLEEncoder::new(),
+            num: RleEncoder::new(),
+            actor: RleEncoder::new(),
             ctr: DeltaEncoder::new(),
         }
     }
 
-    fn append(&mut self, pred: &[amp::OpID], actors: &mut Vec<amp::ActorID>) {
+    fn append(&mut self, pred: &[amp::OpId], actors: &mut Vec<amp::ActorId>) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
@@ -728,25 +728,25 @@ impl PredEncoder {
 }
 
 struct ObjEncoder {
-    actor: RLEEncoder<usize>,
-    ctr: RLEEncoder<u64>,
+    actor: RleEncoder<usize>,
+    ctr: RleEncoder<u64>,
 }
 
 impl ObjEncoder {
     fn new() -> ObjEncoder {
         ObjEncoder {
-            actor: RLEEncoder::new(),
-            ctr: RLEEncoder::new(),
+            actor: RleEncoder::new(),
+            ctr: RleEncoder::new(),
         }
     }
 
-    fn append(&mut self, obj: &amp::ObjectID, actors: &mut Vec<amp::ActorID>) {
+    fn append(&mut self, obj: &amp::ObjectId, actors: &mut Vec<amp::ActorId>) {
         match obj {
-            amp::ObjectID::Root => {
+            amp::ObjectId::Root => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
-            amp::ObjectID::ID(amp::OpID(ctr, actor)) => {
+            amp::ObjectId::Id(amp::OpId(ctr, actor)) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(*ctr);
             }
@@ -762,19 +762,19 @@ impl ObjEncoder {
 }
 
 pub(crate) struct ChangeEncoder {
-    actor: RLEEncoder<usize>,
+    actor: RleEncoder<usize>,
     seq: DeltaEncoder,
     max_op: DeltaEncoder,
     time: DeltaEncoder,
-    message: RLEEncoder<Option<String>>,
-    deps_num: RLEEncoder<usize>,
+    message: RleEncoder<Option<String>>,
+    deps_num: RleEncoder<usize>,
     deps_index: DeltaEncoder,
-    extra_len: RLEEncoder<usize>,
+    extra_len: RleEncoder<usize>,
     extra_raw: Vec<u8>,
 }
 
 impl ChangeEncoder {
-    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorID]) -> (Vec<u8>, Vec<u8>)
+    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::UncompressedChange>,
     {
@@ -785,19 +785,19 @@ impl ChangeEncoder {
 
     fn new() -> ChangeEncoder {
         ChangeEncoder {
-            actor: RLEEncoder::new(),
+            actor: RleEncoder::new(),
             seq: DeltaEncoder::new(),
             max_op: DeltaEncoder::new(),
             time: DeltaEncoder::new(),
-            message: RLEEncoder::new(),
-            deps_num: RLEEncoder::new(),
+            message: RleEncoder::new(),
+            deps_num: RleEncoder::new(),
             deps_index: DeltaEncoder::new(),
-            extra_len: RLEEncoder::new(),
+            extra_len: RleEncoder::new(),
             extra_raw: Vec::new(),
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [amp::ActorID])
+    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [amp::ActorId])
     where
         I: IntoIterator<Item = &'c amp::UncompressedChange>,
     {
@@ -833,19 +833,20 @@ impl ChangeEncoder {
     }
 
     fn finish(self) -> (Vec<u8>, Vec<u8>) {
-        let mut coldata = Vec::new();
-        coldata.push(self.actor.finish(DOC_ACTOR));
-        coldata.push(self.seq.finish(DOC_SEQ));
-        coldata.push(self.max_op.finish(DOC_MAX_OP));
-        coldata.push(self.time.finish(DOC_TIME));
-        coldata.push(self.message.finish(DOC_MESSAGE));
-        coldata.push(self.deps_num.finish(DOC_DEPS_NUM));
-        coldata.push(self.deps_index.finish(DOC_DEPS_INDEX));
-        coldata.push(self.extra_len.finish(DOC_EXTRA_LEN));
-        coldata.push(ColData {
-            col: DOC_EXTRA_RAW,
-            data: self.extra_raw,
-        });
+        let mut coldata = vec![
+            self.actor.finish(DOC_ACTOR),
+            self.seq.finish(DOC_SEQ),
+            self.max_op.finish(DOC_MAX_OP),
+            self.time.finish(DOC_TIME),
+            self.message.finish(DOC_MESSAGE),
+            self.deps_num.finish(DOC_DEPS_NUM),
+            self.deps_index.finish(DOC_DEPS_INDEX),
+            self.extra_len.finish(DOC_EXTRA_LEN),
+            ColData {
+                col: DOC_EXTRA_RAW,
+                data: self.extra_raw,
+            },
+        ];
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut data = Vec::new();
@@ -867,12 +868,12 @@ impl ChangeEncoder {
 }
 
 pub(crate) struct DocOpEncoder {
-    actor: RLEEncoder<usize>,
+    actor: RleEncoder<usize>,
     ctr: DeltaEncoder,
     obj: ObjEncoder,
     key: KeyEncoder,
     insert: BooleanEncoder,
-    action: RLEEncoder<Action>,
+    action: RleEncoder<Action>,
     val: ValEncoder,
     succ: SuccEncoder,
 }
@@ -882,7 +883,7 @@ pub(crate) struct DocOpEncoder {
 impl DocOpEncoder {
     pub(crate) fn encode_doc_ops<'a, 'b, I>(
         ops: I,
-        actors: &'a mut Vec<amp::ActorID>,
+        actors: &'a mut Vec<amp::ActorId>,
     ) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b DocOp>,
@@ -894,18 +895,18 @@ impl DocOpEncoder {
 
     fn new() -> DocOpEncoder {
         DocOpEncoder {
-            actor: RLEEncoder::new(),
+            actor: RleEncoder::new(),
             ctr: DeltaEncoder::new(),
             obj: ObjEncoder::new(),
             key: KeyEncoder::new(),
             insert: BooleanEncoder::new(),
-            action: RLEEncoder::new(),
+            action: RleEncoder::new(),
             val: ValEncoder::new(),
             succ: SuccEncoder::new(),
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorID>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
     where
         I: IntoIterator<Item = &'c DocOp>,
     {
@@ -945,11 +946,12 @@ impl DocOpEncoder {
     }
 
     fn finish(self) -> (Vec<u8>, Vec<u8>) {
-        let mut coldata = Vec::new();
-        coldata.push(self.actor.finish(COL_ID_ACTOR));
-        coldata.push(self.ctr.finish(COL_ID_CTR));
-        coldata.push(self.insert.finish(COL_INSERT));
-        coldata.push(self.action.finish(COL_ACTION));
+        let mut coldata = vec![
+            self.actor.finish(COL_ID_ACTOR),
+            self.ctr.finish(COL_ID_CTR),
+            self.insert.finish(COL_INSERT),
+            self.action.finish(COL_ACTION),
+        ];
         coldata.extend(self.obj.finish());
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());
@@ -980,7 +982,7 @@ pub(crate) struct ColumnEncoder {
     obj: ObjEncoder,
     key: KeyEncoder,
     insert: BooleanEncoder,
-    action: RLEEncoder<Action>,
+    action: RleEncoder<Action>,
     val: ValEncoder,
     pred: PredEncoder,
 }
@@ -988,7 +990,7 @@ pub(crate) struct ColumnEncoder {
 impl ColumnEncoder {
     pub fn encode_ops<'a, 'b, I>(
         ops: I,
-        actors: &'a mut Vec<amp::ActorID>,
+        actors: &'a mut Vec<amp::ActorId>,
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = &'b amp::Op>,
@@ -1003,13 +1005,13 @@ impl ColumnEncoder {
             obj: ObjEncoder::new(),
             key: KeyEncoder::new(),
             insert: BooleanEncoder::new(),
-            action: RLEEncoder::new(),
+            action: RleEncoder::new(),
             val: ValEncoder::new(),
             pred: PredEncoder::new(),
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorID>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
     where
         I: IntoIterator<Item = &'c amp::Op>,
     {
@@ -1018,7 +1020,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn append(&mut self, op: &amp::Op, actors: &mut Vec<amp::ActorID>) {
+    fn append(&mut self, op: &amp::Op, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
@@ -1050,9 +1052,10 @@ impl ColumnEncoder {
     }
 
     fn finish(self) -> (Vec<u8>, HashMap<u32, Range<usize>>) {
-        let mut coldata = Vec::new();
-        coldata.push(self.insert.finish(COL_INSERT));
-        coldata.push(self.action.finish(COL_ACTION));
+        let mut coldata = vec![
+            self.insert.finish(COL_INSERT),
+            self.action.finish(COL_ACTION),
+        ];
         coldata.extend(self.obj.finish());
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());

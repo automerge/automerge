@@ -89,7 +89,7 @@ fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
 struct ChunkIntermediate {
     bytes: Vec<u8>,
     body: Range<usize>,
-    actors: Vec<amp::ActorID>,
+    actors: Vec<amp::ActorId>,
     message: Range<usize>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
@@ -111,8 +111,7 @@ fn encode_chunk(
     }
 
     // encode first actor
-    let mut actors = Vec::new();
-    actors.push(uncompressed_change.actor_id.clone());
+    let mut actors = vec![uncompressed_change.actor_id.clone()];
     uncompressed_change
         .actor_id
         .to_bytes()
@@ -165,14 +164,14 @@ pub struct Change {
     pub time: i64,
     body: Range<usize>,
     message: Range<usize>,
-    actors: Vec<amp::ActorID>,
+    actors: Vec<amp::ActorId>,
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
 }
 
 impl Change {
-    pub fn actor_id(&self) -> &amp::ActorID {
+    pub fn actor_id(&self) -> &amp::ActorId {
         &self.actors[0]
     }
 
@@ -246,11 +245,11 @@ fn read_slice<T: Decodable + Debug>(
     bytes: &[u8],
     cursor: &mut Range<usize>,
 ) -> Result<T, AutomergeError> {
-    let view = &bytes[cursor.clone()];
-    let mut reader = &view[..];
-    let val = T::decode::<&[u8]>(&mut reader).ok_or(AutomergeError::EncodingError);
-    let len = view.len() - reader.len();
-    *cursor = (cursor.start + len)..cursor.end;
+    let mut view = &bytes[cursor.clone()];
+    let init_len = view.len();
+    let val = T::decode::<&[u8]>(&mut view).ok_or(AutomergeError::EncodingError);
+    let bytes_read = init_len - view.len();
+    *cursor = (cursor.start + bytes_read)..cursor.end;
     val
 }
 
@@ -282,7 +281,7 @@ pub(crate) struct Document {
     pub time: i64,
     body: Range<usize>,
     message: Range<usize>,
-    actors: Vec<amp::ActorID>,
+    actors: Vec<amp::ActorId>,
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
@@ -331,15 +330,15 @@ fn decode_hashes(
 fn decode_actors(
     bytes: &[u8],
     cursor: &mut Range<usize>,
-    first: Option<amp::ActorID>,
-) -> Result<Vec<amp::ActorID>, AutomergeError> {
+    first: Option<amp::ActorId>,
+) -> Result<Vec<amp::ActorId>, AutomergeError> {
     let num_actors: usize = read_slice(bytes, cursor)?;
     let mut actors = Vec::with_capacity(num_actors + 1);
     if let Some(actor) = first {
         actors.push(actor)
     }
     for _ in 0..num_actors {
-        actors.push(amp::ActorID::from(&bytes[slice_bytes(bytes, cursor)?]));
+        actors.push(amp::ActorId::from(&bytes[slice_bytes(bytes, cursor)?]));
     }
     Ok(actors)
 }
@@ -402,7 +401,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 
     let deps = decode_hashes(&bytes, &mut cursor)?;
 
-    let actor = amp::ActorID::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
+    let actor = amp::ActorId::from(&bytes[slice_bytes(&bytes, &mut cursor)?]);
     let seq = read_slice(&bytes, &mut cursor)?;
     let start_op = read_slice(&bytes, &mut cursor)?;
     let time = read_slice(&bytes, &mut cursor)?;
@@ -436,7 +435,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 fn group_doc_change_and_doc_ops(
     changes: &mut [DocChange],
     ops: &mut Vec<DocOp>,
-    actors: &[amp::ActorID],
+    actors: &[amp::ActorId],
 ) -> Result<(), AutomergeError> {
     let mut change_actors = HashMap::new();
     let mut actor_max = HashMap::new();
@@ -467,7 +466,7 @@ fn group_doc_change_and_doc_ops(
         for succ in op.succ.iter() {
             if !op_by_id.contains_key(&succ) {
                 let key = if op.insert {
-                    amp::OpID(op.ctr, actors[op.actor].clone()).into()
+                    amp::OpId(op.ctr, actors[op.actor].clone()).into()
                 } else {
                     op.key.clone()
                 };
@@ -519,15 +518,15 @@ fn group_doc_change_and_doc_ops(
     Ok(())
 }
 
-fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorID]) -> Vec<amp::OpID> {
+fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorId]) -> Vec<amp::OpId> {
     pred.iter()
-        .map(|(ctr, actor)| amp::OpID(*ctr, actors[*actor].clone()))
+        .map(|(ctr, actor)| amp::OpId(*ctr, actors[*actor].clone()))
         .collect()
 }
 
 fn doc_changes_to_uncompressed_changes(
     changes: &[DocChange],
-    actors: &[amp::ActorID],
+    actors: &[amp::ActorId],
 ) -> Vec<amp::UncompressedChange> {
     changes
         .iter()
@@ -568,7 +567,7 @@ fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
 fn split_blocks(bytes: &[u8]) -> Vec<&[u8]> {
     // split off all valid blocks - ignore the rest if its corrupted or truncated
     let mut blocks = Vec::new();
-    let mut cursor = &bytes[..];
+    let mut cursor = bytes;
     while let Some(block) = pop_block(cursor) {
         blocks.push(&cursor[block.clone()]);
         if cursor.len() <= block.end {
@@ -641,15 +640,15 @@ fn compress_doc_changes(
     Some(changes)
 }
 
-fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorID]) -> Vec<DocOp> {
-    let mut by_obj_id = HashMap::<amp::ObjectID, HashMap<amp::Key, HashMap<amp::OpID, _>>>::new();
-    let mut by_ref = HashMap::<amp::ObjectID, HashMap<amp::Key, Vec<amp::OpID>>>::new();
-    let mut is_seq = HashSet::<amp::ObjectID>::new();
+fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -> Vec<DocOp> {
+    let mut by_obj_id = HashMap::<amp::ObjectId, HashMap<amp::Key, HashMap<amp::OpId, _>>>::new();
+    let mut by_ref = HashMap::<amp::ObjectId, HashMap<amp::Key, Vec<amp::OpId>>>::new();
+    let mut is_seq = HashSet::<amp::ObjectId>::new();
     let mut ops = Vec::new();
 
     for change in changes {
         for (i, op) in change.operations.iter().enumerate() {
-            let opid = amp::OpID(change.start_op + i as u64, change.actor_id.clone());
+            let opid = amp::OpId(change.start_op + i as u64, change.actor_id.clone());
             let objid = op.obj.clone();
             if let amp::OpType::Make(amp::ObjType::Sequence(_)) = op.action {
                 is_seq.insert(opid.clone().into());
@@ -703,10 +702,10 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorID]) -
     for objid in by_obj_id.keys().sorted() {
         let mut keys = Vec::new();
         if is_seq.contains(objid) {
-            let mut stack = vec![amp::ElementID::Head];
+            let mut stack = vec![amp::ElementId::Head];
             while !stack.is_empty() {
                 let key = stack.pop().unwrap();
-                if key != amp::ElementID::Head {
+                if key != amp::ElementId::Head {
                     keys.push(amp::Key::Seq(key.clone()))
                 }
                 for opid in by_ref
@@ -831,7 +830,7 @@ mod tests {
             time: 1234,
             message: None,
             hash: None,
-            actor_id: amp::ActorID::from_str("deadbeefdeadbeef").unwrap(),
+            actor_id: amp::ActorId::from_str("deadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
             extra_bytes: vec![1, 1, 1],
@@ -845,17 +844,17 @@ mod tests {
 
     #[test]
     fn test_complex_change() {
-        let actor1 = amp::ActorID::from_str("deadbeefdeadbeef").unwrap();
-        let actor2 = amp::ActorID::from_str("feeddefaff").unwrap();
-        let actor3 = amp::ActorID::from_str("00101010fafafafa").unwrap();
-        let opid1 = amp::OpID::new(102, &actor1);
-        let opid2 = amp::OpID::new(391, &actor1);
-        let opid3 = amp::OpID::new(299, &actor2);
-        let opid4 = amp::OpID::new(762, &actor3);
-        let opid5 = amp::OpID::new(100_203, &actor2);
-        let obj1 = amp::ObjectID::ID(opid1.clone());
-        let obj2 = amp::ObjectID::Root;
-        let obj3 = amp::ObjectID::ID(opid4.clone());
+        let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
+        let actor2 = amp::ActorId::from_str("feeddefaff").unwrap();
+        let actor3 = amp::ActorId::from_str("00101010fafafafa").unwrap();
+        let opid1 = amp::OpId::new(102, &actor1);
+        let opid2 = amp::OpId::new(391, &actor1);
+        let opid3 = amp::OpId::new(299, &actor2);
+        let opid4 = amp::OpId::new(762, &actor3);
+        let opid5 = amp::OpId::new(100_203, &actor2);
+        let obj1 = amp::ObjectId::Id(opid1.clone());
+        let obj2 = amp::ObjectId::Root;
+        let obj3 = amp::ObjectId::Id(opid4.clone());
         let key1 = amp::Key::Map("field1".into());
         let key2 = amp::Key::Map("field2".into());
         let key3 = amp::Key::Map("field3".into());
@@ -961,7 +960,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_document() {
-        let actor = amp::ActorID::random();
+        let actor = amp::ActorId::random();
         let mut backend = crate::Backend::init();
         let change1 = amp::UncompressedChange {
             start_op: 1,
@@ -974,14 +973,14 @@ mod tests {
             operations: vec![
                 amp::Op {
                     action: amp::OpType::Set("somevalue".into()),
-                    obj: amp::ObjectID::Root,
+                    obj: amp::ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::Make(amp::ObjType::list()),
-                    obj: amp::ObjectID::Root,
+                    obj: amp::ObjectId::Root,
                     key: "somelist".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -989,13 +988,13 @@ mod tests {
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("elem".into())),
                     obj: actor.op_id_at(2).into(),
-                    key: amp::ElementID::Head.into(),
+                    key: amp::ElementId::Head.into(),
                     insert: true,
                     pred: Vec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Cursor(actor.op_id_at(3))),
-                    obj: amp::ObjectID::Root,
+                    obj: amp::ObjectId::Root,
                     key: "cursor".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -1016,7 +1015,7 @@ mod tests {
             deps: vec![binchange1.hash],
             operations: vec![amp::Op {
                 action: amp::OpType::Set("someothervalue".into()),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "someotherkey".into(),
                 insert: false,
                 pred: Vec::new(),

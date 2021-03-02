@@ -5,15 +5,15 @@ use automerge_frontend::{
 use automerge_protocol as amp;
 use maplit::hashmap;
 
-fn random_op_id() -> amp::OpID {
-    amp::OpID::new(1, &amp::ActorID::random())
+fn random_op_id() -> amp::OpId {
+    amp::OpId::new(1, &amp::ActorId::random())
 }
 
 #[test]
 fn use_version_and_sequence_number_from_backend() {
     let mut doc = Frontend::new();
-    let remote_actor1 = amp::ActorID::random();
-    let remote_actor2 = amp::ActorID::random();
+    let remote_actor1 = amp::ActorId::random();
+    let remote_actor2 = amp::ActorId::random();
 
     // This is a remote patch
     let patch = amp::Patch {
@@ -26,7 +26,7 @@ fn use_version_and_sequence_number_from_backend() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -64,7 +64,7 @@ fn use_version_and_sequence_number_from_backend() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Int(1)),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "partridges".into(),
             insert: false,
             pred: Vec::new(),
@@ -115,7 +115,7 @@ fn remove_pending_requests_once_handled() {
         max_op: 4,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -147,7 +147,7 @@ fn remove_pending_requests_once_handled() {
         max_op: 5,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".into() => hashmap!{
@@ -176,7 +176,7 @@ fn remove_pending_requests_once_handled() {
 
 #[test]
 fn leave_request_queue_unchanged_on_remote_changes() {
-    let remote = amp::ActorID::random();
+    let remote = amp::ActorId::random();
     let mut doc = Frontend::new();
     // Enqueue a local change, moving the document into the "waiting for in
     // flight requests" state
@@ -204,7 +204,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "pheasants".into() => hashmap!{
@@ -236,7 +236,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         max_op: 11,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
@@ -285,7 +285,7 @@ fn dont_allow_out_of_order_request_patches() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
@@ -331,7 +331,7 @@ fn handle_concurrent_insertions_into_lists() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".to_string() => hashmap!{
@@ -381,7 +381,7 @@ fn handle_concurrent_insertions_into_lists() {
         )
     );
 
-    let remote = amp::ActorID::random();
+    let remote = amp::ActorId::random();
 
     // Apply a patch which does not take effect because we're still waiting
     // for the in flight requests to be responded to
@@ -395,7 +395,7 @@ fn handle_concurrent_insertions_into_lists() {
         seq: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -434,7 +434,7 @@ fn handle_concurrent_insertions_into_lists() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff{
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap!{
                 "birds".to_string() => hashmap!{
@@ -505,7 +505,7 @@ fn allow_interleaving_of_patches_and_changes() {
             deps: Vec::new(),
             operations: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Int(1)),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
                 pred: Vec::new(),
@@ -526,7 +526,7 @@ fn allow_interleaving_of_patches_and_changes() {
             deps: Vec::new(),
             operations: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Int(2)),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
                 pred: vec![doc.actor_id.op_id_at(1)],
@@ -562,7 +562,7 @@ fn allow_interleaving_of_patches_and_changes() {
             deps: Vec::new(),
             operations: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Int(3)),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
                 pred: vec![doc.actor_id.op_id_at(2)],
@@ -655,7 +655,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         deps: vec![binchange1.hash],
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(2)),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
             pred: vec![doc.actor_id.op_id_at(1)],
@@ -674,7 +674,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(3)),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
             pred: vec![doc2.actor_id.op_id_at(2)],
@@ -715,7 +715,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::from(4)),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
             pred: vec![doc2.actor_id.op_id_at(3)],

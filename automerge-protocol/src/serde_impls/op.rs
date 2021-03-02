@@ -1,6 +1,6 @@
 use super::read_field;
 use crate::{
-    DataType, Key, MapType, ObjType, ObjectID, Op, OpID, OpType, ScalarValue, SequenceType,
+    DataType, Key, MapType, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
 };
 use serde::ser::SerializeStruct;
 use serde::{
@@ -89,13 +89,13 @@ impl<'de> Deserialize<'de> for Op {
                 V: MapAccess<'de>,
             {
                 let mut action: Option<RawOpType> = None;
-                let mut obj: Option<ObjectID> = None;
+                let mut obj: Option<ObjectId> = None;
                 let mut key: Option<Key> = None;
-                let mut pred: Option<Vec<OpID>> = None;
+                let mut pred: Option<Vec<OpId>> = None;
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
-                let mut ref_id: Option<OpID> = None;
+                let mut ref_id: Option<OpId> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_action() {
-        let actor = crate::ActorID::random();
+        let actor = crate::ActorId::random();
         struct Scenario {
             name: &'static str,
             json: serde_json::Value,
@@ -208,7 +208,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Uint(123)),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -225,7 +225,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Int(-123)),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -242,7 +242,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Str("somestring".to_string())),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -259,7 +259,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::F64(1.23)),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -276,7 +276,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Boolean(true)),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -305,7 +305,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Counter(123)),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -353,7 +353,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Inc(12),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -370,7 +370,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Inc(12),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -397,7 +397,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Null),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -415,7 +415,7 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
-                    obj: ObjectID::Root,
+                    obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
                     pred: Vec::new(),
@@ -457,10 +457,10 @@ mod tests {
                     "Scenario {}: Expected Ok({:?}) but got Ok({:?})",
                     scenario.name, expected_op, result_op
                 ),
-                (Ok(result_op), Err(e)) => panic!(format!(
+                (Ok(result_op), Err(e)) => panic!(
                     "Scenario {}: expected Err({:?}) but got Ok({:?})",
                     scenario.name, e, result_op
-                )),
+                ),
                 (Err(result_e), Err(expected_e)) => assert_eq!(
                     result_e.to_string(),
                     expected_e.to_string(),
@@ -469,10 +469,10 @@ mod tests {
                     expected_e,
                     result_e
                 ),
-                (Err(result_e), Ok(expected)) => panic!(format!(
+                (Err(result_e), Ok(expected)) => panic!(
                     "Scenario {}: expected Ok({:?}) but got Err({:?})",
                     scenario.name, expected, result_e
-                )),
+                ),
             }
         }
     }
@@ -487,7 +487,7 @@ mod tests {
             "pred": []
         }))
         .unwrap();
-        assert_eq!(root.obj, crate::ObjectID::Root);
+        assert_eq!(root.obj, crate::ObjectId::Root);
 
         let opid: Op = serde_json::from_value(serde_json::json!({
             "action": "inc",
@@ -499,7 +499,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             opid.obj,
-            crate::ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()
+            crate::ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()
         );
 
         let invalid: Result<Op, serde_json::Error> = serde_json::from_value(serde_json::json!({
@@ -519,7 +519,7 @@ mod tests {
     fn test_serialize_key() {
         let map_key = Op {
             action: OpType::Inc(12),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "somekey".into(),
             insert: false,
             pred: Vec::new(),
@@ -530,8 +530,8 @@ mod tests {
 
         let elemid_key = Op {
             action: OpType::Inc(12),
-            obj: ObjectID::Root,
-            key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716")
+            obj: ObjectId::Root,
+            key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                 .unwrap()
                 .into(),
             insert: false,
@@ -547,40 +547,40 @@ mod tests {
         let testcases = vec![
             Op {
                 action: OpType::Set(ScalarValue::Uint(12)),
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
             Op {
                 action: OpType::Inc(12),
-                obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
+                obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
             Op {
                 action: OpType::Set(ScalarValue::Uint(12)),
-                obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
+                obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
-                pred: vec![OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
+                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
             },
             Op {
                 action: OpType::Inc(12),
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: Vec::new(),
             },
             Op {
                 action: OpType::Set("seomthing".into()),
-                obj: ObjectID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
-                key: OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716")
+                obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
+                key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                     .unwrap()
                     .into(),
                 insert: false,
-                pred: vec![OpID::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
+                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
             },
         ];
         for (testcase_num, testcase) in testcases.iter().enumerate() {

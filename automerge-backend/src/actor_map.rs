@@ -1,9 +1,9 @@
-use crate::internal::{ActorID, ElementID, InternalOp, InternalOpType, Key, ObjectID, OpID};
+use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
 use automerge_protocol as amp;
 use std::cmp::Ordering;
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) struct ActorMap(Vec<amp::ActorID>);
+pub(crate) struct ActorMap(Vec<amp::ActorId>);
 
 impl ActorMap {
     pub fn new() -> ActorMap {
@@ -17,30 +17,30 @@ impl ActorMap {
         }
     }
 
-    pub fn import_actor(&mut self, actor: &amp::ActorID) -> ActorID {
+    pub fn import_actor(&mut self, actor: &amp::ActorId) -> ActorId {
         if let Some(idx) = self.0.iter().position(|a| a == actor) {
-            ActorID(idx)
+            ActorId(idx)
         } else {
             self.0.push(actor.clone());
-            ActorID(self.0.len() - 1)
+            ActorId(self.0.len() - 1)
         }
     }
 
-    pub fn import_opid(&mut self, opid: &amp::OpID) -> OpID {
-        OpID(opid.0, self.import_actor(&opid.1))
+    pub fn import_opid(&mut self, opid: &amp::OpId) -> OpId {
+        OpId(opid.0, self.import_actor(&opid.1))
     }
 
-    pub fn import_obj(&mut self, obj: &amp::ObjectID) -> ObjectID {
+    pub fn import_obj(&mut self, obj: &amp::ObjectId) -> ObjectId {
         match obj {
-            amp::ObjectID::Root => ObjectID::Root,
-            amp::ObjectID::ID(ref opid) => ObjectID::ID(self.import_opid(opid)),
+            amp::ObjectId::Root => ObjectId::Root,
+            amp::ObjectId::Id(ref opid) => ObjectId::Id(self.import_opid(opid)),
         }
     }
 
-    pub fn import_element_id(&mut self, eid: &amp::ElementID) -> ElementID {
+    pub fn import_element_id(&mut self, eid: &amp::ElementId) -> ElementId {
         match eid {
-            amp::ElementID::Head => ElementID::Head,
-            amp::ElementID::ID(ref opid) => ElementID::ID(self.import_opid(opid)),
+            amp::ElementId::Head => ElementId::Head,
+            amp::ElementId::Id(ref opid) => ElementId::Id(self.import_opid(opid)),
         }
     }
 
@@ -67,23 +67,23 @@ impl ActorMap {
         }
     }
 
-    pub fn export_actor(&self, actor: ActorID) -> amp::ActorID {
+    pub fn export_actor(&self, actor: ActorId) -> amp::ActorId {
         self.0[actor.0].clone()
     }
 
-    pub fn export_opid(&self, opid: &OpID) -> amp::OpID {
-        amp::OpID(opid.0, self.export_actor(opid.1))
+    pub fn export_opid(&self, opid: &OpId) -> amp::OpId {
+        amp::OpId(opid.0, self.export_actor(opid.1))
     }
 
-    pub fn export_obj(&self, obj: &ObjectID) -> amp::ObjectID {
+    pub fn export_obj(&self, obj: &ObjectId) -> amp::ObjectId {
         match obj {
-            ObjectID::Root => amp::ObjectID::Root,
-            ObjectID::ID(opid) => amp::ObjectID::ID(self.export_opid(opid)),
+            ObjectId::Root => amp::ObjectId::Root,
+            ObjectId::Id(opid) => amp::ObjectId::Id(self.export_opid(opid)),
         }
     }
 
     #[allow(dead_code)]
-    pub fn index_of(&mut self, actor: &amp::ActorID) -> usize {
+    pub fn index_of(&mut self, actor: &amp::ActorId) -> usize {
         if let Some(index) = self.0.iter().position(|a| a == actor) {
             return index;
         }
@@ -92,27 +92,27 @@ impl ActorMap {
     }
 
     #[allow(dead_code)]
-    pub fn actor_for(&self, index: usize) -> Option<&amp::ActorID> {
+    pub fn actor_for(&self, index: usize) -> Option<&amp::ActorId> {
         self.0.get(index)
     }
 
-    pub fn cmp(&self, eid1: &ElementID, eid2: &ElementID) -> Ordering {
+    pub fn cmp(&self, eid1: &ElementId, eid2: &ElementId) -> Ordering {
         match (eid1, eid2) {
-            (ElementID::Head, ElementID::Head) => Ordering::Equal,
-            (ElementID::Head, _) => Ordering::Less,
-            (_, ElementID::Head) => Ordering::Greater,
-            (ElementID::ID(opid1), ElementID::ID(opid2)) => self.cmp_opid(opid1, opid2),
+            (ElementId::Head, ElementId::Head) => Ordering::Equal,
+            (ElementId::Head, _) => Ordering::Less,
+            (_, ElementId::Head) => Ordering::Greater,
+            (ElementId::Id(opid1), ElementId::Id(opid2)) => self.cmp_opid(opid1, opid2),
         }
     }
 
-    pub fn opid_to_string(&self, id: &OpID) -> String {
+    pub fn opid_to_string(&self, id: &OpId) -> String {
         format!("{}@{}", id.0, self.export_actor(id.1).to_hex_string())
     }
 
-    pub fn elementid_to_string(&self, eid: &ElementID) -> String {
+    pub fn elementid_to_string(&self, eid: &ElementId) -> String {
         match eid {
-            ElementID::Head => "_head".into(),
-            ElementID::ID(id) => self.opid_to_string(id),
+            ElementId::Head => "_head".into(),
+            ElementId::Id(id) => self.opid_to_string(id),
         }
     }
 
@@ -123,7 +123,7 @@ impl ActorMap {
         }
     }
 
-    fn cmp_opid(&self, op1: &OpID, op2: &OpID) -> Ordering {
+    fn cmp_opid(&self, op1: &OpId, op2: &OpId) -> Ordering {
         if op1.0 != op2.0 {
             op1.0.cmp(&op2.0)
         } else {

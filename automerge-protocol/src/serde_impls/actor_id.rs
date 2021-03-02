@@ -1,20 +1,20 @@
-use crate::ActorID;
+use crate::ActorId;
 use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
-impl<'de> Deserialize<'de> for ActorID {
+impl<'de> Deserialize<'de> for ActorId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        ActorID::from_str(&s)
+        ActorId::from_str(&s)
             .map_err(|_| de::Error::invalid_value(de::Unexpected::Str(&s), &"A valid ActorID"))
     }
 }
 
-impl Serialize for ActorID {
+impl Serialize for ActorId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,

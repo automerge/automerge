@@ -145,7 +145,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         max_op: 3,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             obj_type: amp::MapType::Map,
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             props: hashmap! {
                 "list".to_string() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -184,7 +184,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         clock: hashmap! {actor.clone() => 2},
         max_op: 5,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "cursor".to_string() => hashmap!{

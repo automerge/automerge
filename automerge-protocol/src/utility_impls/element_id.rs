@@ -1,63 +1,63 @@
-use crate::error::InvalidElementID;
-use crate::{ElementID, OpID};
+use crate::error::InvalidElementId;
+use crate::{ElementId, OpId};
 use std::cmp::{Ordering, PartialOrd};
 use std::{convert::TryFrom, str::FromStr};
 
-impl PartialOrd for ElementID {
+impl PartialOrd for ElementId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ElementID {
+impl Ord for ElementId {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ElementID::ID(a), ElementID::ID(b)) => a.cmp(b),
-            (ElementID::Head, ElementID::Head) => Ordering::Equal,
-            (ElementID::Head, _) => Ordering::Less,
-            (_, ElementID::Head) => Ordering::Greater,
+            (ElementId::Id(a), ElementId::Id(b)) => a.cmp(b),
+            (ElementId::Head, ElementId::Head) => Ordering::Equal,
+            (ElementId::Head, _) => Ordering::Less,
+            (_, ElementId::Head) => Ordering::Greater,
         }
     }
 }
 
-impl From<OpID> for ElementID {
-    fn from(o: OpID) -> Self {
-        ElementID::ID(o)
+impl From<OpId> for ElementId {
+    fn from(o: OpId) -> Self {
+        ElementId::Id(o)
     }
 }
 
-impl From<&OpID> for ElementID {
-    fn from(o: &OpID) -> Self {
-        ElementID::ID(o.clone())
+impl From<&OpId> for ElementId {
+    fn from(o: &OpId) -> Self {
+        ElementId::Id(o.clone())
     }
 }
 
-impl FromStr for ElementID {
-    type Err = InvalidElementID;
+impl FromStr for ElementId {
+    type Err = InvalidElementId;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "_head" => Ok(ElementID::Head),
-            id => Ok(ElementID::ID(
-                OpID::from_str(id).map_err(|_| InvalidElementID(id.to_string()))?,
+            "_head" => Ok(ElementId::Head),
+            id => Ok(ElementId::Id(
+                OpId::from_str(id).map_err(|_| InvalidElementId(id.to_string()))?,
             )),
         }
     }
 }
 
-impl TryFrom<&str> for ElementID {
-    type Error = InvalidElementID;
+impl TryFrom<&str> for ElementId {
+    type Error = InvalidElementId;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ElementID::from_str(value)
+        ElementId::from_str(value)
     }
 }
 
-impl std::fmt::Display for ElementID {
+impl std::fmt::Display for ElementId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ElementID::Head => write!(f, "_head"),
-            ElementID::ID(id) => write!(f, "{}", id.to_string()),
+            ElementId::Head => write!(f, "_head"),
+            ElementId::Id(id) => write!(f, "{}", id.to_string()),
         }
     }
 }

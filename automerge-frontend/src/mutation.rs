@@ -80,14 +80,14 @@ pub struct MutationTracker {
     pub(crate) state: StateTree,
     pub(crate) ops: Vec<amp::Op>,
     pub max_op: u64,
-    actor_id: amp::ActorID,
+    actor_id: amp::ActorId,
 }
 
 impl MutationTracker {
     pub(crate) fn new(
         state_tree: StateTree,
         max_op: u64,
-        actor_id: amp::ActorID,
+        actor_id: amp::ActorId,
     ) -> MutationTracker {
         MutationTracker {
             state: state_tree,

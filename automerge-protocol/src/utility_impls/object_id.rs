@@ -1,71 +1,71 @@
-use crate::error::InvalidObjectID;
-use crate::{ObjectID, OpID};
+use crate::error::InvalidObjectId;
+use crate::{ObjectId, OpId};
 use std::cmp::{Ordering, PartialOrd};
 use std::fmt;
 use std::{convert::TryFrom, str::FromStr};
 
-impl PartialOrd for ObjectID {
+impl PartialOrd for ObjectId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ObjectID {
+impl Ord for ObjectId {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
-            (ObjectID::Root, ObjectID::Root) => Ordering::Equal,
-            (ObjectID::Root, _) => Ordering::Less,
-            (_, ObjectID::Root) => Ordering::Greater,
-            (ObjectID::ID(a), ObjectID::ID(b)) => a.cmp(b),
+            (ObjectId::Root, ObjectId::Root) => Ordering::Equal,
+            (ObjectId::Root, _) => Ordering::Less,
+            (_, ObjectId::Root) => Ordering::Greater,
+            (ObjectId::Id(a), ObjectId::Id(b)) => a.cmp(b),
         }
     }
 }
 
-impl From<&OpID> for ObjectID {
-    fn from(o: &OpID) -> Self {
-        ObjectID::ID(o.clone())
+impl From<&OpId> for ObjectId {
+    fn from(o: &OpId) -> Self {
+        ObjectId::Id(o.clone())
     }
 }
 
-impl From<&ObjectID> for ObjectID {
-    fn from(o: &ObjectID) -> Self {
+impl From<&ObjectId> for ObjectId {
+    fn from(o: &ObjectId) -> Self {
         o.clone()
     }
 }
 
-impl FromStr for ObjectID {
-    type Err = InvalidObjectID;
+impl FromStr for ObjectId {
+    type Err = InvalidObjectId;
 
-    fn from_str(s: &str) -> Result<ObjectID, Self::Err> {
+    fn from_str(s: &str) -> Result<ObjectId, Self::Err> {
         if s == "_root" {
-            Ok(ObjectID::Root)
-        } else if let Ok(id) = OpID::from_str(s) {
-            Ok(ObjectID::ID(id))
+            Ok(ObjectId::Root)
+        } else if let Ok(id) = OpId::from_str(s) {
+            Ok(ObjectId::Id(id))
         } else {
-            Err(InvalidObjectID(s.to_string()))
+            Err(InvalidObjectId(s.to_string()))
         }
     }
 }
 
-impl From<OpID> for ObjectID {
-    fn from(id: OpID) -> Self {
-        ObjectID::ID(id)
+impl From<OpId> for ObjectId {
+    fn from(id: OpId) -> Self {
+        ObjectId::Id(id)
     }
 }
 
-impl fmt::Display for ObjectID {
+impl fmt::Display for ObjectId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ObjectID::Root => write!(f, "_root"),
-            ObjectID::ID(oid) => write!(f, "{}", oid),
+            ObjectId::Root => write!(f, "_root"),
+            ObjectId::Id(oid) => write!(f, "{}", oid),
         }
     }
 }
 
-impl TryFrom<&str> for ObjectID {
-    type Error = InvalidObjectID;
+impl TryFrom<&str> for ObjectId {
+    type Error = InvalidObjectId;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        ObjectID::from_str(value)
+        ObjectId::from_str(value)
     }
 }

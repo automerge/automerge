@@ -113,7 +113,7 @@ fn it_should_create_nested_maps() {
         operations: vec![
             amp::Op {
                 action: amp::OpType::Make(amp::ObjType::map()),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "birds".into(),
                 insert: false,
                 pred: Vec::new(),
@@ -243,7 +243,7 @@ fn delete_keys_in_a_map() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Del,
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "magpies".into(),
             insert: false,
             pred: vec![doc.actor_id.op_id_at(1)],
@@ -300,14 +300,14 @@ fn create_lists() {
             amp::Op {
                 action: amp::OpType::Make(amp::ObjType::list()),
                 key: "birds".into(),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 insert: false,
                 pred: Vec::new(),
             },
             amp::Op {
                 action: amp::OpType::Set("chaffinch".into()),
                 obj: birds_id,
-                key: amp::ElementID::Head.into(),
+                key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
@@ -479,7 +479,7 @@ fn handle_counters_inside_maps() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Counter(0)),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "wrens".into(),
             insert: false,
             pred: Vec::new(),
@@ -498,7 +498,7 @@ fn handle_counters_inside_maps() {
         deps: Vec::new(),
         operations: vec![amp::Op {
             action: amp::OpType::Inc(1),
-            obj: amp::ObjectID::Root,
+            obj: amp::ObjectId::Root,
             key: "wrens".into(),
             insert: false,
             pred: vec![doc.actor_id.op_id_at(1)],
@@ -568,7 +568,7 @@ fn handle_counters_inside_lists() {
         operations: vec![
             amp::Op {
                 action: amp::OpType::Make(amp::ObjType::list()),
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: "counts".into(),
                 insert: false,
                 pred: Vec::new(),
@@ -576,7 +576,7 @@ fn handle_counters_inside_lists() {
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Counter(1)),
                 obj: counts_id.clone(),
-                key: amp::ElementID::Head.into(),
+                key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
@@ -778,7 +778,7 @@ fn test_inserts_characters_at_start_of_text() {
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("i".into())),
             obj: text_id,
-            key: amp::ElementID::Head.into(),
+            key: amp::ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
@@ -838,7 +838,7 @@ fn test_inserts_at_end_of_lists() {
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str("greenfinch".into())),
                 obj: list_id.clone(),
-                key: amp::ElementID::Head.into(),
+                key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },

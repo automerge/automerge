@@ -1,7 +1,7 @@
 use crate::value::Value;
 use crate::Path;
 use automerge_protocol as amp;
-use automerge_protocol::ObjectID;
+use automerge_protocol::ObjectId;
 use std::error::Error;
 use std::fmt;
 use thiserror::Error;
@@ -9,12 +9,12 @@ use thiserror::Error;
 #[derive(Debug, PartialEq)]
 pub enum AutomergeFrontendError {
     InvalidChangeRequest,
-    MissingObjectError(ObjectID),
+    MissingObjectError(ObjectId),
     NoSuchPathError(Path),
     PathIsNotCounter,
     CannotOverwriteCounter,
     MismatchedSequenceNumber,
-    InvalidActorIDString(String),
+    InvalidActorIdString(String),
 }
 
 impl fmt::Display for AutomergeFrontendError {
@@ -23,9 +23,9 @@ impl fmt::Display for AutomergeFrontendError {
     }
 }
 
-impl From<automerge_protocol::error::InvalidActorID> for AutomergeFrontendError {
-    fn from(e: automerge_protocol::error::InvalidActorID) -> AutomergeFrontendError {
-        AutomergeFrontendError::InvalidActorIDString(e.0)
+impl From<automerge_protocol::error::InvalidActorId> for AutomergeFrontendError {
+    fn from(e: automerge_protocol::error::InvalidActorId) -> AutomergeFrontendError {
+        AutomergeFrontendError::InvalidActorIdString(e.0)
     }
 }
 
@@ -54,7 +54,7 @@ pub enum InvalidPatch {
     MismatchedSequenceNumber { expected: u64, actual: u64 },
     #[error("Received a diff inserting a non text object in a text object. Target object id was {object_id}, diff was {diff:?}")]
     InsertNonTextInTextObject {
-        object_id: ObjectID,
+        object_id: ObjectId,
         diff: amp::Diff,
     },
     #[error(
@@ -62,24 +62,24 @@ pub enum InvalidPatch {
     )]
     InsertMultipleCharsInTextChar,
     #[error("Received a diff which had multiple values for a key in a table. Table id was {table_id}, diff was {diff:?}")]
-    ConflictsReceivedForTableKey { table_id: ObjectID, diff: amp::Diff },
+    ConflictsReceivedForTableKey { table_id: ObjectId, diff: amp::Diff },
     #[error("Patch contained a diff which expected object with ID {object_id:?} to be {patch_expected_type:?} but we think it is {actual_type:?}")]
     MismatchingObjectType {
-        object_id: ObjectID,
+        object_id: ObjectId,
         patch_expected_type: Option<amp::ObjType>,
         actual_type: Option<amp::ObjType>,
     },
     #[error("Patch referenced an object id {patch_expected_id:?} at a path where we ecpected {actual_id:?}")]
     MismatchingObjectIDs {
-        patch_expected_id: Option<ObjectID>,
-        actual_id: ObjectID,
+        patch_expected_id: Option<ObjectId>,
+        actual_id: ObjectId,
     },
     #[error("Patch attempted to reference an index which did not exist for object {object_id}")]
-    InvalidIndex { object_id: ObjectID, index: usize },
+    InvalidIndex { object_id: ObjectId, index: usize },
     #[error("The patch tried to create an object but specified no value for the new object")]
     DiffCreatedObjectWithNoValue,
     #[error("The patch contained a diff with a list edit which referenced the '_head' of a list, rather than a specific element ID")]
-    DiffEditWithHeadElemID,
+    DiffEditWithHeadElemId,
     #[error("Value diff containing cursor")]
     ValueDiffContainedCursor,
 }

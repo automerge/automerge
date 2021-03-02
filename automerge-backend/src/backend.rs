@@ -1,7 +1,7 @@
 use crate::actor_map::ActorMap;
 use crate::change::encode_document;
 use crate::error::AutomergeError;
-use crate::internal::ObjectID;
+use crate::internal::ObjectId;
 use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::pending_diff::PendingDiff;
@@ -15,7 +15,7 @@ use std::rc::Rc;
 pub struct Backend {
     queue: Vec<Rc<Change>>,
     op_set: Rc<OpSet>,
-    states: HashMap<amp::ActorID, Vec<Rc<Change>>>,
+    states: HashMap<amp::ActorId, Vec<Rc<Change>>>,
     actors: ActorMap,
     hashes: HashMap<amp::ChangeHash, Rc<Change>>,
     history: Vec<amp::ChangeHash>,
@@ -37,7 +37,7 @@ impl Backend {
     fn make_patch(
         &self,
         diffs: Option<amp::Diff>,
-        actor_seq: Option<(amp::ActorID, u64)>,
+        actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
             let last_hash = self.get_hash(actor, *seq)?;
@@ -86,7 +86,7 @@ impl Backend {
     fn apply(
         &mut self,
         mut changes: Vec<Rc<Change>>,
-        actor: Option<(amp::ActorID, u64)>,
+        actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
@@ -99,7 +99,7 @@ impl Backend {
         self.make_patch(diffs, actor)
     }
 
-    fn get_hash(&self, actor: &amp::ActorID, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+    fn get_hash(&self, actor: &amp::ActorId, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
         self.states
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
@@ -149,7 +149,7 @@ impl Backend {
         &mut self,
         change: Rc<Change>,
         local: bool,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, diffs)
@@ -161,7 +161,7 @@ impl Backend {
 
     fn apply_queued_ops(
         &mut self,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, diffs)?;
@@ -172,7 +172,7 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Rc<Change>,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if self.hashes.contains_key(&change.hash) {
             return Ok(());
@@ -220,13 +220,13 @@ impl Backend {
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
         let diffs = self
             .op_set
-            .construct_object(&ObjectID::Root, &self.actors)?;
+            .construct_object(&ObjectId::Root, &self.actors)?;
         self.make_patch(Some(diffs), None)
     }
 
     pub fn get_changes_for_actor_id(
         &self,
-        actor_id: &amp::ActorID,
+        actor_id: &amp::ActorId,
     ) -> Result<Vec<&Change>, AutomergeError> {
         Ok(self
             .states
@@ -259,7 +259,7 @@ impl Backend {
             .filter_map(|hash| self.hashes.get(&hash))
             .map(|r| r.as_ref().into())
             .collect();
-        Ok(encode_document(changes)?)
+        encode_document(changes)
     }
 
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {

@@ -121,7 +121,7 @@ impl<'a> ResolvedPath<'a> {
 
     pub(super) fn new_counter(
         tree: &StateTree,
-        object_id: amp::ObjectID,
+        object_id: amp::ObjectId,
         key: amp::Key,
         mv: MultiValue,
         focus: Focus,
@@ -168,7 +168,7 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub fn values(&self) -> std::collections::HashMap<amp::OpID, Value> {
+    pub fn values(&self) -> std::collections::HashMap<amp::OpId, Value> {
         match &self.target {
             Target::Map(maptarget) => maptarget.multivalue.realise_values(&self.root.objects),
             Target::Root(root) => {
@@ -187,10 +187,10 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub fn object_id(&self) -> Option<amp::ObjectID> {
+    pub fn object_id(&self) -> Option<amp::ObjectId> {
         match &self.target {
             Target::Map(maptarget) => Some(maptarget.value.object_id.clone()),
-            Target::Root(_) => Some(amp::ObjectID::Root),
+            Target::Root(_) => Some(amp::ObjectId::Root),
             Target::Table(tabletarget) => Some(tabletarget.value.object_id.clone()),
             Target::List(listtarget) => Some(listtarget.value.object_id.clone()),
             Target::Text(texttarget) => Some(texttarget.value.object_id.clone()),
@@ -203,7 +203,7 @@ impl<'a> ResolvedPath<'a> {
 
 pub(crate) struct SetOrInsertPayload<'a, T> {
     pub start_op: u64,
-    pub actor: &'a amp::ActorID,
+    pub actor: &'a amp::ActorId,
     pub value: T,
 }
 
@@ -221,7 +221,7 @@ impl ResolvedRoot {
             actor: payload.actor,
             start_op: payload.start_op,
             key: &key.into(),
-            parent_obj: &amp::ObjectID::Root,
+            parent_obj: &amp::ObjectId::Root,
             value: payload.value,
             insert: false,
             pred: self
@@ -248,7 +248,7 @@ impl ResolvedRoot {
             new_state: self.root.remove(key),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del,
-                obj: amp::ObjectID::Root,
+                obj: amp::ObjectId::Root,
                 key: key.into(),
                 insert: false,
                 pred,
@@ -260,7 +260,7 @@ impl ResolvedRoot {
 pub struct ResolvedCounter {
     pub(super) current_value: i64,
     pub(super) multivalue: MultiValue,
-    pub(super) containing_object_id: amp::ObjectID,
+    pub(super) containing_object_id: amp::ObjectId,
     pub(super) key_in_container: amp::Key,
     pub(super) focus: Focus,
 }
@@ -419,10 +419,10 @@ impl ResolvedText {
         payload: SetOrInsertPayload<char>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
-            0 => amp::ElementID::Head,
+            0 => amp::ElementId::Head,
             i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
         };
-        let insert_op = amp::OpID::new(payload.start_op, payload.actor);
+        let insert_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiChar::new_from_char(insert_op, payload.value);
         let new_text = self.value.insert(index.try_into().unwrap(), c)?;
         let updated = StateTreeComposite::Text(new_text);
@@ -452,7 +452,7 @@ impl ResolvedText {
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let index: usize = index.try_into().unwrap();
         let (current_elemid, _) = self.value.elem_at(index)?;
-        let update_op = amp::OpID::new(payload.start_op, payload.actor);
+        let update_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiChar::new_from_char(update_op, payload.value);
         let updated = StateTreeComposite::Text(self.value.set(index, c)?);
         let mv = self
@@ -558,7 +558,7 @@ impl ResolvedList {
         payload: SetOrInsertPayload<&Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
-            0 => amp::ElementID::Head,
+            0 => amp::ElementId::Head,
             i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
         };
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {

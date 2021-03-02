@@ -3,10 +3,10 @@ use serde::Serialize;
 use std::{borrow::Borrow, collections::HashMap};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct Conflicts(HashMap<amp::OpID, Value>);
+pub struct Conflicts(HashMap<amp::OpId, Value>);
 
-impl From<HashMap<amp::OpID, Value>> for Conflicts {
-    fn from(hmap: HashMap<amp::OpID, Value>) -> Self {
+impl From<HashMap<amp::OpId, Value>> for Conflicts {
+    fn from(hmap: HashMap<amp::OpId, Value>) -> Self {
         Conflicts(hmap)
     }
 }
@@ -37,12 +37,12 @@ pub enum Primitive {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Cursor {
     pub index: u32,
-    pub(crate) object: amp::ObjectID,
-    pub(crate) elem_opid: amp::OpID,
+    pub(crate) object: amp::ObjectId,
+    pub(crate) elem_opid: amp::OpId,
 }
 
 impl Cursor {
-    pub fn new(index: u32, obj: amp::ObjectID, op: amp::OpID) -> Cursor {
+    pub fn new(index: u32, obj: amp::ObjectId, op: amp::OpId) -> Cursor {
         Cursor {
             index,
             object: obj,
@@ -57,9 +57,9 @@ impl From<Cursor> for Value {
     }
 }
 
-impl Into<amp::ScalarValue> for &Primitive {
-    fn into(self) -> amp::ScalarValue {
-        match self {
+impl From<&Primitive> for amp::ScalarValue {
+    fn from(p: &Primitive) -> Self {
+        match p {
             Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
             Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
@@ -203,16 +203,16 @@ impl Value {
 ///
 /// Returns a vector of the op requests which will create this value
 pub(crate) fn value_to_op_requests(
-    actor: &amp::ActorID,
+    actor: &amp::ActorId,
     start_op: u64,
-    parent_object: amp::ObjectID,
+    parent_object: amp::ObjectId,
     key: &amp::Key,
     v: &Value,
     insert: bool,
 ) -> (Vec<amp::Op>, u64) {
     match v {
         Value::Sequence(vs) => {
-            let list_op = amp::OpID(start_op, actor.clone());
+            let list_op = amp::OpId(start_op, actor.clone());
             let make_op = amp::Op {
                 action: amp::OpType::Make(amp::ObjType::list()),
                 obj: parent_object,
@@ -222,24 +222,24 @@ pub(crate) fn value_to_op_requests(
             };
             let mut op_num = start_op + 1;
             let mut result = vec![make_op];
-            let mut last_elemid = amp::ElementID::Head;
+            let mut last_elemid = amp::ElementId::Head;
             for v in vs.iter() {
                 let (child_requests, new_op_num) = value_to_op_requests(
                     actor,
                     op_num,
-                    amp::ObjectID::from(list_op.clone()),
+                    amp::ObjectId::from(list_op.clone()),
                     &last_elemid.clone().into(),
                     v,
                     true,
                 );
-                last_elemid = amp::OpID::new(op_num, actor).into();
+                last_elemid = amp::OpId::new(op_num, actor).into();
                 op_num = new_op_num;
                 result.extend(child_requests);
             }
             (result, op_num)
         }
         Value::Text(chars) => {
-            let make_text_op = amp::OpID(start_op, actor.clone());
+            let make_text_op = amp::OpId(start_op, actor.clone());
             let make_op = amp::Op {
                 action: amp::OpType::Make(amp::ObjType::text()),
                 obj: parent_object,
@@ -248,17 +248,17 @@ pub(crate) fn value_to_op_requests(
                 pred: Vec::new(),
             };
             let mut insert_ops: Vec<amp::Op> = Vec::new();
-            let mut last_elemid = amp::ElementID::Head;
+            let mut last_elemid = amp::ElementId::Head;
             let mut op_num = start_op + 1;
             for c in chars.iter() {
                 insert_ops.push(amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str(c.to_string())),
-                    obj: amp::ObjectID::from(make_text_op.clone()),
+                    obj: amp::ObjectId::from(make_text_op.clone()),
                     key: last_elemid.clone().into(),
                     insert: true,
                     pred: Vec::new(),
                 });
-                last_elemid = amp::OpID::new(op_num, actor).into();
+                last_elemid = amp::OpId::new(op_num, actor).into();
                 op_num += 1;
             }
             let mut ops = vec![make_op];
@@ -270,7 +270,7 @@ pub(crate) fn value_to_op_requests(
                 amp::MapType::Map => amp::OpType::Make(amp::ObjType::map()),
                 amp::MapType::Table => amp::OpType::Make(amp::ObjType::table()),
             };
-            let make_op_id = amp::OpID::new(start_op, actor);
+            let make_op_id = amp::OpId::new(start_op, actor);
             let make_op = amp::Op {
                 action: make_action,
                 obj: parent_object,
@@ -284,7 +284,7 @@ pub(crate) fn value_to_op_requests(
                 let (child_requests, new_op_num) = value_to_op_requests(
                     actor,
                     op_num,
-                    amp::ObjectID::from(make_op_id.clone()),
+                    amp::ObjectId::from(make_op_id.clone()),
                     &amp::Key::from(key.as_str()),
                     v,
                     false,

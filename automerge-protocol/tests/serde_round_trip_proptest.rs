@@ -41,25 +41,25 @@ fn arb_optype() -> impl Strategy<Value = amp::OpType> {
     ]
 }
 
-fn arb_actorid() -> impl Strategy<Value = amp::ActorID> {
-    proptest::collection::vec(any::<u8>(), 32).prop_map(|bytes| amp::ActorID::from_bytes(&bytes))
+fn arb_actorid() -> impl Strategy<Value = amp::ActorId> {
+    proptest::collection::vec(any::<u8>(), 32).prop_map(|bytes| amp::ActorId::from_bytes(&bytes))
 }
 
-fn arb_opid() -> impl Strategy<Value = amp::OpID> {
-    (any::<u64>(), arb_actorid()).prop_map(|(seq, actor)| amp::OpID::new(seq, &actor))
+fn arb_opid() -> impl Strategy<Value = amp::OpId> {
+    (any::<u64>(), arb_actorid()).prop_map(|(seq, actor)| amp::OpId::new(seq, &actor))
 }
 
-fn arb_objid() -> impl Strategy<Value = amp::ObjectID> {
+fn arb_objid() -> impl Strategy<Value = amp::ObjectId> {
     prop_oneof![
-        Just(amp::ObjectID::Root),
-        arb_opid().prop_map(amp::ObjectID::ID),
+        Just(amp::ObjectId::Root),
+        arb_opid().prop_map(amp::ObjectId::Id),
     ]
 }
 
-fn arb_elemid() -> impl Strategy<Value = amp::ElementID> {
+fn arb_elemid() -> impl Strategy<Value = amp::ElementId> {
     prop_oneof![
-        Just(amp::ElementID::Head),
-        arb_opid().prop_map(amp::ElementID::ID),
+        Just(amp::ElementId::Head),
+        arb_opid().prop_map(amp::ElementId::Id),
     ]
 }
 

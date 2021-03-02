@@ -1,35 +1,35 @@
 use automerge_protocol as amp;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
-pub(crate) struct ActorID(pub usize);
+pub(crate) struct ActorId(pub usize);
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
-pub(crate) struct OpID(pub u64, pub ActorID);
+pub(crate) struct OpId(pub u64, pub ActorId);
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
-pub(crate) enum ObjectID {
-    ID(OpID),
+pub(crate) enum ObjectId {
+    Id(OpId),
     Root,
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone, Copy)]
-pub(crate) enum ElementID {
+pub(crate) enum ElementId {
     Head,
-    ID(OpID),
+    Id(OpId),
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub(crate) enum Key {
     Map(String),
-    Seq(ElementID),
+    Seq(ElementId),
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct InternalOp {
     pub action: InternalOpType,
-    pub obj: ObjectID,
+    pub obj: ObjectId,
     pub key: Key,
-    pub pred: Vec<OpID>,
+    pub pred: Vec<OpId>,
     pub insert: bool,
 }
 
@@ -55,35 +55,35 @@ pub(crate) enum InternalOpType {
 }
 
 impl Key {
-    pub fn as_element_id(&self) -> Option<ElementID> {
+    pub fn as_element_id(&self) -> Option<ElementId> {
         match self {
             Key::Map(_) => None,
             Key::Seq(eid) => Some(*eid),
         }
     }
 
-    pub fn to_opid(&self) -> Option<OpID> {
+    pub fn to_opid(&self) -> Option<OpId> {
         match self.as_element_id()? {
-            ElementID::ID(id) => Some(id),
-            ElementID::Head => None,
+            ElementId::Id(id) => Some(id),
+            ElementId::Head => None,
         }
     }
 }
 
-impl From<OpID> for ObjectID {
-    fn from(id: OpID) -> ObjectID {
-        ObjectID::ID(id)
+impl From<OpId> for ObjectId {
+    fn from(id: OpId) -> ObjectId {
+        ObjectId::Id(id)
     }
 }
 
-impl From<OpID> for ElementID {
-    fn from(id: OpID) -> ElementID {
-        ElementID::ID(id)
+impl From<OpId> for ElementId {
+    fn from(id: OpId) -> ElementId {
+        ElementId::Id(id)
     }
 }
 
-impl From<OpID> for Key {
-    fn from(id: OpID) -> Key {
-        Key::Seq(ElementID::ID(id))
+impl From<OpId> for Key {
+    fn from(id: OpId) -> Key {
+        Key::Seq(ElementId::Id(id))
     }
 }

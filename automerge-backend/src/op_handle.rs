@@ -4,13 +4,13 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use crate::actor_map::ActorMap;
-use crate::internal::{InternalOp, InternalOpType, Key, ObjectID, OpID};
+use crate::internal::{InternalOp, InternalOpType, Key, ObjectId, OpId};
 use crate::Change;
 use automerge_protocol as amp;
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {
-    pub id: OpID,
+    pub id: OpId,
     pub op: InternalOp,
     pub delta: i64,
 }
@@ -21,7 +21,7 @@ impl OpHandle {
             .iter_ops()
             .enumerate()
             .map(|(index, op)| {
-                let id = OpID(
+                let id = OpId(
                     change.start_op + (index as u64),
                     actors.import_actor(change.actor_id()),
                 );
@@ -41,7 +41,7 @@ impl OpHandle {
         }
     }
 
-    pub fn child(&self) -> Option<ObjectID> {
+    pub fn child(&self) -> Option<ObjectId> {
         match &self.action {
             InternalOpType::Make(_) => Some(self.id.into()),
             _ => None,

@@ -3,19 +3,19 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]
-pub struct InvalidOpID(pub String);
+pub struct InvalidOpId(pub String);
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid object ID: {0}")]
-pub struct InvalidObjectID(pub String);
+pub struct InvalidObjectId(pub String);
 
 #[derive(Error, Debug)]
 #[error("Invalid element ID: {0}")]
-pub struct InvalidElementID(pub String);
+pub struct InvalidElementId(pub String);
 
 #[derive(Error, Debug)]
 #[error("Invalid actor ID: {0}")]
-pub struct InvalidActorID(pub String);
+pub struct InvalidActorId(pub String);
 
 #[derive(Error, Debug, PartialEq)]
 #[error("Invalid change hash slice: {0:?}")]

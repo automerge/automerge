@@ -1,4 +1,4 @@
-use crate::{ElementID, Key, OpID};
+use crate::{ElementId, Key, OpId};
 use std::cmp::{Ordering, PartialOrd};
 
 impl PartialOrd for Key {
@@ -18,20 +18,20 @@ impl Ord for Key {
     }
 }
 
-impl From<OpID> for Key {
-    fn from(id: OpID) -> Self {
-        Key::Seq(ElementID::ID(id))
+impl From<OpId> for Key {
+    fn from(id: OpId) -> Self {
+        Key::Seq(ElementId::Id(id))
     }
 }
 
-impl From<&OpID> for Key {
-    fn from(id: &OpID) -> Self {
-        Key::Seq(ElementID::ID(id.clone()))
+impl From<&OpId> for Key {
+    fn from(id: &OpId) -> Self {
+        Key::Seq(ElementId::Id(id.clone()))
     }
 }
 
-impl From<ElementID> for Key {
-    fn from(id: ElementID) -> Self {
+impl From<ElementId> for Key {
+    fn from(id: ElementId) -> Self {
         Key::Seq(id)
     }
 }

@@ -5,7 +5,7 @@ use maplit::hashmap;
 use std::collections::HashMap;
 
 pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
-    let actor_id = amp::ActorID::random();
+    let actor_id = amp::ActorId::random();
     let make_list_opid = actor_id.op_id_at(1);
     let mut patches: Vec<amp::Patch> = vec![amp::Patch {
         actor: None,
@@ -14,7 +14,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "text".to_string() => hashmap!{
@@ -36,7 +36,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             deps: Vec::new(),
             max_op: op_num as u64,
             diffs: Some(amp::Diff::Map(amp::MapDiff{
-                object_id: amp::ObjectID::Root,
+                object_id: amp::ObjectId::Root,
                 obj_type: amp::MapType::Map,
                 props: hashmap!{
                     "text".to_string() => hashmap!{
@@ -82,10 +82,10 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
 }
 
 pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
-    let actor_id = amp::ActorID::random();
+    let actor_id = amp::ActorId::random();
     let make_list_opid = actor_id.op_id_at(1);
     let mut edits: Vec<amp::DiffEdit> = Vec::new();
-    let mut props: HashMap<usize, HashMap<amp::OpID, amp::Diff>> = HashMap::new();
+    let mut props: HashMap<usize, HashMap<amp::OpId, amp::Diff>> = HashMap::new();
     for index in 0..6000 {
         let op_num = index + 2;
         let this_op_id = actor_id.op_id_at(op_num as u64);
@@ -105,7 +105,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "text".to_string() => hashmap!{

@@ -1,5 +1,5 @@
 use automerge_protocol::{
-    ActorID, ChangeHash, MapType, ObjectID, Op, OpID, Patch, UncompressedChange,
+    ActorId, ChangeHash, MapType, ObjectId, Op, OpId, Patch, UncompressedChange,
 };
 
 mod error;
@@ -64,7 +64,7 @@ impl FrontendState {
     /// Apply a patch received from the backend to this frontend state,
     /// returns the updated cached value (if it has changed) and a new
     /// `FrontendState` which replaces this one
-    fn apply_remote_patch(self, self_actor: &ActorID, patch: &Patch) -> Result<Self, InvalidPatch> {
+    fn apply_remote_patch(self, self_actor: &ActorId, patch: &Patch) -> Result<Self, InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
@@ -129,7 +129,7 @@ impl FrontendState {
         }
     }
 
-    fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
+    fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
         self.resolve_path(path).and_then(|r| r.object_id())
     }
 
@@ -154,7 +154,7 @@ impl FrontendState {
     /// closure no chnages are made and the error is returned.
     pub fn optimistically_apply_change<F, E>(
         self,
-        actor: &ActorID,
+        actor: &ActorId,
         change_closure: F,
         seq: u64,
     ) -> Result<OptimisticChangeResult, E>
@@ -241,7 +241,7 @@ impl FrontendState {
 
 #[derive(Debug)]
 pub struct Frontend {
-    pub actor_id: ActorID,
+    pub actor_id: ActorId,
     pub seq: u64,
     /// The current state of the frontend, see the description of
     /// `FrontendState` for details. It's an `Option` to allow consuming it
@@ -261,7 +261,7 @@ impl Frontend {
     pub fn new() -> Self {
         let root_state = state_tree::StateTree::new();
         Frontend {
-            actor_id: ActorID::random(),
+            actor_id: ActorId::random(),
             seq: 0,
             state: Some(FrontendState::Reconciled {
                 root_state,
@@ -284,7 +284,7 @@ impl Frontend {
                             let (more_ops, max_op) = value::value_to_op_requests(
                                 &front.actor_id,
                                 max_op,
-                                ObjectID::Root,
+                                ObjectId::Root,
                                 &k.into(),
                                 v,
                                 false,
@@ -381,7 +381,7 @@ impl Frontend {
         Ok(())
     }
 
-    pub fn get_object_id(&self, path: &Path) -> Option<ObjectID> {
+    pub fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
         self.state.as_ref().and_then(|s| s.get_object_id(path))
     }
 
@@ -394,7 +394,7 @@ impl Frontend {
 
     /// Gets the set of values for `path`, returns None if the path does not
     /// exist
-    pub fn get_conflicts(&self, path: &Path) -> Option<HashMap<OpID, Value>> {
+    pub fn get_conflicts(&self, path: &Path) -> Option<HashMap<OpId, Value>> {
         self.state
             .as_ref()
             .and_then(|s| s.resolve_path(path))

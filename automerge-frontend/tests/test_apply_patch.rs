@@ -5,7 +5,7 @@ use std::convert::TryInto;
 
 #[test]
 fn set_object_root_properties() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -15,7 +15,7 @@ fn set_object_root_properties() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
@@ -36,12 +36,12 @@ fn set_object_root_properties() {
 fn reveal_conflicts_on_root_properties() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 > actor2)
-    let actor1 = amp::ActorID::from_bytes(
+    let actor1 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
             .unwrap()
             .as_bytes(),
     );
-    let actor2 = amp::ActorID::from_bytes(
+    let actor2 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
             .unwrap()
             .as_bytes(),
@@ -56,7 +56,7 @@ fn reveal_conflicts_on_root_properties() {
         },
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "favouriteBird".into() => hashmap!{
@@ -87,7 +87,7 @@ fn reveal_conflicts_on_root_properties() {
 
 #[test]
 fn create_nested_maps() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -97,7 +97,7 @@ fn create_nested_maps() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -124,7 +124,7 @@ fn create_nested_maps() {
 
 #[test]
 fn apply_updates_inside_nested_maps() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
@@ -134,7 +134,7 @@ fn apply_updates_inside_nested_maps() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -165,7 +165,7 @@ fn apply_updates_inside_nested_maps() {
             actor.clone() => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -197,12 +197,12 @@ fn apply_updates_inside_nested_maps() {
 fn apply_updates_inside_map_conflicts() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 < actor2)
-    let actor1 = amp::ActorID::from_bytes(
+    let actor1 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
             .unwrap()
             .as_bytes(),
     );
-    let actor2 = amp::ActorID::from_bytes(
+    let actor2 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
             .unwrap()
             .as_bytes(),
@@ -217,7 +217,7 @@ fn apply_updates_inside_map_conflicts() {
             actor2.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
@@ -271,7 +271,7 @@ fn apply_updates_inside_map_conflicts() {
             actor2.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
@@ -313,7 +313,7 @@ fn apply_updates_inside_map_conflicts() {
 
 #[test]
 fn delete_keys_in_maps() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let mut frontend = Frontend::new();
     let patch1 = amp::Patch {
         actor: None,
@@ -324,7 +324,7 @@ fn delete_keys_in_maps() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "magpies".into() => hashmap!{
@@ -353,7 +353,7 @@ fn delete_keys_in_maps() {
             actor => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "magpies".into() => hashmap!{}
@@ -370,7 +370,7 @@ fn delete_keys_in_maps() {
 
 #[test]
 fn create_lists() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
         actor: None,
@@ -381,7 +381,7 @@ fn create_lists() {
             actor.clone() => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -409,7 +409,7 @@ fn create_lists() {
 
 #[test]
 fn apply_updates_inside_lists() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
         actor: None,
@@ -420,7 +420,7 @@ fn apply_updates_inside_lists() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -449,7 +449,7 @@ fn apply_updates_inside_lists() {
             actor.clone() => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -478,18 +478,18 @@ fn apply_updates_inside_lists() {
 fn apply_updates_inside_list_conflicts() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 < actor2)
-    let actor1 = amp::ActorID::from_bytes(
+    let actor1 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
             .unwrap()
             .as_bytes(),
     );
-    let actor2 = amp::ActorID::from_bytes(
+    let actor2 = amp::ActorId::from_bytes(
         uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
             .unwrap()
             .as_bytes(),
     );
 
-    let other_actor = amp::ActorID::random();
+    let other_actor = amp::ActorId::random();
 
     let patch1 = amp::Patch {
         actor: None,
@@ -502,7 +502,7 @@ fn apply_updates_inside_list_conflicts() {
             actor2.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -579,7 +579,7 @@ fn apply_updates_inside_list_conflicts() {
             actor2.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -638,7 +638,7 @@ fn apply_updates_inside_list_conflicts() {
 
 #[test]
 fn delete_list_elements() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
         actor: None,
@@ -649,7 +649,7 @@ fn delete_list_elements() {
             actor.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -688,7 +688,7 @@ fn delete_list_elements() {
             actor.clone() => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
@@ -711,7 +711,7 @@ fn delete_list_elements() {
 
 #[test]
 fn apply_updates_at_different_levels_of_object_tree() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let patch1 = amp::Patch {
         clock: hashmap! {actor.clone() => 1},
         seq: None,
@@ -719,7 +719,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "counts".into() => hashmap!{
@@ -781,7 +781,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "counts".into() => hashmap!{
@@ -835,7 +835,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
 
 #[test]
 fn test_text_objects() {
-    let actor = amp::ActorID::random();
+    let actor = amp::ActorId::random();
     let mut frontend = Frontend::new();
     let patch = amp::Patch {
         actor: None,
@@ -846,7 +846,7 @@ fn test_text_objects() {
             actor.clone() => 2,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "name".into() => hashmap!{
@@ -890,7 +890,7 @@ fn test_text_objects() {
             actor.clone() => 3,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "name".into() => hashmap!{
@@ -929,7 +929,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         deps: Vec::new(),
         max_op: 1,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectID::Root,
+            object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "text".to_string() => hashmap!{

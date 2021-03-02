@@ -2,7 +2,7 @@ extern crate automerge_backend;
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorID, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjectID, Op, Patch, ScalarValue,
+    ActorId, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch, ScalarValue,
     SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
@@ -10,7 +10,7 @@ use std::convert::TryInto;
 
 #[test]
 fn test_include_most_recent_value_for_key() {
-    let actor: ActorID = "ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap();
+    let actor: ActorId = "ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -22,7 +22,7 @@ fn test_include_most_recent_value_for_key() {
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             key: "bird".into(),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             pred: Vec::new(),
             insert: false,
         }],
@@ -40,7 +40,7 @@ fn test_include_most_recent_value_for_key() {
         hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             action: amp::OpType::Set("blackbird".into()),
             key: "bird".into(),
             pred: vec![actor.op_id_at(1)],
@@ -60,7 +60,7 @@ fn test_include_most_recent_value_for_key() {
         },
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
@@ -78,8 +78,8 @@ fn test_include_most_recent_value_for_key() {
 
 #[test]
 fn test_includes_conflicting_values_for_key() {
-    let actor1: ActorID = "111111".try_into().unwrap();
-    let actor2: ActorID = "222222".try_into().unwrap();
+    let actor1: ActorId = "111111".try_into().unwrap();
+    let actor2: ActorId = "222222".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor1.clone(),
         seq: 1,
@@ -90,7 +90,7 @@ fn test_includes_conflicting_values_for_key() {
         hash: None,
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             pred: Vec::new(),
             insert: false,
@@ -111,7 +111,7 @@ fn test_includes_conflicting_values_for_key() {
         operations: vec![Op {
             action: amp::OpType::Set("blackbird".into()),
             key: "bird".into(),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             pred: Vec::new(),
             insert: false,
         }],
@@ -130,7 +130,7 @@ fn test_includes_conflicting_values_for_key() {
         actor: None,
         deps: vec![change1.hash, change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
@@ -149,7 +149,7 @@ fn test_includes_conflicting_values_for_key() {
 
 #[test]
 fn test_handles_counter_increment_at_keys_in_a_map() {
-    let actor: ActorID = "46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap();
+    let actor: ActorId = "46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -160,7 +160,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         deps: Vec::new(),
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::Counter(1)),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "counter".into(),
             pred: Vec::new(),
             insert: false,
@@ -180,7 +180,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         hash: None,
         operations: vec![Op {
             action: amp::OpType::Inc(2),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "counter".into(),
             pred: vec![actor.op_id_at(1)],
             insert: false,
@@ -199,7 +199,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         max_op: 2,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "counter".into() => hashmap!{
@@ -217,7 +217,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
 
 #[test]
 fn test_creates_nested_maps() {
-    let actor: ActorID = "06148f9422cb40579fd02f1975c34a51".try_into().unwrap();
+    let actor: ActorId = "06148f9422cb40579fd02f1975c34a51".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -229,7 +229,7 @@ fn test_creates_nested_maps() {
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::map()),
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
                 insert: false,
@@ -237,7 +237,7 @@ fn test_creates_nested_maps() {
             Op {
                 action: amp::OpType::Set(ScalarValue::F64(3.0)),
                 key: "wrens".into(),
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 pred: Vec::new(),
                 insert: false,
             },
@@ -257,14 +257,14 @@ fn test_creates_nested_maps() {
         hash: None,
         operations: vec![
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: amp::OpType::Del,
                 key: "wrens".into(),
                 pred: vec![actor.op_id_at(2)],
                 insert: false,
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: amp::OpType::Set(ScalarValue::F64(15.0)),
                 key: "sparrows".into(),
                 pred: Vec::new(),
@@ -285,12 +285,12 @@ fn test_creates_nested_maps() {
         max_op: 4,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
-                        object_id: ObjectID::from(actor.op_id_at(1)),
+                        object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
@@ -311,7 +311,7 @@ fn test_creates_nested_maps() {
 
 #[test]
 fn test_create_lists() {
-    let actor: ActorID = "90bf7df682f747fa82ac604b35010906".try_into().unwrap();
+    let actor: ActorId = "90bf7df682f747fa82ac604b35010906".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -323,15 +323,15 @@ fn test_create_lists() {
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::list()),
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
                 insert: false,
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: amp::OpType::Set("chaffinch".into()),
-                key: ElementID::Head.into(),
+                key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
@@ -350,12 +350,12 @@ fn test_create_lists() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
-                        object_id: ObjectID::from(actor.op_id_at(1)),
+                        object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert {
                             index: 0,
@@ -380,7 +380,7 @@ fn test_create_lists() {
 
 #[test]
 fn test_includes_latests_state_of_list() {
-    let actor: ActorID = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
+    let actor: ActorId = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -392,27 +392,27 @@ fn test_includes_latests_state_of_list() {
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::list()),
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 key: "todos".into(),
                 pred: Vec::new(),
                 insert: false,
             },
             Op {
                 action: amp::OpType::Make(amp::ObjType::map()),
-                obj: ObjectID::from(actor.op_id_at(1)),
-                key: ElementID::Head.into(),
+                obj: ObjectId::from(actor.op_id_at(1)),
+                key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(2)),
+                obj: ObjectId::from(actor.op_id_at(2)),
                 action: amp::OpType::Set("water plants".into()),
                 key: "title".into(),
                 pred: Vec::new(),
                 insert: false,
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(2)),
+                obj: ObjectId::from(actor.op_id_at(2)),
                 action: amp::OpType::Set(false.into()),
                 key: "done".into(),
                 pred: Vec::new(),
@@ -433,12 +433,12 @@ fn test_includes_latests_state_of_list() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "todos".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
-                        object_id: ObjectID::from(actor.op_id_at(1)),
+                        object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()}],
                         props: hashmap!{
@@ -471,7 +471,7 @@ fn test_includes_latests_state_of_list() {
 
 #[test]
 fn test_includes_date_objects_at_root() {
-    let actor: ActorID = "90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap();
+    let actor: ActorId = "90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -481,7 +481,7 @@ fn test_includes_date_objects_at_root() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             action: amp::OpType::Set(ScalarValue::Timestamp(1_586_541_033_457)),
             key: "now".into(),
             pred: Vec::new(),
@@ -501,7 +501,7 @@ fn test_includes_date_objects_at_root() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "now".into() => hashmap!{
@@ -519,7 +519,7 @@ fn test_includes_date_objects_at_root() {
 
 #[test]
 fn test_includes_date_objects_in_a_list() {
-    let actor: ActorID = "08b050f976a249349021a2e63d99c8e8".try_into().unwrap();
+    let actor: ActorId = "08b050f976a249349021a2e63d99c8e8".try_into().unwrap();
     let change1: Change = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -530,16 +530,16 @@ fn test_includes_date_objects_in_a_list() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                obj: ObjectID::Root,
+                obj: ObjectId::Root,
                 action: amp::OpType::Make(amp::ObjType::list()),
                 key: "list".into(),
                 pred: Vec::new(),
                 insert: false,
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: amp::OpType::Set(ScalarValue::Timestamp(1_586_541_089_595)),
-                key: ElementID::Head.into(),
+                key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
@@ -558,12 +558,12 @@ fn test_includes_date_objects_in_a_list() {
         seq: None,
         deps: vec![change1.hash],
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
-                        object_id: ObjectID::from(actor.op_id_at(1)),
+                        object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Insert {index: 0, elem_id: actor.op_id_at(2).into()}],
                         props: hashmap!{

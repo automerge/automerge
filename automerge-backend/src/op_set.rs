@@ -8,7 +8,7 @@
 //! state. Obviously this is not very efficient.
 use crate::actor_map::ActorMap;
 use crate::error::AutomergeError;
-use crate::internal::{InternalOpType, ObjectID};
+use crate::internal::{InternalOpType, ObjectId};
 use crate::object_store::ObjState;
 use crate::op_handle::OpHandle;
 use crate::ordered_set::OrderedSet;
@@ -40,16 +40,16 @@ use tracing::instrument;
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: HashMap<ObjectID, Rc<ObjState>, FxBuildHasher>,
+    pub objs: HashMap<ObjectId, Rc<ObjState>, FxBuildHasher>,
     pub deps: HashSet<amp::ChangeHash>,
     pub max_op: u64,
-    cursors: HashMap<ObjectID, Vec<CursorState>>,
+    cursors: HashMap<ObjectId, Vec<CursorState>>,
 }
 
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = HashMap::default();
-        objs.insert(ObjectID::Root, Rc::new(ObjState::new(amp::ObjType::map())));
+        objs.insert(ObjectId::Root, Rc::new(ObjState::new(amp::ObjType::map())));
 
         OpSet {
             objs,
@@ -62,7 +62,7 @@ impl OpSet {
     pub(crate) fn apply_ops(
         &mut self,
         mut ops: Vec<OpHandle>,
-        diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &mut ActorMap,
     ) -> Result<(), AutomergeError> {
         for op in ops.drain(..) {
@@ -144,7 +144,7 @@ impl OpSet {
                     let opid = op
                         .operation_key()
                         .to_opid()
-                        .ok_or(AutomergeError::HeadToOpID)?;
+                        .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     tracing::debug!(opid=?opid, index=%index, "deleting element");
                     Some(PendingDiff::SeqRemove(op.clone(), index))
@@ -153,7 +153,7 @@ impl OpSet {
                     let id = op
                         .operation_key()
                         .to_opid()
-                        .ok_or(AutomergeError::HeadToOpID)?;
+                        .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.index_of(id).unwrap_or(0);
                     tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
@@ -204,14 +204,14 @@ impl OpSet {
         Ok(())
     }
 
-    pub fn get_obj(&self, object_id: &ObjectID) -> Result<&ObjState, AutomergeError> {
+    pub fn get_obj(&self, object_id: &ObjectId) -> Result<&ObjState, AutomergeError> {
         self.objs
             .get(&object_id)
             .map(|o| o.as_ref())
             .ok_or(AutomergeError::MissingObjectError)
     }
 
-    fn get_obj_mut(&mut self, object_id: &ObjectID) -> Result<&mut ObjState, AutomergeError> {
+    fn get_obj_mut(&mut self, object_id: &ObjectId) -> Result<&mut ObjState, AutomergeError> {
         self.objs
             .get_mut(&object_id)
             .map(|rc| Rc::make_mut(rc))
@@ -220,7 +220,7 @@ impl OpSet {
 
     pub fn construct_map(
         &self,
-        object_id: &ObjectID,
+        object_id: &ObjectId,
         object: &ObjState,
         actors: &ActorMap,
         map_type: amp::MapType,
@@ -252,7 +252,7 @@ impl OpSet {
 
     pub fn construct_list(
         &self,
-        object_id: &ObjectID,
+        object_id: &ObjectId,
         object: &ObjState,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
@@ -296,7 +296,7 @@ impl OpSet {
 
     pub fn construct_object(
         &self,
-        object_id: &ObjectID,
+        object_id: &ObjectId,
         actors: &ActorMap,
     ) -> Result<amp::Diff, AutomergeError> {
         let object = self.get_obj(&object_id)?;
@@ -312,7 +312,7 @@ impl OpSet {
     // to generate a diff in a single pass
     pub fn finalize_diffs(
         &mut self,
-        mut pending: HashMap<ObjectID, Vec<PendingDiff>>,
+        mut pending: HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
     ) -> Result<Option<amp::Diff>, AutomergeError> {
         if pending.is_empty() {
@@ -321,7 +321,7 @@ impl OpSet {
 
         // For each cursor, if the cursor references an object which has been changed we generate a
         // diff for the cursor
-        let mut cursor_changes: HashMap<ObjectID, Vec<PendingDiff>> = HashMap::new();
+        let mut cursor_changes: HashMap<ObjectId, Vec<PendingDiff>> = HashMap::new();
         for obj_id in pending.keys() {
             if let Some(cursors) = self.cursors.get_mut(&obj_id) {
                 for cursor in cursors.iter_mut() {
@@ -353,7 +353,7 @@ impl OpSet {
         }
 
         Ok(Some(self.gen_obj_diff(
-            &ObjectID::Root,
+            &ObjectId::Root,
             &mut pending,
             actors,
         )?))
@@ -361,10 +361,10 @@ impl OpSet {
 
     fn gen_seq_diff(
         &self,
-        obj_id: &ObjectID,
+        obj_id: &ObjectId,
         obj: &ObjState,
         pending: &[PendingDiff],
-        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
     ) -> Result<amp::Diff, AutomergeError> {
@@ -386,7 +386,7 @@ impl OpSet {
             }
             if let Some(index) = obj
                 .seq
-                .index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpID)?)
+                .index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpId)?)
             {
                 props.insert(index, opid_to_value);
             }
@@ -402,10 +402,10 @@ impl OpSet {
 
     fn gen_map_diff(
         &self,
-        obj_id: &ObjectID,
+        obj_id: &ObjectId,
         obj: &ObjState,
         pending: &[PendingDiff],
-        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         map_type: amp::MapType,
     ) -> Result<amp::Diff, AutomergeError> {
@@ -447,8 +447,8 @@ impl OpSet {
 
     fn gen_obj_diff(
         &self,
-        obj_id: &ObjectID,
-        pending_diffs: &mut HashMap<ObjectID, Vec<PendingDiff>>,
+        obj_id: &ObjectId,
+        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
     ) -> Result<amp::Diff, AutomergeError> {
         let obj = self.get_obj(obj_id)?;
@@ -515,18 +515,18 @@ impl OpSet {
 #[derive(Debug, PartialEq, Clone)]
 struct CursorState {
     /// The id of the object this cursor lives in
-    referring_object_id: amp::ObjectID,
+    referring_object_id: amp::ObjectId,
     /// The same as `referring_object_id` but as an internal::ObjectID
-    internal_referring_object_id: ObjectID,
+    internal_referring_object_id: ObjectId,
     /// The key withing the referring object this cursor lives at
     key: crate::internal::Key,
     /// The id of the sequence this cursor refers
-    referred_object_id: amp::ObjectID,
+    referred_object_id: amp::ObjectId,
     /// The same as the `referred_object_id` but as an internal::ObjectID
-    internal_referred_object_id: ObjectID,
+    internal_referred_object_id: ObjectId,
     /// The OpID of the element within the sequence this cursor refers to
-    element_opid: amp::OpID,
+    element_opid: amp::OpId,
     /// The same as the `element_opid` but as an internal::OpID,
-    internal_element_opid: crate::internal::OpID,
+    internal_element_opid: crate::internal::OpId,
     index: usize,
 }

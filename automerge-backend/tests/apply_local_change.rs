@@ -3,7 +3,7 @@ use automerge_backend::Backend;
 use automerge_backend::Change;
 use automerge_protocol as protocol;
 use automerge_protocol::{
-    ActorID, ChangeHash, Diff, DiffEdit, ElementID, MapDiff, MapType, ObjType, ObjectID, Op,
+    ActorId, ChangeHash, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjType, ObjectId, Op,
     OpType, Patch, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
@@ -12,7 +12,7 @@ use std::convert::TryInto;
 
 #[test]
 fn test_apply_local_change() {
-    let actor: ActorID = "eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap();
+    let actor: ActorId = "eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap();
     let change_request = UncompressedChange {
         actor_id: actor.clone(),
         time: 0,
@@ -24,7 +24,7 @@ fn test_apply_local_change() {
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
             key: "bird".into(),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             insert: false,
             pred: Vec::new(),
         }],
@@ -45,7 +45,7 @@ fn test_apply_local_change() {
         deps: Vec::new(),
         operations: vec![Op {
             action: OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             pred: Vec::new(),
             insert: false,
@@ -65,7 +65,7 @@ fn test_apply_local_change() {
         },
         deps: Vec::new(),
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
@@ -79,7 +79,7 @@ fn test_apply_local_change() {
 
 #[test]
 fn test_error_on_duplicate_requests() {
-    let actor: ActorID = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
+    let actor: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
     let change_request1 = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -90,7 +90,7 @@ fn test_error_on_duplicate_requests() {
         start_op: 1,
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
             pred: Vec::new(),
@@ -108,7 +108,7 @@ fn test_error_on_duplicate_requests() {
         start_op: 2,
         operations: vec![Op {
             action: protocol::OpType::Set("jay".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
             pred: Vec::new(),
@@ -124,7 +124,7 @@ fn test_error_on_duplicate_requests() {
 
 #[test]
 fn test_handle_concurrent_frontend_and_backend_changes() {
-    let actor: ActorID = "cb55260e9d7e457886a4fc73fd949202".try_into().unwrap();
+    let actor: ActorId = "cb55260e9d7e457886a4fc73fd949202".try_into().unwrap();
     let local1 = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -135,7 +135,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         start_op: 1,
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
             pred: Vec::new(),
@@ -153,14 +153,14 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         operations: vec![Op {
             action: protocol::OpType::Set("jay".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
             pred: vec![actor.op_id_at(1)],
         }],
         extra_bytes: Vec::new(),
     };
-    let remote_actor: ActorID = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
+    let remote_actor: ActorId = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
     let remote1 = UncompressedChange {
         actor_id: remote_actor.clone(),
         seq: 1,
@@ -171,7 +171,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         operations: vec![Op {
             action: protocol::OpType::Set("goldfish".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "fish".into(),
             pred: Vec::new(),
             insert: false,
@@ -191,7 +191,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             pred: Vec::new(),
             insert: false,
@@ -210,7 +210,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         operations: vec![Op {
             action: protocol::OpType::Set("goldfish".into()),
             key: "fish".into(),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             pred: Vec::new(),
             insert: false,
         }],
@@ -227,7 +227,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         deps: Vec::new(),
         operations: vec![Op {
             action: protocol::OpType::Set("jay".into()),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             key: "bird".into(),
             pred: vec![actor.op_id_at(1)],
             insert: false,
@@ -262,8 +262,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
 #[test]
 fn test_transform_list_indexes_into_element_ids() {
-    let actor: ActorID = "8f389df8fecb4ddc989102321af3578e".try_into().unwrap();
-    let remote_actor: ActorID = "9ba21574dc44411b8ce37bc6037a9687".try_into().unwrap();
+    let actor: ActorId = "8f389df8fecb4ddc989102321af3578e".try_into().unwrap();
+    let remote_actor: ActorId = "9ba21574dc44411b8ce37bc6037a9687".try_into().unwrap();
     let remote1: Change = UncompressedChange {
         actor_id: remote_actor.clone(),
         seq: 1,
@@ -275,7 +275,7 @@ fn test_transform_list_indexes_into_element_ids() {
         operations: vec![Op {
             action: protocol::OpType::Make(ObjType::list()),
             key: "birds".into(),
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             pred: Vec::new(),
             insert: false,
         }],
@@ -294,8 +294,8 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: vec![remote1.hash],
         operations: vec![Op {
             action: protocol::OpType::Set("magpie".into()),
-            obj: ObjectID::from(remote_actor.op_id_at(1)),
-            key: ElementID::Head.into(),
+            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            key: ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
@@ -313,9 +313,9 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: vec![remote1.hash],
         start_op: 2,
         operations: vec![Op {
-            obj: ObjectID::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(1)),
             action: protocol::OpType::Set("goldfinch".into()),
-            key: ElementID::Head.into(),
+            key: ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
@@ -330,7 +330,7 @@ fn test_transform_list_indexes_into_element_ids() {
         time: 0,
         start_op: 3,
         operations: vec![Op {
-            obj: ObjectID::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(1)),
             action: protocol::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
@@ -349,14 +349,14 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 4,
         operations: vec![
             Op {
-                obj: ObjectID::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: protocol::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
                 insert: false,
                 pred: vec![remote_actor.op_id_at(2)],
             },
             Op {
-                obj: ObjectID::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: protocol::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
@@ -375,9 +375,9 @@ fn test_transform_list_indexes_into_element_ids() {
         hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
-            obj: ObjectID::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(1)),
             action: protocol::OpType::Set("goldfinch".into()),
-            key: ElementID::Head.into(),
+            key: ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
@@ -392,7 +392,7 @@ fn test_transform_list_indexes_into_element_ids() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            obj: ObjectID::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(1)),
             action: protocol::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
@@ -410,14 +410,14 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                obj: ObjectID::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: protocol::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
                 pred: vec![remote_actor.op_id_at(2)],
                 insert: false,
             },
             Op {
-                obj: ObjectID::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: protocol::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
@@ -458,7 +458,7 @@ fn test_transform_list_indexes_into_element_ids() {
 
 #[test]
 fn test_handle_list_insertion_and_deletion_in_same_change() {
-    let actor: ActorID = "0723d2a1940744868ffd6b294ada813f".try_into().unwrap();
+    let actor: ActorId = "0723d2a1940744868ffd6b294ada813f".try_into().unwrap();
     let local1 = UncompressedChange {
         actor_id: actor.clone(),
         seq: 1,
@@ -468,7 +468,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         start_op: 1,
         operations: vec![Op {
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             action: protocol::OpType::Make(ObjType::list()),
             key: "birds".into(),
             insert: false,
@@ -487,14 +487,14 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         start_op: 2,
         operations: vec![
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: protocol::OpType::Set("magpie".into()),
-                key: ElementID::Head.into(),
+                key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: protocol::OpType::Del,
                 key: actor.op_id_at(2).into(),
                 insert: false,
@@ -513,12 +513,12 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         },
         deps: Vec::new(),
         diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectID::Root,
+            object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
-                        object_id: ObjectID::from(actor.op_id_at(1)),
+                        object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()},
@@ -551,7 +551,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            obj: ObjectID::Root,
+            obj: ObjectId::Root,
             action: protocol::OpType::Make(ObjType::list()),
             key: "birds".into(),
             insert: false,
@@ -572,14 +572,14 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: vec![change1.hash],
         operations: vec![
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: protocol::OpType::Set("magpie".into()),
-                key: ElementID::Head.into(),
+                key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
             },
             Op {
-                obj: ObjectID::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(1)),
                 action: protocol::OpType::Del,
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],

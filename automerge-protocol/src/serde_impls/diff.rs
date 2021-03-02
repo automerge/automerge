@@ -1,6 +1,6 @@
 use super::read_field;
 use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectID, OpID, ScalarValue,
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectId, OpId, ScalarValue,
     SeqDiff,
 };
 use serde::{
@@ -75,14 +75,14 @@ impl<'de> Deserialize<'de> for Diff {
                 V: MapAccess<'de>,
             {
                 let mut edits: Option<Vec<DiffEdit>> = None;
-                let mut object_id: Option<ObjectID> = None;
+                let mut object_id: Option<ObjectId> = None;
                 let mut obj_type: Option<ObjType> = None;
-                let mut props: Option<HashMap<String, HashMap<OpID, Diff>>> = None;
+                let mut props: Option<HashMap<String, HashMap<OpId, Diff>>> = None;
                 let mut value: Option<ScalarValue> = None;
                 let mut datatype: Option<DataType> = None;
-                let mut elem_id: Option<OpID> = None;
+                let mut elem_id: Option<OpId> = None;
                 let mut index: Option<u32> = None;
-                let mut ref_object_id: Option<ObjectID> = None;
+                let mut ref_object_id: Option<ObjectId> = None;
 
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
@@ -180,7 +180,7 @@ fn maybe_add_datatype_to_value(value: ScalarValue, datatype: DataType) -> Scalar
 
 #[cfg(test)]
 mod tests {
-    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectID, OpID, SeqDiff, SequenceType};
+    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectId, OpId, SeqDiff, SequenceType};
     use maplit::hashmap;
     use std::convert::TryInto;
     use std::str::FromStr;
@@ -199,11 +199,11 @@ mod tests {
             }
         });
         let diff = Diff::Map(MapDiff {
-            object_id: ObjectID::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
+            object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             obj_type: MapType::Map,
             props: hashmap! {
                 "key".to_string() => hashmap!{
-                    OpID::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
+                    OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
                 }
             },
         });
@@ -227,12 +227,12 @@ mod tests {
             }
         });
         let diff = Diff::Seq(SeqDiff {
-            object_id: ObjectID::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
+            object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             obj_type: SequenceType::List,
             edits: Vec::new(),
             props: hashmap! {
                 0 => hashmap!{
-                    OpID::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
+                    OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
                 }
             },
         });

@@ -1,39 +1,39 @@
-use crate::error::InvalidActorID;
-use crate::ActorID;
+use crate::error::InvalidActorId;
+use crate::ActorId;
 use std::convert::TryFrom;
 use std::{fmt, str::FromStr};
 
-impl TryFrom<&str> for ActorID {
-    type Error = InvalidActorID;
+impl TryFrom<&str> for ActorId {
+    type Error = InvalidActorId;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         hex::decode(s)
-            .map(ActorID)
-            .map_err(|_| InvalidActorID(s.into()))
+            .map(ActorId)
+            .map_err(|_| InvalidActorId(s.into()))
     }
 }
 
-impl From<&[u8]> for ActorID {
+impl From<&[u8]> for ActorId {
     fn from(b: &[u8]) -> Self {
-        ActorID(b.to_vec())
+        ActorId(b.to_vec())
     }
 }
 
-impl From<Vec<u8>> for ActorID {
+impl From<Vec<u8>> for ActorId {
     fn from(b: Vec<u8>) -> Self {
-        ActorID(b)
+        ActorId(b)
     }
 }
 
-impl FromStr for ActorID {
-    type Err = InvalidActorID;
+impl FromStr for ActorId {
+    type Err = InvalidActorId;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ActorID::try_from(s)
+        ActorId::try_from(s)
     }
 }
 
-impl fmt::Display for ActorID {
+impl fmt::Display for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_hex_string())
     }

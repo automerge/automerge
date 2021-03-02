@@ -5,14 +5,14 @@ use std::collections::HashMap;
 
 pub(super) trait DiffableValue: Sized {
     fn construct<K>(
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>;
     fn apply_diff<K>(
         &self,
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -23,13 +23,13 @@ pub(super) trait DiffableValue: Sized {
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>;
-    fn default_opid(&self) -> amp::OpID;
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>;
+    fn default_opid(&self) -> amp::OpId;
 }
 
 impl DiffableValue for MultiChar {
     fn construct<K>(
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -41,7 +41,7 @@ impl DiffableValue for MultiChar {
 
     fn apply_diff<K>(
         &self,
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -56,20 +56,20 @@ impl DiffableValue for MultiChar {
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         self.apply_diff_iter(diff)
         //MultiChar::apply_diff_iter(self, diff)
     }
 
-    fn default_opid(&self) -> amp::OpID {
+    fn default_opid(&self) -> amp::OpId {
         self.default_opid().clone()
     }
 }
 
 impl DiffableValue for MultiValue {
     fn construct<K>(
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -80,7 +80,7 @@ impl DiffableValue for MultiValue {
 
     fn apply_diff<K>(
         &self,
-        opid: &amp::OpID,
+        opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -95,12 +95,12 @@ impl DiffableValue for MultiValue {
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpID, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         self.apply_diff_iter(diff)
     }
 
-    fn default_opid(&self) -> amp::OpID {
+    fn default_opid(&self) -> amp::OpId {
         self.default_opid()
     }
 }
@@ -117,7 +117,7 @@ where
 {
     // TODO: figure out why we need this box. From my understanding of im_rc::Vector we shouldn't
     // need it, but without it we get recursive type errors in StateTreeList
-    underlying: Box<im_rc::Vector<(amp::OpID, Option<T>)>>,
+    underlying: Box<im_rc::Vector<(amp::OpId, Option<T>)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -133,7 +133,7 @@ where
 
     pub(super) fn new_from<I>(i: I) -> DiffableSequence<T>
     where
-        I: IntoIterator<Item = (amp::OpID, T)>,
+        I: IntoIterator<Item = (amp::OpId, T)>,
     {
         DiffableSequence {
             underlying: Box::new(i.into_iter().map(|(oid, v)| (oid, Some(v))).collect()),
@@ -142,9 +142,9 @@ where
 
     pub fn apply_diff<K>(
         &self,
-        object_id: &amp::ObjectID,
+        object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
-        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpID, amp::Diff>>>,
+        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpId, amp::Diff>>>,
     ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -163,8 +163,8 @@ where
                 }
                 amp::DiffEdit::Insert { index, elem_id } => {
                     let op_id = match elem_id {
-                        amp::ElementID::Head => return Err(InvalidPatch::DiffEditWithHeadElemID),
-                        amp::ElementID::ID(oid) => oid.clone(),
+                        amp::ElementId::Head => return Err(InvalidPatch::DiffEditWithHeadElemId),
+                        amp::ElementId::Id(oid) => oid.clone(),
                     };
                     if (*index) == new_underlying.len() {
                         new_underlying.push_back((op_id, None));

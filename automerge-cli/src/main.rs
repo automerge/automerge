@@ -18,8 +18,8 @@ struct Opts {
 
 #[derive(Debug)]
 enum ExportFormat {
-    JSON,
-    TOML,
+    Json,
+    Toml,
 }
 
 impl FromStr for ExportFormat {
@@ -27,8 +27,8 @@ impl FromStr for ExportFormat {
 
     fn from_str(input: &str) -> Result<ExportFormat> {
         match input {
-            "json" => Ok(ExportFormat::JSON),
-            "toml" => Ok(ExportFormat::TOML),
+            "json" => Ok(ExportFormat::Json),
+            "toml" => Ok(ExportFormat::Toml),
             _ => Err(anyhow!("Invalid export format: {}", input)),
         }
     }
@@ -135,7 +135,7 @@ fn main() -> Result<()> {
             changes_file,
             format,
         } => match format {
-            ExportFormat::JSON => {
+            ExportFormat::Json => {
                 let mut in_buffer = open_file_or_stdin(changes_file)?;
                 export::export_json(
                     &mut in_buffer,
@@ -143,7 +143,7 @@ fn main() -> Result<()> {
                     atty::is(atty::Stream::Stdout),
                 )
             }
-            ExportFormat::TOML => unimplemented!(),
+            ExportFormat::Toml => unimplemented!(),
         },
 
         Command::Import {
@@ -151,12 +151,12 @@ fn main() -> Result<()> {
             input_file,
             changes_file,
         } => match format {
-            ExportFormat::JSON => {
+            ExportFormat::Json => {
                 let mut out_buffer = create_file_or_stdout(changes_file)?;
                 let mut in_buffer = open_file_or_stdin(input_file)?;
                 import::import_json(&mut in_buffer, &mut out_buffer)
             }
-            ExportFormat::TOML => unimplemented!(),
+            ExportFormat::Toml => unimplemented!(),
         },
         Command::Change {
             input_file,

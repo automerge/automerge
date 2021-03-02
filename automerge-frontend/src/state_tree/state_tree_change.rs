@@ -4,7 +4,7 @@ use std::ops::{Add, AddAssign};
 
 #[derive(Clone)]
 pub struct StateTreeChange {
-    objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+    objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     new_cursors: Cursors,
 }
 
@@ -16,7 +16,7 @@ impl StateTreeChange {
         }
     }
 
-    pub(super) fn single(object_id: amp::ObjectID, object: StateTreeComposite) -> StateTreeChange {
+    pub(super) fn single(object_id: amp::ObjectId, object: StateTreeComposite) -> StateTreeChange {
         StateTreeChange {
             objects: im_rc::hashmap! {object_id => object},
             new_cursors: Cursors::new(),
@@ -24,7 +24,7 @@ impl StateTreeChange {
     }
 
     pub(super) fn from_updates(
-        objects: im_rc::HashMap<amp::ObjectID, StateTreeComposite>,
+        objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> StateTreeChange {
         StateTreeChange {
             objects,
@@ -37,7 +37,7 @@ impl StateTreeChange {
         self
     }
 
-    pub(super) fn objects(&self) -> im_rc::HashMap<amp::ObjectID, StateTreeComposite> {
+    pub(super) fn objects(&self) -> im_rc::HashMap<amp::ObjectId, StateTreeComposite> {
         self.objects.clone()
     }
 

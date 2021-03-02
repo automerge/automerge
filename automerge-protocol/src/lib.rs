@@ -8,9 +8,9 @@ use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 use std::collections::HashMap;
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
-pub struct ActorID(Vec<u8>);
+pub struct ActorId(Vec<u8>);
 
-impl fmt::Debug for ActorID {
+impl fmt::Debug for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("ActorID")
             .field(&hex::encode(&self.0))
@@ -18,9 +18,9 @@ impl fmt::Debug for ActorID {
     }
 }
 
-impl ActorID {
-    pub fn random() -> ActorID {
-        ActorID(uuid::Uuid::new_v4().as_bytes().to_vec())
+impl ActorId {
+    pub fn random() -> ActorId {
+        ActorId(uuid::Uuid::new_v4().as_bytes().to_vec())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -31,16 +31,16 @@ impl ActorID {
         self.0
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> ActorID {
-        ActorID(bytes.to_vec())
+    pub fn from_bytes(bytes: &[u8]) -> ActorId {
+        ActorId(bytes.to_vec())
     }
 
     pub fn to_hex_string(&self) -> String {
         hex::encode(&self.0)
     }
 
-    pub fn op_id_at(&self, seq: u64) -> OpID {
-        OpID(seq, self.clone())
+    pub fn op_id_at(&self, seq: u64) -> OpId {
+        OpId(seq, self.clone())
     }
 }
 
@@ -84,11 +84,11 @@ pub enum SequenceType {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
-pub struct OpID(pub u64, pub ActorID);
+pub struct OpId(pub u64, pub ActorId);
 
-impl OpID {
-    pub fn new(seq: u64, actor: &ActorID) -> OpID {
-        OpID(seq, actor.clone())
+impl OpId {
+    pub fn new(seq: u64, actor: &ActorId) -> OpId {
+        OpId(seq, actor.clone())
     }
 
     pub fn counter(&self) -> u64 {
@@ -97,22 +97,22 @@ impl OpID {
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
-pub enum ObjectID {
-    ID(OpID),
+pub enum ObjectId {
+    Id(OpId),
     Root,
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
-pub enum ElementID {
+pub enum ElementId {
     Head,
-    ID(OpID),
+    Id(OpId),
 }
 
-impl ElementID {
-    pub fn as_opid(&self) -> Option<&OpID> {
+impl ElementId {
+    pub fn as_opid(&self) -> Option<&OpId> {
         match self {
-            ElementID::Head => None,
-            ElementID::ID(opid) => Some(opid),
+            ElementId::Head => None,
+            ElementId::Id(opid) => Some(opid),
         }
     }
 
@@ -122,8 +122,8 @@ impl ElementID {
 
     pub fn not_head(&self) -> bool {
         match self {
-            ElementID::Head => false,
-            ElementID::ID(_) => true,
+            ElementId::Head => false,
+            ElementId::Id(_) => true,
         }
     }
 }
@@ -132,12 +132,12 @@ impl ElementID {
 #[serde(untagged)]
 pub enum Key {
     Map(String),
-    Seq(ElementID),
+    Seq(ElementId),
 }
 
 impl Key {
     pub fn head() -> Key {
-        Key::Seq(ElementID::Head)
+        Key::Seq(ElementId::Head)
     }
 
     pub fn is_map_key(&self) -> bool {
@@ -147,17 +147,17 @@ impl Key {
         }
     }
 
-    pub fn as_element_id(&self) -> Option<ElementID> {
+    pub fn as_element_id(&self) -> Option<ElementId> {
         match self {
             Key::Map(_) => None,
             Key::Seq(eid) => Some(eid.clone()),
         }
     }
 
-    pub fn to_opid(&self) -> Option<OpID> {
+    pub fn to_opid(&self) -> Option<OpId> {
         match self.as_element_id()? {
-            ElementID::ID(id) => Some(id),
-            ElementID::Head => None,
+            ElementId::Id(id) => Some(id),
+            ElementId::Head => None,
         }
     }
 }
@@ -191,7 +191,7 @@ pub enum ScalarValue {
     F32(f32),
     Counter(i64),
     Timestamp(i64),
-    Cursor(OpID),
+    Cursor(OpId),
     Boolean(bool),
     Null,
 }
@@ -277,9 +277,9 @@ pub enum OpType {
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
-    pub obj: ObjectID,
+    pub obj: ObjectId,
     pub key: Key,
-    pub pred: Vec<OpID>,
+    pub pred: Vec<OpId>,
     pub insert: bool,
 }
 
@@ -352,35 +352,35 @@ pub enum Diff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MapDiff {
-    pub object_id: ObjectID,
+    pub object_id: ObjectId,
     #[serde(rename = "type")]
     pub obj_type: MapType,
     #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub props: HashMap<String, HashMap<OpID, Diff>>,
+    pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SeqDiff {
-    pub object_id: ObjectID,
+    pub object_id: ObjectId,
     #[serde(rename = "type")]
     pub obj_type: SequenceType,
     pub edits: Vec<DiffEdit>,
-    pub props: HashMap<usize, HashMap<OpID, Diff>>,
+    pub props: HashMap<usize, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjDiff {
-    pub object_id: ObjectID,
+    pub object_id: ObjectId,
     #[serde(rename = "type")]
     pub obj_type: ObjType,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct CursorDiff {
-    pub object_id: ObjectID,
-    pub elem_id: OpID,
+    pub object_id: ObjectId,
+    pub elem_id: OpId,
     pub index: u32,
 }
 
@@ -390,7 +390,7 @@ pub enum DiffEdit {
     Insert {
         index: usize,
         #[serde(rename = "elemId")]
-        elem_id: ElementID,
+        elem_id: ElementId,
     },
     Remove {
         index: usize,
@@ -401,10 +401,10 @@ pub enum DiffEdit {
 #[serde(rename_all = "camelCase")]
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub actor: Option<ActorID>,
+    pub actor: Option<ActorId>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<u64>,
-    pub clock: HashMap<ActorID, u64>,
+    pub clock: HashMap<ActorId, u64>,
     pub deps: Vec<ChangeHash>,
     pub max_op: u64,
     //    pub can_undo: bool,
@@ -419,7 +419,7 @@ pub struct UncompressedChange {
     #[serde(rename = "ops")]
     pub operations: Vec<Op>,
     #[serde(rename = "actor")]
-    pub actor_id: ActorID,
+    pub actor_id: ActorId,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hash: Option<ChangeHash>,
     pub seq: u64,
@@ -447,7 +447,7 @@ impl PartialEq for UncompressedChange {
 }
 
 impl UncompressedChange {
-    pub fn op_id_of(&self, index: u64) -> Option<OpID> {
+    pub fn op_id_of(&self, index: u64) -> Option<OpId> {
         if let Ok(index_usize) = usize::try_from(index) {
             if index_usize < self.operations.len() {
                 return Some(self.actor_id.op_id_at(self.start_op + index));

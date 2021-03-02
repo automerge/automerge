@@ -1,11 +1,11 @@
 use crate::actor_map::ActorMap;
-use crate::internal::{Key, OpID};
+use crate::internal::{Key, OpId};
 use crate::op_handle::OpHandle;
 use automerge_protocol as amp;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {
-    SeqInsert(OpHandle, usize, OpID),
+    SeqInsert(OpHandle, usize, OpId),
     SeqRemove(OpHandle, usize),
     Set(OpHandle),
     CursorChange(Key),

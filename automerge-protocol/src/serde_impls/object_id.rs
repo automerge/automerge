@@ -1,29 +1,29 @@
-use crate::{ObjectID, OpID};
+use crate::{ObjectId, OpId};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
 
-impl Serialize for ObjectID {
+impl Serialize for ObjectId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         match self {
-            ObjectID::ID(id) => id.serialize(serializer),
-            ObjectID::Root => serializer.serialize_str("_root"),
+            ObjectId::Id(id) => id.serialize(serializer),
+            ObjectId::Root => serializer.serialize_str("_root"),
         }
     }
 }
 
-impl<'de> Deserialize<'de> for ObjectID {
+impl<'de> Deserialize<'de> for ObjectId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
         if s == "_root" {
-            Ok(ObjectID::Root)
-        } else if let Ok(id) = OpID::from_str(&s) {
-            Ok(ObjectID::ID(id))
+            Ok(ObjectId::Root)
+        } else if let Ok(id) = OpId::from_str(&s) {
+            Ok(ObjectId::Id(id))
         } else {
             Err(de::Error::invalid_value(
                 de::Unexpected::Str(&s),

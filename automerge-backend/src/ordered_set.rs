@@ -405,7 +405,7 @@ where
         if let Some(ref k) = key {
             self.nodes
                 .get(k)
-                .unwrap_or_else(|| panic!(format!("get_node - missing key {:?}", key)))
+                .unwrap_or_else(|| panic!("get_node - missing key {:?}", key))
         } else {
             &self.head
         }
@@ -415,7 +415,7 @@ where
         if let Some(ref k) = key {
             self.nodes
                 .get_mut(k)
-                .unwrap_or_else(|| panic!(format!("get_node - missing key {:?}", key)))
+                .unwrap_or_else(|| panic!("get_node - missing key {:?}", key))
         } else {
             &mut self.head
         }
