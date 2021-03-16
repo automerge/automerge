@@ -30,3 +30,7 @@ harness = false
 [[bench]]
 name = "change"
 harness = false
+
+[features]
+default = ["std"]
+std = []
