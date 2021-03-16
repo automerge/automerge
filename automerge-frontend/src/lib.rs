@@ -15,10 +15,9 @@ pub use mutation::{LocalChange, MutableDocument};
 pub use path::Path;
 use path::PathElement;
 use state_tree::ResolvedPath;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::error::Error;
-use std::time;
+use std::{collections::HashMap, fmt::Debug};
 pub use value::{Conflicts, Cursor, Primitive, Value};
 
 /// Tracks the possible states of the frontend
@@ -239,7 +238,6 @@ impl FrontendState {
     }
 }
 
-#[derive(Debug)]
 pub struct Frontend {
     pub actor_id: ActorId,
     pub seq: u64,
@@ -249,8 +247,31 @@ pub struct Frontend {
     state: Option<FrontendState>,
     /// A cache of the value of this frontend
     cached_value: Option<Value>,
+    /// A function for generating timestamps
+    timestamper: Box<dyn Fn() -> Option<i64>>,
 }
 
+impl Debug for Frontend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        let Frontend {
+            actor_id,
+            seq,
+            state,
+            cached_value,
+            timestamper: _,
+        } = self;
+        {
+            let mut builder = f.debug_struct("Person");
+            let _ = builder.field("actor_id", &actor_id);
+            let _ = builder.field("seq", &seq);
+            let _ = builder.field("state", &state);
+            let _ = builder.field("cached_value", &cached_value);
+            builder.finish()
+        }
+    }
+}
+
+#[cfg(feature = "std")]
 impl Default for Frontend {
     fn default() -> Self {
         Self::new()
@@ -258,7 +279,18 @@ impl Default for Frontend {
 }
 
 impl Frontend {
+    #[cfg(feature = "std")]
     pub fn new() -> Self {
+        let system_time = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|d| i64::try_from(d.as_millis()).ok())
+        };
+        Self::new_with_timestamper(Box::new(system_time))
+    }
+
+    pub fn new_with_timestamper(t: Box<dyn Fn() -> Option<i64>>) -> Self {
         let root_state = state_tree::StateTree::new();
         Frontend {
             actor_id: ActorId::random(),
@@ -269,9 +301,11 @@ impl Frontend {
                 deps_of_last_received_patch: Vec::new(),
             }),
             cached_value: None,
+            timestamper: t,
         }
     }
 
+    #[cfg(feature = "std")]
     pub fn new_with_initial_state(
         initial_state: Value,
     ) -> Result<(Self, UncompressedChange), InvalidInitialStateError> {
@@ -296,7 +330,7 @@ impl Frontend {
                 let init_change_request = UncompressedChange {
                     actor_id: front.actor_id.clone(),
                     start_op: 1,
-                    time: system_time().unwrap_or(0),
+                    time: (front.timestamper)().unwrap_or(0),
                     seq: 1,
                     message: Some("Initialization".to_string()),
                     hash: None,
@@ -351,7 +385,7 @@ impl Frontend {
                 start_op,
                 actor_id: self.actor_id.clone(),
                 seq: self.seq,
-                time: system_time().unwrap_or(0),
+                time: (self.timestamper)().unwrap_or(0),
                 message,
                 hash: None,
                 deps: change_result.deps,
@@ -412,17 +446,6 @@ impl Frontend {
             .and_then(|s| s.resolve_path(&path))
             .map(|o| o.default_value())
     }
-}
-
-fn system_time() -> Option<i64> {
-    // TODO note this can fail as SystemTime is not monotonic, also
-    // it's a system call so it's not no_std compatible. Finally,
-    // it doesn't handle system times before 1970 (which should be
-    // very rare one imagines).
-    time::SystemTime::now()
-        .duration_since(time::UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
 }
 
 struct OptimisticChangeResult {
