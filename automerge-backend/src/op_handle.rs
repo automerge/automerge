@@ -21,18 +21,20 @@ pub(crate) struct OpHandle {
 
 impl OpHandle {
     pub fn extract(change: Change, actors: &mut ActorMap) -> Vec<OpHandle> {
-        change
-            .iter_ops()
-            .enumerate()
-            .map(|(index, op)| {
-                let id = OpId(
-                    change.start_op + (index as u64),
-                    actors.import_actor(change.actor_id()),
-                );
-                let op = actors.import_op(op);
-                OpHandle { id, op, delta: 0 }
-            })
-            .collect()
+        let mut result = Vec::new();
+        let mut opnum = change.start_op;
+        for op in change.iter_ops() {
+            for internal_op in actors.import_ops(op) {
+                let id = OpId(opnum, actors.import_actor(change.actor_id()));
+                result.push(OpHandle {
+                    id,
+                    op: internal_op,
+                    delta: 0,
+                });
+                opnum += 1
+            }
+        }
+        result
     }
 
     pub fn adjusted_value(&self) -> amp::ScalarValue {

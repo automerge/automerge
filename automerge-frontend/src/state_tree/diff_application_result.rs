@@ -46,7 +46,7 @@ impl<T> DiffApplicationResult<T> {
         let result = f(self.value);
         DiffApplicationResult {
             value: result.value,
-            change: result.change + self.change,
+            change: result.change.union(self.change),
         }
     }
 
@@ -57,7 +57,7 @@ impl<T> DiffApplicationResult<T> {
         let result = f(self.value)?;
         Ok(DiffApplicationResult {
             value: result.value,
-            change: result.change + self.change,
+            change: result.change.union(self.change),
         })
     }
 }

@@ -9,6 +9,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {
     SeqInsert(OpHandle, usize, OpId),
+    SeqUpdate(OpHandle, usize, OpId),
     SeqRemove(OpHandle, usize),
     Set(OpHandle),
     CursorChange(Key),
@@ -17,21 +18,27 @@ pub(crate) enum PendingDiff {
 impl PendingDiff {
     pub fn operation_key(&self) -> Key {
         match self {
-            Self::SeqInsert(op, _, _) => op.operation_key(),
-            Self::SeqRemove(op, _) => op.operation_key(),
+            Self::SeqInsert(op, ..) => op.operation_key(),
+            Self::SeqUpdate(op, ..) => op.operation_key(),
+            Self::SeqRemove(op, ..) => op.operation_key(),
             Self::Set(op) => op.operation_key(),
             Self::CursorChange(k) => k.clone(),
         }
     }
+}
 
-    pub fn edit(&self, actors: &ActorMap) -> Option<amp::DiffEdit> {
-        match *self {
-            Self::SeqInsert(_, index, opid) => Some(amp::DiffEdit::Insert {
-                index,
-                elem_id: actors.export_opid(&opid).into(),
-            }),
-            Self::SeqRemove(_, index) => Some(amp::DiffEdit::Remove { index }),
-            _ => None,
-        }
+pub(super) struct Edits(Vec<amp::DiffEdit>);
+
+impl Edits {
+    pub(super) fn new() -> Edits {
+        Edits(Vec::new())
+    }
+
+    pub(super) fn append_edit(&mut self, edit: amp::DiffEdit) {
+        self.0.push(edit)
+    }
+
+    pub(super) fn to_vec(self) -> Vec<amp::DiffEdit> {
+        self.0
     }
 }

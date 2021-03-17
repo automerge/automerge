@@ -351,12 +351,11 @@ fn handle_concurrent_insertions_into_lists() {
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: doc.actor_id.op_id_at(1).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                random_op_id() => amp::Diff::Value("goldfinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: doc.actor_id.op_id_at(1).into(),
+                            value: amp::Diff::Value("goldfinch".into()),
+                        }],
                     })
                 }
             },
@@ -417,12 +416,11 @@ fn handle_concurrent_insertions_into_lists() {
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 1, elem_id: remote.op_id_at(1).into()}],
-                        props: hashmap!{
-                            1 => hashmap!{
-                                remote.op_id_at(1) => amp::Diff::Value("bullfinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert{
+                            index: 1,
+                            elem_id: remote.op_id_at(1).into(),
+                            value: amp::Diff::Value("bullfinch".into()),
+                        }],
                     })
                 }
             },
@@ -444,36 +442,37 @@ fn handle_concurrent_insertions_into_lists() {
         seq: Some(2),
         max_op: 3,
         pending_changes: 0,
-        clock: hashmap!{
+        clock: hashmap! {
             doc.actor_id.clone() => 2,
             remote => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff{
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
-            props: hashmap!{
+            props: hashmap! {
                 "birds".to_string() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id,
                         obj_type: amp::SequenceType::List,
                         edits: vec![
-                            amp::DiffEdit::Insert { index: 0, elem_id: doc.actor_id.op_id_at(2).into() },
-                            amp::DiffEdit::Insert{ index: 2, elem_id: doc.actor_id.op_id_at(3).into() },
-                        ],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                doc.actor_id.op_id_at(2) => amp::Diff::Value("chaffinch".into()),
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 0,
+                                elem_id: doc.actor_id.op_id_at(2).into(),
+                                value: amp::Diff::Value("chaffinch".into()),
                             },
-                            2 => hashmap!{
-                                doc.actor_id.op_id_at(3) => amp::Diff::Value("greenfinch".into()),
-                            }
-                        }
+                            amp::DiffEdit::SingleElementInsert{
+                                index: 2,
+                                elem_id: doc.actor_id.op_id_at(3).into(),
+                                value: amp::Diff::Value("greenfinch".into()),
+                            },
+                        ],
                     })
                 }
-            }
-        }))
-    }).unwrap();
+            },
+        })),
+    })
+    .unwrap();
 
     assert!(doc.in_flight_requests().is_empty());
     assert_eq!(

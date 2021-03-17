@@ -67,6 +67,17 @@ impl ObjType {
     }
 }
 
+impl fmt::Display for ObjType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjType::Map(MapType::Map) => write!(f, "map"),
+            ObjType::Map(MapType::Table) => write!(f, "table"),
+            ObjType::Sequence(SequenceType::List) => write!(f, "list"),
+            ObjType::Sequence(SequenceType::Text) => write!(f, "text"),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum MapType {
@@ -91,6 +102,10 @@ impl OpId {
 
     pub fn counter(&self) -> u64 {
         self.0
+    }
+
+    pub fn increment_by(&self, by: u64) -> OpId {
+        OpId(self.0 + by, self.1.clone())
     }
 }
 
@@ -270,6 +285,7 @@ pub enum OpType {
     Del,
     Inc(i64),
     Set(ScalarValue),
+    MultiSet(Vec<ScalarValue>),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -364,7 +380,6 @@ pub struct SeqDiff {
     #[serde(rename = "type")]
     pub obj_type: SequenceType,
     pub edits: Vec<DiffEdit>,
-    pub props: HashMap<usize, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
@@ -385,13 +400,28 @@ pub struct CursorDiff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
-    Insert {
+    #[serde(rename = "insert")]
+    SingleElementInsert {
         index: usize,
         #[serde(rename = "elemId")]
         elem_id: ElementId,
+        value: Diff,
+    },
+    #[serde(rename = "multi-insert")]
+    MultiElementInsert {
+        index: u64,
+        #[serde(rename = "opId")]
+        first_opid: OpId,
+        values: Vec<ScalarValue>,
+    },
+    Update {
+        index: u64,
+        opid: OpId,
+        value: Diff,
     },
     Remove {
-        index: usize,
+        index: u64,
+        count: u64,
     },
 }
 

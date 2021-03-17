@@ -20,6 +20,7 @@ pub enum LocalOperation {
     Delete,
     Increment(i64),
     Insert(Value),
+    InsertMany(Vec<Value>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -68,6 +69,13 @@ impl LocalChange {
         LocalChange {
             path,
             operation: LocalOperation::Insert(value),
+        }
+    }
+
+    pub fn insert_many(path: Path, values: Vec<Value>) -> LocalChange {
+        LocalChange {
+            path,
+            operation: LocalOperation::InsertMany(values),
         }
     }
 }
@@ -129,6 +137,75 @@ impl MutationTracker {
         self.state = change.new_state();
         self.max_op += change.new_ops.len() as u64;
         self.ops.extend(change.new_ops);
+    }
+
+    fn insert_helper<'a, 'b, 'c, I>(
+        &'a mut self,
+        path: &'b Path,
+        values: I,
+    ) -> Result<(), InvalidChangeRequest>
+    where
+        I: ExactSizeIterator<Item = &'c Value>,
+    {
+        if let Some(name) = path.name() {
+            let index = match name {
+                PathElement::Index(i) => i,
+                _ => {
+                    return Err(InvalidChangeRequest::InsertWithNonSequencePath {
+                        path: path.clone(),
+                    })
+                }
+            };
+            if let Some(parent) = self.state.resolve_path(&path.parent()).map(|p| p.target) {
+                match parent {
+                    Target::List(list_target) => {
+                        let payload = SetOrInsertPayload {
+                            start_op: self.max_op + 1,
+                            actor: &self.actor_id.clone(),
+                            value: values,
+                        };
+                        self.apply_state_change(list_target.insert_many(*index, payload)?);
+                    }
+                    Target::Text(text_target) => {
+                        let mut chars = Vec::with_capacity(values.len());
+                        for value in values {
+                            match value {
+                                Value::Primitive(Primitive::Str(s)) => {
+                                    if s.graphemes(true).count() == 1 {
+                                        chars.push(s.clone())
+                                    } else {
+                                        return Err(
+                                            InvalidChangeRequest::InsertNonTextInTextObject {
+                                                path: path.clone(),
+                                                object: value.clone(),
+                                            },
+                                        );
+                                    }
+                                }
+                                _ => {
+                                    return Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                        path: path.clone(),
+                                        object: value.clone(),
+                                    })
+                                }
+                            }
+                        }
+                        let payload = SetOrInsertPayload {
+                            start_op: self.max_op + 1,
+                            actor: &self.actor_id.clone(),
+                            value: chars.into_iter(),
+                        };
+                        self.apply_state_change(text_target.insert_many(*index, payload)?);
+                    }
+                    _ => return Err(InvalidChangeRequest::NoSuchPathError { path: path.clone() }),
+                };
+                Ok(())
+            } else {
+                Err(InvalidChangeRequest::InsertForNonSequenceObject { path: path.clone() })
+            }
+        } else {
+            Err(InvalidChangeRequest::NoSuchPathError { path: path.clone() })
+        }
     }
 }
 
@@ -316,68 +393,74 @@ impl MutableDocument for MutationTracker {
                     })
                 }
             }
+            //<<<<<<< HEAD
+            //LocalOperation::Insert(value) => {
+            //if let Some(name) = change.path.name() {
+            //let index = match name {
+            //PathElement::Index(i) => i,
+            //_ => {
+            //return Err(InvalidChangeRequest::InsertWithNonSequencePath {
+            //path: change.path,
+            //})
+            //}
+            //};
+            //if let Some(parent) = self
+            //.state
+            //.resolve_path(&change.path.parent())
+            //.map(|p| p.target)
+            //{
+            //match (parent, value) {
+            //(Target::List(list_target), _) => {
+            //let payload = SetOrInsertPayload {
+            //start_op: self.max_op + 1,
+            //actor: &self.actor_id.clone(),
+            //value,
+            //};
+            //self.apply_state_change(list_target.insert(*index, payload)?);
+            //Ok(())
+            //}
+            //(Target::Text(text_target), val) => match val {
+            //Value::Primitive(Primitive::Str(s)) => {
+            //if s.graphemes(true).count() == 1 {
+            //let payload = SetOrInsertPayload {
+            //start_op: self.max_op + 1,
+            //actor: &self.actor_id.clone(),
+            //value: s.clone(),
+            //};
+            //self.apply_state_change(
+            //text_target.insert(*index, payload)?,
+            //);
+            //Ok(())
+            //} else {
+            //Err(InvalidChangeRequest::InsertNonTextInTextObject {
+            //path: change.path,
+            //object: value.clone(),
+            //})
+            //}
+            //}
+            //_ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
+            //path: change.path,
+            //object: value.clone(),
+            //}),
+            //},
+            //_ => Err(InvalidChangeRequest::NoSuchPathError {
+            //path: change.path.clone(),
+            //}),
+            //}
+            //} else {
+            //Err(InvalidChangeRequest::InsertForNonSequenceObject { path: change.path })
+            //}
+            //} else {
+            //Err(InvalidChangeRequest::NoSuchPathError {
+            //path: change.path.clone(),
+            //})
+            //}
+            //}
+            //=======
             LocalOperation::Insert(value) => {
-                if let Some(name) = change.path.name() {
-                    let index = match name {
-                        PathElement::Index(i) => i,
-                        _ => {
-                            return Err(InvalidChangeRequest::InsertWithNonSequencePath {
-                                path: change.path,
-                            })
-                        }
-                    };
-                    if let Some(parent) = self
-                        .state
-                        .resolve_path(&change.path.parent())
-                        .map(|p| p.target)
-                    {
-                        match (parent, value) {
-                            (Target::List(list_target), _) => {
-                                let payload = SetOrInsertPayload {
-                                    start_op: self.max_op + 1,
-                                    actor: &self.actor_id.clone(),
-                                    value,
-                                };
-                                self.apply_state_change(list_target.insert(*index, payload)?);
-                                Ok(())
-                            }
-                            (Target::Text(text_target), val) => match val {
-                                Value::Primitive(Primitive::Str(s)) => {
-                                    if s.graphemes(true).count() == 1 {
-                                        let payload = SetOrInsertPayload {
-                                            start_op: self.max_op + 1,
-                                            actor: &self.actor_id.clone(),
-                                            value: s.clone(),
-                                        };
-                                        self.apply_state_change(
-                                            text_target.insert(*index, payload)?,
-                                        );
-                                        Ok(())
-                                    } else {
-                                        Err(InvalidChangeRequest::InsertNonTextInTextObject {
-                                            path: change.path,
-                                            object: value.clone(),
-                                        })
-                                    }
-                                }
-                                _ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
-                                    path: change.path,
-                                    object: value.clone(),
-                                }),
-                            },
-                            _ => Err(InvalidChangeRequest::NoSuchPathError {
-                                path: change.path.clone(),
-                            }),
-                        }
-                    } else {
-                        Err(InvalidChangeRequest::InsertForNonSequenceObject { path: change.path })
-                    }
-                } else {
-                    Err(InvalidChangeRequest::NoSuchPathError {
-                        path: change.path.clone(),
-                    })
-                }
+                self.insert_helper(&change.path, std::iter::once(value))
             }
+            LocalOperation::InsertMany(values) => self.insert_helper(&change.path, values.iter()),
         }
     }
 }

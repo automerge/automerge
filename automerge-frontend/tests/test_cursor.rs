@@ -157,17 +157,17 @@ fn test_set_cursor_to_new_element_in_diff() {
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
                         edits: vec![
-                            amp::DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()},
-                            amp::DiffEdit::Insert{index: 1, elem_id: actor.op_id_at(3).into()},
-                        ],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value("one".into())
+                            amp::DiffEdit::SingleElementInsert{
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                value: amp::Diff::Value("one".into()),
                             },
-                            1 => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value("two".into())
-                            }
-                        }
+                            amp::DiffEdit::SingleElementInsert{
+                                index: 1,
+                                elem_id: actor.op_id_at(3).into(),
+                                value: amp::Diff::Value("two".into()),
+                            },
+                        ],
                     }),
                 },
                 "cursor".to_string() => hashmap!{

@@ -46,30 +46,18 @@ impl StateTreeChange {
     pub(super) fn new_cursors(&self) -> Cursors {
         self.new_cursors.clone()
     }
-}
 
-impl Add for &StateTreeChange {
-    type Output = StateTreeChange;
+    /// Include changes from `other` in this change
+    pub(super) fn update_with(&mut self, other: StateTreeChange) {
+        self.objects = other.objects.union(self.objects.clone());
+        self.new_cursors = other.new_cursors.union(self.new_cursors.clone());
+    }
 
-    fn add(self, rhs: &StateTreeChange) -> Self::Output {
+    /// Combine with `other`, entries in the current change take precedence
+    pub(super) fn union(&self, other: StateTreeChange) -> StateTreeChange {
         StateTreeChange {
-            objects: self.objects.clone().union(rhs.objects.clone()),
-            new_cursors: self.new_cursors.clone().union(rhs.new_cursors.clone()),
+            objects: self.objects.clone().union(other.objects.clone()),
+            new_cursors: self.new_cursors.clone().union(other.new_cursors.clone()),
         }
-    }
-}
-
-impl Add for StateTreeChange {
-    type Output = StateTreeChange;
-
-    fn add(self, rhs: StateTreeChange) -> Self::Output {
-        &self + &rhs
-    }
-}
-
-impl AddAssign for StateTreeChange {
-    fn add_assign(&mut self, rhs: StateTreeChange) {
-        self.objects = self.objects.clone().union(rhs.objects);
-        self.new_cursors = self.new_cursors.clone().union(rhs.new_cursors);
     }
 }

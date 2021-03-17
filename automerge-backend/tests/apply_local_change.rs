@@ -522,10 +522,13 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                         object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![
-                            DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()},
-                            DiffEdit::Remove{index: 0},
+                            DiffEdit::SingleElementInsert{
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                value: Diff::Value("magpie".into()),
+                            },
+                            DiffEdit::Remove{index: 0, count: 1},
                         ],
-                        props: hashmap!{},
                     })
                 }
             },

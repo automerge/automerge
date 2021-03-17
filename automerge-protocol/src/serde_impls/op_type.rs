@@ -15,6 +15,7 @@ impl Serialize for OpType {
             OpType::Del => "del",
             OpType::Inc(_) => "inc",
             OpType::Set(_) => "set",
+            OpType::MultiSet(..) => "set",
         };
         serializer.serialize_str(s)
     }

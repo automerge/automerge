@@ -87,3 +87,14 @@ impl From<OpId> for Key {
         Key::Seq(ElementId::Id(id))
     }
 }
+
+impl From<&InternalOpType> for amp::OpType {
+    fn from(i: &InternalOpType) -> amp::OpType {
+        match i {
+            InternalOpType::Del => amp::OpType::Del,
+            InternalOpType::Make(ot) => amp::OpType::Make(ot.clone()),
+            InternalOpType::Set(v) => amp::OpType::Set(v.clone()),
+            InternalOpType::Inc(i) => amp::OpType::Inc(*i),
+        }
+    }
+}

@@ -413,6 +413,7 @@ pub struct ResolvedText {
 }
 
 impl ResolvedText {
+    #[allow(dead_code)]
     pub(crate) fn insert(
         &self,
         index: u32,
@@ -437,6 +438,51 @@ impl ResolvedText {
             new_state: (self.update)(treechange),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
+                obj: self.value.object_id.clone(),
+                key: current_elemid.into(),
+                insert: true,
+                pred: Vec::new(),
+            }],
+        })
+    }
+
+    pub(crate) fn insert_many<'a, I>(
+        &'a self,
+        index: u32,
+        payload: SetOrInsertPayload<I>,
+    ) -> Result<LocalOperationResult, error::MissingIndexError>
+    where
+        I: ExactSizeIterator<Item = String>,
+    {
+        let current_elemid = match index {
+            0 => amp::ElementId::Head,
+            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+        };
+        let mut values = Vec::with_capacity(payload.value.len());
+        let mut chars: Vec<amp::ScalarValue> = Vec::with_capacity(payload.value.len());
+        for (i, c) in payload.value.enumerate() {
+            let insert_op = amp::OpId::new(payload.start_op + i as u64, payload.actor);
+            chars.push(amp::ScalarValue::Str(c.to_string()));
+            let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, c);
+            values.push(c)
+        }
+        let new_text = self.value.insert_many(index.try_into().unwrap(), values)?;
+        let updated = StateTreeComposite::Text(new_text);
+        let mv = self
+            .multivalue
+            .update_default(StateTreeValue::Link(updated.object_id()));
+        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+            self.value.object_id.clone(),
+            updated,
+        ));
+        let action = match chars.len() {
+            1 => amp::OpType::Set(chars[0].clone()),
+            _ => amp::OpType::MultiSet(chars),
+        };
+        Ok(LocalOperationResult {
+            new_state: (self.update)(treechange),
+            new_ops: vec![amp::Op {
+                action,
                 obj: self.value.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
@@ -552,6 +598,7 @@ impl ResolvedList {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn insert(
         &self,
         index: u32,
@@ -586,6 +633,60 @@ impl ResolvedList {
         Ok(LocalOperationResult {
             new_state: self.focus.update(treechange),
             new_ops: newvalue.ops(),
+        })
+    }
+
+    pub(crate) fn insert_many<'a, 'b, I>(
+        &'a self,
+        index: u32,
+        payload: SetOrInsertPayload<I>,
+    ) -> Result<LocalOperationResult, error::MissingIndexError>
+    where
+        I: ExactSizeIterator<Item = &'b Value>,
+    {
+        let mut last_elemid = match index {
+            0 => amp::ElementId::Head,
+            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+        };
+        let mut newvalues = DiffApplicationResult::pure(Vec::with_capacity(payload.value.len()));
+        let mut op_num = payload.start_op;
+        let mut ops = Vec::new();
+        for value in payload.value {
+            let newvalue = MultiValue::new_from_value_2(NewValueRequest {
+                actor: payload.actor,
+                start_op: op_num,
+                value: &value,
+                parent_obj: &self.value.object_id,
+                key: &last_elemid.clone().into(),
+                insert: true,
+                pred: Vec::new(),
+            });
+            last_elemid = amp::OpId::new(op_num, payload.actor).into();
+            op_num = newvalue.max_op() + 1;
+            newvalues = newvalue.diff_app_result().and_then(|v| {
+                newvalues.map(|mut vs| {
+                    vs.push(v);
+                    vs
+                })
+            });
+            ops.extend(newvalue.ops());
+        }
+        let treechange = newvalues.try_and_then(|vs| {
+            let new_value =
+                StateTreeComposite::List(self.value.insert_many(index.try_into().unwrap(), vs)?);
+            let mv = self
+                .multivalue
+                .update_default(StateTreeValue::Link(new_value.object_id()));
+            Ok(
+                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
+                    self.value.object_id.clone(),
+                    new_value,
+                )),
+            )
+        })?;
+        Ok(LocalOperationResult {
+            new_state: self.focus.update(treechange),
+            new_ops: condense_insert_ops(ops),
         })
     }
 
@@ -630,4 +731,56 @@ pub struct ResolvedChar {
 
 pub struct ResolvedPrimitive {
     pub(super) multivalue: MultiValue,
+}
+
+fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
+    if ops.len() == 1 {
+        return ops;
+    }
+    let mut op_iter = ops.iter();
+    let mut prim_vals = Vec::with_capacity(ops.len());
+    let mut preds = Vec::new();
+    if let Some(v) = op_iter.next() {
+        if let Some(prim) = prim_from_op_action(&v.action) {
+            prim_vals.push(prim);
+            preds.extend(v.pred.clone());
+        }
+        while let Some(o) = op_iter.next() {
+            if let Some(prim) = prim_from_op_action(&o.action) {
+                prim_vals.push(prim);
+                preds.extend(o.pred.clone());
+            }
+        }
+        if prim_vals.len() == ops.len() {
+            vec![amp::Op {
+                action: amp::OpType::MultiSet(prim_vals),
+                pred: preds,
+                insert: true,
+                key: v.key.clone(),
+                obj: v.obj.clone(),
+            }]
+        } else {
+            ops
+        }
+    } else {
+        ops
+    }
+}
+
+fn prim_from_op_action(action: &amp::OpType) -> Option<amp::ScalarValue> {
+    match action {
+        amp::OpType::Set(v) => match v {
+            amp::ScalarValue::Str(_) => Some(v.clone()),
+            amp::ScalarValue::Int(_) => Some(v.clone()),
+            amp::ScalarValue::Uint(_) => Some(v.clone()),
+            amp::ScalarValue::F64(_) => Some(v.clone()),
+            amp::ScalarValue::F32(_) => Some(v.clone()),
+            amp::ScalarValue::Counter(_) => None,
+            amp::ScalarValue::Timestamp(_) => None,
+            amp::ScalarValue::Cursor(_) => None,
+            amp::ScalarValue::Boolean(_) => Some(v.clone()),
+            amp::ScalarValue::Null => Some(v.clone()),
+        },
+        _ => None,
+    }
 }

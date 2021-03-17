@@ -20,7 +20,7 @@ use crate::{
     object_store::ObjState,
     op_handle::OpHandle,
     ordered_set::OrderedSet,
-    pending_diff::PendingDiff,
+    pending_diff::{Edits, PendingDiff},
     Change,
 };
 
@@ -138,8 +138,13 @@ impl OpSet {
 
             let diff = match (before, after) {
                 (true, true) => {
+                    let opid = op
+                        .operation_key()
+                        .to_opid()
+                        .ok_or(AutomergeError::HeadToOpId)?;
+                    let index = object.index_of(opid).unwrap_or(0);
                     tracing::debug!("updating existing element");
-                    Some(PendingDiff::Set(op.clone()))
+                    Some(PendingDiff::SeqUpdate(op.clone(), index, opid))
                 }
                 (true, false) => {
                     let opid = op
@@ -257,29 +262,37 @@ impl OpSet {
         seq_type: amp::SequenceType,
     ) -> Result<amp::Diff, AutomergeError> {
         let mut edits = Vec::new();
-        let mut props = HashMap::new();
         let mut index = 0;
         let mut max_counter = 0;
+        let mut seen_indices: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         for opid in object.seq.into_iter() {
             max_counter = max(max_counter, opid.0);
             let key = (*opid).into(); // FIXME - something is wrong here
-            let elem_id = actors.export_opid(opid).into();
             if let Some(ops) = object.props.get(&key) {
                 if !ops.is_empty() {
-                    edits.push(amp::DiffEdit::Insert { index, elem_id });
-                    let mut opid_to_value = HashMap::new();
                     for op in ops.iter() {
-                        let amp_opid = actors.export_opid(&op.id);
-                        if let Some(child_id) = op.child() {
-                            opid_to_value
-                                .insert(amp_opid, self.construct_object(&child_id, actors)?);
+                        let value = if let Some(child_id) = op.child() {
+                            self.construct_object(&child_id, actors)?
                         } else {
-                            opid_to_value
-                                .insert(amp_opid, self.gen_value_diff(op, &op.adjusted_value()));
+                            self.gen_value_diff(op, &op.adjusted_value())
+                        };
+                        let amp_opid = actors.export_opid(&op.id);
+                        if seen_indices.contains(&index) {
+                            edits.push(amp::DiffEdit::Update {
+                                index,
+                                opid: amp_opid,
+                                value,
+                            });
+                        } else {
+                            edits.push(amp::DiffEdit::SingleElementInsert {
+                                index: index as usize,
+                                elem_id: amp_opid.into(),
+                                value,
+                            });
                         }
+                        seen_indices.insert(index);
                     }
-                    props.insert(index, opid_to_value);
                     index += 1;
                 }
             }
@@ -288,7 +301,6 @@ impl OpSet {
             object_id: actors.export_obj(object_id),
             obj_type: seq_type,
             edits,
-            props,
         }
         .into())
     }
@@ -361,40 +373,54 @@ impl OpSet {
     fn gen_seq_diff(
         &self,
         obj_id: &ObjectId,
-        obj: &ObjState,
+        _obj: &ObjState,
         pending: &[PendingDiff],
         pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
     ) -> Result<amp::Diff, AutomergeError> {
-        let mut props = HashMap::new();
-        let edits = pending.iter().filter_map(|p| p.edit(actors)).collect();
-        // i may have duplicate keys - this makes sure I hit each one only once
-        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
-        for key in keys.iter() {
-            let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
-                let link = match op.action {
-                    InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
-                    InternalOpType::Make(_) => {
-                        self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
-                    }
-                    _ => panic!("del or inc found in field_operations"),
-                };
-                opid_to_value.insert(actors.export_opid(&op.id), link);
-            }
-            if let Some(index) = obj
-                .seq
-                .index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpId)?)
-            {
-                props.insert(index, opid_to_value);
+        let mut edits = Edits::new();
+        for pending_edit in pending.iter() {
+            match pending_edit {
+                PendingDiff::SeqInsert(op, index, opid) => {
+                    let value = match op.action {
+                        InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
+                        InternalOpType::Make(_) => {
+                            self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
+                        }
+                        _ => panic!("del or inc found in field operations"),
+                    };
+                    edits.append_edit(amp::DiffEdit::SingleElementInsert {
+                        index: *index,
+                        elem_id: actors.export_opid(&opid).into(),
+                        value,
+                    });
+                }
+                PendingDiff::SeqUpdate(op, index, opid) => {
+                    let value = match op.action {
+                        InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
+                        InternalOpType::Make(_) => {
+                            self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
+                        }
+                        _ => panic!("del or inc found in field operations"),
+                    };
+                    edits.append_edit(amp::DiffEdit::Update {
+                        index: *index as u64,
+                        opid: actors.export_opid(&opid).into(),
+                        value,
+                    });
+                }
+                PendingDiff::SeqRemove(_, index) => edits.append_edit(amp::DiffEdit::Remove {
+                    index: (*index) as u64,
+                    count: 1,
+                }),
+                _ => {}
             }
         }
         Ok(amp::SeqDiff {
             object_id: actors.export_obj(obj_id),
             obj_type: seq_type,
-            edits,
-            props,
+            edits: edits.to_vec(),
         }
         .into())
     }
