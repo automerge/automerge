@@ -640,7 +640,10 @@ fn compress_doc_changes(
     Some(changes)
 }
 
-fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -> Vec<DocOp> {
+fn group_doc_ops(
+    changes: &[amp::UncompressedChange],
+    actors: &[amp::ActorId],
+) -> Result<Vec<DocOp>, AutomergeError> {
     let mut by_obj_id = HashMap::<amp::ObjectId, HashMap<amp::Key, HashMap<amp::OpId, _>>>::new();
     let mut by_ref = HashMap::<amp::ObjectId, HashMap<amp::Key, Vec<amp::OpId>>>::new();
     let mut is_seq = HashSet::<amp::ObjectId>::new();
@@ -686,15 +689,19 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
                 );
 
             for pred in &op.pred {
-                by_obj_id
+                if let Some(pred_op) = by_obj_id
                     .entry(objid.clone())
                     .or_default()
                     .entry(key.clone())
                     .or_default()
                     .get_mut(pred)
-                    .unwrap()
-                    .succ
-                    .push((opid.0, actors.iter().position(|a| a == &opid.1).unwrap()));
+                {
+                    pred_op
+                        .succ
+                        .push((opid.0, actors.iter().position(|a| a == &opid.1).unwrap()));
+                } else {
+                    return Err(AutomergeError::MissingIndex(pred.clone()));
+                }
             }
         }
     }
@@ -703,8 +710,7 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
         let mut keys = Vec::new();
         if is_seq.contains(objid) {
             let mut stack = vec![amp::ElementId::Head];
-            while !stack.is_empty() {
-                let key = stack.pop().unwrap();
+            while let Some(key) = stack.pop() {
                 if key != amp::ElementId::Head {
                     keys.push(amp::Key::Seq(key.clone()))
                 }
@@ -738,7 +744,7 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
         }
     }
 
-    ops
+    Ok(ops)
 }
 
 fn get_heads(changes: &[amp::UncompressedChange]) -> HashSet<amp::ChangeHash> {
@@ -773,7 +779,7 @@ pub(crate) fn encode_document(
 
     let (change_bytes, change_info) = ChangeEncoder::encode_changes(&changes, &actors);
 
-    let doc_ops = group_doc_ops(&changes, &actors);
+    let doc_ops = group_doc_ops(&changes, &actors)?;
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(&doc_ops, &mut actors);
 
