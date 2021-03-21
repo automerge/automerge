@@ -115,9 +115,7 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    // TODO: figure out why we need this box. From my understanding of im_rc::Vector we shouldn't
-    // need it, but without it we get recursive type errors in StateTreeList
-    underlying: Box<im_rc::Vector<Box<(amp::OpId, Option<T>)>>>,
+    underlying: im_rc::Vector<Box<(amp::OpId, Option<T>)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -127,7 +125,7 @@ where
 {
     pub fn new() -> DiffableSequence<T> {
         DiffableSequence {
-            underlying: Box::new(im_rc::Vector::new()),
+            underlying: im_rc::Vector::new(),
         }
     }
 
@@ -136,11 +134,10 @@ where
         I: IntoIterator<Item = (amp::OpId, T)>,
     {
         DiffableSequence {
-            underlying: Box::new(
-                i.into_iter()
-                    .map(|(oid, v)| Box::new((oid, Some(v))))
-                    .collect(),
-            ),
+            underlying: i
+                .into_iter()
+                .map(|(oid, v)| Box::new((oid, Some(v))))
+                .collect(),
         }
     }
 
@@ -264,10 +261,9 @@ where
 
     pub(super) fn update(&self, index: usize, value: T) -> Self {
         DiffableSequence {
-            underlying: Box::new(
-                self.underlying
-                    .update(index, Box::new((value.default_opid(), Some(value)))),
-            ),
+            underlying: self
+                .underlying
+                .update(index, Box::new((value.default_opid(), Some(value)))),
         }
     }
 

@@ -60,7 +60,7 @@ pub fn b1_1(c: &mut Criterion) {
                         doc1.apply_patch(patch).unwrap();
 
                         let patch2 = backend2
-                            .apply_changes(vec![(*change_to_send).clone()])
+                            .apply_changes(vec![(change_to_send).clone()])
                             .unwrap();
                         doc2.apply_patch(patch2).unwrap()
                     }
@@ -123,9 +123,7 @@ pub fn b1_2(c: &mut Criterion) {
                         backend1.apply_local_change(doc1_insert_change).unwrap();
                     doc1.apply_patch(patch).unwrap();
 
-                    let patch2 = backend2
-                        .apply_changes(vec![(*change_to_send).clone()])
-                        .unwrap();
+                    let patch2 = backend2.apply_changes(vec![change_to_send]).unwrap();
                     doc2.apply_patch(patch2).unwrap();
                     (doc1, backend1, doc2, backend2)
                 })
@@ -162,9 +160,7 @@ pub fn b3_1(c: &mut Criterion) {
                     .enumerate()
                     .map(|(index, mut doc)| {
                         let mut backend = Backend::init();
-                        let patch = backend
-                            .apply_changes(vec![(*init_binchange).clone()])
-                            .unwrap();
+                        let patch = backend.apply_changes(vec![init_binchange.clone()]).unwrap();
                         doc.apply_patch(patch).unwrap();
                         let change = doc
                             .change(None, |d| {
@@ -175,7 +171,7 @@ pub fn b3_1(c: &mut Criterion) {
                             })
                             .unwrap()
                             .unwrap();
-                        (*backend.apply_local_change(change).unwrap().1).clone()
+                        backend.apply_local_change(change).unwrap().1
                     })
                     .collect();
                 (local_doc, local_backend, updates)
