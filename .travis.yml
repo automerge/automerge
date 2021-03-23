@@ -1,3 +1,5 @@
+os: linux
+dist: xenial
 language: rust
 rust:
 - stable
