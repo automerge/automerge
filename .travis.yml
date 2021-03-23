@@ -1,16 +1,32 @@
+os: linux
+dist: xenial
 language: rust
 rust:
 - stable
 - beta
-before_script:
+install:
 - rustup self update
-- rustup component add clippy 
+- rustup component add clippy
 - rustup component add rustfmt
+- curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+before_script:
+- export -f travis_fold
 script:
+- travis_fold start "format"
 - cargo fmt --all -- --check
+- travis_fold end "format"
+- travis_fold start "clippy"
 - cargo clippy --all-targets --all-features -- -D warnings
+- travis_fold end "clippy"
+- travis_fold start "build"
 - cargo build --verbose --all
+- travis_fold end "build"
+- travis_fold start "test"
 - cargo test --verbose --all
+- travis_fold end "test"
+- travis_fold start "wasm-build"
+- cd automerge-backend-wasm && yarn release
+- travis_fold end "wasm-build"
 jobs:
   allow_failures:
   - rust: nightly

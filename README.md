@@ -2,7 +2,7 @@
 
 [![docs](https://docs.rs/automerge/badge.svg)](https://docs.rs/automerge)
 [![crates](https://img.shields.io/crates/v/automerge.svg)](https://crates.io/crates/automerge)
-[![Build Status](https://travis-ci.org/automerge/automerge-rs.svg?branch=master)](https://travis-ci.org/automerge/automerge-rs)
+[![Build Status](https://travis-ci.org/automerge/automerge-rs.svg?branch=main)](https://travis-ci.org/automerge/automerge-rs)
 
 This is a rust implementation of
 [automerge](https://github.com/automerge/automerge). Currently this repo
