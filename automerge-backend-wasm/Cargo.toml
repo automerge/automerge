@@ -25,6 +25,8 @@ automerge-protocol = { path = "../automerge-protocol" }
 js-sys = "^0.3"
 serde = "^1.0"
 serde_json = "^1.0"
+getrandom = { version = "0.2.2", features=["js"] }
+uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
 
 [dependencies.wasm-bindgen]
 version = "^0.2"
