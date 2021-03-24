@@ -23,8 +23,8 @@ automerge-protocol = { path = "../automerge-protocol" }
 
 [dev-dependencies]
 criterion = "0.3.3"
+pretty_assertions = "0.7.1"
 rand = "0.8.2"
-
 
 [[bench]]
 name = "crdt_benchmarks"
