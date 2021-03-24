@@ -5,7 +5,6 @@ use automerge::MapType;
 use automerge::Path;
 use automerge::Value;
 use automerge::{InvalidChangeRequest, Primitive};
-use pretty_assertions::assert_eq;
 
 #[test]
 fn missing_object_error() {
@@ -143,14 +142,20 @@ fn missing_object_error() {
             change1s.push(change.clone());
             backend.apply_local_change(change).unwrap();
         }
+        if change1s.len() >= 2 {
+            println!(
+                "{}",
+                pretty_assertions::Comparison::new(
+                    &change1s[change1s.len() - 2],
+                    &change1s[change1s.len() - 1],
+                )
+            )
+        }
 
         let backend_bytes = backend.save().unwrap();
         println!("{:?}", backend_bytes);
 
         let backend = Backend::load(backend_bytes);
-        if change1s.len() >= 2 {
-            assert_eq!(change1s[change1s.len() - 2], change1s[change1s.len() - 1])
-        }
         match backend {
             Err(e) => {
                 panic!("failed loading backend: {:?}", e)
@@ -171,12 +176,18 @@ fn missing_object_error() {
                     .unwrap();
                 if let Some(change) = c {
                     change2s.push(change.clone());
+                    if change2s.len() >= 2 {
+                        println!(
+                            "{}",
+                            pretty_assertions::Comparison::new(
+                                &change2s[change2s.len() - 2],
+                                &change2s[change2s.len() - 1]
+                            )
+                        )
+                    }
                     backend.apply_local_change(change).unwrap();
                 }
             }
-        }
-        if change2s.len() >= 2 {
-            assert_eq!(change2s[change2s.len() - 2], change2s[change2s.len() - 1])
         }
     }
 }
