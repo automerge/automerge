@@ -5,6 +5,11 @@ use automerge::MapType;
 use automerge::Path;
 use automerge::Value;
 use automerge::{InvalidChangeRequest, Primitive};
+use automerge_protocol::{
+    ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
+    UncompressedChange,
+};
+use test_env_log::test;
 
 #[test]
 fn missing_object_error() {
@@ -194,9 +199,10 @@ fn missing_object_error() {
 
 #[test]
 fn missing_object_error_2() {
-    let actor_id = uuid::Uuid::new_v4();
+    let actor_uuid = uuid::Uuid::new_v4();
+    let actor_id = ActorId::from_bytes(actor_uuid.as_bytes());
 
-    let changes1 = vec![LocalChange::set(
+    let _changes = vec![LocalChange::set(
         Path::root(),
         Value::Map(
             vec![
@@ -290,22 +296,497 @@ fn missing_object_error_2() {
         ),
     )];
 
-    let mut backend = Backend::init();
-    let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
-    let patch = backend.get_patch().unwrap();
-    frontend.apply_patch(patch).unwrap();
+    let raw_change = UncompressedChange {
+        operations: vec![
+            Op {
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                obj: ObjectId::Root,
+                key: Key::Map("".to_owned()),
+                pred: vec![],
+                insert: false,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Head),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(2, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(3, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(4, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(5, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(6, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(7, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(8, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(9, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(10, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(11, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(12, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(13, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(14, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(1, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(15, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                obj: ObjectId::Root,
+                key: Key::Map("\u{0}".to_owned()),
+                pred: vec![],
+                insert: false,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Head),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(18, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(19, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(20, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(21, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(22, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(23, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(24, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(25, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(26, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(27, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(28, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(29, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(30, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(31, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(32, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(33, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(34, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(35, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(36, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(37, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(38, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(39, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(40, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(41, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(42, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(43, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(44, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(45, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(46, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(47, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(48, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(49, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(50, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(51, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(52, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(53, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(54, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(55, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(56, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(57, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(58, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(59, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(60, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(61, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(62, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(63, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(64, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(17, actor_id.clone())),
+                key: Key::Seq(ElementId::Id(OpId(65, actor_id.clone()))),
+                pred: vec![],
+                insert: true,
+            },
+            Op {
+                action: OpType::Make(ObjType::Map(MapType::Map)),
+                obj: ObjectId::Root,
+                key: Key::Map("\u{1}".to_owned()),
+                pred: vec![],
+                insert: false,
+            },
+            Op {
+                action: OpType::Set(ScalarValue::Null),
+                obj: ObjectId::Id(OpId(67, actor_id.clone())),
+                key: Key::Map("".to_owned()),
+                pred: vec![],
+                insert: false,
+            },
+        ],
+        actor_id,
+        hash: None,
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        deps: vec![],
+        extra_bytes: vec![],
+    };
 
-    let c = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
-            for change in &changes1 {
-                d.add_change(change.clone())?
-            }
-            Ok(())
-        })
-        .unwrap();
-    if let Some(change) = c {
-        backend.apply_local_change(change).unwrap();
-    }
+    let mut backend = Backend::init();
+    backend.apply_local_change(raw_change).unwrap();
 
     let backend_bytes = backend.save().unwrap();
     println!("{:?}", backend_bytes);
