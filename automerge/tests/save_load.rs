@@ -301,7 +301,7 @@ fn missing_object_error_2() {
             Op {
                 action: OpType::Make(ObjType::Sequence(SequenceType::List)),
                 obj: ObjectId::Root,
-                key: Key::Map("".to_owned()),
+                key: Key::Map("b".to_owned()),
                 pred: vec![],
                 insert: false,
             },
@@ -770,7 +770,7 @@ fn missing_object_error_2() {
             Op {
                 action: OpType::Set(ScalarValue::Null),
                 obj: ObjectId::Id(OpId(67, actor_id.clone())),
-                key: Key::Map("".to_owned()),
+                key: Key::Map("a".to_owned()),
                 pred: vec![],
                 insert: false,
             },
@@ -780,7 +780,7 @@ fn missing_object_error_2() {
         seq: 1,
         start_op: 1,
         time: 0,
-        message: None,
+        message: Some("".to_owned()),
         deps: vec![],
         extra_bytes: vec![],
     };
