@@ -340,7 +340,8 @@ where
                     self.literal = true;
                 }
                 _ => {
-                    self.count = self.decoder.read().unwrap_or_default();
+                    // FIXME(jeffa5): handle usize > isize here somehow
+                    self.count = self.decoder.read::<usize>().unwrap_or_default() as isize;
                     self.last_value = None;
                     self.literal = false;
                 }
