@@ -306,7 +306,17 @@ fn decode_header(bytes: &[u8]) -> Result<(u8, amp::ChangeHash, Range<usize>), Au
 
     let mut hasher = Sha256::new();
     hasher.input(&bytes[PREAMBLE_BYTES..]);
-    let hash = hasher.result()[..]
+    let calculated_hash = hasher.result();
+
+    let checksum = &bytes[4..8];
+    if checksum != &calculated_hash[0..4] {
+        return Err(AutomergeError::InvalidChecksum {
+            found: checksum.try_into().unwrap(),
+            calculated: calculated_hash[0..4].try_into().unwrap(),
+        });
+    }
+
+    let hash = calculated_hash[..]
         .try_into()
         .map_err(InvalidChangeError::from)?;
 
@@ -820,6 +830,7 @@ pub(crate) const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use amp::{ActorId, UncompressedChange};
     use std::str::FromStr;
 
     #[test]
@@ -1040,5 +1051,34 @@ mod tests {
             loaded_changes,
             changes.into_iter().cloned().collect::<Vec<Change>>()
         );
+    }
+
+    #[test]
+    fn test_invalid_document_checksum() {
+        let change = UncompressedChange {
+            operations: Vec::new(),
+            actor_id: ActorId::random(),
+            hash: None,
+            seq: 1,
+            start_op: 1,
+            time: 0,
+            message: None,
+            deps: Vec::new(),
+            extra_bytes: Vec::new(),
+        };
+        let mut doc = encode_document(vec![change]).unwrap();
+        let hash = doc[4..8].try_into().unwrap();
+        doc[4] = 0;
+        doc[5] = 0;
+        doc[6] = 0;
+        doc[7] = 1;
+        let decode_result = decode_document(&doc);
+        assert_eq!(
+            Err(AutomergeError::InvalidChecksum {
+                found: [0, 0, 0, 1],
+                calculated: hash,
+            }),
+            decode_result
+        )
     }
 }
