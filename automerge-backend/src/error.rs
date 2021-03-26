@@ -65,6 +65,8 @@ pub enum AutomergeError {
     EncodingError,
     #[error("Attempted to create a cursor for opid {opid} which was not an element in a sequence")]
     InvalidCursor { opid: amp::OpId },
+    #[error("Found mismatching checksum values, calculated {calculated:?} but found {found:?}")]
+    InvalidChecksum { found: [u8; 4], calculated: [u8; 4] },
 }
 
 #[derive(Error, Debug)]
