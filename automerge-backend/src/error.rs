@@ -67,6 +67,10 @@ pub enum AutomergeError {
     InvalidCursor { opid: amp::OpId },
     #[error("Found mismatching checksum values, calculated {calculated:?} but found {found:?}")]
     InvalidChecksum { found: [u8; 4], calculated: [u8; 4] },
+    #[error("A compressed chunk could not be decompressed")]
+    BadCompressedChunk,
+    #[error("A change contained compressed columns, which is not supported")]
+    ChangeContainedCompressedColumns,
 }
 
 #[derive(Error, Debug)]

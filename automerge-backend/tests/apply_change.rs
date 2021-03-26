@@ -665,7 +665,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         time: 0,
         message: None,
         hash: None,
-        deps: Vec::new(),
+        deps: vec![change1.hash],
         operations: vec![
             Op {
                 action: amp::OpType::Set("chaffinch".into()),
@@ -694,7 +694,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         seq: None,
         actor: None,
         max_op: 3,
-        deps: vec![change2.hash, change1.hash],
+        deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
@@ -792,7 +792,7 @@ fn test_handle_changes_within_conflicted_objects() {
             actor2.clone() => 2,
         },
         max_op: 2,
-        deps: vec![change3.hash, change1.hash],
+        deps: vec![change1.hash, change3.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,

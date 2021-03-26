@@ -21,6 +21,7 @@ fxhash = "^0.2.1"
 thiserror = "1.0.16"
 itertools = "0.9.0"
 tracing = { version = "0.1.25", features = ["log"] }
+flate2 = "1.0.20"
 
 [dependencies.web-sys]
 version = "0.3"
@@ -28,3 +29,7 @@ features = [
   "console",
 ]
 
+[dev-dependencies]
+test-env-log = "0.2.6"
+env_logger = "*"
+tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}

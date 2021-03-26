@@ -133,13 +133,13 @@ impl From<Backend> for *mut Backend {
 
 impl From<Vec<&Change>> for BinaryResults {
     fn from(changes: Vec<&Change>) -> Self {
-        BinaryResults(Ok(changes.iter().map(|b| b.bytes.clone()).collect()))
+        BinaryResults(Ok(changes.iter().map(|b| b.raw_bytes().into()).collect()))
     }
 }
 
 impl From<Result<Vec<&Change>, AutomergeError>> for BinaryResults {
     fn from(result: Result<Vec<&Change>, AutomergeError>) -> Self {
-        BinaryResults(result.map(|changes| changes.iter().map(|b| b.bytes.clone()).collect()))
+        BinaryResults(result.map(|changes| changes.iter().map(|b| b.raw_bytes().into()).collect()))
     }
 }
 
@@ -332,7 +332,7 @@ pub unsafe extern "C" fn automerge_encode_change(
     let change = change.to_string_lossy();
     let uncomp_change: UncompressedChange = serde_json::from_str(&change).unwrap();
     let change: Change = uncomp_change.try_into().unwrap();
-    (*backend).handle_binary(Ok(change.bytes))
+    (*backend).handle_binary(Ok(change.raw_bytes().into()))
 }
 
 /// # Safety
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn automerge_encode_change(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_last_local_change(backend: *mut Backend) -> isize {
     match (*backend).last_local_change.as_ref() {
-        Some(change) => (*backend).handle_binary(Ok(change.bytes.clone())),
+        Some(change) => (*backend).handle_binary(Ok(change.raw_bytes().into())),
         None => (*backend).handle_error("no last change"),
     }
 }

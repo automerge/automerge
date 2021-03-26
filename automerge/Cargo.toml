@@ -27,6 +27,7 @@ hex = "0.4.3"
 pretty_assertions = "0.7.1"
 rand = "0.8.2"
 test-env-log = { version = "0.2.6", features = ["trace"], default-features = false }
+env_logger = "*"
 tracing = "0.1.25"
 tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}
 

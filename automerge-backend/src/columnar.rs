@@ -2,6 +2,8 @@ use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecod
 use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder};
 use automerge_protocol as amp;
 use core::fmt::Debug;
+use flate2::bufread::DeflateDecoder;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io;
@@ -611,10 +613,10 @@ impl ValEncoder {
             self.ref_counter.finish(COL_REF_CTR),
             self.ref_actor.finish(COL_REF_ACTOR),
             self.len.finish(COL_VAL_LEN),
-            ColData {
-                col: COL_VAL_RAW,
-                data: self.raw,
-            },
+            ColData::new(
+                COL_VAL_RAW,
+                self.raw,
+            ),
         ]
     }
 }
@@ -802,7 +804,6 @@ impl ChangeEncoder {
         I: IntoIterator<Item = &'c amp::UncompressedChange>,
     {
         let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
-        //let hashes : Vec<_> = changes.clone().into_iter().filter_map(|c| c.hash).collect();
         for (index, change) in changes.into_iter().enumerate() {
             if let Some(hash) = change.hash {
                 index_by_hash.insert(hash, index);
@@ -842,10 +843,10 @@ impl ChangeEncoder {
             self.deps_num.finish(DOC_DEPS_NUM),
             self.deps_index.finish(DOC_DEPS_INDEX),
             self.extra_len.finish(DOC_EXTRA_LEN),
-            ColData {
-                col: DOC_EXTRA_RAW,
-                data: self.extra_raw,
-            },
+            ColData::new(
+                DOC_EXTRA_RAW,
+                self.extra_raw,
+            ),
         ];
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
@@ -857,7 +858,8 @@ impl ChangeEncoder {
             .count()
             .encode(&mut info)
             .ok();
-        for d in coldata.iter() {
+        for d in coldata.iter_mut() {
+            d.deflate();
             d.encode_col_len(&mut info).ok();
         }
         for d in coldata.iter() {
@@ -966,7 +968,8 @@ impl DocOpEncoder {
             .count()
             .encode(&mut info)
             .ok();
-        for d in coldata.iter() {
+        for d in coldata.iter_mut() {
+            d.deflate();
             d.encode_col_len(&mut info).ok();
         }
         for d in coldata.iter() {
@@ -1070,7 +1073,7 @@ impl ColumnEncoder {
             .count()
             .encode(&mut data)
             .ok();
-        for d in coldata.iter() {
+        for d in coldata.iter_mut() {
             d.encode_col_len(&mut data).ok();
         }
         for d in coldata.iter() {
@@ -1086,11 +1089,21 @@ impl ColumnEncoder {
 
 fn col_iter<'a, T>(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>, col_id: u32) -> T
 where
-    T: From<&'a [u8]>,
+    T: From<Cow<'a, [u8]>>,
 {
-    ops.get(&col_id)
-        .map(|r| T::from(&bytes[r.clone()]))
-        .unwrap_or_else(|| T::from(&[] as &[u8]))
+    let bytes = if let Some(r) = ops.get(&col_id) {
+        Cow::Borrowed(&bytes[r.clone()])
+    } else if let Some(r) = ops.get(&(col_id | COLUMN_TYPE_DEFLATE)) {
+        let mut decoder = DeflateDecoder::new(&bytes[r.clone()]);
+        let mut inflated = Vec::new();
+        //TODO this could throw if the compression is corrupt, we should propagate the error rather
+        //than unwrapping
+        decoder.read_to_end(&mut inflated).unwrap();
+        Cow::Owned(inflated)
+    } else {
+        Cow::from(&[] as &[u8])
+    };
+    T::from(bytes)
 }
 
 const VALUE_TYPE_NULL: usize = 0;
@@ -1115,6 +1128,7 @@ pub(crate) const COLUMN_TYPE_BOOLEAN: u32 = 4;
 pub(crate) const COLUMN_TYPE_STRING_RLE: u32 = 5;
 pub(crate) const COLUMN_TYPE_VALUE_LEN: u32 = 6;
 pub(crate) const COLUMN_TYPE_VALUE_RAW: u32 = 7;
+pub(crate) const COLUMN_TYPE_DEFLATE: u32 = 8;
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
@@ -1149,33 +1163,33 @@ impl Decodable for Action {
 
 const COL_OBJ_ACTOR: u32 = COLUMN_TYPE_ACTOR_ID;
 const COL_OBJ_CTR: u32 = COLUMN_TYPE_INT_RLE;
-const COL_KEY_ACTOR: u32 = 1 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_KEY_CTR: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_KEY_STR: u32 = 1 << 3 | COLUMN_TYPE_STRING_RLE;
-const COL_ID_ACTOR: u32 = 2 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_ID_CTR: u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_INSERT: u32 = 3 << 3 | COLUMN_TYPE_BOOLEAN;
-const COL_ACTION: u32 = 4 << 3 | COLUMN_TYPE_INT_RLE;
-const COL_VAL_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
-const COL_VAL_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
-const COL_PRED_NUM: u32 = 7 << 3 | COLUMN_TYPE_GROUP_CARD;
-const COL_PRED_ACTOR: u32 = 7 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_PRED_CTR: u32 = 7 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_SUCC_NUM: u32 = 8 << 3 | COLUMN_TYPE_GROUP_CARD;
-const COL_SUCC_ACTOR: u32 = 8 << 3 | COLUMN_TYPE_ACTOR_ID;
-const COL_SUCC_CTR: u32 = 8 << 3 | COLUMN_TYPE_INT_DELTA;
-const COL_REF_CTR: u32 = 6 << 3 | COLUMN_TYPE_INT_RLE;
-const COL_REF_ACTOR: u32 = 6 << 3 | COLUMN_TYPE_ACTOR_ID;
+const COL_KEY_ACTOR: u32 = 1 << 4 | COLUMN_TYPE_ACTOR_ID;
+const COL_KEY_CTR: u32 = 1 << 4 | COLUMN_TYPE_INT_DELTA;
+const COL_KEY_STR: u32 = 1 << 4 | COLUMN_TYPE_STRING_RLE;
+const COL_ID_ACTOR: u32 = 2 << 4 | COLUMN_TYPE_ACTOR_ID;
+const COL_ID_CTR: u32 = 2 << 4 | COLUMN_TYPE_INT_DELTA;
+const COL_INSERT: u32 = 3 << 4 | COLUMN_TYPE_BOOLEAN;
+const COL_ACTION: u32 = 4 << 4 | COLUMN_TYPE_INT_RLE;
+const COL_VAL_LEN: u32 = 5 << 4 | COLUMN_TYPE_VALUE_LEN;
+const COL_VAL_RAW: u32 = 5 << 4 | COLUMN_TYPE_VALUE_RAW;
+const COL_PRED_NUM: u32 = 7 << 4 | COLUMN_TYPE_GROUP_CARD;
+const COL_PRED_ACTOR: u32 = 7 << 4 | COLUMN_TYPE_ACTOR_ID;
+const COL_PRED_CTR: u32 = 7 << 4 | COLUMN_TYPE_INT_DELTA;
+const COL_SUCC_NUM: u32 = 8 << 4 | COLUMN_TYPE_GROUP_CARD;
+const COL_SUCC_ACTOR: u32 = 8 << 4 | COLUMN_TYPE_ACTOR_ID;
+const COL_SUCC_CTR: u32 = 8 << 4 | COLUMN_TYPE_INT_DELTA;
+const COL_REF_CTR: u32 = 6 << 4 | COLUMN_TYPE_INT_RLE;
+const COL_REF_ACTOR: u32 = 6 << 4 | COLUMN_TYPE_ACTOR_ID;
 
-const DOC_ACTOR: u32 = /* 0 << 3 */ COLUMN_TYPE_ACTOR_ID;
-const DOC_SEQ: u32 = /* 0 << 3 */ COLUMN_TYPE_INT_DELTA;
-const DOC_MAX_OP: u32 = 1 << 3 | COLUMN_TYPE_INT_DELTA;
-const DOC_TIME: u32 = 2 << 3 | COLUMN_TYPE_INT_DELTA;
-const DOC_MESSAGE: u32 = 3 << 3 | COLUMN_TYPE_STRING_RLE;
-const DOC_DEPS_NUM: u32 = 4 << 3 | COLUMN_TYPE_GROUP_CARD;
-const DOC_DEPS_INDEX: u32 = 4 << 3 | COLUMN_TYPE_INT_DELTA;
-const DOC_EXTRA_LEN: u32 = 5 << 3 | COLUMN_TYPE_VALUE_LEN;
-const DOC_EXTRA_RAW: u32 = 5 << 3 | COLUMN_TYPE_VALUE_RAW;
+const DOC_ACTOR: u32 = /* 0 << 4 */ COLUMN_TYPE_ACTOR_ID;
+const DOC_SEQ: u32 = /* 0 << 4 */ COLUMN_TYPE_INT_DELTA;
+const DOC_MAX_OP: u32 = 1 << 4 | COLUMN_TYPE_INT_DELTA;
+const DOC_TIME: u32 = 2 << 4 | COLUMN_TYPE_INT_DELTA;
+const DOC_MESSAGE: u32 = 3 << 4 | COLUMN_TYPE_STRING_RLE;
+const DOC_DEPS_NUM: u32 = 4 << 4 | COLUMN_TYPE_GROUP_CARD;
+const DOC_DEPS_INDEX: u32 = 4 << 4 | COLUMN_TYPE_INT_DELTA;
+const DOC_EXTRA_LEN: u32 = 5 << 4 | COLUMN_TYPE_VALUE_LEN;
+const DOC_EXTRA_RAW: u32 = 5 << 4 | COLUMN_TYPE_VALUE_RAW;
 
 /*
 const DOCUMENT_COLUMNS = {
@@ -1278,7 +1292,7 @@ mod tests {
 
         assert_eq!(encoded, vec![0, 64, 127, 1, 97]);
 
-        let decoder: RleDecoder<String> = RleDecoder::from(&encoded[..]);
+        let decoder: RleDecoder<String> = RleDecoder::from(Cow::from(&encoded[..]));
 
         let decoded = decoder.take(ops.len()).collect::<Vec<_>>();
         assert_eq!(decoded, ops);

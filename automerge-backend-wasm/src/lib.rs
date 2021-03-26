@@ -93,7 +93,7 @@ pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsV
         let change: UncompressedChange = js_to_rust(&change).unwrap();
         let (patch, change) = state.0.apply_local_change(change)?;
         let result = Array::new();
-        let bytes: Uint8Array = change.bytes.as_slice().into();
+        let bytes: Uint8Array = change.raw_bytes().into();
         // FIXME unwrap
         let p = rust_to_js(&patch).unwrap();
         result.push(&p);
@@ -193,7 +193,7 @@ fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
 fn export_changes(changes: Vec<&Change>) -> Array {
     let result = Array::new();
     for c in changes {
-        let bytes: Uint8Array = c.bytes.as_slice().into();
+        let bytes: Uint8Array = c.raw_bytes().into();
         result.push(bytes.as_ref());
     }
     result
