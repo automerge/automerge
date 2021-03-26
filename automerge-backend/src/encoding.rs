@@ -329,18 +329,19 @@ where
             if self.decoder.done() {
                 return Some(None);
             }
-            match self.decoder.read() {
+            match self.decoder.read::<i64>() {
                 Ok(count) if count > 0 => {
-                    self.count = count;
+                    self.count = count as isize;
                     self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
                 Ok(count) if count < 0 => {
-                    self.count = count.abs();
+                    self.count = count.abs() as isize;
                     self.literal = true;
                 }
                 _ => {
-                    self.count = self.decoder.read().unwrap_or_default();
+                    // FIXME(jeffa5): handle usize > isize here somehow
+                    self.count = self.decoder.read::<usize>().unwrap_or_default() as isize;
                     self.last_value = None;
                     self.literal = false;
                 }

@@ -1190,3 +1190,97 @@ const DOCUMENT_COLUMNS = {
   extraRaw:  5 << 3 | COLUMN_TYPE.VALUE_RAW
 }
 */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rle_encoder_for_strings_from_key() {
+        // this seems like a strange case but checks that we write nulls into the encoder as usize and read them out the same.
+        // if we don't then the 64 nulls gets interpreted as -64 and causes the rle decoder to never read the next values.
+        let ops = vec![
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("a".to_owned()),
+        ];
+        let mut encoder = RleEncoder::new();
+        for op in &ops {
+            if let Some(v) = op {
+                encoder.append_value(v.clone())
+            } else {
+                encoder.append_null()
+            }
+        }
+        let encoded = encoder.finish(0).data;
+
+        assert_eq!(encoded, vec![0, 64, 127, 1, 97]);
+
+        let decoder: RleDecoder<String> = RleDecoder::from(&encoded[..]);
+
+        let decoded = decoder.take(ops.len()).collect::<Vec<_>>();
+        assert_eq!(decoded, ops);
+    }
+}

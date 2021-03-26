@@ -290,10 +290,28 @@ impl Frontend {
         Self::new_with_timestamper(Box::new(system_time))
     }
 
+    #[cfg(feature = "std")]
+    pub fn new_with_actor_id(actor_id: uuid::Uuid) -> Self {
+        let system_time = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .and_then(|d| i64::try_from(d.as_millis()).ok())
+        };
+        Self::new_with_timestamper_and_actor_id(Box::new(system_time), actor_id)
+    }
+
     pub fn new_with_timestamper(t: Box<dyn Fn() -> Option<i64>>) -> Self {
+        Self::new_with_timestamper_and_actor_id(t, uuid::Uuid::new_v4())
+    }
+
+    pub fn new_with_timestamper_and_actor_id(
+        t: Box<dyn Fn() -> Option<i64>>,
+        actor_id: uuid::Uuid,
+    ) -> Self {
         let root_state = state_tree::StateTree::new();
         Frontend {
-            actor_id: ActorId::random(),
+            actor_id: ActorId::from_bytes(actor_id.as_bytes()),
             seq: 0,
             state: Some(FrontendState::Reconciled {
                 root_state,
