@@ -474,7 +474,9 @@ fn group_doc_change_and_doc_ops(
                                  //let id = (op.ctr, op.actor);
                                  //op_by_id.insert(id, i);
         for succ in op.succ.iter() {
-            if !op_by_id.contains_key(&succ) {
+            if let Some(index) = op_by_id.get(&succ) {
+                ops[*index].pred.push((op.ctr, op.actor))
+            } else {
                 let key = if op.insert {
                     amp::OpId(op.ctr, actors[op.actor].clone()).into()
                 } else {
@@ -492,12 +494,6 @@ fn group_doc_change_and_doc_ops(
                 };
                 op_by_id.insert(*succ, ops.len());
                 ops.push(del);
-            } else if let Some(index) = op_by_id.get(&succ) {
-                ops[*index].pred.push((op.ctr, op.actor))
-            } else {
-                return Err(AutomergeError::ChangeDecompressError(
-                    "Doc Succ Invalid".into(),
-                ));
             }
         }
     }
