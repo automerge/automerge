@@ -27,6 +27,9 @@ script:
 - travis_fold start "wasm-build"
 - cd automerge-backend-wasm && yarn release
 - travis_fold end "wasm-build"
+- travis_fold start "wasm-test"
+- wasm-pack test automerge-frontend --node
+- travis_fold end "wasm-test"
 jobs:
   allow_failures:
   - rust: nightly
