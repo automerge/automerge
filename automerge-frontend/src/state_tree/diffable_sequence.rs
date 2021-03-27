@@ -117,7 +117,7 @@ where
 {
     // TODO: figure out why we need this box. From my understanding of im_rc::Vector we shouldn't
     // need it, but without it we get recursive type errors in StateTreeList
-    underlying: Box<im_rc::Vector<(amp::OpId, Option<T>)>>,
+    underlying: Box<im_rc::Vector<Box<(amp::OpId, Option<T>)>>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -136,7 +136,11 @@ where
         I: IntoIterator<Item = (amp::OpId, T)>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().map(|(oid, v)| (oid, Some(v))).collect()),
+            underlying: Box::new(
+                i.into_iter()
+                    .map(|(oid, v)| Box::new((oid, Some(v))))
+                    .collect(),
+            ),
         }
     }
 
@@ -167,9 +171,9 @@ where
                         amp::ElementId::Id(oid) => oid.clone(),
                     };
                     if (*index) == new_underlying.len() {
-                        new_underlying.push_back((op_id, None));
+                        new_underlying.push_back(Box::new((op_id, None)));
                     } else {
-                        new_underlying.insert(*index, (op_id, None));
+                        new_underlying.insert(*index, Box::new((op_id, None)));
                     }
                 }
             };
@@ -187,8 +191,8 @@ where
                     let entry = new_underlying.get_mut(*index);
                     match entry {
                         Some(e) => {
-                            let mut updated_node = match e {
-                                (_, Some(n)) => n.apply_diff(
+                            let mut updated_node = match &e.1 {
+                                Some(n) => n.apply_diff(
                                     opid,
                                     DiffToApply {
                                         current_objects: current_objects.clone(),
@@ -197,7 +201,7 @@ where
                                         diff,
                                     },
                                 )?,
-                                (_, None) => T::construct(
+                                None => T::construct(
                                     opid,
                                     DiffToApply {
                                         current_objects: current_objects.clone(),
@@ -235,8 +239,8 @@ where
         }
         //This is where we maintain the invariant that allows us to provide an iterator over T
         //rather than Option<T>
-        for (index, (_, maybe_elem)) in new_underlying.iter().enumerate() {
-            if maybe_elem.is_none() {
+        for (index, b) in new_underlying.iter().enumerate() {
+            if b.1.is_none() {
                 return Err(InvalidPatch::InvalidIndex {
                     object_id: object_id.clone(),
                     index,
@@ -262,18 +266,18 @@ where
         DiffableSequence {
             underlying: Box::new(
                 self.underlying
-                    .update(index, (value.default_opid(), Some(value))),
+                    .update(index, Box::new((value.default_opid(), Some(value)))),
             ),
         }
     }
 
     pub(super) fn get(&self, index: usize) -> Option<&T> {
-        self.underlying.get(index).and_then(|(_, v)| v.as_ref())
+        self.underlying.get(index).and_then(|b| b.1.as_ref())
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
         self.underlying
-            .insert(index, (value.default_opid(), Some(value)))
+            .insert(index, Box::new((value.default_opid(), Some(value))))
     }
 
     pub(super) fn mutate<F>(&mut self, index: usize, f: F)
@@ -289,6 +293,6 @@ where
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter().map(|(_, v)| v.as_ref().unwrap())
+        self.underlying.iter().map(|b| b.1.as_ref().unwrap())
     }
 }
