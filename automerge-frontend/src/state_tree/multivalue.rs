@@ -246,7 +246,7 @@ pub(super) struct MultiGrapheme {
 
 impl MultiGrapheme {
     pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: String) -> MultiGrapheme {
-        debug_assert!(s.graphemes(true).count() == 1);
+        debug_assert_eq!(s.graphemes(true).count(), 1);
         MultiGrapheme {
             winning_value: (opid, s),
             conflicts: None,
