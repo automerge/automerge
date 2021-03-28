@@ -1,6 +1,6 @@
 use super::focus::Focus;
 use super::{
-    random_op_id, DiffApplicationResult, LocalOperationResult, MultiChar, MultiValue,
+    random_op_id, DiffApplicationResult, LocalOperationResult, MultiGrapheme, MultiValue,
     NewValueRequest, StateTree, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
     StateTreeTable, StateTreeText, StateTreeValue,
 };
@@ -416,14 +416,14 @@ impl ResolvedText {
     pub(crate) fn insert(
         &self,
         index: u32,
-        payload: SetOrInsertPayload<char>,
+        payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
             0 => amp::ElementId::Head,
             i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
         };
         let insert_op = amp::OpId::new(payload.start_op, payload.actor);
-        let c = MultiChar::new_from_char(insert_op, payload.value);
+        let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, payload.value.clone());
         let new_text = self.value.insert(index.try_into().unwrap(), c)?;
         let updated = StateTreeComposite::Text(new_text);
         let mv = self
@@ -436,7 +436,7 @@ impl ResolvedText {
         Ok(LocalOperationResult {
             new_state: (self.update)(treechange),
             new_ops: vec![amp::Op {
-                action: amp::OpType::Set(amp::ScalarValue::Str(payload.value.to_string())),
+                action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
                 obj: self.value.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
@@ -448,12 +448,12 @@ impl ResolvedText {
     pub(crate) fn set(
         &self,
         index: u32,
-        payload: SetOrInsertPayload<char>,
+        payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let index: usize = index.try_into().unwrap();
         let (current_elemid, _) = self.value.elem_at(index)?;
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
-        let c = MultiChar::new_from_char(update_op, payload.value);
+        let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
         let updated = StateTreeComposite::Text(self.value.set(index, c)?);
         let mv = self
             .multivalue
@@ -466,7 +466,7 @@ impl ResolvedText {
         Ok(LocalOperationResult {
             new_state,
             new_ops: vec![amp::Op {
-                action: amp::OpType::Set(amp::ScalarValue::Str(payload.value.to_string())),
+                action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
                 obj: self.value.object_id.clone(),
                 key: current_elemid.into(),
                 pred: self.value.pred_for_index(index as u32),

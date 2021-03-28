@@ -15,7 +15,7 @@ mod state_tree_change;
 use diff_application_result::DiffApplicationResult;
 use diffable_sequence::DiffableSequence;
 use focus::Focus;
-use multivalue::{MultiChar, MultiValue, NewValueRequest};
+use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 pub(crate) use resolved_path::SetOrInsertPayload;
 pub use resolved_path::{ResolvedPath, Target};
 use state_tree_change::StateTreeChange;
@@ -258,8 +258,10 @@ impl StateTree {
                                         return None;
                                     }
                                 }
-                                Some(StateTreeComposite::Text(StateTreeText { chars, .. })) => {
-                                    if chars.get(i as usize).is_some() {
+                                Some(StateTreeComposite::Text(StateTreeText {
+                                    graphemes, ..
+                                })) => {
+                                    if graphemes.get(i as usize).is_some() {
                                         if stack.is_empty() {
                                             return Some(ResolvedPath::new_character(
                                                 self,
@@ -505,8 +507,8 @@ impl StateTreeComposite {
             Self::List(StateTreeList {
                 elements: elems, ..
             }) => Value::Sequence(elems.iter().map(|e| e.default_value(objects)).collect()),
-            Self::Text(StateTreeText { chars, .. }) => {
-                Value::Text(chars.iter().map(|c| c.default_char()).collect())
+            Self::Text(StateTreeText { graphemes, .. }) => {
+                Value::Text(graphemes.iter().map(|c| c.default_grapheme()).collect())
             }
         }
     }
@@ -580,7 +582,7 @@ impl StateTreeValue {
             }) => match obj_type {
                 amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                     object_id: object_id.clone(),
-                    chars: DiffableSequence::new(),
+                    graphemes: DiffableSequence::new(),
                 }),
                 amp::SequenceType::List => StateTreeComposite::List(StateTreeList {
                     object_id: object_id.clone(),
@@ -859,22 +861,22 @@ impl StateTreeTable {
 #[derive(Debug, Clone)]
 struct StateTreeText {
     object_id: amp::ObjectId,
-    chars: DiffableSequence<MultiChar>,
+    graphemes: DiffableSequence<MultiGrapheme>,
 }
 
 impl StateTreeText {
     fn remove(&self, index: usize) -> Result<StateTreeText, error::MissingIndexError> {
-        if index >= self.chars.len() {
+        if index >= self.graphemes.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
-                size_of_collection: self.chars.len(),
+                size_of_collection: self.graphemes.len(),
             })
         } else {
-            let mut new_chars = self.chars.clone();
+            let mut new_chars = self.graphemes.clone();
             new_chars.remove(index);
             Ok(StateTreeText {
                 object_id: self.object_id.clone(),
-                chars: new_chars,
+                graphemes: new_chars,
             })
         }
     }
@@ -882,17 +884,17 @@ impl StateTreeText {
     fn set(
         &self,
         index: usize,
-        value: MultiChar,
+        value: MultiGrapheme,
     ) -> Result<StateTreeText, error::MissingIndexError> {
-        if self.chars.len() > index {
+        if self.graphemes.len() > index {
             Ok(StateTreeText {
                 object_id: self.object_id.clone(),
-                chars: self.chars.update(index, value),
+                graphemes: self.graphemes.update(index, value),
             })
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
-                size_of_collection: self.chars.len(),
+                size_of_collection: self.graphemes.len(),
             })
         }
     }
@@ -900,32 +902,32 @@ impl StateTreeText {
     pub(crate) fn elem_at(
         &self,
         index: usize,
-    ) -> Result<(&amp::OpId, char), error::MissingIndexError> {
-        self.chars
+    ) -> Result<(&amp::OpId, String), error::MissingIndexError> {
+        self.graphemes
             .get(index)
-            .map(|mc| (mc.default_opid(), mc.default_char()))
+            .map(|mc| (mc.default_opid(), mc.default_grapheme()))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
-                size_of_collection: self.chars.len(),
+                size_of_collection: self.graphemes.len(),
             })
     }
 
     fn insert(
         &self,
         index: usize,
-        value: MultiChar,
+        value: MultiGrapheme,
     ) -> Result<StateTreeText, error::MissingIndexError> {
-        if index > self.chars.len() {
+        if index > self.graphemes.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
-                size_of_collection: self.chars.len(),
+                size_of_collection: self.graphemes.len(),
             })
         } else {
-            let mut new_chars = self.chars.clone();
+            let mut new_chars = self.graphemes.clone();
             new_chars.insert(index, value);
             Ok(StateTreeText {
                 object_id: self.object_id.clone(),
-                chars: new_chars,
+                graphemes: new_chars,
             })
         }
     }
@@ -938,11 +940,11 @@ impl StateTreeText {
     where
         K: Into<amp::Key>,
     {
-        let new_chars = self.chars.apply_diff(&self.object_id, edits, props)?;
-        Ok(new_chars.and_then(|new_chars| {
+        let new_graphemes = self.graphemes.apply_diff(&self.object_id, edits, props)?;
+        Ok(new_graphemes.and_then(|new_graphemes| {
             let text = StateTreeText {
                 object_id: self.object_id.clone(),
-                chars: new_chars,
+                graphemes: new_graphemes,
             };
             DiffApplicationResult::pure(text.clone()).with_changes(StateTreeChange::single(
                 self.object_id.clone(),
@@ -952,14 +954,14 @@ impl StateTreeText {
     }
 
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
-        self.chars
+        self.graphemes
             .get(index.try_into().unwrap())
             .map(|v| vec![v.default_opid().clone()])
             .unwrap_or_else(Vec::new)
     }
 
     pub(crate) fn index_of(&self, opid: &amp::OpId) -> Option<usize> {
-        self.chars.iter().position(|e| e.has_opid(opid))
+        self.graphemes.iter().position(|e| e.has_opid(opid))
     }
 }
 

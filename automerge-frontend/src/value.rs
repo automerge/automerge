@@ -16,7 +16,8 @@ impl From<HashMap<amp::OpId, Value>> for Conflicts {
 pub enum Value {
     Map(HashMap<String, Value>, amp::MapType),
     Sequence(Vec<Value>),
-    Text(Vec<char>),
+    /// Sequence of grapheme clusters
+    Text(Vec<String>),
     Primitive(Primitive),
 }
 
@@ -164,7 +165,7 @@ impl Value {
             Value::Sequence(elements) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
             }
-            Value::Text(chars) => serde_json::Value::String(chars.iter().collect()),
+            Value::Text(graphemes) => serde_json::Value::String(graphemes.join("")),
             Value::Primitive(v) => match v {
                 Primitive::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),

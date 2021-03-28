@@ -3,6 +3,7 @@ use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Prim
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::convert::TryInto;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[test]
 fn test_allow_cursor_on_list_element() {
@@ -49,7 +50,7 @@ fn test_allow_cursor_on_text_element() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".chars().collect()),
+                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -89,7 +90,7 @@ fn test_do_not_allow_index_past_end_of_list() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".chars().collect()),
+                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
             ))?;
             let cursor = d.cursor_to_path(&Path::root().key("list").index(10));
             assert_eq!(cursor, None);
@@ -105,7 +106,7 @@ fn test_updates_cursor_during_change_function() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".chars().collect()),
+                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -222,7 +223,7 @@ fn test_set_cursor_to_new_element_in_local_change() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".chars().collect()),
+                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -270,7 +271,7 @@ fn test_delete_cursor_and_adding_again() {
         .change::<_, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".chars().collect()),
+                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))

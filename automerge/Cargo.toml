@@ -29,6 +29,7 @@ rand = "0.8.2"
 test-env-log = { version = "0.2.6", features = ["trace"], default-features = false }
 tracing = "0.1.25"
 tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}
+unicode-segmentation = "1.7.1"
 
 [[bench]]
 name = "crdt_benchmarks"

@@ -3,6 +3,7 @@ use crate::state_tree::{LocalOperationResult, SetOrInsertPayload, StateTree, Tar
 use crate::value::{Cursor, Primitive, Value};
 use crate::{Path, PathElement};
 use automerge_protocol as amp;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;
@@ -189,11 +190,11 @@ impl MutableDocument for MutationTracker {
                             }
                             (PathElement::Index(i), Target::Text(ref text)) => match value {
                                 Value::Primitive(Primitive::Str(s)) => {
-                                    if s.len() == 1 {
+                                    if s.graphemes(true).count() == 1 {
                                         let payload = SetOrInsertPayload {
                                             start_op: self.max_op + 1,
                                             actor: &self.actor_id.clone(),
-                                            value: s.chars().next().unwrap(),
+                                            value: s.clone(),
                                         };
                                         self.apply_state_change(text.set(*i, payload)?);
                                         Ok(())
@@ -339,11 +340,11 @@ impl MutableDocument for MutationTracker {
                             }
                             (Target::Text(text_target), val) => match val {
                                 Value::Primitive(Primitive::Str(s)) => {
-                                    if s.len() == 1 {
+                                    if s.graphemes(true).count() == 1 {
                                         let payload = SetOrInsertPayload {
                                             start_op: self.max_op + 1,
                                             actor: &self.actor_id.clone(),
-                                            value: s.chars().next().unwrap(),
+                                            value: s.clone(),
                                         };
                                         self.apply_state_change(
                                             text_target.insert(*index, payload)?,
