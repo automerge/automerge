@@ -2,6 +2,7 @@ use automerge_frontend::{Frontend, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::convert::TryInto;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[test]
 fn set_object_root_properties() {
@@ -878,7 +879,9 @@ fn test_text_objects() {
 
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"name" => Value::Text("ben".to_string().chars().collect())})
+        &Into::<Value>::into(
+            hashmap! {"name" => Value::Text("ben".graphemes(true).map(|s|s.to_owned()).collect())}
+        )
     );
 
     let patch2 = amp::Patch {
@@ -915,7 +918,9 @@ fn test_text_objects() {
 
     assert_eq!(
         frontend.state(),
-        &Into::<Value>::into(hashmap! {"name" => Value::Text("bi".to_string().chars().collect())})
+        &Into::<Value>::into(
+            hashmap! {"name" => Value::Text("bi".graphemes(true).map(|s|s.to_owned()).collect())}
+        )
     );
 }
 

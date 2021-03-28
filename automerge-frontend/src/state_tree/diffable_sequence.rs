@@ -1,4 +1,4 @@
-use super::{DiffApplicationResult, DiffToApply, MultiChar, MultiValue, StateTreeChange};
+use super::{DiffApplicationResult, DiffToApply, MultiGrapheme, MultiValue, StateTreeChange};
 use crate::error::InvalidPatch;
 use automerge_protocol as amp;
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ pub(super) trait DiffableValue: Sized {
     fn default_opid(&self) -> amp::OpId;
 }
 
-impl DiffableValue for MultiChar {
+impl DiffableValue for MultiGrapheme {
     fn construct<K>(
         opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
@@ -35,7 +35,7 @@ impl DiffableValue for MultiChar {
     where
         K: Into<amp::Key>,
     {
-        let c = MultiChar::new_from_diff(opid, diff)?;
+        let c = MultiGrapheme::new_from_diff(opid, diff)?;
         Ok(DiffApplicationResult::pure(c))
     }
 
@@ -47,7 +47,7 @@ impl DiffableValue for MultiChar {
     where
         K: Into<amp::Key>,
     {
-        MultiChar::apply_diff(self, opid, diff).map(DiffApplicationResult::pure)
+        MultiGrapheme::apply_diff(self, opid, diff).map(DiffApplicationResult::pure)
     }
 
     fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
@@ -59,7 +59,7 @@ impl DiffableValue for MultiChar {
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
     {
         self.apply_diff_iter(diff)
-        //MultiChar::apply_diff_iter(self, diff)
+        //MultiGrapheme::apply_diff_iter(self, diff)
     }
 
     fn default_opid(&self) -> amp::OpId {

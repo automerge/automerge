@@ -2,6 +2,7 @@ use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Prim
 use automerge_protocol as amp;
 use maplit::hashmap;
 use std::convert::TryInto;
+use unicode_segmentation::UnicodeSegmentation;
 
 #[test]
 fn test_should_be_empty_after_init() {
@@ -640,7 +641,7 @@ fn test_sets_characters_in_text() {
     doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
-            Value::Text("some".chars().collect()),
+            Value::Text("some".graphemes(true).map(|s| s.to_owned()).collect()),
         ))?;
         Ok(())
     })
@@ -679,7 +680,7 @@ fn test_sets_characters_in_text() {
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(
         hashmap! {
-            "text".into() => Value::Text(vec!['s', 'a', 'm', 'e']),
+            "text".into() => Value::Text(vec!["s".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
         },
         amp::MapType::Map,
     );
@@ -692,7 +693,7 @@ fn test_inserts_characters_in_text() {
     doc.change::<_, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
-            Value::Text("same".chars().collect()),
+            Value::Text("same".graphemes(true).map(|s| s.to_owned()).collect()),
         ))?;
         Ok(())
     })
@@ -734,7 +735,7 @@ fn test_inserts_characters_in_text() {
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(
         hashmap! {
-            "text".into() => Value::Text(vec!['s', 'h', 'a', 'm', 'e']),
+            "text".into() => Value::Text(vec!["s".to_owned(), "h".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
         },
         amp::MapType::Map,
     );
@@ -789,7 +790,7 @@ fn test_inserts_characters_at_start_of_text() {
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(
         hashmap! {
-            "text".into() => Value::Text(vec!['i']),
+            "text".into() => Value::Text(vec!["i".to_owned()]),
         },
         amp::MapType::Map,
     );

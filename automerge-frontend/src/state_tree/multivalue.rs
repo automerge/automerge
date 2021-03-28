@@ -1,4 +1,5 @@
 use automerge_protocol as amp;
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
     CursorState, Cursors, DiffApplicationResult, DiffToApply, DiffableSequence, StateTreeChange,
@@ -236,17 +237,18 @@ impl NewValue {
 }
 
 /// This struct exists to constrain the values of a text type to just containing
-/// sequences of chars
+/// sequences of grapheme clusters
 #[derive(Debug, Clone)]
-pub(super) struct MultiChar {
-    winning_value: (amp::OpId, char),
-    conflicts: Option<im_rc::HashMap<amp::OpId, char>>,
+pub(super) struct MultiGrapheme {
+    winning_value: (amp::OpId, String),
+    conflicts: Option<im_rc::HashMap<amp::OpId, String>>,
 }
 
-impl MultiChar {
-    pub(super) fn new_from_char(opid: amp::OpId, c: char) -> MultiChar {
-        MultiChar {
-            winning_value: (opid, c),
+impl MultiGrapheme {
+    pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: String) -> MultiGrapheme {
+        debug_assert!(s.graphemes(true).count() == 1);
+        MultiGrapheme {
+            winning_value: (opid, s),
             conflicts: None,
         }
     }
@@ -254,19 +256,19 @@ impl MultiChar {
     pub(super) fn new_from_diff<K>(
         opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiChar, error::InvalidPatch>
+    ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
         let winning_value = match diff.diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
-                if s.len() != 1 {
+                if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: diff.parent_object_id.clone(),
                         diff: diff.diff.clone(),
                     });
                 } else {
-                    s.chars().next().unwrap()
+                    s.clone()
                 }
             }
             _ => {
@@ -276,7 +278,7 @@ impl MultiChar {
                 });
             }
         };
-        Ok(MultiChar {
+        Ok(MultiGrapheme {
             winning_value: (opid.clone(), winning_value),
             conflicts: None,
         })
@@ -286,7 +288,7 @@ impl MultiChar {
         &self,
         opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiChar, error::InvalidPatch>
+    ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -297,7 +299,7 @@ impl MultiChar {
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a self,
         diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiChar>, error::InvalidPatch>
+    ) -> Result<DiffApplicationResult<MultiGrapheme>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
@@ -306,14 +308,13 @@ impl MultiChar {
         for (opid, subdiff) in diff {
             match subdiff.diff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
-                    if s.len() != 1 {
+                    if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
                             object_id: subdiff.parent_object_id.clone(),
                             diff: subdiff.diff.clone(),
                         });
                     } else {
-                        let c = s.chars().next().unwrap();
-                        updated = updated.update(opid, c);
+                        updated = updated.update(opid, s.clone());
                     }
                 }
                 _ => {
@@ -327,16 +328,16 @@ impl MultiChar {
         Ok(DiffApplicationResult::pure(updated.result()))
     }
 
-    pub(super) fn default_char(&self) -> char {
-        self.winning_value.1
+    pub(super) fn default_grapheme(&self) -> String {
+        self.winning_value.1.clone()
     }
 
     pub fn default_opid(&self) -> &amp::OpId {
         &self.winning_value.0
     }
 
-    fn values(&self) -> MultiCharValues {
-        MultiCharValues {
+    fn values(&self) -> MultiGraphemeValues {
+        MultiGraphemeValues {
             current: self.clone(),
         }
     }
@@ -351,12 +352,12 @@ impl MultiChar {
     }
 }
 
-struct MultiCharValues {
-    current: MultiChar,
+struct MultiGraphemeValues {
+    current: MultiGrapheme,
 }
 
-impl MultiCharValues {
-    fn update(mut self, key: &amp::OpId, value: char) -> MultiCharValues {
+impl MultiGraphemeValues {
+    fn update(mut self, key: &amp::OpId, value: String) -> MultiGraphemeValues {
         let mut conflicts = self.current.conflicts.unwrap_or_else(im_rc::HashMap::new);
         if *key >= self.current.winning_value.0 {
             conflicts.insert(self.current.winning_value.0, self.current.winning_value.1);
@@ -369,7 +370,7 @@ impl MultiCharValues {
         self
     }
 
-    fn result(self) -> MultiChar {
+    fn result(self) -> MultiGrapheme {
         self.current
     }
 }
@@ -397,7 +398,7 @@ where
         match value {
             Value::Map(props, map_type) => self.new_map_or_table(props, map_type),
             Value::Sequence(values) => self.new_list(values),
-            Value::Text(chars) => self.new_text(chars),
+            Value::Text(graphemes) => self.new_text(graphemes),
             Value::Primitive(p) => self.new_primitive(p),
         }
     }
@@ -507,7 +508,7 @@ where
         }
     }
 
-    fn new_text(self, chars: &[char]) -> NewValue {
+    fn new_text(self, graphemes: &[String]) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
         let mut ops: Vec<amp::Op> = vec![amp::Op {
             action: amp::OpType::Make(amp::ObjType::text()),
@@ -518,25 +519,29 @@ where
         }];
         let mut current_max_op = self.start_op;
         let mut last_elemid = amp::ElementId::Head;
-        let mut multichars: Vec<(amp::OpId, MultiChar)> = Vec::with_capacity(chars.len());
-        for c in chars.iter() {
+        let mut multigraphemes: Vec<(amp::OpId, MultiGrapheme)> =
+            Vec::with_capacity(graphemes.len());
+        for grapheme in graphemes.iter() {
             current_max_op += 1;
             let opid = self.actor.op_id_at(current_max_op);
             let op = amp::Op {
-                action: amp::OpType::Set(amp::ScalarValue::Str(c.to_string())),
+                action: amp::OpType::Set(amp::ScalarValue::Str(grapheme.clone())),
                 obj: make_text_opid.clone().into(),
                 key: last_elemid.clone().into(),
                 insert: true,
                 pred: Vec::new(),
             };
-            multichars.push((opid.clone(), MultiChar::new_from_char(opid.clone(), *c)));
+            multigraphemes.push((
+                opid.clone(),
+                MultiGrapheme::new_from_grapheme_cluster(opid.clone(), grapheme.clone()),
+            ));
             ops.push(op);
             last_elemid = opid.clone().into();
         }
-        let seq = DiffableSequence::new_from(multichars);
+        let seq = DiffableSequence::new_from(multigraphemes);
         let text = StateTreeComposite::Text(StateTreeText {
             object_id: make_text_opid.clone().into(),
-            chars: seq,
+            graphemes: seq,
         });
         let value = StateTreeValue::Link(make_text_opid.clone().into());
         NewValue {
