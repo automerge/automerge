@@ -713,8 +713,7 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
         let mut keys = Vec::new();
         if is_seq.contains(objid) {
             let mut stack = vec![amp::ElementId::Head];
-            while !stack.is_empty() {
-                let key = stack.pop().unwrap();
+            while let Some(key) = stack.pop() {
                 if key != amp::ElementId::Head {
                     keys.push(amp::Key::Seq(key.clone()))
                 }
