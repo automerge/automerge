@@ -4,6 +4,7 @@ use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::default::Default;
+use unicode_segmentation::UnicodeSegmentation;
 
 pub fn b1_1(c: &mut Criterion) {
     c.bench_function("B1.1 Append N characters", move |b| {
@@ -102,7 +103,10 @@ pub fn b1_2(c: &mut Criterion) {
                     .take(6000)
                     .map(char::from)
                     .collect();
-                let chars: Vec<char> = random_string.chars().collect();
+                let chars: Vec<_> = random_string
+                    .graphemes(true)
+                    .map(|s| s.to_owned())
+                    .collect();
                 let text = Value::Text(chars);
                 (doc1, backend1, doc2, backend2, text)
             },
