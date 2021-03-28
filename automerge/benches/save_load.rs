@@ -241,7 +241,7 @@ fn load_medium(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10);
+    config = Criterion::default();
     targets = save_empty, save_small, save_medium, load_empty, load_small, load_medium
 }
 criterion_main!(benches);
