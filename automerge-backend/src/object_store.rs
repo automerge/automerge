@@ -5,7 +5,6 @@ use crate::op_handle::OpHandle;
 use crate::ordered_set::{OrderedSet, SkipList};
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
-//use im_rc::{HashMap, HashSet};
 use std::collections::{HashMap, HashSet};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular

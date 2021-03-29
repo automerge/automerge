@@ -29,3 +29,21 @@ mod pending_diff;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+    };
+
+    #[test]
+    fn sync_and_send_backend() {
+        let b = crate::Backend::init();
+        let mb = Arc::new(Mutex::new(b));
+        thread::spawn(move || {
+            let b = mb.lock().unwrap();
+            b.get_changes(&[]);
+        });
+    }
+}

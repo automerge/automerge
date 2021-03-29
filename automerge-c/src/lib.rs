@@ -13,13 +13,12 @@ use std::ffi::{CStr, CString};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_char;
 use std::ptr;
-use std::rc::Rc;
 
 #[derive(Clone)]
 pub struct Backend {
     handle: automerge_backend::Backend,
     text: Option<String>,
-    last_local_change: Option<Rc<Change>>,
+    last_local_change: Option<Change>,
     binary: Vec<Vec<u8>>,
     queue: Option<Vec<Vec<u8>>>,
     error: Option<CString>,

@@ -620,7 +620,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
 
     let mut doc2 = Frontend::new();
     let mut backend2 = Backend::init();
-    let patch1 = backend2.apply_changes(vec![(*binchange1).clone()]).unwrap();
+    let patch1 = backend2.apply_changes(vec![binchange1.clone()]).unwrap();
     doc2.apply_patch(patch1.clone()).unwrap();
 
     let change2 = doc2

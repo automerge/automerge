@@ -9,21 +9,20 @@ use crate::Change;
 use automerge_protocol as amp;
 use core::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
-    queue: Vec<Rc<Change>>,
-    op_set: Rc<OpSet>,
-    states: HashMap<amp::ActorId, Vec<Rc<Change>>>,
+    queue: Vec<Change>,
+    op_set: OpSet,
+    states: HashMap<amp::ActorId, Vec<Change>>,
     actors: ActorMap,
-    hashes: HashMap<amp::ChangeHash, Rc<Change>>,
+    hashes: HashMap<amp::ChangeHash, Change>,
     history: Vec<amp::ChangeHash>,
 }
 
 impl Backend {
     pub fn init() -> Backend {
-        let op_set = Rc::new(OpSet::init());
+        let op_set = OpSet::init();
         Backend {
             op_set,
             queue: Vec::new(),
@@ -66,7 +65,7 @@ impl Backend {
     }
 
     pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
-        let changes = changes.drain(0..).map(Rc::new).collect();
+        let changes = changes.drain(0..).collect();
         self.apply(changes, None)?;
         Ok(())
     }
@@ -75,7 +74,7 @@ impl Backend {
         &mut self,
         mut changes: Vec<Change>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let changes = changes.drain(0..).map(Rc::new).collect();
+        let changes = changes.drain(0..).collect();
         self.apply(changes, None)
     }
 
@@ -85,7 +84,7 @@ impl Backend {
 
     fn apply(
         &mut self,
-        mut changes: Vec<Rc<Change>>,
+        mut changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
@@ -94,7 +93,7 @@ impl Backend {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
-        let op_set = Rc::make_mut(&mut self.op_set);
+        let op_set = &mut self.op_set;
         let diffs = op_set.finalize_diffs(pending_diffs, &self.actors)?;
         self.make_patch(diffs, actor)
     }
@@ -110,7 +109,7 @@ impl Backend {
     pub fn apply_local_change(
         &mut self,
         mut change: amp::UncompressedChange,
-    ) -> Result<(amp::Patch, Rc<Change>), AutomergeError> {
+    ) -> Result<(amp::Patch, Change), AutomergeError> {
         self.check_for_duplicate(&change)?; // Change has already been applied
 
         let actor_seq = (change.actor_id.clone(), change.seq);
@@ -122,7 +121,7 @@ impl Backend {
             }
         }
 
-        let bin_change: Rc<Change> = Rc::new(change.into());
+        let bin_change: Change = change.into();
         let patch: amp::Patch = self.apply(vec![bin_change.clone()], Some(actor_seq))?;
 
         Ok((patch, bin_change))
@@ -147,7 +146,7 @@ impl Backend {
 
     fn add_change(
         &mut self,
-        change: Rc<Change>,
+        change: Change,
         local: bool,
         diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
@@ -171,7 +170,7 @@ impl Backend {
 
     fn apply_change(
         &mut self,
-        change: Rc<Change>,
+        change: Change,
         diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
         if self.hashes.contains_key(&change.hash) {
@@ -180,7 +179,7 @@ impl Backend {
 
         self.update_history(&change);
 
-        let op_set = Rc::make_mut(&mut self.op_set);
+        let op_set = &mut self.op_set;
 
         let start_op = change.start_op;
 
@@ -195,7 +194,7 @@ impl Backend {
         Ok(())
     }
 
-    fn update_history(&mut self, change: &Rc<Change>) {
+    fn update_history(&mut self, change: &Change) {
         self.states
             .entry(change.actor_id().clone())
             .or_default()
@@ -205,7 +204,7 @@ impl Backend {
         self.hashes.insert(change.hash, change.clone());
     }
 
-    fn pop_next_causally_ready_change(&mut self) -> Option<Rc<Change>> {
+    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
         let mut index = 0;
         while index < self.queue.len() {
             let change = self.queue.get(index).unwrap();
@@ -231,7 +230,7 @@ impl Backend {
         Ok(self
             .states
             .get(actor_id)
-            .map(|vec| vec.iter().map(|c| c.as_ref()).collect())
+            .map(|vec| vec.iter().collect())
             .unwrap_or_default())
     }
 
@@ -248,7 +247,6 @@ impl Backend {
             .iter()
             .filter(|hash| !has_seen.contains(hash))
             .filter_map(|hash| self.hashes.get(hash))
-            .map(|rc| rc.as_ref())
             .collect()
     }
 
@@ -257,7 +255,7 @@ impl Backend {
             .history
             .iter()
             .filter_map(|hash| self.hashes.get(&hash))
-            .map(|r| r.as_ref().into())
+            .map(|r| r.into())
             .collect();
         encode_document(changes)
     }
