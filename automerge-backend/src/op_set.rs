@@ -19,8 +19,6 @@ use core::cmp::max;
 use fxhash::FxBuildHasher;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::convert::AsRef;
-use std::rc::Rc;
 use tracing::instrument;
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
@@ -40,7 +38,7 @@ use tracing::instrument;
 
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct OpSet {
-    pub objs: HashMap<ObjectId, Rc<ObjState>, FxBuildHasher>,
+    pub objs: HashMap<ObjectId, ObjState, FxBuildHasher>,
     pub deps: HashSet<amp::ChangeHash>,
     pub max_op: u64,
     cursors: HashMap<ObjectId, Vec<CursorState>>,
@@ -49,7 +47,7 @@ pub(crate) struct OpSet {
 impl OpSet {
     pub fn init() -> OpSet {
         let mut objs = HashMap::default();
-        objs.insert(ObjectId::Root, Rc::new(ObjState::new(amp::ObjType::map())));
+        objs.insert(ObjectId::Root, ObjState::new(amp::ObjType::map()));
 
         OpSet {
             objs,
@@ -91,7 +89,7 @@ impl OpSet {
     ) -> Result<Option<PendingDiff>, AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             //let child = actors.import_obj(child);
-            self.objs.insert(child, Rc::new(ObjState::new(obj_type)));
+            self.objs.insert(child, ObjState::new(obj_type));
         }
 
         if let InternalOpType::Set(amp::ScalarValue::Cursor(ref oid)) = op.op.action {
@@ -207,14 +205,12 @@ impl OpSet {
     pub fn get_obj(&self, object_id: &ObjectId) -> Result<&ObjState, AutomergeError> {
         self.objs
             .get(&object_id)
-            .map(|o| o.as_ref())
             .ok_or(AutomergeError::MissingObjectError)
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectId) -> Result<&mut ObjState, AutomergeError> {
         self.objs
             .get_mut(&object_id)
-            .map(|rc| Rc::make_mut(rc))
             .ok_or(AutomergeError::MissingObjectError)
     }
 

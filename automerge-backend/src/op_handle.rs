@@ -1,7 +1,6 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
-use std::rc::Rc;
 
 use crate::actor_map::ActorMap;
 use crate::internal::{InternalOp, InternalOpType, Key, ObjectId, OpId};
@@ -16,7 +15,7 @@ pub(crate) struct OpHandle {
 }
 
 impl OpHandle {
-    pub fn extract(change: Rc<Change>, actors: &mut ActorMap) -> Vec<OpHandle> {
+    pub fn extract(change: Change, actors: &mut ActorMap) -> Vec<OpHandle> {
         change
             .iter_ops()
             .enumerate()
