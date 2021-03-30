@@ -20,10 +20,10 @@ script:
 - cargo clippy --all-targets --all-features -- -D warnings
 - travis_fold end "clippy"
 - travis_fold start "build"
-- cargo build --verbose --all
+- cargo build --verbose --all-targets --workspace
 - travis_fold end "build"
 - travis_fold start "test"
-- cargo test --verbose --all
+- cargo test --verbose --all-targets --workspace
 - travis_fold end "test"
 - travis_fold start "wasm-build"
 - cd automerge-backend-wasm && yarn release
