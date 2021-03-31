@@ -1,6 +1,7 @@
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use rand::{thread_rng, Rng};
+use unicode_segmentation::UnicodeSegmentation;
 
 pub fn insert_long_string(c: &mut Criterion) {
     c.bench_function("Frontend::change insert long string", move |b| {
@@ -20,7 +21,7 @@ pub fn insert_long_string(c: &mut Criterion) {
                     doc.change::<_, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("text"),
-                            Value::Text(string.chars().collect()),
+                            Value::Text(string.graphemes(true).map(|s| s.to_owned()).collect()),
                         ))
                     })
                     .unwrap()
