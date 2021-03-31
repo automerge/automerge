@@ -59,10 +59,16 @@ impl<'a> Decoder<'a> {
     }
 }
 
+/// Encodes booleans by storing the count of the same value.
+///
+/// The sequence of numbers describes the count of false values on even indices (0-indexed) and the
+/// count of true values on odd indices (0-indexed).
+///
+/// Counts are encoded as u32s.
 pub(crate) struct BooleanEncoder {
     buf: Vec<u8>,
     last: bool,
-    count: usize,
+    count: u32,
 }
 
 impl BooleanEncoder {
@@ -95,10 +101,11 @@ impl BooleanEncoder {
     }
 }
 
+/// See discussion on [`BooleanEncoder`] for the format data is stored in.
 pub(crate) struct BooleanDecoder<'a> {
     decoder: Decoder<'a>,
     last_value: bool,
-    count: usize,
+    count: u32,
 }
 
 impl<'a> From<&'a [u8]> for Decoder<'a> {
