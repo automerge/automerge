@@ -170,6 +170,20 @@ enum RleState<T> {
     Run(T, usize),
 }
 
+/// Encodes data in run lengh encoding format. This is very efficient for long repeats of data
+///
+/// There are 3 types of 'run' in this encoder:
+/// - a normal run (compresses repeated values)
+/// - a null run (compresses repeated nulls)
+/// - a literal run (no compression)
+///
+/// A normal run consists of the length of the run (encoded as an i32) followed by the encoded value that this run contains.
+///
+/// A null run consists of a zero value (encoded as an i32) folled by the length of the null run (encoded as a u32).
+///
+/// A literal run consists of the **negative** length of the run (encoded as an i32) folled by the values in the run.
+///
+/// Therefore all the types start with an encoded i32, the value of which determines the type of the following data.
 pub(crate) struct RleEncoder<T>
 where
     T: Encodable + PartialEq + Clone,
@@ -212,17 +226,17 @@ where
     }
 
     fn flush_run(&mut self, val: T, len: usize) {
-        self.encode(len as i64);
+        self.encode(len as i32);
         self.encode(val);
     }
 
     fn flush_null_run(&mut self, len: usize) {
-        self.encode::<i64>(0);
-        self.encode(len);
+        self.encode::<i32>(0);
+        self.encode(len as u32);
     }
 
     fn flush_lit_run(&mut self, run: Vec<T>) {
-        self.encode(-(run.len() as i64));
+        self.encode(-(run.len() as i32));
         for val in run {
             self.encode(val);
         }
@@ -296,11 +310,12 @@ where
     }
 }
 
+/// See discussion on [`RleEncoder`] for the format data is stored in.
 #[derive(Debug)]
 pub(crate) struct RleDecoder<'a, T> {
     pub decoder: Decoder<'a>,
     last_value: Option<T>,
-    count: isize,
+    count: u32,
     literal: bool,
 }
 
@@ -329,21 +344,27 @@ where
             if self.decoder.done() {
                 return Some(None);
             }
-            match self.decoder.read::<i64>() {
-                Ok(count) if count > 0 => {
-                    self.count = count as isize;
+            match self.decoder.read::<i32>() {
+                Ok(count @ 1..=i32::MAX) => {
+                    // normal run
+                    self.count = count as u32;
                     self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
-                Ok(count) if count < 0 => {
-                    self.count = count.abs() as isize;
+                Ok(count @ i32::MIN..=-1) => {
+                    // literal run
+                    self.count = count.abs() as u32;
                     self.literal = true;
                 }
-                _ => {
-                    // FIXME(jeffa5): handle usize > isize here somehow
-                    self.count = self.decoder.read::<usize>().unwrap_or_default() as isize;
+                Ok(0) => {
+                    // null run
+                    self.count = self.decoder.read::<u32>().unwrap_or_default();
                     self.last_value = None;
                     self.literal = false;
+                }
+                Err(e) => {
+                    tracing::warn!(error=?e, "error during rle decoding");
+                    return None;
                 }
             }
         }
