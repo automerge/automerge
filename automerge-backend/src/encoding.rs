@@ -141,6 +141,11 @@ impl<'a> Iterator for BooleanDecoder<'a> {
     }
 }
 
+/// Encodes integers as the change since the previous value.
+///
+/// The initial value is 0 encoded as u64. Deltas are encoded as i64.
+///
+/// Run length encoding is then applied to the resulting sequence.
 pub(crate) struct DeltaEncoder {
     rle: RleEncoder<i64>,
     absolute_value: u64,
@@ -384,6 +389,7 @@ where
     }
 }
 
+/// See discussion on [`DeltaDecoder`] for the format data is stored in.
 pub(crate) struct DeltaDecoder<'a> {
     rle: RleDecoder<'a, i64>,
     absolute_val: u64,
