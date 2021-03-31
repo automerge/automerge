@@ -164,10 +164,10 @@ impl DeltaEncoder {
 
 enum RleState<T> {
     Empty,
-    NullRun(usize),
+    NullRun(u32),
     LiteralRun(T, Vec<T>),
     LoneVal(T),
-    Run(T, usize),
+    Run(T, i32),
 }
 
 /// Encodes data in run lengh encoding format. This is very efficient for long repeats of data
@@ -205,7 +205,7 @@ where
 
     pub fn finish(mut self, col: u32) -> ColData {
         match self.take_state() {
-            // this coveres `only_nulls`
+            // this covers `only_nulls`
             RleState::NullRun(size) => {
                 if !self.buf.is_empty() {
                     self.flush_null_run(size)
@@ -225,14 +225,14 @@ where
         }
     }
 
-    fn flush_run(&mut self, val: T, len: usize) {
+    fn flush_run(&mut self, val: T, len: i32) {
         self.encode(len as i32);
         self.encode(val);
     }
 
-    fn flush_null_run(&mut self, len: usize) {
+    fn flush_null_run(&mut self, len: u32) {
         self.encode::<i32>(0);
-        self.encode(len as u32);
+        self.encode(len);
     }
 
     fn flush_lit_run(&mut self, run: Vec<T>) {
