@@ -15,7 +15,7 @@ pub trait MutableDocument {
 pub enum LocalOperation {
     Set(Value),
     Delete,
-    Increment(u32),
+    Increment(i64),
     Insert(Value),
 }
 
@@ -54,7 +54,7 @@ impl LocalChange {
     }
 
     /// Increment the counter at path by a (possibly negative) amount `by`
-    pub fn increment_by(path: Path, by: u32) -> LocalChange {
+    pub fn increment_by(path: Path, by: i64) -> LocalChange {
         LocalChange {
             path,
             operation: LocalOperation::Increment(by),
@@ -297,7 +297,7 @@ impl MutableDocument for MutationTracker {
                     if let Some(pr) = self.state.resolve_path(&change.path) {
                         match pr.target {
                             Target::Counter(counter_target) => {
-                                self.apply_state_change(counter_target.increment(*by as i64));
+                                self.apply_state_change(counter_target.increment(*by));
                                 Ok(())
                             }
                             _ => Err(InvalidChangeRequest::IncrementForNonCounterObject {
