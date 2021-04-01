@@ -151,15 +151,15 @@ impl FrontendState {
     /// which it can use to query the document state and make changes. It
     /// can also throw an error of type `E`. If an error is thrown in the
     /// closure no chnages are made and the error is returned.
-    pub fn optimistically_apply_change<F, E>(
+    pub fn optimistically_apply_change<F, O, E>(
         self,
         actor: &ActorId,
         change_closure: F,
         seq: u64,
-    ) -> Result<OptimisticChangeResult, E>
+    ) -> Result<(O, OptimisticChangeResult), E>
     where
         E: Error,
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
         match self {
             FrontendState::WaitingForInFlightRequests {
@@ -173,19 +173,22 @@ impl FrontendState {
                     max_op,
                     actor.clone(),
                 );
-                change_closure(&mut mutation_tracker)?;
+                let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 in_flight_requests.push(seq);
-                Ok(OptimisticChangeResult {
-                    ops: mutation_tracker.ops(),
-                    new_state: FrontendState::WaitingForInFlightRequests {
-                        in_flight_requests,
-                        optimistically_updated_root_state: new_root_state,
-                        reconciled_root_state,
-                        max_op: mutation_tracker.max_op,
+                Ok((
+                    result,
+                    OptimisticChangeResult {
+                        ops: mutation_tracker.ops(),
+                        new_state: FrontendState::WaitingForInFlightRequests {
+                            in_flight_requests,
+                            optimistically_updated_root_state: new_root_state,
+                            reconciled_root_state,
+                            max_op: mutation_tracker.max_op,
+                        },
+                        deps: Vec::new(),
                     },
-                    deps: Vec::new(),
-                })
+                ))
             }
             FrontendState::Reconciled {
                 root_state,
@@ -194,19 +197,22 @@ impl FrontendState {
             } => {
                 let mut mutation_tracker =
                     mutation::MutationTracker::new(root_state.clone(), max_op, actor.clone());
-                change_closure(&mut mutation_tracker)?;
+                let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 let in_flight_requests = vec![seq];
-                Ok(OptimisticChangeResult {
-                    ops: mutation_tracker.ops(),
-                    new_state: FrontendState::WaitingForInFlightRequests {
-                        in_flight_requests,
-                        optimistically_updated_root_state: new_root_state,
-                        reconciled_root_state: root_state,
-                        max_op: mutation_tracker.max_op,
+                Ok((
+                    result,
+                    OptimisticChangeResult {
+                        ops: mutation_tracker.ops(),
+                        new_state: FrontendState::WaitingForInFlightRequests {
+                            in_flight_requests,
+                            optimistically_updated_root_state: new_root_state,
+                            reconciled_root_state: root_state,
+                            max_op: mutation_tracker.max_op,
+                        },
+                        deps: deps_of_last_received_patch,
                     },
-                    deps: deps_of_last_received_patch,
-                })
+                ))
             }
         }
     }
@@ -379,18 +385,18 @@ impl Frontend {
         }
     }
 
-    pub fn change<F, E>(
+    pub fn change<F, O, E>(
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<Option<UncompressedChange>, E>
+    ) -> Result<(O, Option<UncompressedChange>), E>
     where
         E: Error,
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
         let start_op = self.state.as_ref().unwrap().max_op() + 1;
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let change_result = self.state.take().unwrap().optimistically_apply_change(
+        let (result, change_result) = self.state.take().unwrap().optimistically_apply_change(
             &self.actor_id,
             change_closure,
             self.seq + 1,
@@ -410,9 +416,9 @@ impl Frontend {
                 operations: ops,
                 extra_bytes: Vec::new(),
             };
-            Ok(Some(change))
+            Ok((result, Some(change)))
         } else {
-            Ok(None)
+            Ok((result, None))
         }
     }
 

@@ -44,7 +44,7 @@ fn use_version_and_sequence_number_from_backend() {
     // Now apply a local patch, this will move the doc into the "waiting for
     // in flight requests" state, which should reflect the change just made.
     let req = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
                 Value::Primitive(Primitive::Int(1)),
@@ -52,6 +52,7 @@ fn use_version_and_sequence_number_from_backend() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let expected_change_request = amp::UncompressedChange {
@@ -81,7 +82,7 @@ fn remove_pending_requests_once_handled() {
 
     // First we add two local changes
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 Primitive::Int(24),
@@ -89,10 +90,11 @@ fn remove_pending_requests_once_handled() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let _req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("partridges"),
                 Primitive::Int(1),
@@ -100,6 +102,7 @@ fn remove_pending_requests_once_handled() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     // The doc is waiting for those changes to be applied
@@ -181,7 +184,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     // Enqueue a local change, moving the document into the "waiting for in
     // flight requests" state
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 Primitive::Int(24),
@@ -189,6 +192,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     // The document is now waiting for the above request
@@ -266,7 +270,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
 fn dont_allow_out_of_order_request_patches() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("blackbirds"),
                 Primitive::Int(24),
@@ -274,6 +278,7 @@ fn dont_allow_out_of_order_request_patches() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let result = doc.apply_patch(amp::Patch {
@@ -308,7 +313,7 @@ fn dont_allow_out_of_order_request_patches() {
 fn handle_concurrent_insertions_into_lists() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 vec!["goldfinch"],
@@ -316,6 +321,7 @@ fn handle_concurrent_insertions_into_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
@@ -360,7 +366,7 @@ fn handle_concurrent_insertions_into_lists() {
     // Now add another change which updates the same list, this results in an
     // in flight reuest
     let _req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("birds").index(0),
                 "chaffinch".into(),
@@ -372,6 +378,7 @@ fn handle_concurrent_insertions_into_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -472,7 +479,7 @@ fn handle_concurrent_insertions_into_lists() {
 fn allow_interleaving_of_patches_and_changes() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(1),
@@ -480,10 +487,11 @@ fn allow_interleaving_of_patches_and_changes() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(2),
@@ -491,6 +499,7 @@ fn allow_interleaving_of_patches_and_changes() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -540,7 +549,7 @@ fn allow_interleaving_of_patches_and_changes() {
     doc.apply_patch(patch1).unwrap();
 
     let req3 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(3),
@@ -548,6 +557,7 @@ fn allow_interleaving_of_patches_and_changes() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -624,7 +634,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     doc2.apply_patch(patch1.clone()).unwrap();
 
     let change2 = doc2
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(2),
@@ -632,10 +642,11 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let change3 = doc2
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(3),
@@ -643,6 +654,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let expected_change2 = amp::UncompressedChange {
@@ -695,7 +707,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     doc2.apply_patch(patch3).unwrap();
 
     let change4 = doc2
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("number"),
                 Primitive::Int(4),
@@ -703,6 +715,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let expected_change4 = amp::UncompressedChange {

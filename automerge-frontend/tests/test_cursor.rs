@@ -10,7 +10,7 @@ fn test_allow_cursor_on_list_element() {
     let _ = env_logger::builder().is_test(true).try_init().unwrap();
     let mut frontend = Frontend::new();
     let change = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(Path::root().key("list"), vec![1, 2, 3]))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -19,6 +19,7 @@ fn test_allow_cursor_on_list_element() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let mut backend = Backend::init();
     backend
@@ -47,7 +48,7 @@ fn test_allow_cursor_on_list_element() {
 fn test_allow_cursor_on_text_element() {
     let mut frontend = Frontend::new();
     let change = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -59,6 +60,7 @@ fn test_allow_cursor_on_text_element() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let mut backend = Backend::init();
     backend
@@ -87,7 +89,7 @@ fn test_allow_cursor_on_text_element() {
 fn test_do_not_allow_index_past_end_of_list() {
     let mut frontend = Frontend::new();
     frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -103,7 +105,7 @@ fn test_do_not_allow_index_past_end_of_list() {
 fn test_updates_cursor_during_change_function() {
     let mut frontend = Frontend::new();
     frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -201,7 +203,7 @@ fn test_set_cursor_to_new_element_in_diff() {
     frontend.apply_patch(patch2).unwrap();
 
     frontend
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("list").index(1),
                 "three".into(),
@@ -220,7 +222,7 @@ fn test_set_cursor_to_new_element_in_diff() {
 fn test_set_cursor_to_new_element_in_local_change() {
     let mut frontend = Frontend::new();
     frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -268,7 +270,7 @@ fn test_set_cursor_to_new_element_in_local_change() {
 fn test_delete_cursor_and_adding_again() {
     let mut frontend = Frontend::new();
     frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),

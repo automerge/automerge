@@ -135,13 +135,14 @@ fn missing_object_error_flaky_null_rle_decoding() {
     frontend.apply_patch(patch).unwrap();
 
     let c = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             for change in &changes1 {
                 d.add_change(change.clone())?
             }
             Ok(())
         })
-        .unwrap();
+        .unwrap()
+        .1;
     if let Some(change) = c {
         change1s.push(change.clone());
         backend.apply_local_change(change).unwrap();
@@ -171,13 +172,14 @@ fn missing_object_error_flaky_null_rle_decoding() {
             frontend.apply_patch(patch).unwrap();
 
             let c = frontend
-                .change::<_, InvalidChangeRequest>(None, |d| {
+                .change::<_, _, InvalidChangeRequest>(None, |d| {
                     for change in &changes2 {
                         d.add_change(change.clone())?
                     }
                     Ok(())
                 })
-                .unwrap();
+                .unwrap()
+                .1;
             if let Some(change) = c {
                 change2s.push(change.clone());
                 if change2s.len() >= 2 {

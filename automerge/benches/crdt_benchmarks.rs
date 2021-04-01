@@ -12,7 +12,7 @@ pub fn b1_1(c: &mut Criterion) {
             || {
                 let mut doc1 = Frontend::new();
                 let changedoc1 = doc1
-                    .change::<_, InvalidChangeRequest>(None, |d| {
+                    .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("text"),
                             Value::Text(Vec::new()),
@@ -20,6 +20,7 @@ pub fn b1_1(c: &mut Criterion) {
                         Ok(())
                     })
                     .unwrap()
+                    .1
                     .unwrap();
                 let mut backend1 = Backend::init();
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
@@ -46,7 +47,7 @@ pub fn b1_1(c: &mut Criterion) {
                     for (index, c) in random_string.chars().enumerate() {
                         let index: u32 = index.try_into().unwrap();
                         let doc1_insert_change = doc1
-                            .change::<_, InvalidChangeRequest>(None, |d| {
+                            .change::<_, _, InvalidChangeRequest>(None, |d| {
                                 d.add_change(LocalChange::insert(
                                     Path::root().key("text").index(index),
                                     c.into(),
@@ -54,6 +55,7 @@ pub fn b1_1(c: &mut Criterion) {
                                 Ok(())
                             })
                             .unwrap()
+                            .1
                             .unwrap();
                         let (patch, change_to_send) =
                             backend1.apply_local_change(doc1_insert_change).unwrap();
@@ -77,7 +79,7 @@ pub fn b1_2(c: &mut Criterion) {
             || {
                 let mut doc1 = Frontend::new();
                 let changedoc1 = doc1
-                    .change::<_, InvalidChangeRequest>(None, |d| {
+                    .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("text"),
                             Value::Text(Vec::new()),
@@ -85,6 +87,7 @@ pub fn b1_2(c: &mut Criterion) {
                         Ok(())
                     })
                     .unwrap()
+                    .1
                     .unwrap();
                 let mut backend1 = Backend::init();
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
@@ -114,10 +117,11 @@ pub fn b1_2(c: &mut Criterion) {
                 #[allow(clippy::unit_arg)]
                 black_box({
                     let doc1_insert_change = doc1
-                        .change::<_, InvalidChangeRequest>(None, |d| {
+                        .change::<_, _, InvalidChangeRequest>(None, |d| {
                             d.add_change(LocalChange::set(Path::root().key("text"), text))
                         })
                         .unwrap()
+                        .1
                         .unwrap();
                     let (patch, change_to_send) =
                         backend1.apply_local_change(doc1_insert_change).unwrap();
@@ -142,13 +146,14 @@ pub fn b3_1(c: &mut Criterion) {
                 let mut local_doc = Frontend::new();
                 let mut local_backend = Backend::init();
                 let init_change = local_doc
-                    .change::<_, InvalidChangeRequest>(None, |d| {
+                    .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("map"),
                             Value::Map(HashMap::new(), automerge_protocol::MapType::Map),
                         ))
                     })
                     .unwrap()
+                    .1
                     .unwrap();
                 let (patch, init_binchange) =
                     local_backend.apply_local_change(init_change).unwrap();
@@ -170,6 +175,7 @@ pub fn b3_1(c: &mut Criterion) {
                                 ))
                             })
                             .unwrap()
+                            .1
                             .unwrap();
                         backend.apply_local_change(change).unwrap().1
                     })
