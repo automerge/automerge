@@ -64,17 +64,15 @@ impl Backend {
         })
     }
 
-    pub fn load_changes(&mut self, mut changes: Vec<Change>) -> Result<(), AutomergeError> {
-        let changes = changes.drain(0..).collect();
+    pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         self.apply(changes, None)?;
         Ok(())
     }
 
     pub fn apply_changes(
         &mut self,
-        mut changes: Vec<Change>,
+        changes: Vec<Change>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let changes = changes.drain(0..).collect();
         self.apply(changes, None)
     }
 
@@ -84,12 +82,12 @@ impl Backend {
 
     fn apply(
         &mut self,
-        mut changes: Vec<Change>,
+        changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
-        for change in changes.drain(..) {
+        for change in changes.into_iter() {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
