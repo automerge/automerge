@@ -61,6 +61,12 @@ impl<'a> Decoder<'a> {
     }
 }
 
+/// Encodes booleans by storing the count of the same value.
+///
+/// The sequence of numbers describes the count of false values on even indices (0-indexed) and the
+/// count of true values on odd indices (0-indexed).
+///
+/// Counts are encoded as usize.
 pub(crate) struct BooleanEncoder {
     buf: Vec<u8>,
     last: bool,
@@ -94,6 +100,7 @@ impl BooleanEncoder {
     }
 }
 
+/// See discussion on [`BooleanEncoder`] for the format data is stored in.
 pub(crate) struct BooleanDecoder<'a> {
     decoder: Decoder<'a>,
     last_value: bool,
@@ -133,6 +140,11 @@ impl<'a> Iterator for BooleanDecoder<'a> {
     }
 }
 
+/// Encodes integers as the change since the previous value.
+///
+/// The initial value is 0 encoded as u64. Deltas are encoded as i64.
+///
+/// Run length encoding is then applied to the resulting sequence.
 pub(crate) struct DeltaEncoder {
     rle: RleEncoder<i64>,
     absolute_value: u64,
@@ -169,6 +181,20 @@ enum RleState<T> {
     Run(T, usize),
 }
 
+/// Encodes data in run lengh encoding format. This is very efficient for long repeats of data
+///
+/// There are 3 types of 'run' in this encoder:
+/// - a normal run (compresses repeated values)
+/// - a null run (compresses repeated nulls)
+/// - a literal run (no compression)
+///
+/// A normal run consists of the length of the run (encoded as an i64) followed by the encoded value that this run contains.
+///
+/// A null run consists of a zero value (encoded as an i64) followed by the length of the null run (encoded as a usize).
+///
+/// A literal run consists of the **negative** length of the run (encoded as an i64) followed by the values in the run.
+///
+/// Therefore all the types start with an encoded i64, the value of which determines the type of the following data.
 pub(crate) struct RleEncoder<T>
 where
     T: Encodable + PartialEq + Clone,
@@ -190,7 +216,7 @@ where
 
     pub fn finish(mut self, col: u32) -> ColData {
         match self.take_state() {
-            // this coveres `only_nulls`
+            // this covers `only_nulls`
             RleState::NullRun(size) => {
                 if !self.buf.is_empty() {
                     self.flush_null_run(size)
@@ -292,11 +318,12 @@ where
     }
 }
 
+/// See discussion on [`RleEncoder`] for the format data is stored in.
 #[derive(Debug)]
 pub(crate) struct RleDecoder<'a, T> {
     pub decoder: Decoder<'a>,
     last_value: Option<T>,
-    count: isize,
+    count: i64,
     literal: bool,
 }
 
@@ -326,20 +353,27 @@ where
                 return Some(None);
             }
             match self.decoder.read::<i64>() {
-                Ok(count) if count > 0 => {
-                    self.count = count as isize;
+                Ok(count @ 1..=i64::MAX) => {
+                    // normal run
+                    self.count = count;
                     self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
-                Ok(count) if count < 0 => {
-                    self.count = count.abs() as isize;
+                Ok(count @ i64::MIN..=-1) => {
+                    // literal run
+                    self.count = count.abs();
                     self.literal = true;
                 }
-                _ => {
-                    // FIXME(jeffa5): handle usize > isize here somehow
-                    self.count = self.decoder.read::<usize>().unwrap_or_default() as isize;
+                Ok(0) => {
+                    // null run
+                    // FIXME(jeffa5): handle usize > i64 here somehow
+                    self.count = self.decoder.read::<usize>().unwrap_or_default() as i64;
                     self.last_value = None;
                     self.literal = false;
+                }
+                Err(e) => {
+                    tracing::warn!(error=?e, "error during rle decoding");
+                    return None;
                 }
             }
         }
@@ -352,6 +386,7 @@ where
     }
 }
 
+/// See discussion on [`DeltaEncoder`] for the format data is stored in.
 pub(crate) struct DeltaDecoder<'a> {
     rle: RleDecoder<'a, i64>,
     absolute_val: u64,
