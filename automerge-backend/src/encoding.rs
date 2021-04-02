@@ -1,11 +1,15 @@
-use crate::error::AutomergeError;
+use crate::{columnar::COLUMN_TYPE_DEFLATE, error::AutomergeError};
 use automerge_protocol as amp;
 use core::fmt::Debug;
+use flate2::{bufread::DeflateEncoder, Compression};
+use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::io;
 use std::io::{Read, Write};
 use std::mem;
 use std::str;
+
+pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
 
 fn err(_s: &str) -> AutomergeError {
     AutomergeError::EncodingError
@@ -15,39 +19,37 @@ fn err(_s: &str) -> AutomergeError {
 pub(crate) struct Decoder<'a> {
     pub offset: usize,
     pub last_read: usize,
-    buf: &'a [u8],
+    data: Cow<'a, [u8]>,
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(buf: &'a [u8]) -> Self {
+    pub fn new(data: Cow<'a, [u8]>) -> Self {
         Decoder {
             offset: 0,
             last_read: 0,
-            buf,
+            data,
         }
     }
 
     pub fn read<T: Decodable + Debug>(&mut self) -> Result<T, AutomergeError> {
-        let mut new_buf = self.buf;
-        let val = T::decode::<&[u8]>(&mut new_buf).ok_or(AutomergeError::EncodingError)?;
-        let delta = self.buf.len() - new_buf.len();
+        let mut buf = &self.data[self.offset..];
+        let init_len = buf.len();
+        let val = T::decode::<&[u8]>(&mut buf).ok_or(AutomergeError::EncodingError)?;
+        let delta = init_len - buf.len();
         if delta == 0 {
             Err(err("buffer size didnt change..."))
         } else {
-            self.buf = new_buf;
             self.last_read = delta;
             self.offset += delta;
             Ok(val)
         }
     }
 
-    pub fn read_bytes(&mut self, index: usize) -> Result<&'a [u8], AutomergeError> {
-        let buf = self.buf;
-        if buf.len() < index {
+    pub fn read_bytes(&mut self, index: usize) -> Result<&[u8], AutomergeError> {
+        if self.offset + index > self.data.len() {
             Err(AutomergeError::EncodingError)
         } else {
-            let head = &buf[0..index];
-            self.buf = &buf[index..];
+            let head = &self.data[self.offset..self.offset + index];
             self.last_read = index;
             self.offset += index;
             Ok(head)
@@ -55,7 +57,7 @@ impl<'a> Decoder<'a> {
     }
 
     pub fn done(&self) -> bool {
-        self.buf.is_empty()
+        self.offset >= self.data.len()
     }
 }
 
@@ -88,10 +90,10 @@ impl BooleanEncoder {
         if self.count > 0 {
             self.count.encode(&mut self.buf).ok();
         }
-        ColData {
+        ColData::new(
             col,
-            data: self.buf,
-        }
+            self.buf,
+        )
     }
 }
 
@@ -101,16 +103,16 @@ pub(crate) struct BooleanDecoder<'a> {
     count: usize,
 }
 
-impl<'a> From<&'a [u8]> for Decoder<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
+impl<'a> From<Cow<'a, [u8]>> for Decoder<'a> {
+    fn from(bytes: Cow<'a, [u8]>) -> Decoder<'a> {
         Decoder::new(bytes)
     }
 }
 
-impl<'a> From<&'a [u8]> for BooleanDecoder<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
+impl<'a> From<Cow<'a, [u8]>> for BooleanDecoder<'a> {
+    fn from(bytes: Cow<'a, [u8]>) -> Self {
         BooleanDecoder {
-            decoder: Decoder::new(bytes),
+            decoder: Decoder::from(bytes),
             last_value: true,
             count: 0,
         }
@@ -205,10 +207,10 @@ where
             }
             RleState::Empty => {}
         }
-        ColData {
+        ColData::new(
             col,
-            data: self.buf,
-        }
+            self.buf,
+        )
     }
 
     fn flush_run(&mut self, val: T, len: usize) {
@@ -304,10 +306,10 @@ pub(crate) struct RleDecoder<'a, T> {
     literal: bool,
 }
 
-impl<'a, T> From<&'a [u8]> for RleDecoder<'a, T> {
-    fn from(bytes: &'a [u8]) -> Self {
+impl<'a, T> From<Cow<'a, [u8]>> for RleDecoder<'a, T> {
+    fn from(bytes: Cow<'a, [u8]>) -> Self {
         RleDecoder {
-            decoder: Decoder::new(bytes),
+            decoder: Decoder::from(bytes),
             last_value: None,
             count: 0,
             literal: false,
@@ -361,11 +363,11 @@ pub(crate) struct DeltaDecoder<'a> {
     absolute_val: u64,
 }
 
-impl<'a> From<&'a [u8]> for DeltaDecoder<'a> {
-    fn from(bytes: &'a [u8]) -> Self {
+impl<'a> From<Cow<'a, [u8]>> for DeltaDecoder<'a> {
+    fn from(bytes: Cow<'a, [u8]>) -> Self {
         DeltaDecoder {
             rle: RleDecoder {
-                decoder: Decoder::new(bytes),
+                decoder: Decoder::from(bytes),
                 last_value: None,
                 count: 0,
                 literal: false,
@@ -621,9 +623,21 @@ impl Encodable for i32 {
 pub(crate) struct ColData {
     pub col: u32,
     pub data: Vec<u8>,
+    #[cfg(debug_assertions)]
+    has_been_deflated: bool,
 }
 
 impl ColData {
+
+    pub fn new(col_id: u32, data: Vec<u8>) -> ColData {
+        ColData{
+            col: col_id,
+            data,
+            #[cfg(debug_assertions)]
+            has_been_deflated: false,
+        }
+    }
+
     pub fn encode_col_len<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = 0;
         if !self.data.is_empty() {
@@ -631,5 +645,21 @@ impl ColData {
             len += self.data.len().encode(buf)?;
         }
         Ok(len)
+    }
+
+    pub fn deflate(&mut self) {
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(!self.has_been_deflated);
+            self.has_been_deflated = true;
+        }
+        if self.data.len() > DEFLATE_MIN_SIZE {
+            let mut deflated = Vec::new();
+            let mut deflater = DeflateEncoder::new(&self.data[..], Compression::best());
+            //This unwrap should be okay as we're reading and writing to in memory buffers
+            deflater.read_to_end(&mut deflated).unwrap();
+            self.col |= COLUMN_TYPE_DEFLATE;
+            self.data = deflated;
+        }
     }
 }
