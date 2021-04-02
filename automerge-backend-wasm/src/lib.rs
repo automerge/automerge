@@ -164,6 +164,14 @@ pub fn get_changes(input: Object, have_deps: JsValue) -> Result<JsValue, JsValue
     })
 }
 
+#[wasm_bindgen(js_name = getAllChanges)]
+pub fn get_all_changes(input: Object) -> Result<JsValue, JsValue> {
+    let deps: Vec<ChangeHash> = vec![];
+    get_input(input, |state| {
+        Ok(export_changes(state.0.get_changes(&deps)).into())
+    })
+}
+
 #[wasm_bindgen(js_name = getMissingDeps)]
 pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| rust_to_js(state.0.get_missing_deps()))
