@@ -1,7 +1,7 @@
 //#![feature(set_stdio)]
 
 use automerge_backend::{AutomergeError, Backend, Change};
-use automerge_protocol::{ActorId, ChangeHash, UncompressedChange};
+use automerge_protocol::{ChangeHash, UncompressedChange};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -161,18 +161,6 @@ pub fn get_changes(input: Object, have_deps: JsValue) -> Result<JsValue, JsValue
     let deps: Vec<ChangeHash> = js_to_rust(&have_deps)?;
     get_input(input, |state| {
         Ok(export_changes(state.0.get_changes(&deps)).into())
-    })
-}
-
-#[wasm_bindgen(js_name = getChangesForActor)]
-pub fn get_changes_for_actor(input: Object, actorid: JsValue) -> Result<JsValue, JsValue> {
-    let actorid: ActorId = js_to_rust(&actorid)?;
-    get_input(input, |state| {
-        state
-            .0
-            .get_changes_for_actor_id(&actorid)
-            .map(|changes| export_changes(changes).into())
-            .map_err(to_js_err)
     })
 }
 
