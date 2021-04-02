@@ -367,7 +367,7 @@ where
                 Ok(0) => {
                     // null run
                     // FIXME(jeffa5): handle usize > i64 here somehow
-                    self.count = self.decoder.read::<usize>().unwrap_or_default() as i64;
+                    self.count = self.decoder.read::<usize>().unwrap() as i64;
                     self.last_value = None;
                     self.literal = false;
                 }
