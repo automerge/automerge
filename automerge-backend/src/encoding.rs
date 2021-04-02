@@ -648,7 +648,8 @@ impl ColData {
     }
 
     pub fn deflate(&mut self) {
-        if cfg!(debug_assertions) {
+        #[cfg(debug_assertions)]
+        {
             debug_assert!(!self.has_been_deflated);
             self.has_been_deflated = true;
         }
