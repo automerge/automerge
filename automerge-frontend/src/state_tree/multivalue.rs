@@ -33,11 +33,12 @@ impl MultiValue {
     pub fn new_from_diff<K>(
         opid: amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        StateTreeValue::new_from_diff(diff)?.try_map(move |value| {
+        StateTreeValue::new_from_diff(diff, current_objects)?.try_map(move |value| {
             Ok(MultiValue {
                 winning_value: (opid, value),
                 conflicts: im_rc::HashMap::new(),
@@ -88,16 +89,18 @@ impl MultiValue {
         &self,
         opid: &amp::OpId,
         subdiff: DiffToApply<K, &amp::Diff>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        self.apply_diff_iter(&mut std::iter::once((opid, subdiff)))
+        self.apply_diff_iter(&mut std::iter::once((opid, subdiff)), current_objects)
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a self,
         diff: &mut I,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -108,16 +111,18 @@ impl MultiValue {
         for (opid, subdiff) in diff {
             let u = if let Some(existing_value) = updated.get(opid) {
                 match existing_value {
-                    StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff),
-                    StateTreeValue::Link(obj_id) => subdiff
-                        .current_objects
+                    StateTreeValue::Leaf(_) => {
+                        StateTreeValue::new_from_diff(subdiff, current_objects)
+                    }
+                    StateTreeValue::Link(obj_id) => current_objects
                         .get(obj_id)
-                        .unwrap_or_else(|| panic!("link to nonexistent object: {:?}", obj_id))
-                        .apply_diff(&subdiff)
+                        .cloned()
+                        .expect("link to nonexistent object")
+                        .apply_diff(&subdiff, current_objects)
                         .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
                 }
             } else {
-                StateTreeValue::new_from_diff(subdiff)
+                StateTreeValue::new_from_diff(subdiff, current_objects)
             }?;
             changes.update_with(u.change);
             updated = updated.update(opid, &u.value)
@@ -544,9 +549,14 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
-            objects = next_value.new_objects.clone().union(objects.clone());
+            for (k, v) in next_value.new_objects {
+                objects.insert(k, v);
+            }
             ops.extend_from_slice(&next_value.ops[..]);
-            result_props = result_props.update(prop.clone(), next_value.multivalue())
+            result_props = result_props.update(
+                prop.clone(),
+                MultiValue::from_statetree_value(next_value.value, next_value.opid),
+            )
         }
         let map = match map_type {
             amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {

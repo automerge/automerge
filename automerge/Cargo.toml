@@ -32,7 +32,7 @@ env_logger = "*"
 tracing = "0.1.25"
 tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}
 unicode-segmentation = "1.7.1"
-maplit = "^1.0.2"
+maplit = "1.0.2"
 
 [[bench]]
 name = "crdt_benchmarks"
@@ -44,4 +44,8 @@ harness = false
 
 [[bench]]
 name = "save_load"
+harness = false
+
+[[bench]]
+name = "frontend_patch"
 harness = false

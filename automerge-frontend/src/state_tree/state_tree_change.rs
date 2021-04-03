@@ -59,3 +59,24 @@ impl StateTreeChange {
         }
     }
 }
+
+impl Add for StateTreeChange {
+    type Output = StateTreeChange;
+
+    fn add(mut self, rhs: StateTreeChange) -> Self::Output {
+        for (k, v) in rhs.objects {
+            self.objects.insert(k, v);
+        }
+        self.new_cursors = self.new_cursors.union(rhs.new_cursors);
+        self
+    }
+}
+
+impl AddAssign for StateTreeChange {
+    fn add_assign(&mut self, rhs: StateTreeChange) {
+        for (k, v) in rhs.objects {
+            self.objects.insert(k, v);
+        }
+        self.new_cursors = self.new_cursors.clone().union(rhs.new_cursors);
+    }
+}

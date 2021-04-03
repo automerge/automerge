@@ -54,7 +54,7 @@ impl StateTree {
         }
     }
 
-    pub fn apply_root_diff(&self, diff: amp::RootDiff) -> Result<StateTree, error::InvalidPatch> {
+    pub fn apply_root_diff(&self, diff: amp::RootDiff) -> Result<(), error::InvalidPatch> {
         self.apply_map_diff(&MapDiff {
             object_id: ObjectId::Root,
             obj_type: amp::MapType::Map,
@@ -62,40 +62,45 @@ impl StateTree {
         })
     }
 
-    fn apply_map_diff(&self, diff: &amp::MapDiff) -> Result<StateTree, error::InvalidPatch> {
-        match self.objects.get(&diff.object_id) {
+    fn apply_map_diff(&mut self, diff: amp::MapDiff) -> Result<(), error::InvalidPatch> {
+        let object = self.objects.get(&diff.object_id).cloned();
+        match object {
             Some(StateTreeComposite::Map(m)) => {
-                let diffapp = m.apply_diff(&DiffToApply {
-                    parent_key: &"",
-                    parent_object_id: &amp::ObjectId::Root,
-                    diff: &diff.props,
-                    current_objects: self.objects.clone(),
-                })?;
-                Ok(StateTree {
-                    objects: diffapp.change.objects().union(self.objects.clone()),
-                    cursors: self.cursors.clone(),
-                })
+                let diffapp = m.apply_diff(
+                    &DiffToApply {
+                        parent_key: &"",
+                        parent_object_id: &amp::ObjectId::Root,
+                        diff: &diff.props,
+                    },
+                    &mut self.objects,
+                )?;
+                for (id, composite) in diffapp.change.objects() {
+                    self.objects.insert(id, composite);
+                }
+                Ok(())
             }
             Some(o) => Err(error::InvalidPatch::MismatchingObjectType {
-                object_id: diff.object_id.clone(),
+                object_id: diff.object_id,
                 actual_type: Some(o.obj_type()),
                 patch_expected_type: Some(amp::ObjType::map()),
             }),
             None => {
                 let map = StateTreeMap {
-                    object_id: diff.object_id.clone(),
+                    object_id: diff.object_id,
                     props: im_rc::HashMap::new(),
                 };
-                let diffapp = map.apply_diff(&DiffToApply {
-                    parent_key: &"",
-                    parent_object_id: &amp::ObjectId::Root,
-                    diff: &diff.props,
-                    current_objects: self.objects.clone(),
-                })?;
-                Ok(StateTree {
-                    objects: diffapp.change.objects(),
-                    cursors: self.cursors.clone(),
-                })
+                let diffapp = map.apply_diff(
+                    &DiffToApply {
+                        parent_key: &"",
+                        parent_object_id: &amp::ObjectId::Root,
+                        diff: &diff.props,
+                    },
+                    &mut self.objects,
+                )?;
+                for (id, composite) in diffapp.change.objects() {
+                    self.objects.insert(id, composite);
+                }
+                Ok(())
             }
         }
     }
@@ -335,6 +340,7 @@ impl StateTreeComposite {
     fn apply_diff<K>(
         &self,
         diff: &DiffToApply<K, &amp::Diff>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeComposite>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -359,12 +365,14 @@ impl StateTreeComposite {
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
-                        map.apply_diff(&DiffToApply {
-                            parent_object_id: diff.parent_object_id,
-                            parent_key: diff.parent_key,
-                            current_objects: diff.current_objects.clone(),
-                            diff: prop_diffs,
-                        })
+                        map.apply_diff(
+                            &DiffToApply {
+                                parent_object_id: diff.parent_object_id,
+                                parent_key: diff.parent_key,
+                                diff: prop_diffs,
+                            },
+                            current_objects,
+                        )
                         .map(|d| d.map(StateTreeComposite::Map))
                     }
                 }
@@ -377,12 +385,14 @@ impl StateTreeComposite {
                         })
                     } else {
                         table
-                            .apply_diff(&DiffToApply {
-                                parent_object_id: diff.parent_object_id,
-                                parent_key: diff.parent_key,
-                                current_objects: diff.current_objects.clone(),
-                                diff: prop_diffs,
-                            })
+                            .apply_diff(
+                                &DiffToApply {
+                                    parent_object_id: diff.parent_object_id,
+                                    parent_key: diff.parent_key,
+                                    diff: prop_diffs,
+                                },
+                                current_objects,
+                            )
                             .map(|d| d.map(StateTreeComposite::Table))
                     }
                 }
@@ -501,6 +511,7 @@ impl StateTreeComposite {
 impl StateTreeValue {
     fn new_from_diff<K>(
         diff: DiffToApply<K, &amp::Diff>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -537,7 +548,7 @@ impl StateTreeValue {
                     props: im_rc::HashMap::new(),
                 }),
             }
-            .apply_diff(&diff)
+            .apply_diff(&diff, current_objects)
             .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
             amp::Diff::Seq(amp::SeqDiff {
                 object_id,
@@ -553,7 +564,7 @@ impl StateTreeValue {
                     elements: DiffableSequence::new(),
                 }),
             }
-            .apply_diff(&diff)
+            .apply_diff(&diff, current_objects)
             .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
             amp::Diff::Cursor(ref c) => {
                 Ok(DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())))
@@ -600,6 +611,7 @@ impl StateTreeMap {
     fn apply_diff<K>(
         &self,
         prop_diffs: &DiffToApply<K, &HashMap<String, HashMap<amp::OpId, amp::Diff>>>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeMap>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -610,22 +622,24 @@ impl StateTreeMap {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
                 None => {
-                    new_props = new_props.without(prop);
+                    new_props.remove(prop);
                 }
                 Some((opid, diff)) => {
+                    for (id, composite) in change.objects() {
+                        current_objects.insert(id, composite);
+                    }
                     let node = match new_props.get(prop) {
                         Some(n) => {
                             let diff_result = n.apply_diff(
                                 opid,
                                 DiffToApply {
-                                    current_objects: change
-                                        .objects()
-                                        .union(prop_diffs.current_objects.clone()),
                                     parent_key: prop,
                                     parent_object_id: &self.object_id,
                                     diff,
                                 },
+                                current_objects,
                             )?;
+
                             change.update_with(diff_result.change);
                             new_props = new_props.update(prop.clone(), diff_result.value.clone());
                             diff_result.value
@@ -634,13 +648,11 @@ impl StateTreeMap {
                             let diff_result = MultiValue::new_from_diff(
                                 opid.clone(),
                                 DiffToApply {
-                                    current_objects: change
-                                        .objects()
-                                        .union(prop_diffs.current_objects.clone()),
                                     parent_key: prop,
                                     parent_object_id: &self.object_id,
                                     diff,
                                 },
+                                current_objects,
                             )?;
                             change.update_with(diff_result.change);
                             new_props = new_props.update(prop.clone(), diff_result.value.clone());
@@ -652,9 +664,6 @@ impl StateTreeMap {
                             (
                                 oid,
                                 DiffToApply {
-                                    current_objects: change
-                                        .objects()
-                                        .union(prop_diffs.current_objects.clone()),
                                     parent_key: prop,
                                     parent_object_id: &self.object_id,
                                     diff,
@@ -718,6 +727,7 @@ impl StateTreeTable {
     fn apply_diff<K>(
         &self,
         prop_diffs: &DiffToApply<K, &HashMap<String, HashMap<amp::OpId, amp::Diff>>>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeTable>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -733,34 +743,36 @@ impl StateTreeTable {
                         Some(n) => n.apply_diff(
                             opid,
                             DiffToApply {
-                                current_objects: prop_diffs.current_objects.clone(),
                                 parent_object_id: &self.object_id,
                                 parent_key: prop,
                                 diff,
                             },
+                            current_objects,
                         )?,
                         None => MultiValue::new_from_diff(
                             opid.clone(),
                             DiffToApply {
-                                current_objects: prop_diffs.current_objects.clone(),
                                 parent_object_id: &self.object_id,
                                 parent_key: prop,
                                 diff,
                             },
+                            current_objects,
                         )?,
                     };
-                    node_diffapp = node_diffapp.try_and_then(move |n| {
-                        n.apply_diff_iter(&mut diff_iter.map(|(oid, diff)| {
-                            (
-                                oid,
-                                DiffToApply {
-                                    current_objects: prop_diffs.current_objects.clone(),
-                                    parent_object_id: &self.object_id,
-                                    parent_key: prop,
-                                    diff,
-                                },
-                            )
-                        }))
+                    node_diffapp = node_diffapp.try_and_then(|n| {
+                        n.apply_diff_iter(
+                            &mut diff_iter.map(|(oid, diff)| {
+                                (
+                                    oid,
+                                    DiffToApply {
+                                        parent_object_id: &self.object_id,
+                                        parent_key: prop,
+                                        diff,
+                                    },
+                                )
+                            }),
+                            current_objects,
+                        )
                     })?;
                     changes.update_with(node_diffapp.change);
                     new_props.insert(prop.to_string(), node_diffapp.value);
@@ -994,10 +1006,15 @@ impl StateTreeList {
         &self,
         current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
         edits: &[amp::DiffEdit],
-    ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch> {
-        let new_elements = self
-            .elements
-            .apply_diff(current_objects, &self.object_id, edits)?;
+        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpId, amp::Diff>>>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
+    ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch>
+    where
+        K: Into<amp::Key>,
+    {
+        let new_elements =
+            self.elements
+                .apply_diff(&self.object_id, edits, new_props, current_objects)?;
         Ok(new_elements.and_then(|new_elements| {
             let new_list = StateTreeList {
                 object_id: self.object_id.clone(),
@@ -1071,7 +1088,6 @@ struct DiffToApply<'a, K, T>
 where
     K: Into<amp::Key>,
 {
-    current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     diff: T,
     parent_object_id: &'a amp::ObjectId,
     parent_key: &'a K,

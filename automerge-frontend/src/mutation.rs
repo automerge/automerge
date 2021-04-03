@@ -109,14 +109,6 @@ impl MutationTracker {
         }
     }
 
-    pub fn ops(&self) -> Option<Vec<amp::Op>> {
-        if !self.ops.is_empty() {
-            Some(self.ops.clone())
-        } else {
-            None
-        }
-    }
-
     /// If the `value` is a map, individually assign each k,v in it to a key in
     /// the root object
     fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), InvalidChangeRequest> {
@@ -206,6 +198,15 @@ impl MutationTracker {
         } else {
             Err(InvalidChangeRequest::NoSuchPathError { path: path.clone() })
         }
+    }
+
+    pub(crate) fn finalise(self) -> (StateTree, Option<Vec<amp::Op>>) {
+        let ops = if !self.ops.is_empty() {
+            Some(self.ops)
+        } else {
+            None
+        };
+        (self.state, ops)
     }
 }
 
@@ -393,7 +394,6 @@ impl MutableDocument for MutationTracker {
                     })
                 }
             }
-            //<<<<<<< HEAD
             //LocalOperation::Insert(value) => {
             //if let Some(name) = change.path.name() {
             //let index = match name {
