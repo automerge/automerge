@@ -2,7 +2,7 @@
 CC=gcc
 CFLAGS=-I.
 DEPS=automerge.h
-LIBS=-lautomerge -lpthread -ldl -lm
+LIBS=-lpthread -ldl -lm
 LDIR=../target/release
 LIB=../target/release/libautomerge.a
 DEBUG_LIB=../target/debug/libautomerge.a
@@ -13,7 +13,7 @@ debug: LDIR=../target/debug
 debug: automerge $(DEBUG_LIB)
 
 automerge: automerge.o $(LDIR)/libautomerge.a
-	$(CC) -o $@ automerge.o $(LIBS) -L$(LDIR)
+	$(CC) -o $@ automerge.o $(LDIR)/libautomerge.a $(LIBS) -L$(LDIR)
 
 $(DEBUG_LIB): src/lib.rs
 	cargo build
