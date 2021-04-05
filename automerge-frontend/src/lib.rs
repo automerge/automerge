@@ -156,7 +156,7 @@ impl FrontendState {
         actor: &ActorId,
         change_closure: F,
         seq: u64,
-    ) -> Result<(O, OptimisticChangeResult), E>
+    ) -> Result<OptimisticChangeResult<O>, E>
     where
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
@@ -176,19 +176,17 @@ impl FrontendState {
                 let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 in_flight_requests.push(seq);
-                Ok((
-                    result,
-                    OptimisticChangeResult {
-                        ops: mutation_tracker.ops(),
-                        new_state: FrontendState::WaitingForInFlightRequests {
-                            in_flight_requests,
-                            optimistically_updated_root_state: new_root_state,
-                            reconciled_root_state,
-                            max_op: mutation_tracker.max_op,
-                        },
-                        deps: Vec::new(),
+                Ok(OptimisticChangeResult {
+                    ops: mutation_tracker.ops(),
+                    new_state: FrontendState::WaitingForInFlightRequests {
+                        in_flight_requests,
+                        optimistically_updated_root_state: new_root_state,
+                        reconciled_root_state,
+                        max_op: mutation_tracker.max_op,
                     },
-                ))
+                    deps: Vec::new(),
+                    closure_result: result,
+                })
             }
             FrontendState::Reconciled {
                 root_state,
@@ -200,19 +198,17 @@ impl FrontendState {
                 let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 let in_flight_requests = vec![seq];
-                Ok((
-                    result,
-                    OptimisticChangeResult {
-                        ops: mutation_tracker.ops(),
-                        new_state: FrontendState::WaitingForInFlightRequests {
-                            in_flight_requests,
-                            optimistically_updated_root_state: new_root_state,
-                            reconciled_root_state: root_state,
-                            max_op: mutation_tracker.max_op,
-                        },
-                        deps: deps_of_last_received_patch,
+                Ok(OptimisticChangeResult {
+                    ops: mutation_tracker.ops(),
+                    new_state: FrontendState::WaitingForInFlightRequests {
+                        in_flight_requests,
+                        optimistically_updated_root_state: new_root_state,
+                        reconciled_root_state: root_state,
+                        max_op: mutation_tracker.max_op,
                     },
-                ))
+                    deps: deps_of_last_received_patch,
+                    closure_result: result,
+                })
             }
         }
     }
@@ -396,7 +392,7 @@ impl Frontend {
     {
         let start_op = self.state.as_ref().unwrap().max_op() + 1;
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let (result, change_result) = self.state.take().unwrap().optimistically_apply_change(
+        let change_result = self.state.take().unwrap().optimistically_apply_change(
             &self.actor_id,
             change_closure,
             self.seq + 1,
@@ -416,9 +412,9 @@ impl Frontend {
                 operations: ops,
                 extra_bytes: Vec::new(),
             };
-            Ok((result, Some(change)))
+            Ok((change_result.closure_result, Some(change)))
         } else {
-            Ok((result, None))
+            Ok((change_result.closure_result, None))
         }
     }
 
@@ -472,8 +468,9 @@ impl Frontend {
     }
 }
 
-struct OptimisticChangeResult {
+struct OptimisticChangeResult<O> {
     ops: Option<Vec<Op>>,
     new_state: FrontendState,
     deps: Vec<ChangeHash>,
+    closure_result: O,
 }
