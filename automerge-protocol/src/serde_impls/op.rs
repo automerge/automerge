@@ -174,8 +174,8 @@ impl<'de> Deserialize<'de> for Op {
                     action,
                     obj,
                     key,
-                    insert,
                     pred,
+                    insert,
                 })
             }
         }
