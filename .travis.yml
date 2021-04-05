@@ -28,6 +28,7 @@ script:
 - travis_fold start "wasm-build"
 - cd automerge-backend-wasm && yarn release
 - travis_fold end "wasm-build"
+- cd $TRAVIS_BUILD_DIR
 - travis_fold start "wasm-test"
 - wasm-pack test automerge-frontend --node
 - travis_fold end "wasm-test"
