@@ -613,10 +613,7 @@ impl ValEncoder {
             self.ref_counter.finish(COL_REF_CTR),
             self.ref_actor.finish(COL_REF_ACTOR),
             self.len.finish(COL_VAL_LEN),
-            ColData::new(
-                COL_VAL_RAW,
-                self.raw,
-            ),
+            ColData::new(COL_VAL_RAW, self.raw),
         ]
     }
 }
@@ -843,10 +840,7 @@ impl ChangeEncoder {
             self.deps_num.finish(DOC_DEPS_NUM),
             self.deps_index.finish(DOC_DEPS_INDEX),
             self.extra_len.finish(DOC_EXTRA_LEN),
-            ColData::new(
-                DOC_EXTRA_RAW,
-                self.extra_raw,
-            ),
+            ColData::new(DOC_EXTRA_RAW, self.extra_raw),
         ];
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 

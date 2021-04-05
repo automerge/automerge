@@ -69,10 +69,7 @@ impl Backend {
         Ok(())
     }
 
-    pub fn apply_changes(
-        &mut self,
-        changes: Vec<Change>,
-    ) -> Result<amp::Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<amp::Patch, AutomergeError> {
         self.apply(changes, None)
     }
 
