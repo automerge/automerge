@@ -506,7 +506,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 }
 
 fn decompress_chunk(preamble: &[u8], buf: &[u8]) -> Result<ChangeBytes, AutomergeError> {
-    let mut decoder = DeflateDecoder::new(&buf[..]);
+    let mut decoder = DeflateDecoder::new(buf);
     let mut decompressed = Vec::new();
     decoder.read_to_end(&mut decompressed)?;
     let mut result = Vec::with_capacity(decompressed.len() + preamble.len());

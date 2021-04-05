@@ -356,8 +356,8 @@ where
         SkipList {
             nodes,
             head,
-            len,
             rng,
+            len,
         }
     }
 
@@ -527,7 +527,7 @@ where
         let links = pre
             .into_iter()
             .zip(suc.into_iter())
-            .map(|(prev, next)| LinkLevel { prev, next })
+            .map(|(prev, next)| LinkLevel { next, prev })
             .collect();
         self.nodes.insert(
             key,
