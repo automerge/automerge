@@ -90,10 +90,7 @@ impl BooleanEncoder {
         if self.count > 0 {
             self.count.encode(&mut self.buf).ok();
         }
-        ColData::new(
-            col,
-            self.buf,
-        )
+        ColData::new(col, self.buf)
     }
 }
 
@@ -207,10 +204,7 @@ where
             }
             RleState::Empty => {}
         }
-        ColData::new(
-            col,
-            self.buf,
-        )
+        ColData::new(col, self.buf)
     }
 
     fn flush_run(&mut self, val: T, len: usize) {
@@ -628,9 +622,8 @@ pub(crate) struct ColData {
 }
 
 impl ColData {
-
     pub fn new(col_id: u32, data: Vec<u8>) -> ColData {
-        ColData{
+        ColData {
             col: col_id,
             data,
             #[cfg(debug_assertions)]
