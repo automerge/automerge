@@ -22,8 +22,9 @@ if [[ -z $AUTOMERGE_JS_DIR ]]; then
 else
     # if the env var is set, assume the user is using an existing checkout of automerge
     echo "Using $AUTOMERGE_JS_DIR"
-    if [[ -d $AUTOMERGE_JS_DIR ]]; then
+    if [[ ! -d $AUTOMERGE_JS_DIR ]]; then
         echo "$AUTOMERGE_JS_DIR dir not found."
+        exit 1
     fi
 fi
 
@@ -31,4 +32,9 @@ cd $ORIGINAL_PWD
 cd $AUTOMERGE_JS_DIR
 
 yarn install
-env WASM_BACKEND_PATH="$ORIGINAL_PWD/build" yarn testwasm
+WASM_BACKEND_PATH="$ORIGINAL_PWD/build"
+if [[ ! -d $WASM_BACKEND_PATH ]]; then
+    echo "$WASM_BACKEND_PATH does not exist. Run 'yarn release' to build WASM backend"
+    exit 1
+fi
+WASM_BACKEND_PATH=$WASM_BACKEND_PATH yarn testwasm
