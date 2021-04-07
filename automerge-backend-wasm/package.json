@@ -25,7 +25,8 @@
     "profiling": "wasm-pack build --target nodejs --profiling --out-name index -d dev",
     "mocha": "yarn build && mocha --bail --full-trace",
     "webpack": "webpack",
-    "test": "cargo test && wasm-pack test --node"
+    "test": "cargo test && wasm-pack test --node",
+    "test:js": "./scripts/js_tests.sh"
   },
   "dependencies": {},
   "devDependencies": {
