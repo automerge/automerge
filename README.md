@@ -52,3 +52,4 @@ Note that the performance branch of automerge is under active development and is
 Development of automerge rust is currently being coordinated at our [slack channel](https://automerge.slack.com/archives/CTQARU3NZ).  Come say hi. =)
 
 
+
