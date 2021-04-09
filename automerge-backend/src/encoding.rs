@@ -323,7 +323,7 @@ where
 pub(crate) struct RleDecoder<'a, T> {
     pub decoder: Decoder<'a>,
     last_value: Option<T>,
-    count: i64,
+    count: isize,
     literal: bool,
 }
 
@@ -353,21 +353,21 @@ where
                 return Some(None);
             }
             match self.decoder.read::<i64>() {
-                Ok(count @ 1..=i64::MAX) => {
+                Ok(count) if count > 0 => {
                     // normal run
-                    self.count = count;
+                    self.count = count as isize;
                     self.last_value = self.decoder.read().ok();
                     self.literal = false;
                 }
-                Ok(count @ i64::MIN..=-1) => {
+                Ok(count) if count < 0 => {
                     // literal run
-                    self.count = count.abs();
+                    self.count = count.abs() as isize;
                     self.literal = true;
                 }
-                Ok(0) => {
+                Ok(_) => {
                     // null run
                     // FIXME(jeffa5): handle usize > i64 here somehow
-                    self.count = self.decoder.read::<usize>().unwrap() as i64;
+                    self.count = self.decoder.read::<usize>().unwrap() as isize;
                     self.last_value = None;
                     self.literal = false;
                 }
