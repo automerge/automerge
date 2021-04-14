@@ -10,6 +10,7 @@ install:
 - rustup component add clippy
 - rustup component add rustfmt
 - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+- nvm install 10
 before_script:
 - export -f travis_fold
 script:
