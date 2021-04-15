@@ -18,7 +18,7 @@ pub fn insert_long_string(c: &mut Criterion) {
             |(mut doc, string)| {
                 #[allow(clippy::unit_arg)]
                 black_box({
-                    doc.change::<_, InvalidChangeRequest>(None, |d| {
+                    doc.change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("text"),
                             Value::Text(string.graphemes(true).map(|s| s.to_owned()).collect()),

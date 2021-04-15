@@ -192,7 +192,7 @@ pub fn change(
     // there's no way for the user to recover
     frontend.apply_patch(patch).unwrap();
     let local_change = parse_change_script(script)?;
-    let new_changes = frontend.change::<_, amf::InvalidChangeRequest>(None, |d| {
+    let ((), new_changes) = frontend.change::<_, _, amf::InvalidChangeRequest>(None, |d| {
         d.add_change(local_change)?;
         Ok(())
     })?;

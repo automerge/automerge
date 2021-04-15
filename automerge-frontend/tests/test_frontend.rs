@@ -45,7 +45,7 @@ fn test_init_with_empty_state() {
 fn test_set_root_object_properties() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change::<_, InvalidChangeRequest>(Some("set root object".into()), |doc| {
+        .change::<_, _, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
                 Value::Primitive(Primitive::Str("magpie".to_string())),
@@ -53,6 +53,7 @@ fn test_set_root_object_properties() {
             Ok(())
         })
         .unwrap()
+        .1
         // Remove timestamp which is irrelevant to test
         .map(|mut cr| {
             cr.time = 0;
@@ -82,8 +83,9 @@ fn test_set_root_object_properties() {
 fn it_should_return_no_changes_if_nothing_was_changed() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change::<_, InvalidChangeRequest>(Some("do nothing".into()), |_| Ok(()))
-        .unwrap();
+        .change::<_, _, InvalidChangeRequest>(Some("do nothing".into()), |_| Ok(()))
+        .unwrap()
+        .1;
     assert!(change_request.is_none())
 }
 
@@ -91,7 +93,7 @@ fn it_should_return_no_changes_if_nothing_was_changed() {
 fn it_should_create_nested_maps() {
     let mut doc = Frontend::new();
     let change_request = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::from_json(&serde_json::json!({
@@ -101,6 +103,7 @@ fn it_should_create_nested_maps() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
     let expected_change = amp::UncompressedChange {
@@ -136,7 +139,7 @@ fn it_should_create_nested_maps() {
 fn apply_updates_inside_nested_maps() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::from_json(&serde_json::json!({
@@ -146,10 +149,11 @@ fn apply_updates_inside_nested_maps() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_first_change = doc.state().clone();
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").key("sparrows"),
                 Value::Primitive(Primitive::F64(15.0)),
@@ -157,6 +161,7 @@ fn apply_updates_inside_nested_maps() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_second_change = doc.state().clone();
 
@@ -202,7 +207,7 @@ fn apply_updates_inside_nested_maps() {
 fn delete_keys_in_a_map() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root(),
                 Value::from_json(&serde_json::json!({
@@ -218,13 +223,15 @@ fn delete_keys_in_a_map() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::delete(Path::root().key("magpies")))?;
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -259,7 +266,7 @@ fn delete_keys_in_a_map() {
 fn create_lists() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::Sequence(vec!["chaffinch".into()]),
@@ -267,10 +274,11 @@ fn create_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let _req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
                 "chaffinch",
@@ -278,6 +286,7 @@ fn create_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -323,7 +332,7 @@ fn create_lists() {
 fn apply_updates_inside_lists() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 Value::Sequence(vec!["chaffinch".into()]),
@@ -331,10 +340,11 @@ fn apply_updates_inside_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds").index(0),
                 "greenfinch",
@@ -342,6 +352,7 @@ fn apply_updates_inside_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -378,7 +389,7 @@ fn apply_updates_inside_lists() {
 fn delete_list_elements() {
     let mut doc = Frontend::new();
     let _req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
                 vec!["chaffinch", "goldfinch"],
@@ -386,14 +397,16 @@ fn delete_list_elements() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::delete(Path::root().key("birds").index(0)))?;
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     assert_eq!(
@@ -430,7 +443,7 @@ fn delete_list_elements() {
 fn handle_counters_inside_maps() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("wrens"),
                 Value::Primitive(Primitive::Counter(0)),
@@ -438,15 +451,17 @@ fn handle_counters_inside_maps() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_first_change = doc.state().clone();
 
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::increment(Path::root().key("wrens")))?;
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_second_change = doc.state().clone();
 
@@ -513,7 +528,7 @@ fn handle_counters_inside_maps() {
 fn handle_counters_inside_lists() {
     let mut doc = Frontend::new();
     let req1 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("counts"),
                 vec![Value::Primitive(Primitive::Counter(1))],
@@ -521,11 +536,12 @@ fn handle_counters_inside_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_first_change = doc.state().clone();
 
     let req2 = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::increment_by(
                 Path::root().key("counts").index(0),
                 2,
@@ -533,6 +549,7 @@ fn handle_counters_inside_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     let state_after_second_change = doc.state().clone();
 
@@ -609,7 +626,7 @@ fn handle_counters_inside_lists() {
 #[test]
 fn refuse_to_overwrite_counter_value() {
     let mut doc = Frontend::new();
-    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
             Value::Primitive(Primitive::Counter(1)),
@@ -617,9 +634,10 @@ fn refuse_to_overwrite_counter_value() {
         Ok(())
     })
     .unwrap()
+    .1
     .unwrap();
 
-    let result = doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    let result = doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
             "somethingelse",
@@ -638,7 +656,7 @@ fn refuse_to_overwrite_counter_value() {
 #[test]
 fn test_sets_characters_in_text() {
     let mut doc = Frontend::new();
-    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
             Value::Text("some".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -646,14 +664,16 @@ fn test_sets_characters_in_text() {
         Ok(())
     })
     .unwrap()
+    .1
     .unwrap();
 
     let request = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(Path::root().key("text").index(1), "a"))?;
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
@@ -690,7 +710,7 @@ fn test_sets_characters_in_text() {
 #[test]
 fn test_inserts_characters_in_text() {
     let mut doc = Frontend::new();
-    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
             Value::Text("same".graphemes(true).map(|s| s.to_owned()).collect()),
@@ -698,10 +718,11 @@ fn test_inserts_characters_in_text() {
         Ok(())
     })
     .unwrap()
+    .1
     .unwrap();
 
     let request = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("text").index(1),
                 "h".into(),
@@ -709,6 +730,7 @@ fn test_inserts_characters_in_text() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
@@ -745,7 +767,7 @@ fn test_inserts_characters_in_text() {
 #[test]
 fn test_inserts_characters_at_start_of_text() {
     let mut doc = Frontend::new();
-    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
             Value::Text(Vec::new()),
@@ -753,10 +775,11 @@ fn test_inserts_characters_at_start_of_text() {
         Ok(())
     })
     .unwrap()
+    .1
     .unwrap();
 
     let request = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("text").index(0),
                 "i".into(),
@@ -764,6 +787,7 @@ fn test_inserts_characters_at_start_of_text() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
@@ -800,7 +824,7 @@ fn test_inserts_characters_at_start_of_text() {
 #[test]
 fn test_inserts_at_end_of_lists() {
     let mut doc = Frontend::new();
-    doc.change::<_, InvalidChangeRequest>(None, |doc| {
+    doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("birds"),
             Value::Sequence(Vec::new()),
@@ -808,10 +832,11 @@ fn test_inserts_at_end_of_lists() {
         Ok(())
     })
     .unwrap()
+    .1
     .unwrap();
 
     let request = doc
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::insert(
                 Path::root().key("birds").index(0),
                 "greenfinch".into(),
@@ -823,6 +848,7 @@ fn test_inserts_at_end_of_lists() {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
 
     let list_id = doc.get_object_id(&Path::root().key("birds")).unwrap();

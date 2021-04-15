@@ -151,15 +151,15 @@ impl FrontendState {
     /// which it can use to query the document state and make changes. It
     /// can also throw an error of type `E`. If an error is thrown in the
     /// closure no chnages are made and the error is returned.
-    pub fn optimistically_apply_change<F, E>(
+    pub fn optimistically_apply_change<F, O, E>(
         self,
         actor: &ActorId,
         change_closure: F,
         seq: u64,
-    ) -> Result<OptimisticChangeResult, E>
+    ) -> Result<OptimisticChangeResult<O>, E>
     where
         E: Error,
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
         match self {
             FrontendState::WaitingForInFlightRequests {
@@ -173,7 +173,7 @@ impl FrontendState {
                     max_op,
                     actor.clone(),
                 );
-                change_closure(&mut mutation_tracker)?;
+                let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 in_flight_requests.push(seq);
                 Ok(OptimisticChangeResult {
@@ -185,6 +185,7 @@ impl FrontendState {
                         max_op: mutation_tracker.max_op,
                     },
                     deps: Vec::new(),
+                    closure_result: result,
                 })
             }
             FrontendState::Reconciled {
@@ -194,7 +195,7 @@ impl FrontendState {
             } => {
                 let mut mutation_tracker =
                     mutation::MutationTracker::new(root_state.clone(), max_op, actor.clone());
-                change_closure(&mut mutation_tracker)?;
+                let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 let in_flight_requests = vec![seq];
                 Ok(OptimisticChangeResult {
@@ -206,6 +207,7 @@ impl FrontendState {
                         max_op: mutation_tracker.max_op,
                     },
                     deps: deps_of_last_received_patch,
+                    closure_result: result,
                 })
             }
         }
@@ -379,14 +381,14 @@ impl Frontend {
         }
     }
 
-    pub fn change<F, E>(
+    pub fn change<F, O, E>(
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<Option<UncompressedChange>, E>
+    ) -> Result<(O, Option<UncompressedChange>), E>
     where
         E: Error,
-        F: FnOnce(&mut dyn MutableDocument) -> Result<(), E>,
+        F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
         let start_op = self.state.as_ref().unwrap().max_op() + 1;
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
@@ -410,9 +412,9 @@ impl Frontend {
                 operations: ops,
                 extra_bytes: Vec::new(),
             };
-            Ok(Some(change))
+            Ok((change_result.closure_result, Some(change)))
         } else {
-            Ok(None)
+            Ok((change_result.closure_result, None))
         }
     }
 
@@ -466,8 +468,9 @@ impl Frontend {
     }
 }
 
-struct OptimisticChangeResult {
+struct OptimisticChangeResult<O> {
     ops: Option<Vec<Op>>,
     new_state: FrontendState,
     deps: Vec<ChangeHash>,
+    closure_result: O,
 }
