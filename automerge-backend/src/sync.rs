@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -11,13 +12,21 @@ use crate::{
     Backend, Change,
 };
 
+extern crate web_sys;
+#[allow(unused_macros)]
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+          web_sys::console::log_1(&format!( $( $t )* ).into());
+    };
+}
+
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
 // Bloom filter are encoded in the wire format.
 const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,
@@ -90,12 +99,17 @@ impl BloomFilter {
     }
 }
 
+fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> u32 {
+    let f = ((num_entries as f64 * num_bits_per_entry as f64) / 8f64).ceil();
+    f as u32
+}
+
 impl From<Vec<ChangeHash>> for BloomFilter {
     fn from(hashes: Vec<ChangeHash>) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
-        let bits = Vec::with_capacity(((num_entries * num_bits_per_entry) / 8) as usize);
+        let bits = vec![0].repeat(bits_capacity(num_entries, num_bits_per_entry) as usize);
         let mut filter = Self {
             num_entries,
             num_bits_per_entry,
@@ -124,7 +138,7 @@ impl From<Vec<u8>> for BloomFilter {
             let num_bits_per_entry = decoder.read().unwrap();
             let num_probes = decoder.read().unwrap();
             let bits = decoder
-                .read_bytes(((num_entries * num_bits_per_entry) / 8) as usize)
+                .read_bytes((bits_capacity(num_entries, num_bits_per_entry)) as usize)
                 .unwrap();
             Self {
                 num_entries,
@@ -145,7 +159,7 @@ impl Backend {
             .collect::<Vec<_>>();
         SyncHave {
             last_sync: last_sync.to_vec(),
-            bloom: BloomFilter::from(hashes),
+            bloom: BloomFilter::from(hashes).into_bytes(),
         }
     }
 
@@ -162,7 +176,7 @@ impl Backend {
                 for hash in &h.last_sync {
                     last_sync_hashes.insert(*hash);
                 }
-                bloom_filters.push(&h.bloom)
+                bloom_filters.push(BloomFilter::from(h.bloom.clone()))
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 

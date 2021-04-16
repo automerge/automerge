@@ -31,6 +31,8 @@ mod sync;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
+pub use protocol::PeerState;
+pub use protocol::SyncMessage;
 
 #[cfg(test)]
 mod tests {

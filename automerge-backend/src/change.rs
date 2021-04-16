@@ -13,6 +13,7 @@ use flate2::{
     Compression,
 };
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -178,7 +179,7 @@ fn encode_chunk(
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 enum ChangeBytes {
     Compressed {
         compressed: Vec<u8>,
@@ -203,7 +204,7 @@ impl ChangeBytes {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Change {
     bytes: ChangeBytes,
     pub hash: amp::ChangeHash,
@@ -269,6 +270,11 @@ impl Change {
 
     pub fn raw_bytes(&self) -> &[u8] {
         self.bytes.raw()
+    }
+
+    pub fn checksum(&self) -> u32 {
+        let bytes = self.bytes.uncompressed();
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
     }
 }
 
