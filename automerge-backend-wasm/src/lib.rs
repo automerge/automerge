@@ -209,9 +209,10 @@ pub fn generate_sync_message(input: Object, peer_state: JsValue) -> Result<JsVal
         let result = Array::new();
         let p = rust_to_js(peer_state).unwrap();
         result.push(&p);
-        let message_bytes = &message.map(|m| m.encode()).unwrap_or_default()[..];
-        let m: Uint8Array = message_bytes.into();
-        result.push(&m);
+        let message = message
+            .map(|m| Uint8Array::from(m.encode().as_slice()).into())
+            .unwrap_or(JsValue::NULL);
+        result.push(&message);
         Ok(result.into())
     })
 }
