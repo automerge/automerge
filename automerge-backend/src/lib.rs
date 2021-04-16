@@ -25,14 +25,13 @@ mod op_handle;
 mod op_set;
 mod ordered_set;
 mod pending_diff;
-mod protocol;
 mod sync;
 
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
-pub use protocol::PeerState;
-pub use protocol::SyncMessage;
+pub use sync::PeerState;
+pub use sync::SyncMessage;
 
 #[cfg(test)]
 mod tests {
