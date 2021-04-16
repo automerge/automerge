@@ -174,7 +174,9 @@ pub fn get_all_changes(input: Object) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = getMissingDeps)]
 pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
-    get_input(input, |state| rust_to_js(state.0.get_missing_deps()))
+    get_input(input, |state| {
+        rust_to_js(state.0.get_missing_deps(&[], &[]))
+    })
 }
 
 fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
@@ -193,6 +195,20 @@ fn export_changes(changes: Vec<&Change>) -> Array {
         result.push(bytes.as_ref());
     }
     result
+}
+
+#[wasm_bindgen(js_name = generateSyncMessage)]
+pub fn generate_sync_message(input: Object, peer_state: JsValue) -> Result<JsValue, JsValue> {
+    get_input(input, |state| {
+        let peer_state: PeerState = js_to_rust(&peer_state).unwrap();
+        let (peer_state, message) = state.0.generate_sync_message(peer_state);
+        let result = Array::new();
+        let p = rust_to_js(peer_state).unwrap();
+        result.push(&p);
+        let m = rust_to_js(message).unwrap();
+        result.push(&m);
+        Ok(result)
+    })
 }
 
 fn get_state(input: &Object) -> Result<State, JsValue> {

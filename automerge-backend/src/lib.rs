@@ -25,6 +25,8 @@ mod op_handle;
 mod op_set;
 mod ordered_set;
 mod pending_diff;
+mod protocol;
+mod sync;
 
 pub use backend::Backend;
 pub use change::Change;

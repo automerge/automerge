@@ -381,7 +381,7 @@ pub unsafe extern "C" fn automerge_get_changes(
 /// This must me called with a valid backend pointer
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_missing_deps(backend: *mut Backend) -> isize {
-    let missing = (*backend).get_missing_deps();
+    let missing = (*backend).get_missing_deps(&[], &[]);
     (*backend).generate_json(Ok(missing))
 }
 

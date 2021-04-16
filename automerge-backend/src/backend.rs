@@ -6,6 +6,7 @@ use crate::op_handle::OpHandle;
 use crate::op_set::OpSet;
 use crate::pending_diff::PendingDiff;
 use crate::Change;
+use amp::ChangeHash;
 use automerge_protocol as amp;
 use core::cmp::max;
 use std::collections::{HashMap, HashSet};
@@ -262,12 +263,34 @@ impl Backend {
         Ok(backend)
     }
 
-    pub fn get_missing_deps(&self) -> Vec<amp::ChangeHash> {
-        let in_queue: Vec<_> = self.queue.iter().map(|change| &change.hash).collect();
-        self.queue
+    pub fn get_missing_deps(
+        &self,
+        changes: &[Change],
+        heads: &[ChangeHash],
+    ) -> Vec<amp::ChangeHash> {
+        let in_queue: Vec<_> = self
+            .queue
             .iter()
-            .flat_map(|change| change.deps.clone())
-            .filter(|h| !in_queue.contains(&h))
-            .collect()
+            .chain(changes.iter())
+            .map(|change| change.hash)
+            .collect();
+        let mut missing = HashSet::new();
+        for head in heads {
+            if self.hashes.contains_key(&head) {
+                missing.insert(head.clone());
+            }
+        }
+        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
+            if !in_queue.contains(&head) {
+                missing.insert(head);
+            }
+        }
+        let mut missing = missing.into_iter().collect::<Vec<_>>();
+        missing.sort();
+        missing
+    }
+
+    pub fn get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
+        self.hashes.get(hash)
     }
 }
