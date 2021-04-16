@@ -1,7 +1,7 @@
 //#![feature(set_stdio)]
 
 use automerge_backend::{AutomergeError, Backend, Change};
-use automerge_backend::{PeerState, SyncMessage};
+use automerge_backend::{SyncMessage, SyncState};
 use automerge_protocol::{ChangeHash, UncompressedChange};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
@@ -201,7 +201,7 @@ fn export_changes(changes: Vec<&Change>) -> Array {
 #[wasm_bindgen(js_name = generateSyncMessage)]
 pub fn generate_sync_message(input: Object, peer_state: JsValue) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let peer_state: PeerState = js_to_rust::<Option<PeerState>>(&peer_state)
+        let peer_state: SyncState = js_to_rust::<Option<SyncState>>(&peer_state)
             .unwrap_or_default()
             .unwrap_or_default();
 
@@ -225,7 +225,7 @@ pub fn receive_sync_message(
     get_mut_input(input, |state| {
         let binary_message = Uint8Array::from(message.clone()).to_vec();
         let message = SyncMessage::decode(binary_message).unwrap();
-        let peer_state: PeerState = js_to_rust::<Option<PeerState>>(&peer_state)
+        let peer_state: SyncState = js_to_rust::<Option<SyncState>>(&peer_state)
             .unwrap_or_default()
             .unwrap_or_default();
 

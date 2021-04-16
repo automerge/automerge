@@ -31,7 +31,7 @@ const BITS_PER_ENTRY: u32 = 10;
 const NUM_PROBES: u32 = 7;
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
-const PEER_STATE_TYPE: u8 = 0x43; // first byte of an encoded peer state, for identification
+const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct BloomFilter {
@@ -160,17 +160,17 @@ impl From<Vec<u8>> for BloomFilter {
 impl Backend {
     pub fn generate_sync_message(
         &self,
-        mut peer_state: PeerState,
-    ) -> (PeerState, Option<SyncMessage>) {
+        mut sync_state: SyncState,
+    ) -> (SyncState, Option<SyncMessage>) {
         let our_heads = self.get_heads();
 
-        let have = if peer_state.our_need.is_empty() {
-            vec![self.make_bloom_filter(&peer_state.shared_heads)]
+        let have = if sync_state.our_need.is_empty() {
+            vec![self.make_bloom_filter(&sync_state.shared_heads)]
         } else {
             Vec::new()
         };
 
-        if let Some(ref their_have) = peer_state.have {
+        if let Some(ref their_have) = sync_state.have {
             if let Some(first_have) = their_have.first().as_ref() {
                 if !first_have
                     .last_sync
@@ -186,26 +186,26 @@ impl Backend {
                         }],
                         changes: Vec::new(),
                     };
-                    return (peer_state, Some(reset_msg));
+                    return (sync_state, Some(reset_msg));
                 }
             }
         }
 
         let mut changes_to_send = if let (Some(their_have), Some(their_need)) =
-            (peer_state.have.as_ref(), peer_state.their_need.as_ref())
+            (sync_state.have.as_ref(), sync_state.their_need.as_ref())
         {
             self.get_changes_to_send(their_have, their_need)
         } else {
             Vec::new()
         };
 
-        let heads_unchanged = if let Some(last_sent_heads) = peer_state.last_sent_heads.as_ref() {
+        let heads_unchanged = if let Some(last_sent_heads) = sync_state.last_sent_heads.as_ref() {
             last_sent_heads == &our_heads
         } else {
             false
         };
 
-        let heads_equal = if let Some(their_heads) = peer_state.their_heads.as_ref() {
+        let heads_equal = if let Some(their_heads) = sync_state.their_heads.as_ref() {
             their_heads == &our_heads
         } else {
             false
@@ -218,64 +218,64 @@ impl Backend {
                     heads_unchanged,
                     heads_equal,
                     &changes_to_send,
-                    &peer_state.our_need
+                    &sync_state.our_need
                 )
             );
         }
         if heads_unchanged
             && heads_equal
             && changes_to_send.is_empty()
-            && peer_state.our_need.is_empty()
+            && sync_state.our_need.is_empty()
         {
-            return (peer_state, None);
+            return (sync_state, None);
         }
 
-        if !peer_state.sent_changes.is_empty() && !changes_to_send.is_empty() {
-            changes_to_send = deduplicate_changes(&peer_state.sent_changes, changes_to_send)
+        if !sync_state.sent_changes.is_empty() && !changes_to_send.is_empty() {
+            changes_to_send = deduplicate_changes(&sync_state.sent_changes, changes_to_send)
         }
 
         let sync_message = SyncMessage {
             heads: our_heads.clone(),
             have,
-            need: peer_state.our_need.clone(),
+            need: sync_state.our_need.clone(),
             changes: changes_to_send.clone(),
         };
 
-        peer_state.last_sent_heads = Some(our_heads);
-        peer_state.sent_changes.extend(changes_to_send);
+        sync_state.last_sent_heads = Some(our_heads);
+        sync_state.sent_changes.extend(changes_to_send);
 
-        (peer_state, Some(sync_message))
+        (sync_state, Some(sync_message))
     }
 
     pub fn receive_sync_message(
         &mut self,
         message: SyncMessage,
-        mut old_peer_state: PeerState,
-    ) -> (PeerState, Option<Patch>) {
+        mut old_sync_state: SyncState,
+    ) -> (SyncState, Option<Patch>) {
         let mut patch = None;
         unsafe { log!("{:?}", message) };
 
         let before_heads = self.get_heads();
 
         if !message.changes.is_empty() {
-            old_peer_state
+            old_sync_state
                 .unapplied_changes
                 .extend(message.changes.clone());
 
-            let our_need = self.get_missing_deps(&old_peer_state.unapplied_changes, &message.heads);
+            let our_need = self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
             unsafe { log!("our_need {:?}", our_need) };
 
             if our_need.iter().all(|hash| message.heads.contains(hash)) {
                 patch = Some(
-                    self.apply_changes(old_peer_state.unapplied_changes.to_vec())
+                    self.apply_changes(old_sync_state.unapplied_changes.to_vec())
                         .unwrap(),
                 );
-                old_peer_state.unapplied_changes = Vec::new();
-                old_peer_state.shared_heads =
-                    advance_heads(before_heads, self.get_heads(), old_peer_state.shared_heads);
+                old_sync_state.unapplied_changes = Vec::new();
+                old_sync_state.shared_heads =
+                    advance_heads(before_heads, self.get_heads(), old_sync_state.shared_heads);
             }
         } else if message.heads == before_heads {
-            old_peer_state.last_sent_heads = Some(message.heads.clone())
+            old_sync_state.last_sent_heads = Some(message.heads.clone())
         }
 
         if message.heads.iter().all(|head| {
@@ -283,20 +283,20 @@ impl Backend {
 
             res.is_some()
         }) {
-            old_peer_state.shared_heads = message.heads.clone()
+            old_sync_state.shared_heads = message.heads.clone()
         }
 
-        let new_peer_state = PeerState {
-            shared_heads: old_peer_state.shared_heads,
-            last_sent_heads: old_peer_state.last_sent_heads,
+        let new_sync_state = SyncState {
+            shared_heads: old_sync_state.shared_heads,
+            last_sent_heads: old_sync_state.last_sent_heads,
             have: Some(message.have),
             their_heads: Some(message.heads),
             their_need: Some(message.need),
-            our_need: old_peer_state.our_need,
-            unapplied_changes: old_peer_state.unapplied_changes,
-            sent_changes: old_peer_state.sent_changes,
+            our_need: old_sync_state.our_need,
+            unapplied_changes: old_sync_state.unapplied_changes,
+            sent_changes: old_sync_state.sent_changes,
         };
-        (new_peer_state, patch)
+        (new_sync_state, patch)
     }
 
     pub fn make_bloom_filter(&self, last_sync: &[ChangeHash]) -> SyncHave {
@@ -381,7 +381,7 @@ impl Backend {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PeerState {
+pub struct SyncState {
     shared_heads: Vec<ChangeHash>,
     last_sent_heads: Option<Vec<ChangeHash>>,
     their_heads: Option<Vec<ChangeHash>>,
@@ -392,9 +392,9 @@ pub struct PeerState {
     sent_changes: Vec<Change>,
 }
 
-impl PeerState {
+impl SyncState {
     pub fn encode(self) -> Vec<u8> {
-        let mut buf = vec![PEER_STATE_TYPE];
+        let mut buf = vec![SYNC_STATE_TYPE];
         encode_hashes(&mut buf, &self.shared_heads);
         buf
     }
@@ -403,7 +403,7 @@ impl PeerState {
         let mut decoder = Decoder::new(Cow::Owned(bytes));
 
         let record_type = decoder.read::<u8>()?;
-        if record_type != PEER_STATE_TYPE {
+        if record_type != SYNC_STATE_TYPE {
             return Err(AutomergeError::EncodingError);
         }
 
@@ -421,7 +421,7 @@ impl PeerState {
     }
 }
 
-impl Default for PeerState {
+impl Default for SyncState {
     fn default() -> Self {
         Self {
             shared_heads: Vec::new(),
