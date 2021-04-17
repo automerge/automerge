@@ -79,8 +79,7 @@ impl BloomFilter {
 
     fn add_hash(&mut self, hash: ChangeHash) {
         for probe in self.get_probes(hash) {
-            let probe = probe as usize;
-            self.set_bit(probe)
+            self.set_bit(probe as usize)
         }
     }
 
@@ -101,8 +100,7 @@ impl BloomFilter {
             false
         } else {
             for probe in self.get_probes(hash) {
-                let probe = probe as usize;
-                if let Some(bit) = self.get_bit(probe) {
+                if let Some(bit) = self.get_bit(probe as usize) {
                     if bit == 0 {
                         return false;
                     }
