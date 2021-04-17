@@ -33,7 +33,7 @@ const NUM_PROBES: u32 = 7;
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,
@@ -42,16 +42,16 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    pub fn into_bytes(self) -> Vec<u8> {
+    pub fn into_bytes(self) -> Result<Vec<u8>, AutomergeError> {
         if self.num_entries == 0 {
-            Vec::new()
+            Ok(Vec::new())
         } else {
             let mut buf = Vec::new();
-            self.num_entries.encode(&mut buf).unwrap();
-            self.num_bits_per_entry.encode(&mut buf).unwrap();
-            self.num_probes.encode(&mut buf).unwrap();
+            self.num_entries.encode(&mut buf)?;
+            self.num_bits_per_entry.encode(&mut buf)?;
+            self.num_probes.encode(&mut buf)?;
             buf.extend(self.bits);
-            buf
+            Ok(buf)
         }
     }
 
@@ -87,8 +87,20 @@ impl BloomFilter {
     fn add_hash(&mut self, hash: ChangeHash) {
         for probe in self.get_probes(hash) {
             let probe = probe as usize;
-            self.bits[probe >> 3] |= 1 << (probe & 7);
+            self.set_bit(probe)
         }
+    }
+
+    fn set_bit(&mut self, probe: usize) {
+        if let Some(byte) = self.bits.get_mut(probe >> 3) {
+            *byte |= 1 << (probe & 7)
+        }
+    }
+
+    fn get_bit(&self, probe: usize) -> Option<u8> {
+        self.bits
+            .get(probe >> 3)
+            .map(|byte| byte & (1 << (probe & 7)))
     }
 
     fn contains_hash(&self, hash: ChangeHash) -> bool {
@@ -97,8 +109,10 @@ impl BloomFilter {
         } else {
             for probe in self.get_probes(hash) {
                 let probe = probe as usize;
-                if (self.bits[probe >> 3] & (1 << (probe & 7))) == 0 {
-                    return false;
+                if let Some(bit) = self.get_bit(probe) {
+                    if bit == 0 {
+                        return false;
+                    }
                 }
             }
             true
@@ -106,9 +120,9 @@ impl BloomFilter {
     }
 }
 
-fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> u32 {
+fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
     let f = ((num_entries as f64 * num_bits_per_entry as f64) / 8f64).ceil();
-    f as u32
+    f as usize
 }
 
 impl From<Vec<ChangeHash>> for BloomFilter {
@@ -130,29 +144,25 @@ impl From<Vec<ChangeHash>> for BloomFilter {
     }
 }
 
-impl From<Vec<u8>> for BloomFilter {
-    fn from(bytes: Vec<u8>) -> Self {
+impl TryFrom<Vec<u8>> for BloomFilter {
+    type Error = AutomergeError;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         if bytes.is_empty() {
-            Self {
-                num_entries: 0,
-                num_bits_per_entry: 0,
-                num_probes: 0,
-                bits: bytes,
-            }
+            Ok(Self::default())
         } else {
             let mut decoder = Decoder::new(Cow::Owned(bytes));
-            let num_entries = decoder.read().unwrap();
-            let num_bits_per_entry = decoder.read().unwrap();
-            let num_probes = decoder.read().unwrap();
-            let bits = decoder
-                .read_bytes((bits_capacity(num_entries, num_bits_per_entry)) as usize)
-                .unwrap();
-            Self {
+            let num_entries = decoder.read()?;
+            let num_bits_per_entry = decoder.read()?;
+            let num_probes = decoder.read()?;
+            let bits =
+                decoder.read_bytes((bits_capacity(num_entries, num_bits_per_entry)) as usize)?;
+            Ok(Self {
                 num_entries,
                 num_bits_per_entry,
                 num_probes,
                 bits: bits.to_vec(),
-            }
+            })
         }
     }
 }
@@ -182,7 +192,7 @@ impl Backend {
                         need: Vec::new(),
                         have: vec![SyncHave {
                             last_sync: Vec::new(),
-                            bloom: Vec::new(),
+                            bloom: BloomFilter::default(),
                         }],
                         changes: Vec::new(),
                     };
@@ -211,17 +221,6 @@ impl Backend {
             false
         };
 
-        unsafe {
-            log!(
-                "{:?}",
-                (
-                    heads_unchanged,
-                    heads_equal,
-                    &changes_to_send,
-                    &sync_state.our_need
-                )
-            );
-        }
         if heads_unchanged
             && heads_equal
             && changes_to_send.is_empty()
@@ -251,9 +250,8 @@ impl Backend {
         &mut self,
         message: SyncMessage,
         mut old_sync_state: SyncState,
-    ) -> (SyncState, Option<Patch>) {
+    ) -> Result<(SyncState, Option<Patch>), AutomergeError> {
         let mut patch = None;
-        unsafe { log!("{:?}", message) };
 
         let before_heads = self.get_heads();
 
@@ -263,13 +261,9 @@ impl Backend {
                 .extend(message.changes.clone());
 
             let our_need = self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
-            unsafe { log!("our_need {:?}", our_need) };
 
             if our_need.iter().all(|hash| message.heads.contains(hash)) {
-                patch = Some(
-                    self.apply_changes(old_sync_state.unapplied_changes.to_vec())
-                        .unwrap(),
-                );
+                patch = Some(self.apply_changes(old_sync_state.unapplied_changes.to_vec())?);
                 old_sync_state.unapplied_changes = Vec::new();
                 old_sync_state.shared_heads =
                     advance_heads(before_heads, self.get_heads(), old_sync_state.shared_heads);
@@ -296,7 +290,7 @@ impl Backend {
             unapplied_changes: old_sync_state.unapplied_changes,
             sent_changes: old_sync_state.sent_changes,
         };
-        (new_sync_state, patch)
+        Ok((new_sync_state, patch))
     }
 
     pub fn make_bloom_filter(&self, last_sync: &[ChangeHash]) -> SyncHave {
@@ -307,14 +301,14 @@ impl Backend {
             .collect::<Vec<_>>();
         SyncHave {
             last_sync: last_sync.to_vec(),
-            bloom: BloomFilter::from(hashes).into_bytes(),
+            bloom: BloomFilter::from(hashes),
         }
     }
 
     pub fn get_changes_to_send(&self, have: &[SyncHave], need: &[ChangeHash]) -> Vec<Change> {
         if have.is_empty() {
             need.iter()
-                .map(|hash| self.get_change_by_hash(hash).unwrap().clone())
+                .filter_map(|hash| self.get_change_by_hash(hash).cloned())
                 .collect()
         } else {
             let mut last_sync_hashes = HashSet::new();
@@ -324,7 +318,7 @@ impl Backend {
                 for hash in &h.last_sync {
                     last_sync_hashes.insert(*hash);
                 }
-                bloom_filters.push(BloomFilter::from(h.bloom.clone()))
+                bloom_filters.push(h.bloom.clone())
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
@@ -393,10 +387,10 @@ pub struct SyncState {
 }
 
 impl SyncState {
-    pub fn encode(self) -> Vec<u8> {
+    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
         let mut buf = vec![SYNC_STATE_TYPE];
-        encode_hashes(&mut buf, &self.shared_heads);
-        buf
+        encode_hashes(&mut buf, &self.shared_heads)?;
+        Ok(buf)
     }
 
     pub fn decode(bytes: Vec<u8>) -> Result<Self, AutomergeError> {
@@ -407,7 +401,7 @@ impl SyncState {
             return Err(AutomergeError::EncodingError);
         }
 
-        let shared_heads = decode_hashes(&mut decoder);
+        let shared_heads = decode_hashes(&mut decoder)?;
         Ok(Self {
             shared_heads,
             last_sent_heads: Some(Vec::new()),
@@ -445,52 +439,49 @@ pub struct SyncMessage {
 }
 
 impl SyncMessage {
-    pub fn encode(self) -> Vec<u8> {
+    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
-        encode_hashes(&mut buf, &self.heads);
-        encode_hashes(&mut buf, &self.need);
-        (self.have.len() as u32).encode(&mut buf).unwrap();
+        encode_hashes(&mut buf, &self.heads)?;
+        encode_hashes(&mut buf, &self.need)?;
+        (self.have.len() as u32).encode(&mut buf)?;
         for have in self.have {
-            encode_hashes(&mut buf, &have.last_sync);
-            have.bloom.encode(&mut buf).unwrap();
+            encode_hashes(&mut buf, &have.last_sync)?;
+            have.bloom.into_bytes()?.encode(&mut buf)?;
         }
 
-        (self.changes.len() as u32).encode(&mut buf).unwrap();
+        (self.changes.len() as u32).encode(&mut buf)?;
         for change in self.changes {
-            change.raw_bytes().encode(&mut buf).unwrap();
+            change.raw_bytes().encode(&mut buf)?;
         }
 
-        buf
+        Ok(buf)
     }
 
     pub fn decode(bytes: Vec<u8>) -> Result<SyncMessage, AutomergeError> {
         let mut decoder = Decoder::new(Cow::Owned(bytes));
 
-        let message_type = decoder.read::<u8>().unwrap();
+        let message_type = decoder.read::<u8>()?;
         if message_type != MESSAGE_TYPE_SYNC {
             return Err(AutomergeError::EncodingError);
         }
 
-        let heads = decode_hashes(&mut decoder);
-        let need = decode_hashes(&mut decoder);
-        let have_count = decoder.read::<u32>().unwrap();
+        let heads = decode_hashes(&mut decoder)?;
+        let need = decode_hashes(&mut decoder)?;
+        let have_count = decoder.read::<u32>()?;
         let mut have = Vec::new();
         for _ in 0..have_count {
-            let last_sync = decode_hashes(&mut decoder);
-            let bloom_bytes: Vec<u8> = decoder.read().unwrap();
-            let bloom = BloomFilter::from(bloom_bytes);
-            have.push(SyncHave {
-                last_sync,
-                bloom: bloom.into_bytes(),
-            });
+            let last_sync = decode_hashes(&mut decoder)?;
+            let bloom_bytes: Vec<u8> = decoder.read()?;
+            let bloom = BloomFilter::try_from(bloom_bytes)?;
+            have.push(SyncHave { last_sync, bloom });
         }
 
-        let change_count = decoder.read::<u32>().unwrap();
+        let change_count = decoder.read::<u32>()?;
         let mut changes = Vec::new();
         for _ in 0..change_count {
-            let change = decoder.read().unwrap();
-            changes.push(Change::from_bytes(change).unwrap());
+            let change = decoder.read()?;
+            changes.push(Change::from_bytes(change)?);
         }
 
         Ok(Self {
@@ -502,31 +493,36 @@ impl SyncMessage {
     }
 }
 
-fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) {
-    (hashes.len() as u32).encode(buf).unwrap();
+fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), AutomergeError> {
+    (hashes.len() as u32).encode(buf)?;
     // debug_assert!(hashes.is_sorted());
     for hash in hashes {
         let bytes = &hash.0[..];
         buf.extend(bytes);
     }
+
+    Ok(())
 }
 
-fn decode_hashes(decoder: &mut Decoder) -> Vec<ChangeHash> {
-    let length = decoder.read::<u32>().unwrap();
+fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeError> {
+    let length = decoder.read::<u32>()?;
     let mut hashes = Vec::new();
 
     const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
     for _ in 0..length {
-        hashes.push(ChangeHash::try_from(decoder.read_bytes(HASH_SIZE).unwrap()).unwrap())
+        let hash_bytes = decoder.read_bytes(HASH_SIZE)?;
+        let hash = ChangeHash::try_from(hash_bytes)
+            .map_err(|source| AutomergeError::ChangeBadFormat { source })?;
+        hashes.push(hash);
     }
 
-    hashes
+    Ok(hashes)
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SyncHave {
     pub last_sync: Vec<ChangeHash>,
-    pub bloom: Vec<u8>,
+    pub bloom: BloomFilter,
 }
 
 fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) -> Vec<Change> {
