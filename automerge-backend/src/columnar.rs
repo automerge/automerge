@@ -1,15 +1,21 @@
-use crate::encoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder};
-use crate::encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder};
-use automerge_protocol as amp;
 use core::fmt::Debug;
+use std::{
+    borrow::Cow,
+    cmp::Ordering,
+    collections::HashMap,
+    io,
+    io::{Read, Write},
+    ops::Range,
+    str,
+};
+
+use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::io;
-use std::io::{Read, Write};
-use std::ops::Range;
-use std::str;
+
+use crate::encoding::{
+    BooleanDecoder, BooleanEncoder, ColData, Decodable, Decoder, DeltaDecoder, DeltaEncoder,
+    Encodable, RleDecoder, RleEncoder,
+};
 
 impl Encodable for Action {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {

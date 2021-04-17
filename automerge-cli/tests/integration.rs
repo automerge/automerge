@@ -1,5 +1,6 @@
-use duct::cmd;
 use std::env;
+
+use duct::cmd;
 
 #[test]
 fn import_stdin() {

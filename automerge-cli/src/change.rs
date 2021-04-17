@@ -1,8 +1,8 @@
+use std::iter::FromIterator;
+
 use automerge_backend as amb;
 use automerge_frontend as amf;
-use combine::parser::char as charparser;
-use combine::{EasyParser, ParseError, Parser};
-use std::iter::FromIterator;
+use combine::{parser::char as charparser, EasyParser, ParseError, Parser};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -209,8 +209,9 @@ pub fn change(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use maplit::hashmap;
+
+    use super::*;
 
     #[test]
     fn test_parse_change_script() {

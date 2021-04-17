@@ -6,20 +6,23 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use crate::actor_map::ActorMap;
-use crate::error::AutomergeError;
-use crate::internal::{InternalOpType, ObjectId};
-use crate::object_store::ObjState;
-use crate::op_handle::OpHandle;
-use crate::ordered_set::OrderedSet;
-use crate::pending_diff::PendingDiff;
-use crate::Change;
-use automerge_protocol as amp;
 use core::cmp::max;
+use std::collections::{HashMap, HashSet};
+
+use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use tracing::instrument;
+
+use crate::{
+    actor_map::ActorMap,
+    error::AutomergeError,
+    internal::{InternalOpType, ObjectId},
+    object_store::ObjState,
+    op_handle::OpHandle,
+    ordered_set::OrderedSet,
+    pending_diff::PendingDiff,
+    Change,
+};
 
 /// The OpSet manages an ObjectStore, and a queue of incoming changes in order
 /// to ensure that operations are delivered to the object store in causal order

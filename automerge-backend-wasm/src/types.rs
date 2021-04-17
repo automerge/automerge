@@ -1,9 +1,8 @@
-use automerge_backend::{AutomergeError, Change};
-use automerge_backend::{BloomFilter, SyncHave, SyncMessage};
-use automerge_protocol::ChangeHash;
-use serde::Deserialize;
-use serde::Serialize;
 use std::convert::TryFrom;
+
+use automerge_backend::{AutomergeError, BloomFilter, Change, SyncHave, SyncMessage};
+use automerge_protocol::ChangeHash;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct BinaryChange(#[serde(with = "serde_bytes")] pub Vec<u8>);

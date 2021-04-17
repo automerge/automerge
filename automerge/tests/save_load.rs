@@ -1,10 +1,6 @@
-use automerge::Backend;
-use automerge::Frontend;
-use automerge::LocalChange;
-use automerge::MapType;
-use automerge::Path;
-use automerge::Value;
-use automerge::{InvalidChangeRequest, Primitive};
+use automerge::{
+    Backend, Frontend, InvalidChangeRequest, LocalChange, MapType, Path, Primitive, Value,
+};
 use automerge_protocol::{
     ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
     UncompressedChange,

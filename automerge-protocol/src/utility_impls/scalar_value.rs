@@ -1,5 +1,6 @@
-use crate::ScalarValue;
 use std::fmt;
+
+use crate::ScalarValue;
 
 impl From<&str> for ScalarValue {
     fn from(s: &str) -> Self {

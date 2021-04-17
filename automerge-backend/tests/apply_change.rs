@@ -1,4 +1,6 @@
 extern crate automerge_backend;
+use std::{convert::TryInto, str::FromStr};
+
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
@@ -6,8 +8,6 @@ use automerge_protocol::{
     Op, Patch, ScalarValue, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
-use std::convert::TryInto;
-use std::str::FromStr;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {

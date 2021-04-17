@@ -1,14 +1,13 @@
 extern crate automerge_backend;
-use automerge_backend::Backend;
-use automerge_backend::Change;
+use std::{collections::HashSet, convert::TryInto};
+
+use automerge_backend::{Backend, Change};
 use automerge_protocol as protocol;
 use automerge_protocol::{
     ActorId, ChangeHash, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjType, ObjectId, Op,
     OpType, Patch, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
-use std::collections::HashSet;
-use std::convert::TryInto;
 
 #[test]
 fn test_apply_local_change() {

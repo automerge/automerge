@@ -1,6 +1,8 @@
-use crate::{ObjectId, OpId};
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
+
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::{ObjectId, OpId};
 
 impl Serialize for ObjectId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

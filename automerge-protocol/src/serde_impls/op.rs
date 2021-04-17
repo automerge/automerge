@@ -1,11 +1,12 @@
+use serde::{
+    de::{Error, MapAccess, Unexpected, Visitor},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
+};
+
 use super::read_field;
 use crate::{
     DataType, Key, MapType, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
-};
-use serde::ser::SerializeStruct;
-use serde::{
-    de::{Error, MapAccess, Unexpected, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 
 impl Serialize for Op {
@@ -185,8 +186,9 @@ impl<'de> Deserialize<'de> for Op {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::str::FromStr;
+
+    use super::*;
 
     #[test]
     fn test_deserialize_action() {

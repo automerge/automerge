@@ -1,8 +1,7 @@
+use std::{fs::File, path::PathBuf, str::FromStr};
+
 use anyhow::{anyhow, Result};
 use clap::Clap;
-use std::fs::File;
-use std::path::PathBuf;
-use std::str::FromStr;
 
 mod change;
 mod examine;

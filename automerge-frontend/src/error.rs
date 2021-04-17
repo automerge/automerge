@@ -1,10 +1,10 @@
-use crate::value::Value;
-use crate::Path;
+use std::{error::Error, fmt};
+
 use automerge_protocol as amp;
 use automerge_protocol::ObjectId;
-use std::error::Error;
-use std::fmt;
 use thiserror::Error;
+
+use crate::{value::Value, Path};
 
 #[derive(Debug, PartialEq)]
 pub enum AutomergeFrontendError {

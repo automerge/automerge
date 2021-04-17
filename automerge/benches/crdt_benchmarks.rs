@@ -1,9 +1,8 @@
+use std::{collections::HashMap, convert::TryInto, default::Default};
+
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::default::Default;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub fn b1_1(c: &mut Criterion) {

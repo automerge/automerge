@@ -1,6 +1,7 @@
+use std::{borrow::Borrow, collections::HashMap};
+
 use automerge_protocol as amp;
 use serde::Serialize;
-use std::{borrow::Borrow, collections::HashMap};
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Conflicts(HashMap<amp::OpId, Value>);

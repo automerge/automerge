@@ -1,6 +1,8 @@
-use super::{Cursors, StateTreeComposite};
-use automerge_protocol as amp;
 use std::ops::{Add, AddAssign};
+
+use automerge_protocol as amp;
+
+use super::{Cursors, StateTreeComposite};
 
 #[derive(Clone)]
 pub struct StateTreeChange {

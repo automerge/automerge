@@ -8,6 +8,8 @@ mod path;
 mod state_tree;
 mod value;
 
+use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug};
+
 pub use error::{
     AutomergeFrontendError, InvalidChangeRequest, InvalidInitialStateError, InvalidPatch,
 };
@@ -15,9 +17,6 @@ pub use mutation::{LocalChange, MutableDocument};
 pub use path::Path;
 use path::PathElement;
 use state_tree::ResolvedPath;
-use std::convert::TryFrom;
-use std::error::Error;
-use std::{collections::HashMap, fmt::Debug};
 pub use value::{Conflicts, Cursor, Primitive, Value};
 
 /// Tracks the possible states of the frontend

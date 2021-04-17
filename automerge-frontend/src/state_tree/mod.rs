@@ -1,9 +1,8 @@
-use crate::error;
-use crate::{Cursor, Primitive, Value};
-use crate::{Path, PathElement};
+use std::{collections::HashMap, convert::TryInto};
+
 use automerge_protocol as amp;
-use std::collections::HashMap;
-use std::convert::TryInto;
+
+use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 
 mod diff_application_result;
 mod diffable_sequence;

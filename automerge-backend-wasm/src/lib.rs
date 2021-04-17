@@ -2,16 +2,17 @@
 
 mod types;
 
-use automerge_backend::{AutomergeError, Backend, Change};
-use automerge_backend::{SyncMessage, SyncState};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt::Display,
+};
+
+use automerge_backend::{AutomergeError, Backend, Change, SyncMessage, SyncState};
 use automerge_protocol::{ChangeHash, UncompressedChange};
 use js_sys::Array;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::{collections::HashMap, convert::TryFrom};
-use std::{collections::HashSet, fmt::Display};
-use types::RawSyncMessage;
-use types::{BinaryChange, BinaryDocument, BinarySyncMessage, BinarySyncState};
+use serde::{de::DeserializeOwned, Serialize};
+use types::{BinaryChange, BinaryDocument, BinarySyncMessage, BinarySyncState, RawSyncMessage};
 use wasm_bindgen::prelude::*;
 
 extern crate web_sys;

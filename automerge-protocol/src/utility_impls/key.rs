@@ -1,5 +1,6 @@
-use crate::{ElementId, Key, OpId};
 use std::cmp::{Ordering, PartialOrd};
+
+use crate::{ElementId, Key, OpId};
 
 impl PartialOrd for Key {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

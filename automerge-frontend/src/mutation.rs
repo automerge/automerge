@@ -1,9 +1,12 @@
-use crate::error::InvalidChangeRequest;
-use crate::state_tree::{LocalOperationResult, SetOrInsertPayload, StateTree, Target};
-use crate::value::{Cursor, Primitive, Value};
-use crate::{Path, PathElement};
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
+
+use crate::{
+    error::InvalidChangeRequest,
+    state_tree::{LocalOperationResult, SetOrInsertPayload, StateTree, Target},
+    value::{Cursor, Primitive, Value},
+    Path, PathElement,
+};
 
 pub trait MutableDocument {
     fn value_at_path(&self, path: &Path) -> Option<Value>;

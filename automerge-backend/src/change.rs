@@ -1,26 +1,29 @@
 //use crate::columnar;
-use crate::columnar::{
-    ChangeEncoder, ChangeIterator, ColumnEncoder, DocChange, DocOp, DocOpEncoder, DocOpIterator,
-    OperationIterator, COLUMN_TYPE_DEFLATE,
-};
-use crate::encoding::DEFLATE_MIN_SIZE;
-use crate::encoding::{Decodable, Encodable};
-use crate::error::{AutomergeError, InvalidChangeError};
-use automerge_protocol as amp;
 use core::fmt::Debug;
+use std::{
+    collections::{HashMap, HashSet},
+    convert::{TryFrom, TryInto},
+    io::{Read, Write},
+    ops::Range,
+    str,
+};
+
+use automerge_protocol as amp;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
     Compression,
 };
 use itertools::Itertools;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
-use std::convert::TryFrom;
-use std::convert::TryInto;
-use std::io::Read;
-use std::io::Write;
-use std::ops::Range;
-use std::str;
+
+use crate::{
+    columnar::{
+        ChangeEncoder, ChangeIterator, ColumnEncoder, DocChange, DocOp, DocOpEncoder,
+        DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
+    },
+    encoding::{Decodable, Encodable, DEFLATE_MIN_SIZE},
+    error::{AutomergeError, InvalidChangeError},
+};
 
 const HASH_BYTES: usize = 32;
 const BLOCK_TYPE_DOC: u8 = 0;
@@ -907,9 +910,11 @@ pub(crate) const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use amp::{ActorId, UncompressedChange};
     use std::str::FromStr;
+
+    use amp::{ActorId, UncompressedChange};
+
+    use super::*;
 
     #[test]
     fn test_empty_change() {

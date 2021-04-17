@@ -1,7 +1,10 @@
-use crate::error::InvalidElementId;
-use crate::{ElementId, OpId};
-use std::cmp::{Ordering, PartialOrd};
-use std::{convert::TryFrom, str::FromStr};
+use std::{
+    cmp::{Ordering, PartialOrd},
+    convert::TryFrom,
+    str::FromStr,
+};
+
+use crate::{error::InvalidElementId, ElementId, OpId};
 
 impl PartialOrd for ElementId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

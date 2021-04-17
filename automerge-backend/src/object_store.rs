@@ -1,11 +1,15 @@
-use crate::actor_map::ActorMap;
-use crate::concurrent_operations::ConcurrentOperations;
-use crate::internal::{ElementId, Key, OpId};
-use crate::op_handle::OpHandle;
-use crate::ordered_set::{OrderedSet, SkipList};
+use std::collections::{HashMap, HashSet};
+
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
-use std::collections::{HashMap, HashSet};
+
+use crate::{
+    actor_map::ActorMap,
+    concurrent_operations::ConcurrentOperations,
+    internal::{ElementId, Key, OpId},
+    op_handle::OpHandle,
+    ordered_set::{OrderedSet, SkipList},
+};
 
 /// ObjectHistory is what the OpSet uses to store operations for a particular
 /// key, they represent the two possible container types in automerge, a map or
