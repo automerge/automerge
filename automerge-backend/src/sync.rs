@@ -194,7 +194,7 @@ impl Backend {
         let mut changes_to_send = if let (Some(their_have), Some(their_need)) =
             (sync_state.have.as_ref(), sync_state.their_need.as_ref())
         {
-            self.get_changes_to_send(their_have.to_vec(), their_need)
+            self.get_changes_to_send(their_have, their_need)
         } else {
             Vec::new()
         };
@@ -286,7 +286,7 @@ impl Backend {
         Ok((new_sync_state, patch))
     }
 
-    pub fn make_bloom_filter(&self, last_sync: &[ChangeHash]) -> SyncHave {
+    fn make_bloom_filter(&self, last_sync: &[ChangeHash]) -> SyncHave {
         let new_changes = self.get_changes(last_sync);
         let hashes = new_changes
             .into_iter()
@@ -298,7 +298,7 @@ impl Backend {
         }
     }
 
-    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes_to_send(&self, have: &[SyncHave], need: &[ChangeHash]) -> Vec<Change> {
         if have.is_empty() {
             need.iter()
                 .filter_map(|hash| self.get_change_by_hash(hash).cloned())
@@ -311,7 +311,7 @@ impl Backend {
                 for hash in &h.last_sync {
                     last_sync_hashes.insert(*hash);
                 }
-                bloom_filters.push(h.bloom)
+                bloom_filters.push(&h.bloom)
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
@@ -386,8 +386,8 @@ impl SyncState {
         Ok(buf)
     }
 
-    pub fn decode(bytes: Vec<u8>) -> Result<Self, AutomergeError> {
-        let mut decoder = Decoder::new(Cow::Owned(bytes));
+    pub fn decode(bytes: &[u8]) -> Result<Self, AutomergeError> {
+        let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let record_type = decoder.read::<u8>()?;
         if record_type != SYNC_STATE_TYPE {
@@ -451,8 +451,8 @@ impl SyncMessage {
         Ok(buf)
     }
 
-    pub fn decode(bytes: Vec<u8>) -> Result<SyncMessage, AutomergeError> {
-        let mut decoder = Decoder::new(Cow::Owned(bytes));
+    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, AutomergeError> {
+        let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let message_type = decoder.read::<u8>()?;
         if message_type != MESSAGE_TYPE_SYNC {
