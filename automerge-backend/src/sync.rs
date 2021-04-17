@@ -1,4 +1,6 @@
 use std::convert::TryFrom;
+use std::io;
+use std::io::Write;
 
 use automerge_protocol::Patch;
 
@@ -485,14 +487,24 @@ impl SyncMessage {
 }
 
 fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), AutomergeError> {
-    (hashes.len() as u32).encode(buf)?;
-    // debug_assert!(hashes.is_sorted());
-    for hash in hashes {
-        let bytes = &hash.0[..];
-        buf.extend(bytes);
-    }
-
+    debug_assert!(
+        hashes.windows(2).all(|h| h[0] <= h[1]),
+        "hashes were not sorted"
+    );
+    hashes.encode(buf)?;
     Ok(())
+}
+
+impl Encodable for &[ChangeHash] {
+    fn encode<W: Write>(&self, buf: &mut W) -> io::Result<usize> {
+        let head = self.len().encode(buf)?;
+        let mut body = 0;
+        for hash in self.iter() {
+            buf.write_all(&hash.0)?;
+            body += hash.0.len()
+        }
+        Ok(head + body)
+    }
 }
 
 fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeError> {
