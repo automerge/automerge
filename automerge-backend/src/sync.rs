@@ -5,7 +5,6 @@ use std::io::Write;
 use automerge_protocol::Patch;
 
 use crate::AutomergeError;
-use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -35,7 +34,7 @@ const NUM_PROBES: u32 = 7;
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone)]
 pub struct BloomFilter {
     num_entries: u32,
     num_bits_per_entry: u32,
@@ -137,14 +136,14 @@ impl From<&[ChangeHash]> for BloomFilter {
     }
 }
 
-impl TryFrom<Vec<u8>> for BloomFilter {
+impl TryFrom<&[u8]> for BloomFilter {
     type Error = AutomergeError;
 
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         if bytes.is_empty() {
             Ok(Self::default())
         } else {
-            let mut decoder = Decoder::new(Cow::Owned(bytes));
+            let mut decoder = Decoder::new(Cow::Borrowed(bytes));
             let num_entries = decoder.read()?;
             let num_bits_per_entry = decoder.read()?;
             let num_probes = decoder.read()?;
@@ -366,17 +365,16 @@ impl Backend {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 pub struct SyncState {
-    shared_heads: Vec<ChangeHash>,
-    last_sent_heads: Option<Vec<ChangeHash>>,
-    their_heads: Option<Vec<ChangeHash>>,
-    their_need: Option<Vec<ChangeHash>>,
-    our_need: Vec<ChangeHash>,
-    have: Option<Vec<SyncHave>>,
-    unapplied_changes: Vec<Change>,
-    sent_changes: Vec<Change>,
+    pub shared_heads: Vec<ChangeHash>,
+    pub last_sent_heads: Option<Vec<ChangeHash>>,
+    pub their_heads: Option<Vec<ChangeHash>>,
+    pub their_need: Option<Vec<ChangeHash>>,
+    pub our_need: Vec<ChangeHash>,
+    pub have: Option<Vec<SyncHave>>,
+    pub unapplied_changes: Vec<Change>,
+    pub sent_changes: Vec<Change>,
 }
 
 impl SyncState {
@@ -423,12 +421,12 @@ impl Default for SyncState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct SyncMessage {
-    heads: Vec<ChangeHash>,
-    need: Vec<ChangeHash>,
-    have: Vec<SyncHave>,
-    changes: Vec<Change>,
+    pub heads: Vec<ChangeHash>,
+    pub need: Vec<ChangeHash>,
+    pub have: Vec<SyncHave>,
+    pub changes: Vec<Change>,
 }
 
 impl SyncMessage {
@@ -466,7 +464,7 @@ impl SyncMessage {
         for _ in 0..have_count {
             let last_sync = decode_hashes(&mut decoder)?;
             let bloom_bytes: Vec<u8> = decoder.read()?;
-            let bloom = BloomFilter::try_from(bloom_bytes)?;
+            let bloom = BloomFilter::try_from(bloom_bytes.as_slice())?;
             have.push(SyncHave { last_sync, bloom });
         }
 
@@ -477,7 +475,7 @@ impl SyncMessage {
             changes.push(Change::from_bytes(change)?);
         }
 
-        Ok(Self {
+        Ok(SyncMessage {
             heads,
             need,
             have,
@@ -522,7 +520,7 @@ fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeErro
     Ok(hashes)
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct SyncHave {
     pub last_sync: Vec<ChangeHash>,
     pub bloom: BloomFilter,

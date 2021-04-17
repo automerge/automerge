@@ -1,11 +1,13 @@
 //#![feature(set_stdio)]
 
 use automerge_backend::{AutomergeError, Backend, Change};
-use automerge_backend::{SyncMessage, SyncState};
+use automerge_backend::{BloomFilter, SyncHave, SyncMessage, SyncState};
 use automerge_protocol::{ChangeHash, UncompressedChange};
 use js_sys::{Array, Uint8Array};
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde::Serialize;
+use std::convert::TryFrom;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -198,16 +200,90 @@ fn export_changes(changes: Vec<&Change>) -> Array {
     result
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawSyncState {
+    shared_heads: Vec<ChangeHash>,
+    last_sent_heads: Option<Vec<ChangeHash>>,
+    their_heads: Option<Vec<ChangeHash>>,
+    their_need: Option<Vec<ChangeHash>>,
+    our_need: Vec<ChangeHash>,
+    have: Option<Vec<RawSyncHave>>,
+    unapplied_changes: Vec<Change>,
+    sent_changes: Vec<Change>,
+}
+
+impl From<SyncState> for RawSyncState {
+    fn from(value: SyncState) -> Self {
+        Self {
+            shared_heads: value.shared_heads,
+            last_sent_heads: value.last_sent_heads,
+            their_heads: value.their_heads,
+            their_need: value.their_need,
+            our_need: value.our_need,
+            have: value
+                .have
+                .map(|h| h.into_iter().map(RawSyncHave::from).collect()),
+            unapplied_changes: value.unapplied_changes,
+            sent_changes: value.sent_changes,
+        }
+    }
+}
+
+impl From<RawSyncState> for SyncState {
+    fn from(value: RawSyncState) -> Self {
+        Self {
+            shared_heads: value.shared_heads,
+            last_sent_heads: value.last_sent_heads,
+            their_heads: value.their_heads,
+            their_need: value.their_need,
+            our_need: value.our_need,
+            have: value
+                .have
+                .map(|h| h.into_iter().map(SyncHave::from).collect()),
+            unapplied_changes: value.unapplied_changes,
+            sent_changes: value.sent_changes,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawSyncHave {
+    pub last_sync: Vec<ChangeHash>,
+    #[serde(with = "serde_bytes")]
+    pub bloom: Vec<u8>,
+}
+
+impl From<SyncHave> for RawSyncHave {
+    fn from(value: SyncHave) -> Self {
+        Self {
+            last_sync: value.last_sync,
+            bloom: value.bloom.into_bytes().unwrap(),
+        }
+    }
+}
+
+impl From<RawSyncHave> for SyncHave {
+    fn from(raw: RawSyncHave) -> Self {
+        Self {
+            last_sync: raw.last_sync,
+            bloom: BloomFilter::try_from(raw.bloom.as_slice()).unwrap(),
+        }
+    }
+}
+
 #[wasm_bindgen(js_name = generateSyncMessage)]
 pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
-            .unwrap_or_default()
-            .unwrap_or_default();
+        let sync_state: SyncState =
+            serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)?
+                .map(SyncState::from)
+                .unwrap_or_default();
 
         let (sync_state, message) = state.0.generate_sync_message(sync_state);
         let result = Array::new();
-        let p = rust_to_js(sync_state).unwrap();
+        let p = serde_wasm_bindgen::to_value(&RawSyncState::from(sync_state))?;
         result.push(&p);
         let message = message
             .map(|m| Uint8Array::from(m.encode().unwrap().as_slice()).into())
@@ -227,8 +303,8 @@ pub fn receive_sync_message(
 
     let binary_message = Uint8Array::from(message).to_vec();
     let message = SyncMessage::decode(&binary_message).unwrap();
-    let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
-        .unwrap_or_default()
+    let sync_state: SyncState = serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)?
+        .map(SyncState::from)
         .unwrap_or_default();
 
     let (sync_state, patch) = match state.0.receive_sync_message(message, sync_state) {
@@ -240,12 +316,19 @@ pub fn receive_sync_message(
     };
 
     let result = Array::new();
-    result.push(&rust_to_js(&sync_state).unwrap());
+    let sync_state = serde_wasm_bindgen::to_value(&RawSyncState::from(sync_state))?;
+    result.push(&sync_state);
 
-    let heads = state.0.get_heads();
-    let new_state = wrapper(state, false, heads);
-    input.set_frozen(true);
-    result.push(&new_state.into());
+    if patch.is_some() {
+        let heads = state.0.get_heads();
+        let new_state = wrapper(state, false, heads);
+        // the receiveSyncMessage in automerge.js returns the original doc when there is no patch so we should only freeze it when there is a patch
+        input.set_frozen(true);
+        result.push(&new_state.into());
+    } else {
+        input.set_state(state);
+        result.push(&input);
+    }
 
     let p = rust_to_js(&patch).unwrap();
     result.push(&p);
@@ -276,7 +359,7 @@ fn wrapper(state: State, frozen: bool, heads: Vec<ChangeHash>) -> Object {
 
 fn get_input<F>(input: Object, action: F) -> Result<JsValue, JsValue>
 where
-    F: Fn(&State) -> Result<JsValue, JsValue>,
+    F: FnOnce(&State) -> Result<JsValue, JsValue>,
 {
     let state: State = get_state(&input)?;
     let result = action(&state);
