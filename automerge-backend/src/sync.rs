@@ -262,8 +262,11 @@ impl Backend {
             if our_need.iter().all(|hash| message.heads.contains(hash)) {
                 patch = Some(self.apply_changes(old_sync_state.unapplied_changes.to_vec())?);
                 old_sync_state.unapplied_changes = Vec::new();
-                old_sync_state.shared_heads =
-                    advance_heads(before_heads, self.get_heads(), old_sync_state.shared_heads);
+                old_sync_state.shared_heads = advance_heads(
+                    &before_heads,
+                    &self.get_heads(),
+                    &old_sync_state.shared_heads,
+                );
             }
         } else if message.heads == before_heads {
             old_sync_state.last_sent_heads = Some(message.heads.clone())
@@ -543,9 +546,9 @@ fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) ->
 }
 
 fn advance_heads(
-    my_old_heads: Vec<ChangeHash>,
-    my_new_heads: Vec<ChangeHash>,
-    our_old_shared_heads: Vec<ChangeHash>,
+    my_old_heads: &[ChangeHash],
+    my_new_heads: &[ChangeHash],
+    our_old_shared_heads: &[ChangeHash],
 ) -> Vec<ChangeHash> {
     let new_heads = my_new_heads
         .iter()
@@ -553,7 +556,7 @@ fn advance_heads(
         .collect::<Vec<_>>();
 
     let common_heads = our_old_shared_heads
-        .into_iter()
+        .iter()
         .filter(|head| my_new_heads.contains(head))
         .collect::<Vec<_>>();
 
@@ -562,7 +565,7 @@ fn advance_heads(
         advanced_heads.insert(*head);
     }
     for head in common_heads {
-        advanced_heads.insert(head);
+        advanced_heads.insert(*head);
     }
     let mut advanced_heads = advanced_heads.into_iter().collect::<Vec<_>>();
     advanced_heads.sort();
