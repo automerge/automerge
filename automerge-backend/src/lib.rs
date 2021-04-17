@@ -30,6 +30,8 @@ mod sync;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
+pub use sync::BloomFilter;
+pub use sync::SyncHave;
 pub use sync::SyncMessage;
 pub use sync::SyncState;
 
