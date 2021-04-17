@@ -57,8 +57,8 @@ impl BloomFilter {
         }
     }
 
-    fn get_probes(&self, hash: ChangeHash) -> Vec<u32> {
-        let hash_bytes = hash.0.to_vec();
+    fn get_probes(&self, hash: &ChangeHash) -> Vec<u32> {
+        let hash_bytes = hash.0;
         let modulo = 8 * self.bits.len() as u32;
 
         let mut x =
@@ -79,7 +79,7 @@ impl BloomFilter {
         probes
     }
 
-    fn add_hash(&mut self, hash: ChangeHash) {
+    fn add_hash(&mut self, hash: &ChangeHash) {
         for probe in self.get_probes(hash) {
             self.set_bit(probe as usize)
         }
@@ -97,7 +97,7 @@ impl BloomFilter {
             .map(|byte| byte & (1 << (probe & 7)))
     }
 
-    fn contains_hash(&self, hash: ChangeHash) -> bool {
+    fn contains_hash(&self, hash: &ChangeHash) -> bool {
         if self.num_entries == 0 {
             false
         } else {
@@ -118,8 +118,8 @@ fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
     f as usize
 }
 
-impl From<Vec<ChangeHash>> for BloomFilter {
-    fn from(hashes: Vec<ChangeHash>) -> Self {
+impl From<&[ChangeHash]> for BloomFilter {
+    fn from(hashes: &[ChangeHash]) -> Self {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
@@ -194,7 +194,7 @@ impl Backend {
         let mut changes_to_send = if let (Some(their_have), Some(their_need)) =
             (sync_state.have.as_ref(), sync_state.their_need.as_ref())
         {
-            self.get_changes_to_send(their_have, their_need)
+            self.get_changes_to_send(their_have.to_vec(), their_need)
         } else {
             Vec::new()
         };
@@ -294,11 +294,11 @@ impl Backend {
             .collect::<Vec<_>>();
         SyncHave {
             last_sync: last_sync.to_vec(),
-            bloom: BloomFilter::from(hashes),
+            bloom: BloomFilter::from(&hashes[..]),
         }
     }
 
-    pub fn get_changes_to_send(&self, have: &[SyncHave], need: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<Change> {
         if have.is_empty() {
             need.iter()
                 .filter_map(|hash| self.get_change_by_hash(hash).cloned())
@@ -311,7 +311,7 @@ impl Backend {
                 for hash in &h.last_sync {
                     last_sync_hashes.insert(*hash);
                 }
-                bloom_filters.push(h.bloom.clone())
+                bloom_filters.push(h.bloom)
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
@@ -330,7 +330,7 @@ impl Backend {
 
                 if bloom_filters
                     .iter()
-                    .all(|bloom| !bloom.contains_hash(change.hash))
+                    .all(|bloom| !bloom.contains_hash(&change.hash))
                 {
                     hashes_to_send.insert(change.hash);
                 }
@@ -522,7 +522,7 @@ fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeErro
     Ok(hashes)
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncHave {
     pub last_sync: Vec<ChangeHash>,
     pub bloom: BloomFilter,
