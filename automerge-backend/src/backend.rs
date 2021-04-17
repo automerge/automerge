@@ -277,7 +277,7 @@ impl Backend {
         let mut missing = HashSet::new();
         for head in heads {
             if self.hashes.contains_key(&head) {
-                missing.insert(head.clone());
+                missing.insert(*head);
             }
         }
         for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
