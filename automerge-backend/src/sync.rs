@@ -123,7 +123,7 @@ impl From<Vec<ChangeHash>> for BloomFilter {
         let num_entries = hashes.len() as u32;
         let num_bits_per_entry = BITS_PER_ENTRY;
         let num_probes = NUM_PROBES;
-        let bits = vec![0].repeat(bits_capacity(num_entries, num_bits_per_entry) as usize);
+        let bits = vec![0; bits_capacity(num_entries, num_bits_per_entry) as usize];
         let mut filter = Self {
             num_entries,
             num_bits_per_entry,
