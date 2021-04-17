@@ -210,7 +210,7 @@ pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsVal
         let p = rust_to_js(sync_state).unwrap();
         result.push(&p);
         let message = message
-            .map(|m| Uint8Array::from(m.encode().as_slice()).into())
+            .map(|m| Uint8Array::from(m.encode().unwrap().as_slice()).into())
             .unwrap_or(JsValue::NULL);
         result.push(&message);
         Ok(result.into())
@@ -230,7 +230,7 @@ pub fn receive_sync_message(
             .unwrap_or_default()
             .unwrap_or_default();
 
-        let (sync_state, patch) = state.0.receive_sync_message(message, sync_state);
+        let (sync_state, patch) = state.0.receive_sync_message(message, sync_state)?;
 
         let result = Array::new();
         result.push(&rust_to_js(&sync_state).unwrap());
