@@ -225,7 +225,7 @@ pub fn receive_sync_message(
 ) -> Result<JsValue, JsValue> {
     get_mut_input(input, |state| {
         let binary_message = Uint8Array::from(message.clone()).to_vec();
-        let message = SyncMessage::decode(binary_message).unwrap();
+        let message = SyncMessage::decode(&binary_message).unwrap();
         let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
             .unwrap_or_default()
             .unwrap_or_default();
