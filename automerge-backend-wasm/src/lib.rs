@@ -199,15 +199,15 @@ fn export_changes(changes: Vec<&Change>) -> Array {
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
-pub fn generate_sync_message(input: Object, peer_state: JsValue) -> Result<JsValue, JsValue> {
+pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let peer_state: SyncState = js_to_rust::<Option<SyncState>>(&peer_state)
+        let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
             .unwrap_or_default()
             .unwrap_or_default();
 
-        let (peer_state, message) = state.0.generate_sync_message(peer_state);
+        let (sync_state, message) = state.0.generate_sync_message(sync_state);
         let result = Array::new();
-        let p = rust_to_js(peer_state).unwrap();
+        let p = rust_to_js(sync_state).unwrap();
         result.push(&p);
         let message = message
             .map(|m| Uint8Array::from(m.encode().as_slice()).into())
@@ -221,19 +221,19 @@ pub fn generate_sync_message(input: Object, peer_state: JsValue) -> Result<JsVal
 pub fn receive_sync_message(
     input: Object,
     message: JsValue,
-    peer_state: JsValue,
+    sync_state: JsValue,
 ) -> Result<JsValue, JsValue> {
     get_mut_input(input, |state| {
         let binary_message = Uint8Array::from(message.clone()).to_vec();
         let message = SyncMessage::decode(binary_message).unwrap();
-        let peer_state: SyncState = js_to_rust::<Option<SyncState>>(&peer_state)
+        let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
             .unwrap_or_default()
             .unwrap_or_default();
 
-        let (peer_state, patch) = state.0.receive_sync_message(message, peer_state);
+        let (sync_state, patch) = state.0.receive_sync_message(message, sync_state);
 
         let result = Array::new();
-        result.push(&rust_to_js(&peer_state).unwrap());
+        result.push(&rust_to_js(&sync_state).unwrap());
         let p = rust_to_js(&patch).unwrap();
         result.push(&p);
         Ok(result)
