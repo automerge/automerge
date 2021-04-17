@@ -199,7 +199,7 @@ fn export_changes(changes: Vec<&Change>) -> Array {
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
-pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsValue, JsValue> {
+pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
         let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
             .unwrap_or_default()
@@ -219,9 +219,9 @@ pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsVal
 
 #[wasm_bindgen(js_name = receiveSyncMessage)]
 pub fn receive_sync_message(
+    sync_state: JsValue,
     input: Object,
     message: JsValue,
-    sync_state: JsValue,
 ) -> Result<JsValue, JsValue> {
     get_mut_input(input, |state| {
         let binary_message = Uint8Array::from(message.clone()).to_vec();
