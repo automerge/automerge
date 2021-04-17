@@ -1,16 +1,17 @@
-use super::read_field;
-use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectId, OpId, ScalarValue,
-    SeqDiff,
-};
+use std::{collections::HashMap, fmt};
+
 use serde::{
     de,
     de::{Error, MapAccess, Unexpected},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::collections::HashMap;
-use std::fmt;
+
+use super::read_field;
+use crate::{
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectId, OpId, ScalarValue,
+    SeqDiff,
+};
 
 impl Serialize for Diff {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -180,10 +181,11 @@ fn maybe_add_datatype_to_value(value: ScalarValue, datatype: DataType) -> Scalar
 
 #[cfg(test)]
 mod tests {
-    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectId, OpId, SeqDiff, SequenceType};
+    use std::{convert::TryInto, str::FromStr};
+
     use maplit::hashmap;
-    use std::convert::TryInto;
-    use std::str::FromStr;
+
+    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectId, OpId, SeqDiff, SequenceType};
 
     #[test]
     fn map_diff_serialization_round_trip() {

@@ -1,8 +1,9 @@
+use std::collections::HashMap;
+
 use automerge_frontend::Frontend;
 use automerge_protocol as amp;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use maplit::hashmap;
-use std::collections::HashMap;
 
 pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
     let actor_id = amp::ActorId::random();

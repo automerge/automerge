@@ -1,13 +1,13 @@
-use super::focus::Focus;
-use super::{
-    random_op_id, DiffApplicationResult, LocalOperationResult, MultiGrapheme, MultiValue,
-    NewValueRequest, StateTree, StateTreeChange, StateTreeComposite, StateTreeList, StateTreeMap,
-    StateTreeTable, StateTreeText, StateTreeValue,
-};
-use crate::error;
-use crate::{Cursor, Primitive, Value};
-use automerge_protocol as amp;
 use std::convert::TryInto;
+
+use automerge_protocol as amp;
+
+use super::{
+    focus::Focus, random_op_id, DiffApplicationResult, LocalOperationResult, MultiGrapheme,
+    MultiValue, NewValueRequest, StateTree, StateTreeChange, StateTreeComposite, StateTreeList,
+    StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+};
+use crate::{error, Cursor, Primitive, Value};
 
 #[derive(Debug)]
 pub struct ResolvedPath<'a> {

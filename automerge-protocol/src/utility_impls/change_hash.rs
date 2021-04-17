@@ -1,6 +1,6 @@
-use crate::error::InvalidChangeHashSlice;
-use crate::ChangeHash;
 use std::convert::TryFrom;
+
+use crate::{error::InvalidChangeHashSlice, ChangeHash};
 
 impl TryFrom<&[u8]> for ChangeHash {
     type Error = InvalidChangeHashSlice;

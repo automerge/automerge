@@ -1,13 +1,16 @@
-use crate::{columnar::COLUMN_TYPE_DEFLATE, error::AutomergeError};
-use automerge_protocol as amp;
 use core::fmt::Debug;
+use std::{
+    borrow::Cow,
+    convert::TryFrom,
+    io,
+    io::{Read, Write},
+    mem, str,
+};
+
+use automerge_protocol as amp;
 use flate2::{bufread::DeflateEncoder, Compression};
-use std::borrow::Cow;
-use std::convert::TryFrom;
-use std::io;
-use std::io::{Read, Write};
-use std::mem;
-use std::str;
+
+use crate::{columnar::COLUMN_TYPE_DEFLATE, error::AutomergeError};
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
 

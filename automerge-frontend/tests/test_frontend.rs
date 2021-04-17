@@ -1,7 +1,8 @@
+use std::convert::TryInto;
+
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
-use std::convert::TryInto;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[test]

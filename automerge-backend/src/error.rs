@@ -1,6 +1,7 @@
-use automerge_protocol as amp;
 //use std::error::Error;
 use std::fmt::Debug;
+
+use automerge_protocol as amp;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]

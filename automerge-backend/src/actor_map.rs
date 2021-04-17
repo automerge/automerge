@@ -1,6 +1,8 @@
-use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
-use automerge_protocol as amp;
 use std::cmp::Ordering;
+
+use automerge_protocol as amp;
+
+use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct ActorMap(Vec<amp::ActorId>);

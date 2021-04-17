@@ -1,11 +1,11 @@
-use crate::error::InvalidOpId;
-use crate::{ActorId, OpId};
 use core::fmt;
 use std::{
     cmp::{Ordering, PartialOrd},
     convert::TryFrom,
     str::FromStr,
 };
+
+use crate::{error::InvalidOpId, ActorId, OpId};
 
 impl Ord for OpId {
     fn cmp(&self, other: &Self) -> Ordering {

@@ -1,7 +1,6 @@
-use crate::error::InvalidActorId;
-use crate::ActorId;
-use std::convert::TryFrom;
-use std::{fmt, str::FromStr};
+use std::{convert::TryFrom, fmt, str::FromStr};
+
+use crate::{error::InvalidActorId, ActorId};
 
 impl TryFrom<&str> for ActorId {
     type Error = InvalidActorId;

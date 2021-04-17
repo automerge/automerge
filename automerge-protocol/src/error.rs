@@ -1,5 +1,6 @@
-use crate::{DataType, ScalarValue};
 use thiserror::Error;
+
+use crate::{DataType, ScalarValue};
 
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]

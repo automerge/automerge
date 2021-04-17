@@ -1,15 +1,13 @@
-use crate::actor_map::ActorMap;
-use crate::change::encode_document;
-use crate::error::AutomergeError;
-use crate::internal::ObjectId;
-use crate::op_handle::OpHandle;
-use crate::op_set::OpSet;
-use crate::pending_diff::PendingDiff;
-use crate::Change;
-use amp::ChangeHash;
-use automerge_protocol as amp;
 use core::cmp::max;
 use std::collections::{HashMap, HashSet, VecDeque};
+
+use amp::ChangeHash;
+use automerge_protocol as amp;
+
+use crate::{
+    actor_map::ActorMap, change::encode_document, error::AutomergeError, internal::ObjectId,
+    op_handle::OpHandle, op_set::OpSet, pending_diff::PendingDiff, Change,
+};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {

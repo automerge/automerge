@@ -1,11 +1,9 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::convert::TryFrom;
-use std::fmt;
+use std::{collections::HashMap, convert::TryFrom, fmt};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
-use std::collections::HashMap;
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorId(Vec<u8>);

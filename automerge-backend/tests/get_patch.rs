@@ -1,4 +1,6 @@
 extern crate automerge_backend;
+use std::convert::TryInto;
+
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
@@ -6,7 +8,6 @@ use automerge_protocol::{
     SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
-use std::convert::TryInto;
 
 #[test]
 fn test_include_most_recent_value_for_key() {

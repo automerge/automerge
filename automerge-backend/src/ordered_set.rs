@@ -1,15 +1,17 @@
 #![allow(dead_code)]
 
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+    fmt::Debug,
+    hash::Hash,
+    iter::Iterator,
+    mem,
+    ops::AddAssign,
+};
+
 use fxhash::FxBuildHasher;
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
-use std::cmp::{max, min};
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::hash::Hash;
-use std::iter::Iterator;
-use std::mem;
-use std::ops::AddAssign;
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 struct Link<K>

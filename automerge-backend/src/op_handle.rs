@@ -1,11 +1,16 @@
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    ops::Deref,
+};
 
-use crate::actor_map::ActorMap;
-use crate::internal::{InternalOp, InternalOpType, Key, ObjectId, OpId};
-use crate::Change;
 use automerge_protocol as amp;
+
+use crate::{
+    actor_map::ActorMap,
+    internal::{InternalOp, InternalOpType, Key, ObjectId, OpId},
+    Change,
+};
 
 #[derive(Clone)]
 pub(crate) struct OpHandle {

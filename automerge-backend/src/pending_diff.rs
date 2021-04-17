@@ -1,7 +1,10 @@
-use crate::actor_map::ActorMap;
-use crate::internal::{Key, OpId};
-use crate::op_handle::OpHandle;
 use automerge_protocol as amp;
+
+use crate::{
+    actor_map::ActorMap,
+    internal::{Key, OpId},
+    op_handle::OpHandle,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {

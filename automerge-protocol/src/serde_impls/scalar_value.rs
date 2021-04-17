@@ -1,5 +1,6 @@
-use crate::ScalarValue;
 use serde::{de, Deserialize, Deserializer};
+
+use crate::ScalarValue;
 
 impl<'de> Deserialize<'de> for ScalarValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

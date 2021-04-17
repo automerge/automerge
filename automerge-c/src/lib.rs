@@ -3,16 +3,19 @@ extern crate errno;
 extern crate libc;
 extern crate serde;
 
+use core::fmt::Debug;
+use std::{
+    convert::TryInto,
+    ffi::{CStr, CString},
+    ops::{Deref, DerefMut},
+    os::raw::c_char,
+    ptr,
+};
+
 use automerge_backend::{AutomergeError, Change};
 use automerge_protocol::{ChangeHash, UncompressedChange};
-use core::fmt::Debug;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
-use std::convert::TryInto;
-use std::ffi::{CStr, CString};
-use std::ops::{Deref, DerefMut};
-use std::os::raw::c_char;
-use std::ptr;
 
 #[derive(Clone)]
 pub struct Backend {

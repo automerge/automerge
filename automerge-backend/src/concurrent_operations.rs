@@ -1,7 +1,6 @@
-use crate::error::AutomergeError;
-use crate::internal::InternalOpType;
-use crate::op_handle::OpHandle;
 use std::ops::Deref;
+
+use crate::{error::AutomergeError, internal::InternalOpType, op_handle::OpHandle};
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other

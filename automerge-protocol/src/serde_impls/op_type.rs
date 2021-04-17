@@ -1,5 +1,6 @@
-use crate::{MapType, ObjType, OpType, SequenceType};
 use serde::{Serialize, Serializer};
+
+use crate::{MapType, ObjType, OpType, SequenceType};
 
 impl Serialize for OpType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

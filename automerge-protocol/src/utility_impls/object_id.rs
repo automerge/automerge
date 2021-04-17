@@ -1,8 +1,11 @@
-use crate::error::InvalidObjectId;
-use crate::{ObjectId, OpId};
-use std::cmp::{Ordering, PartialOrd};
-use std::fmt;
-use std::{convert::TryFrom, str::FromStr};
+use std::{
+    cmp::{Ordering, PartialOrd},
+    convert::TryFrom,
+    fmt,
+    str::FromStr,
+};
+
+use crate::{error::InvalidObjectId, ObjectId, OpId};
 
 impl PartialOrd for ObjectId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

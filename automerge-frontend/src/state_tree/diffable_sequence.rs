@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
+use automerge_protocol as amp;
+
 use super::{DiffApplicationResult, DiffToApply, MultiGrapheme, MultiValue, StateTreeChange};
 use crate::error::InvalidPatch;
-use automerge_protocol as amp;
-use std::collections::HashMap;
 
 pub(super) trait DiffableValue: Sized {
     fn construct<K>(

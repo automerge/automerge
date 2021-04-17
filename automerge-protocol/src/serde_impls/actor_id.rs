@@ -1,7 +1,8 @@
-use crate::ActorId;
-use serde::de;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::str::FromStr;
+
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::ActorId;
 
 impl<'de> Deserialize<'de> for ActorId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

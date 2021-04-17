@@ -1,3 +1,5 @@
+use std::iter::Iterator;
+
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -5,9 +7,10 @@ use super::{
     CursorState, Cursors, DiffApplicationResult, DiffToApply, DiffableSequence, StateTreeChange,
     StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
-use crate::error;
-use crate::value::{Primitive, Value};
-use std::iter::Iterator;
+use crate::{
+    error,
+    value::{Primitive, Value},
+};
 
 pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
     pub(crate) actor: &'a amp::ActorId,
