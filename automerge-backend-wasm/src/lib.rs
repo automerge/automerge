@@ -223,21 +223,34 @@ pub fn receive_sync_message(
     input: Object,
     message: JsValue,
 ) -> Result<JsValue, JsValue> {
-    get_mut_input(input, |state| {
-        let binary_message = Uint8Array::from(message.clone()).to_vec();
-        let message = SyncMessage::decode(&binary_message).unwrap();
-        let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
-            .unwrap_or_default()
-            .unwrap_or_default();
+    let mut state: State = get_state(&input)?;
 
-        let (sync_state, patch) = state.0.receive_sync_message(message, sync_state)?;
+    let binary_message = Uint8Array::from(message).to_vec();
+    let message = SyncMessage::decode(&binary_message).unwrap();
+    let sync_state: SyncState = js_to_rust::<Option<SyncState>>(&sync_state)
+        .unwrap_or_default()
+        .unwrap_or_default();
 
-        let result = Array::new();
-        result.push(&rust_to_js(&sync_state).unwrap());
-        let p = rust_to_js(&patch).unwrap();
-        result.push(&p);
-        Ok(result)
-    })
+    let (sync_state, patch) = match state.0.receive_sync_message(message, sync_state) {
+        Ok(r) => r,
+        Err(err) => {
+            input.set_state(state);
+            return Err(to_js_err(err));
+        }
+    };
+
+    let result = Array::new();
+    result.push(&rust_to_js(&sync_state).unwrap());
+
+    let heads = state.0.get_heads();
+    let new_state = wrapper(state, false, heads);
+    input.set_frozen(true);
+    result.push(&new_state.into());
+
+    let p = rust_to_js(&patch).unwrap();
+    result.push(&p);
+
+    Ok(result.into())
 }
 
 fn get_state(input: &Object) -> Result<State, JsValue> {
