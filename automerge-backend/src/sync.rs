@@ -59,20 +59,13 @@ impl BloomFilter {
         let hash_bytes = hash.0.to_vec();
         let modulo = 8 * self.bits.len() as u32;
 
-        let mut x = (hash_bytes[0] as u32
-            | ((hash_bytes[1] as u32) << 8)
-            | (hash_bytes[2] as u32) << 16
-            | (hash_bytes[3] as u32) << 24)
-            % modulo;
-        let mut y = (hash_bytes[4] as u32
-            | (hash_bytes[5] as u32) << 8
-            | (hash_bytes[6] as u32) << 16
-            | (hash_bytes[7] as u32) << 24)
-            % modulo;
-        let z = (hash_bytes[8] as u32
-            | (hash_bytes[9] as u32) << 8
-            | (hash_bytes[10] as u32) << 16
-            | (hash_bytes[11] as u32) << 24)
+        let mut x =
+            u32::from_le_bytes([hash_bytes[0], hash_bytes[1], hash_bytes[2], hash_bytes[3]])
+                % modulo;
+        let mut y =
+            u32::from_le_bytes([hash_bytes[4], hash_bytes[5], hash_bytes[6], hash_bytes[7]])
+                % modulo;
+        let z = u32::from_le_bytes([hash_bytes[8], hash_bytes[9], hash_bytes[10], hash_bytes[11]])
             % modulo;
 
         let mut probes = vec![x];
