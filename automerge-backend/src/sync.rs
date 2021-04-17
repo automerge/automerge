@@ -147,7 +147,7 @@ impl TryFrom<Vec<u8>> for BloomFilter {
             let num_bits_per_entry = decoder.read()?;
             let num_probes = decoder.read()?;
             let bits =
-                decoder.read_bytes((bits_capacity(num_entries, num_bits_per_entry)) as usize)?;
+                decoder.read_bytes(bits_capacity(num_entries, num_bits_per_entry) as usize)?;
             Ok(Self {
                 num_entries,
                 num_bits_per_entry,
