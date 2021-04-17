@@ -190,10 +190,7 @@ impl Backend {
                     let reset_msg = SyncMessage {
                         heads: our_heads,
                         need: Vec::new(),
-                        have: vec![SyncHave {
-                            last_sync: Vec::new(),
-                            bloom: BloomFilter::default(),
-                        }],
+                        have: vec![SyncHave::default()],
                         changes: Vec::new(),
                     };
                     return (sync_state, Some(reset_msg));
