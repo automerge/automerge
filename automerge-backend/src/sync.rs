@@ -167,7 +167,7 @@ impl Backend {
         let our_heads = self.get_heads();
 
         let have = if sync_state.our_need.is_empty() {
-            vec![self.make_bloom_filter(&sync_state.shared_heads)]
+            vec![self.make_bloom_filter(sync_state.shared_heads.clone())]
         } else {
             Vec::new()
         };
@@ -290,14 +290,14 @@ impl Backend {
         Ok((new_sync_state, patch))
     }
 
-    fn make_bloom_filter(&self, last_sync: &[ChangeHash]) -> SyncHave {
-        let new_changes = self.get_changes(last_sync);
+    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {
+        let new_changes = self.get_changes(&last_sync);
         let hashes = new_changes
             .into_iter()
             .map(|change| change.hash)
             .collect::<Vec<_>>();
         SyncHave {
-            last_sync: last_sync.to_vec(),
+            last_sync,
             bloom: BloomFilter::from(&hashes[..]),
         }
     }
