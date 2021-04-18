@@ -249,9 +249,14 @@ impl Backend {
                 .unapplied_changes
                 .extend(message.changes.clone());
 
-            let our_need = self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
+            old_sync_state.our_need =
+                self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
 
-            if our_need.iter().all(|hash| message.heads.contains(hash)) {
+            if old_sync_state
+                .our_need
+                .iter()
+                .all(|hash| message.heads.contains(hash))
+            {
                 patch = Some(self.apply_changes(old_sync_state.unapplied_changes.to_vec())?);
                 old_sync_state.unapplied_changes = Vec::new();
                 old_sync_state.shared_heads = advance_heads(
