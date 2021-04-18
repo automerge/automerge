@@ -213,37 +213,55 @@ pub struct RawSyncState {
     sent_changes: Vec<Change>,
 }
 
-impl From<SyncState> for RawSyncState {
-    fn from(value: SyncState) -> Self {
-        Self {
+impl TryFrom<SyncState> for RawSyncState {
+    type Error = AutomergeError;
+
+    fn try_from(value: SyncState) -> Result<Self, Self::Error> {
+        let have = if let Some(have) = value.have {
+            Some(
+                have.into_iter()
+                    .map(RawSyncHave::try_from)
+                    .collect::<Result<_, _>>()?,
+            )
+        } else {
+            None
+        };
+        Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
             our_need: value.our_need,
-            have: value
-                .have
-                .map(|h| h.into_iter().map(RawSyncHave::from).collect()),
+            have,
             unapplied_changes: value.unapplied_changes,
             sent_changes: value.sent_changes,
-        }
+        })
     }
 }
 
-impl From<RawSyncState> for SyncState {
-    fn from(value: RawSyncState) -> Self {
-        Self {
+impl TryFrom<RawSyncState> for SyncState {
+    type Error = AutomergeError;
+
+    fn try_from(value: RawSyncState) -> Result<Self, Self::Error> {
+        let have = if let Some(have) = value.have {
+            Some(
+                have.into_iter()
+                    .map(SyncHave::try_from)
+                    .collect::<Result<_, _>>()?,
+            )
+        } else {
+            None
+        };
+        Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
             our_need: value.our_need,
-            have: value
-                .have
-                .map(|h| h.into_iter().map(SyncHave::from).collect()),
+            have,
             unapplied_changes: value.unapplied_changes,
             sent_changes: value.sent_changes,
-        }
+        })
     }
 }
 
@@ -255,39 +273,49 @@ pub struct RawSyncHave {
     pub bloom: Vec<u8>,
 }
 
-impl From<SyncHave> for RawSyncHave {
-    fn from(value: SyncHave) -> Self {
-        Self {
+impl TryFrom<SyncHave> for RawSyncHave {
+    type Error = AutomergeError;
+
+    fn try_from(value: SyncHave) -> Result<Self, Self::Error> {
+        Ok(Self {
             last_sync: value.last_sync,
-            bloom: value.bloom.into_bytes().unwrap(),
-        }
+            bloom: value.bloom.into_bytes()?,
+        })
     }
 }
 
-impl From<RawSyncHave> for SyncHave {
-    fn from(raw: RawSyncHave) -> Self {
-        Self {
+impl TryFrom<RawSyncHave> for SyncHave {
+    type Error = AutomergeError;
+
+    fn try_from(raw: RawSyncHave) -> Result<Self, Self::Error> {
+        Ok(Self {
             last_sync: raw.last_sync,
-            bloom: BloomFilter::try_from(raw.bloom.as_slice()).unwrap(),
-        }
+            bloom: BloomFilter::try_from(raw.bloom.as_slice())?,
+        })
     }
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
 pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let sync_state: SyncState =
+        let sync_state: SyncState = if let Some(state) =
             serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)?
-                .map(SyncState::from)
-                .unwrap_or_default();
+        {
+            SyncState::try_from(state).map_err(to_js_err)?
+        } else {
+            SyncState::default()
+        };
 
         let (sync_state, message) = state.0.generate_sync_message(sync_state);
         let result = Array::new();
-        let p = serde_wasm_bindgen::to_value(&RawSyncState::from(sync_state))?;
+        let p =
+            serde_wasm_bindgen::to_value(&RawSyncState::try_from(sync_state).map_err(to_js_err)?)?;
         result.push(&p);
-        let message = message
-            .map(|m| Uint8Array::from(m.encode().unwrap().as_slice()).into())
-            .unwrap_or(JsValue::NULL);
+        let message = if let Some(message) = message {
+            Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into()
+        } else {
+            JsValue::NULL
+        };
         result.push(&message);
         Ok(result.into())
     })
@@ -302,10 +330,13 @@ pub fn receive_sync_message(
     let mut state: State = get_state(&input)?;
 
     let binary_message = Uint8Array::from(message).to_vec();
-    let message = SyncMessage::decode(&binary_message).unwrap();
-    let sync_state: SyncState = serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)?
-        .map(SyncState::from)
-        .unwrap_or_default();
+    let message = SyncMessage::decode(&binary_message).map_err(to_js_err)?;
+    let sync_state: SyncState =
+        if let Some(state) = serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)? {
+            SyncState::try_from(state).map_err(to_js_err)?
+        } else {
+            SyncState::default()
+        };
 
     let (sync_state, patch) = match state.0.receive_sync_message(message, sync_state) {
         Ok(r) => r,
@@ -316,7 +347,8 @@ pub fn receive_sync_message(
     };
 
     let result = Array::new();
-    let sync_state = serde_wasm_bindgen::to_value(&RawSyncState::from(sync_state))?;
+    let sync_state =
+        serde_wasm_bindgen::to_value(&RawSyncState::try_from(sync_state).map_err(to_js_err)?)?;
     result.push(&sync_state);
 
     if patch.is_some() {
@@ -330,7 +362,7 @@ pub fn receive_sync_message(
         result.push(&input);
     }
 
-    let p = rust_to_js(&patch).unwrap();
+    let p = rust_to_js(&patch)?;
     result.push(&p);
 
     Ok(result.into())
