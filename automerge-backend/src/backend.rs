@@ -268,24 +268,35 @@ impl Backend {
         changes: &[Change],
         heads: &[ChangeHash],
     ) -> Vec<amp::ChangeHash> {
-        let in_queue: Vec<_> = self
+        let in_queue: HashSet<_> = self
             .queue
             .iter()
             .chain(changes.iter())
             .map(|change| change.hash)
             .collect();
         let mut missing = HashSet::new();
-        for head in heads {
-            if self.hashes.contains_key(&head) {
-                missing.insert(*head);
-            }
-        }
-        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
-            if !in_queue.contains(&head) {
+
+        for head in self
+            .queue
+            .iter()
+            .chain(changes.iter())
+            .flat_map(|change| change.deps.clone())
+        {
+            if !self.hashes.contains_key(&head) {
                 missing.insert(head);
             }
         }
-        let mut missing = missing.into_iter().collect::<Vec<_>>();
+
+        for head in heads {
+            if !self.hashes.contains_key(&head) {
+                missing.insert(*head);
+            }
+        }
+
+        let mut missing = missing
+            .into_iter()
+            .filter(|hash| !in_queue.contains(hash))
+            .collect::<Vec<_>>();
         missing.sort();
         missing
     }
