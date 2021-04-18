@@ -209,8 +209,8 @@ pub struct RawSyncState {
     their_need: Option<Vec<ChangeHash>>,
     our_need: Vec<ChangeHash>,
     have: Option<Vec<RawSyncHave>>,
-    unapplied_changes: Vec<Change>,
-    sent_changes: Vec<Change>,
+    unapplied_changes: Vec<Vec<u8>>,
+    sent_changes: Vec<Vec<u8>>,
 }
 
 impl TryFrom<SyncState> for RawSyncState {
@@ -226,6 +226,16 @@ impl TryFrom<SyncState> for RawSyncState {
         } else {
             None
         };
+        let unapplied_changes = value
+            .unapplied_changes
+            .into_iter()
+            .map(|c| c.raw_bytes().to_vec())
+            .collect();
+        let sent_changes = value
+            .sent_changes
+            .into_iter()
+            .map(|c| c.raw_bytes().to_vec())
+            .collect();
         Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
@@ -233,8 +243,8 @@ impl TryFrom<SyncState> for RawSyncState {
             their_need: value.their_need,
             our_need: value.our_need,
             have,
-            unapplied_changes: value.unapplied_changes,
-            sent_changes: value.sent_changes,
+            unapplied_changes,
+            sent_changes,
         })
     }
 }
@@ -252,6 +262,16 @@ impl TryFrom<RawSyncState> for SyncState {
         } else {
             None
         };
+        let unapplied_changes = value
+            .unapplied_changes
+            .into_iter()
+            .map(Change::from_bytes)
+            .collect::<Result<_, _>>()?;
+        let sent_changes = value
+            .sent_changes
+            .into_iter()
+            .map(Change::from_bytes)
+            .collect::<Result<_, _>>()?;
         Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
@@ -259,8 +279,8 @@ impl TryFrom<RawSyncState> for SyncState {
             their_need: value.their_need,
             our_need: value.our_need,
             have,
-            unapplied_changes: value.unapplied_changes,
-            sent_changes: value.sent_changes,
+            unapplied_changes,
+            sent_changes,
         })
     }
 }
