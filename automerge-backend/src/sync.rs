@@ -194,7 +194,7 @@ impl Backend {
         let mut changes_to_send = if let (Some(their_have), Some(their_need)) =
             (sync_state.have.as_ref(), sync_state.their_need.as_ref())
         {
-            self.get_changes_to_send(their_have, their_need)
+            self.get_changes_to_send(their_have.clone(), their_need)
         } else {
             Vec::new()
         };
@@ -318,7 +318,7 @@ impl Backend {
         }
     }
 
-    pub fn get_changes_to_send(&self, have: &[SyncHave], need: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<Change> {
         if have.is_empty() {
             need.iter()
                 .filter_map(|hash| self.get_change_by_hash(hash).cloned())
@@ -328,10 +328,11 @@ impl Backend {
             let mut bloom_filters = Vec::new();
 
             for h in have {
-                for hash in &h.last_sync {
-                    last_sync_hashes.insert(*hash);
+                let SyncHave { last_sync, bloom } = h;
+                for hash in last_sync {
+                    last_sync_hashes.insert(hash);
                 }
-                bloom_filters.push(&h.bloom)
+                bloom_filters.push(bloom)
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
