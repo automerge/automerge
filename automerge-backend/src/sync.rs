@@ -17,14 +17,6 @@ use crate::{
     Backend, Change,
 };
 
-extern crate web_sys;
-#[allow(unused_macros)]
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-          web_sys::console::log_1(&format!( $( $t )* ).into());
-    };
-}
-
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
 // Bloom filter are encoded in the wire format.
