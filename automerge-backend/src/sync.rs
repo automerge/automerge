@@ -235,38 +235,32 @@ impl Backend {
     pub fn receive_sync_message(
         &mut self,
         message: SyncMessage,
-        mut old_sync_state: SyncState,
+        mut sync_state: SyncState,
     ) -> Result<(SyncState, Option<Patch>), AutomergeError> {
         let mut patch = None;
 
         let before_heads = self.get_heads();
 
         if !message.changes.is_empty() {
-            old_sync_state
-                .unapplied_changes
-                .extend(message.changes.clone())
+            sync_state.unapplied_changes.extend(message.changes.clone())
         }
 
-        old_sync_state.our_need =
-            self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
+        sync_state.our_need = self.get_missing_deps(&sync_state.unapplied_changes, &message.heads);
 
         if !message.changes.is_empty()
-            && old_sync_state
+            && sync_state
                 .our_need
                 .iter()
                 .all(|hash| message.heads.contains(hash))
         {
-            patch = Some(self.apply_changes(old_sync_state.unapplied_changes)?);
-            old_sync_state.unapplied_changes = Vec::new();
-            old_sync_state.shared_heads = advance_heads(
-                &before_heads,
-                &self.get_heads(),
-                &old_sync_state.shared_heads,
-            )
+            patch = Some(self.apply_changes(sync_state.unapplied_changes)?);
+            sync_state.unapplied_changes = Vec::new();
+            sync_state.shared_heads =
+                advance_heads(&before_heads, &self.get_heads(), &sync_state.shared_heads)
         }
 
         if message.changes.is_empty() && message.heads == before_heads {
-            old_sync_state.last_sent_heads = Some(message.heads.clone())
+            sync_state.last_sent_heads = Some(message.heads.clone())
         }
 
         let known_heads = message
@@ -275,9 +269,9 @@ impl Backend {
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message.heads.len() {
-            old_sync_state.shared_heads = message.heads.clone()
+            sync_state.shared_heads = message.heads.clone()
         } else {
-            old_sync_state.shared_heads = old_sync_state
+            sync_state.shared_heads = sync_state
                 .shared_heads
                 .iter()
                 .chain(known_heads)
@@ -285,7 +279,7 @@ impl Backend {
                 .into_iter()
                 .cloned()
                 .collect::<Vec<_>>();
-            old_sync_state.shared_heads.sort();
+            sync_state.shared_heads.sort();
         }
         if message.heads.iter().all(|head| {
             let res = self.get_change_by_hash(head);
@@ -293,17 +287,11 @@ impl Backend {
             res.is_some()
         }) {}
 
-        let new_sync_state = SyncState {
-            shared_heads: old_sync_state.shared_heads,
-            last_sent_heads: old_sync_state.last_sent_heads,
-            have: Some(message.have),
-            their_heads: Some(message.heads),
-            their_need: Some(message.need),
-            our_need: old_sync_state.our_need,
-            unapplied_changes: old_sync_state.unapplied_changes,
-            sent_changes: old_sync_state.sent_changes,
-        };
-        Ok((new_sync_state, patch))
+        sync_state.have = Some(message.have);
+        sync_state.their_heads = Some(message.heads);
+        sync_state.their_need = Some(message.need);
+
+        Ok((sync_state, patch))
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {
