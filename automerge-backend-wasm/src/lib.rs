@@ -1,5 +1,7 @@
 //#![feature(set_stdio)]
 
+mod ser;
+
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_backend::{BloomFilter, SyncHave, SyncMessage, SyncState};
 use automerge_protocol::{ChangeHash, UncompressedChange};
@@ -328,8 +330,9 @@ pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsVal
 
         let (sync_state, message) = state.0.generate_sync_message(sync_state);
         let result = Array::new();
-        let p =
-            serde_wasm_bindgen::to_value(&RawSyncState::try_from(sync_state).map_err(to_js_err)?)?;
+        let p = RawSyncState::try_from(sync_state)
+            .map_err(to_js_err)?
+            .serialize(&ser::Serializer::new())?;
         result.push(&p);
         let message = if let Some(message) = message {
             Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into()
@@ -367,8 +370,9 @@ pub fn receive_sync_message(
     };
 
     let result = Array::new();
-    let sync_state =
-        serde_wasm_bindgen::to_value(&RawSyncState::try_from(sync_state).map_err(to_js_err)?)?;
+    let sync_state = RawSyncState::try_from(sync_state)
+        .map_err(to_js_err)?
+        .serialize(&ser::Serializer::new())?;
     result.push(&sync_state);
 
     if patch.is_some() {
