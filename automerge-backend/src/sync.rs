@@ -158,12 +158,16 @@ impl Backend {
     ) -> (SyncState, Option<SyncMessage>) {
         let our_heads = self.get_heads();
 
-        let have = if sync_state.our_need.iter().all(|hash| {
-            sync_state
-                .their_heads
-                .as_ref()
-                .map_or(false, |heads| heads.contains(hash))
-        }) {
+        let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
+            heads.iter().collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
+        let have = if sync_state
+            .our_need
+            .iter()
+            .all(|hash| their_heads_set.contains(hash))
+        {
             vec![self.make_bloom_filter(sync_state.shared_heads.clone())]
         } else {
             Vec::new()
@@ -241,35 +245,48 @@ impl Backend {
 
         let before_heads = self.get_heads();
 
-        if !message.changes.is_empty() {
-            sync_state.unapplied_changes.extend(message.changes.clone())
+        let SyncMessage {
+            heads: message_heads,
+            changes: message_changes,
+            need: message_need,
+            have: message_have,
+        } = message;
+
+        let changes_is_empty = message_changes.is_empty();
+        if !changes_is_empty {
+            sync_state.unapplied_changes.extend(message_changes)
         }
 
-        sync_state.our_need = self.get_missing_deps(&sync_state.unapplied_changes, &message.heads);
+        sync_state.our_need = self.get_missing_deps(&sync_state.unapplied_changes, &message_heads);
 
-        if !message.changes.is_empty()
-            && sync_state
+        if changes_is_empty {
+            if message_heads == before_heads {
+                sync_state.last_sent_heads = Some(message_heads.clone())
+            }
+        } else {
+            let heads_set = message_heads.iter().collect::<HashSet<_>>();
+
+            if sync_state
                 .our_need
                 .iter()
-                .all(|hash| message.heads.contains(hash))
-        {
-            patch = Some(self.apply_changes(sync_state.unapplied_changes)?);
-            sync_state.unapplied_changes = Vec::new();
-            sync_state.shared_heads =
-                advance_heads(&before_heads, &self.get_heads(), &sync_state.shared_heads)
+                .all(|hash| heads_set.contains(hash))
+            {
+                patch = Some(self.apply_changes(sync_state.unapplied_changes)?);
+                sync_state.unapplied_changes = Vec::new();
+                sync_state.shared_heads = advance_heads(
+                    &before_heads.iter().collect::<HashSet<_>>(),
+                    &self.get_heads().into_iter().collect::<HashSet<_>>(),
+                    &sync_state.shared_heads,
+                )
+            }
         }
 
-        if message.changes.is_empty() && message.heads == before_heads {
-            sync_state.last_sent_heads = Some(message.heads.clone())
-        }
-
-        let known_heads = message
-            .heads
+        let known_heads = message_heads
             .iter()
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
-        if known_heads.len() == message.heads.len() {
-            sync_state.shared_heads = message.heads.clone()
+        if known_heads.len() == message_heads.len() {
+            sync_state.shared_heads = message_heads.clone()
         } else {
             sync_state.shared_heads = sync_state
                 .shared_heads
@@ -281,15 +298,10 @@ impl Backend {
                 .collect::<Vec<_>>();
             sync_state.shared_heads.sort();
         }
-        if message.heads.iter().all(|head| {
-            let res = self.get_change_by_hash(head);
 
-            res.is_some()
-        }) {}
-
-        sync_state.have = Some(message.have);
-        sync_state.their_heads = Some(message.heads);
-        sync_state.their_need = Some(message.need);
+        sync_state.have = Some(message_have);
+        sync_state.their_heads = Some(message_heads);
+        sync_state.their_need = Some(message_need);
 
         Ok((sync_state, patch))
     }
@@ -346,9 +358,11 @@ impl Backend {
 
             let mut stack = hashes_to_send.iter().cloned().collect::<Vec<_>>();
             while let Some(hash) = stack.pop() {
-                for dep in dependents.get(&hash).cloned().unwrap_or_default() {
-                    if hashes_to_send.insert(dep) {
-                        stack.push(dep)
+                if let Some(deps) = dependents.get(&hash) {
+                    for dep in deps {
+                        if hashes_to_send.insert(*dep) {
+                            stack.push(*dep)
+                        }
                     }
                 }
             }
@@ -556,26 +570,28 @@ fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) ->
 }
 
 fn advance_heads(
-    my_old_heads: &[ChangeHash],
-    my_new_heads: &[ChangeHash],
+    my_old_heads: &HashSet<&ChangeHash>,
+    my_new_heads: &HashSet<ChangeHash>,
     our_old_shared_heads: &[ChangeHash],
 ) -> Vec<ChangeHash> {
     let new_heads = my_new_heads
         .iter()
         .filter(|head| !my_old_heads.contains(head))
+        .cloned()
         .collect::<Vec<_>>();
 
     let common_heads = our_old_shared_heads
         .iter()
         .filter(|head| my_new_heads.contains(head))
+        .cloned()
         .collect::<Vec<_>>();
 
     let mut advanced_heads = HashSet::new();
     for head in new_heads {
-        advanced_heads.insert(*head);
+        advanced_heads.insert(head);
     }
     for head in common_heads {
-        advanced_heads.insert(*head);
+        advanced_heads.insert(head);
     }
     let mut advanced_heads = advanced_heads.into_iter().collect::<Vec<_>>();
     advanced_heads.sort();
