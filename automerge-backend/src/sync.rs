@@ -252,25 +252,28 @@ impl Backend {
         if !message.changes.is_empty() {
             old_sync_state
                 .unapplied_changes
-                .extend(message.changes.clone());
+                .extend(message.changes.clone())
+        }
 
-            old_sync_state.our_need =
-                self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
+        old_sync_state.our_need =
+            self.get_missing_deps(&old_sync_state.unapplied_changes, &message.heads);
 
-            if old_sync_state
+        if !message.changes.is_empty()
+            && old_sync_state
                 .our_need
                 .iter()
                 .all(|hash| message.heads.contains(hash))
-            {
-                patch = Some(self.apply_changes(old_sync_state.unapplied_changes.to_vec())?);
-                old_sync_state.unapplied_changes = Vec::new();
-                old_sync_state.shared_heads = advance_heads(
-                    &before_heads,
-                    &self.get_heads(),
-                    &old_sync_state.shared_heads,
-                );
-            }
-        } else if message.heads == before_heads {
+        {
+            patch = Some(self.apply_changes(old_sync_state.unapplied_changes)?);
+            old_sync_state.unapplied_changes = Vec::new();
+            old_sync_state.shared_heads = advance_heads(
+                &before_heads,
+                &self.get_heads(),
+                &old_sync_state.shared_heads,
+            )
+        }
+
+        if message.changes.is_empty() && message.heads == before_heads {
             old_sync_state.last_sent_heads = Some(message.heads.clone())
         }
 
