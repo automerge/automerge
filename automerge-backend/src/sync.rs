@@ -158,19 +158,14 @@ impl Backend {
     ) -> (SyncState, Option<SyncMessage>) {
         let our_heads = self.get_heads();
 
-        sync_state.our_need =
-            self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
+        let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
             heads.iter().collect::<HashSet<_>>()
         } else {
             HashSet::new()
         };
-        let our_have = if sync_state
-            .our_need
-            .iter()
-            .all(|hash| their_heads_set.contains(hash))
-        {
+        let our_have = if our_need.iter().all(|hash| their_heads_set.contains(hash)) {
             vec![self.make_bloom_filter(sync_state.shared_heads.clone())]
         } else {
             Vec::new()
@@ -215,11 +210,7 @@ impl Backend {
             false
         };
 
-        if heads_unchanged
-            && heads_equal
-            && changes_to_send.is_empty()
-            && sync_state.our_need.is_empty()
-        {
+        if heads_unchanged && heads_equal && changes_to_send.is_empty() && our_need.is_empty() {
             return (sync_state, None);
         }
 
@@ -230,7 +221,7 @@ impl Backend {
         let sync_message = SyncMessage {
             heads: our_heads.clone(),
             have: our_have,
-            need: sync_state.our_need.clone(),
+            need: our_need,
             changes: changes_to_send.clone(),
         };
 
@@ -265,8 +256,6 @@ impl Backend {
                 &sync_state.shared_heads,
             )
         }
-
-        sync_state.our_need = self.get_missing_deps(&message_heads);
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads = Some(message_heads.clone())
@@ -386,7 +375,6 @@ pub struct SyncState {
     pub last_sent_heads: Option<Vec<ChangeHash>>,
     pub their_heads: Option<Vec<ChangeHash>>,
     pub their_need: Option<Vec<ChangeHash>>,
-    pub our_need: Vec<ChangeHash>,
     pub their_have: Option<Vec<SyncHave>>,
     pub sent_changes: Vec<Change>,
 }
@@ -412,7 +400,6 @@ impl SyncState {
             last_sent_heads: Some(Vec::new()),
             their_heads: None,
             their_need: None,
-            our_need: Vec::new(),
             their_have: Some(Vec::new()),
             sent_changes: Vec::new(),
         })
@@ -426,8 +413,7 @@ impl Default for SyncState {
             last_sent_heads: Some(Vec::new()),
             their_heads: None,
             their_need: None,
-            our_need: Vec::new(),
-            their_have: Some(Vec::new()),
+            their_have: None,
             sent_changes: Vec::new(),
         }
     }
