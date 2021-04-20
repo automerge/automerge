@@ -179,9 +179,7 @@ pub fn get_all_changes(input: Object) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = getMissingDeps)]
 pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
-    get_input(input, |state| {
-        rust_to_js(state.0.get_missing_deps(&[], &[]))
-    })
+    get_input(input, |state| rust_to_js(state.0.get_missing_deps(&[])))
 }
 
 fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
@@ -210,8 +208,7 @@ pub struct RawSyncState {
     their_heads: Option<Vec<ChangeHash>>,
     their_need: Option<Vec<ChangeHash>>,
     our_need: Vec<ChangeHash>,
-    have: Option<Vec<RawSyncHave>>,
-    unapplied_changes: Vec<Vec<u8>>,
+    their_have: Option<Vec<RawSyncHave>>,
     sent_changes: Vec<Vec<u8>>,
 }
 
@@ -219,7 +216,7 @@ impl TryFrom<SyncState> for RawSyncState {
     type Error = AutomergeError;
 
     fn try_from(value: SyncState) -> Result<Self, Self::Error> {
-        let have = if let Some(have) = value.have {
+        let have = if let Some(have) = value.their_have {
             Some(
                 have.into_iter()
                     .map(RawSyncHave::try_from)
@@ -228,11 +225,6 @@ impl TryFrom<SyncState> for RawSyncState {
         } else {
             None
         };
-        let unapplied_changes = value
-            .unapplied_changes
-            .into_iter()
-            .map(|c| c.raw_bytes().to_vec())
-            .collect();
         let sent_changes = value
             .sent_changes
             .into_iter()
@@ -244,8 +236,7 @@ impl TryFrom<SyncState> for RawSyncState {
             their_heads: value.their_heads,
             their_need: value.their_need,
             our_need: value.our_need,
-            have,
-            unapplied_changes,
+            their_have: have,
             sent_changes,
         })
     }
@@ -255,7 +246,7 @@ impl TryFrom<RawSyncState> for SyncState {
     type Error = AutomergeError;
 
     fn try_from(value: RawSyncState) -> Result<Self, Self::Error> {
-        let have = if let Some(have) = value.have {
+        let have = if let Some(have) = value.their_have {
             Some(
                 have.into_iter()
                     .map(SyncHave::try_from)
@@ -264,11 +255,6 @@ impl TryFrom<RawSyncState> for SyncState {
         } else {
             None
         };
-        let unapplied_changes = value
-            .unapplied_changes
-            .into_iter()
-            .map(Change::from_bytes)
-            .collect::<Result<_, _>>()?;
         let sent_changes = value
             .sent_changes
             .into_iter()
@@ -280,9 +266,63 @@ impl TryFrom<RawSyncState> for SyncState {
             their_heads: value.their_heads,
             their_need: value.their_need,
             our_need: value.our_need,
-            have,
-            unapplied_changes,
+            their_have: have,
             sent_changes,
+        })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawSyncMessage {
+    pub heads: Vec<ChangeHash>,
+    pub need: Vec<ChangeHash>,
+    pub have: Vec<RawSyncHave>,
+    pub changes: Vec<Vec<u8>>,
+}
+
+impl TryFrom<SyncMessage> for RawSyncMessage {
+    type Error = AutomergeError;
+
+    fn try_from(value: SyncMessage) -> Result<Self, Self::Error> {
+        let have = value
+            .have
+            .into_iter()
+            .map(RawSyncHave::try_from)
+            .collect::<Result<_, _>>()?;
+        let changes = value
+            .changes
+            .into_iter()
+            .map(|c| c.raw_bytes().to_vec())
+            .collect();
+        Ok(Self {
+            heads: value.heads,
+            need: value.need,
+            have,
+            changes,
+        })
+    }
+}
+
+impl TryFrom<RawSyncMessage> for SyncMessage {
+    type Error = AutomergeError;
+
+    fn try_from(value: RawSyncMessage) -> Result<Self, Self::Error> {
+        let have = value
+            .have
+            .into_iter()
+            .map(SyncHave::try_from)
+            .collect::<Result<_, _>>()?;
+        let changes = value
+            .changes
+            .into_iter()
+            .map(Change::from_bytes)
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            heads: value.heads,
+            need: value.need,
+            have,
+            changes,
         })
     }
 }
@@ -318,15 +358,11 @@ impl TryFrom<RawSyncHave> for SyncHave {
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
-pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsValue, JsValue> {
+pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let sync_state: SyncState = if let Some(state) =
-            serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)?
-        {
-            SyncState::try_from(state).map_err(to_js_err)?
-        } else {
-            SyncState::default()
-        };
+        let sync_state =
+            SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
+                .map_err(to_js_err)?;
 
         let (sync_state, message) = state.0.generate_sync_message(sync_state);
         let result = Array::new();
@@ -346,20 +382,17 @@ pub fn generate_sync_message(sync_state: JsValue, input: Object) -> Result<JsVal
 
 #[wasm_bindgen(js_name = receiveSyncMessage)]
 pub fn receive_sync_message(
-    sync_state: JsValue,
     input: Object,
+    sync_state: JsValue,
     message: JsValue,
 ) -> Result<JsValue, JsValue> {
     let mut state: State = get_state(&input)?;
 
     let binary_message = Uint8Array::from(message).to_vec();
     let message = SyncMessage::decode(&binary_message).map_err(to_js_err)?;
-    let sync_state: SyncState =
-        if let Some(state) = serde_wasm_bindgen::from_value::<Option<RawSyncState>>(sync_state)? {
-            SyncState::try_from(state).map_err(to_js_err)?
-        } else {
-            SyncState::default()
-        };
+    let sync_state =
+        SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
+            .map_err(to_js_err)?;
 
     let (sync_state, patch) = match state.0.receive_sync_message(message, sync_state) {
         Ok(r) => r,
@@ -370,10 +403,6 @@ pub fn receive_sync_message(
     };
 
     let result = Array::new();
-    let sync_state = RawSyncState::try_from(sync_state)
-        .map_err(to_js_err)?
-        .serialize(&ser::Serializer::new())?;
-    result.push(&sync_state);
 
     if patch.is_some() {
         let heads = state.0.get_heads();
@@ -386,10 +415,66 @@ pub fn receive_sync_message(
         result.push(&input);
     }
 
+    let sync_state = RawSyncState::try_from(sync_state)
+        .map_err(to_js_err)?
+        .serialize(&ser::Serializer::new())?;
+    result.push(&sync_state);
+
     let p = rust_to_js(&patch)?;
     result.push(&p);
 
     Ok(result.into())
+}
+
+#[wasm_bindgen(js_name = initSyncState)]
+pub fn init_sync_state() -> Result<JsValue, JsValue> {
+    RawSyncState::try_from(SyncState::default())
+        .map_err(to_js_err)?
+        .serialize(&ser::Serializer::new())
+        .map_err(to_js_err)
+}
+
+#[wasm_bindgen(js_name = encodeSyncState)]
+pub fn encode_sync_state(sync_state: JsValue) -> Result<JsValue, JsValue> {
+    let sync_state =
+        SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
+            .map_err(to_js_err)?;
+
+    let binary_sync_state = sync_state.encode().map_err(to_js_err)?;
+    let uint8array: Uint8Array = binary_sync_state.as_slice().into();
+    Ok(uint8array.into())
+}
+
+#[wasm_bindgen(js_name = decodeSyncState)]
+pub fn decode_sync_state(sync_state_bytes: JsValue) -> Result<JsValue, JsValue> {
+    let bytes = Uint8Array::from(sync_state_bytes).to_vec();
+    let sync_state = SyncState::decode(&bytes).map_err(to_js_err)?;
+    RawSyncState::try_from(sync_state)
+        .map_err(to_js_err)?
+        .serialize(&ser::Serializer::new())
+        .map_err(to_js_err)
+}
+
+#[wasm_bindgen(js_name = encodeSyncMessage)]
+pub fn encode_sync_message(sync_message: JsValue) -> Result<JsValue, JsValue> {
+    let sync_message = SyncMessage::try_from(serde_wasm_bindgen::from_value::<RawSyncMessage>(
+        sync_message,
+    )?)
+    .map_err(to_js_err)?;
+
+    let binary_sync_message = sync_message.encode().map_err(to_js_err)?;
+    let uint8array: Uint8Array = binary_sync_message.as_slice().into();
+    Ok(uint8array.into())
+}
+
+#[wasm_bindgen(js_name = decodeSyncMessage)]
+pub fn decode_sync_message(sync_message_bytes: JsValue) -> Result<JsValue, JsValue> {
+    let bytes = Uint8Array::from(sync_message_bytes).to_vec();
+    let sync_message = SyncMessage::decode(&bytes).map_err(to_js_err)?;
+    RawSyncMessage::try_from(sync_message)
+        .map_err(to_js_err)?
+        .serialize(&ser::Serializer::new())
+        .map_err(to_js_err)
 }
 
 fn get_state(input: &Object) -> Result<State, JsValue> {

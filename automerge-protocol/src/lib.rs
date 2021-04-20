@@ -407,6 +407,7 @@ pub struct Patch {
     pub clock: HashMap<ActorId, u64>,
     pub deps: Vec<ChangeHash>,
     pub max_op: u64,
+    pub pending_changes: usize,
     //    pub can_undo: bool,
     //    pub can_redo: bool,
     //    pub version: u64,
