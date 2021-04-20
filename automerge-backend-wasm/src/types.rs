@@ -9,6 +9,15 @@ use std::convert::TryFrom;
 pub struct BinaryChange(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 #[derive(Serialize, Deserialize)]
+pub struct BinaryDocument(#[serde(with = "serde_bytes")] pub Vec<u8>);
+
+#[derive(Serialize, Deserialize)]
+pub struct BinarySyncState(#[serde(with = "serde_bytes")] pub Vec<u8>);
+
+#[derive(Serialize, Deserialize)]
+pub struct BinarySyncMessage(#[serde(with = "serde_bytes")] pub Vec<u8>);
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawSyncState {
     shared_heads: Vec<ChangeHash>,
