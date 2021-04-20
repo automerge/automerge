@@ -11,6 +11,7 @@ fn set_object_root_properties() {
         actor: None,
         seq: None,
         max_op: 1,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
@@ -51,6 +52,7 @@ fn reveal_conflicts_on_root_properties() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         clock: hashmap! {
             actor1.clone() => 1,
             actor2.clone() => 2,
@@ -93,6 +95,7 @@ fn create_nested_maps() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
@@ -130,6 +133,7 @@ fn apply_updates_inside_nested_maps() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
@@ -161,6 +165,7 @@ fn apply_updates_inside_nested_maps() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
@@ -212,6 +217,7 @@ fn apply_updates_inside_map_conflicts() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 1,
@@ -266,6 +272,7 @@ fn apply_updates_inside_map_conflicts() {
         actor: None,
         seq: None,
         max_op: 1,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 2,
@@ -319,6 +326,7 @@ fn delete_keys_in_maps() {
     let patch1 = amp::Patch {
         actor: None,
         max_op: 2,
+        pending_changes: 0,
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
@@ -349,6 +357,7 @@ fn delete_keys_in_maps() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor => 2,
@@ -377,6 +386,7 @@ fn create_lists() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
@@ -416,6 +426,7 @@ fn apply_updates_inside_lists() {
         actor: None,
         seq: None,
         max_op: 1,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
@@ -445,6 +456,7 @@ fn apply_updates_inside_lists() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
@@ -496,6 +508,7 @@ fn apply_updates_inside_list_conflicts() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             other_actor.clone() => 1,
@@ -574,6 +587,7 @@ fn apply_updates_inside_list_conflicts() {
         actor: None,
         seq: None,
         max_op: 5,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor1.clone() => 2,
@@ -645,6 +659,7 @@ fn delete_list_elements() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 1,
@@ -684,6 +699,7 @@ fn delete_list_elements() {
         actor: None,
         seq: None,
         max_op: 4,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
@@ -717,6 +733,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         clock: hashmap! {actor.clone() => 1},
         seq: None,
         max_op: 6,
+        pending_changes: 0,
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -779,6 +796,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         clock: hashmap! {actor.clone() => 2},
         seq: None,
         max_op: 7,
+        pending_changes: 0,
         actor: None,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -842,6 +860,7 @@ fn test_text_objects() {
         actor: None,
         seq: None,
         max_op: 4,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 2,
@@ -888,6 +907,7 @@ fn test_text_objects() {
         actor: None,
         seq: None,
         max_op: 5,
+        pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => 3,
@@ -933,6 +953,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         clock: hashmap! {doc.actor_id.clone() => 1},
         deps: Vec::new(),
         max_op: 1,
+        pending_changes: 0,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,

@@ -35,6 +35,7 @@ fn use_version_and_sequence_number_from_backend() {
             },
         })),
         max_op: 4,
+        pending_changes: 0,
     };
 
     // There were no in flight requests so the doc state should be reconciled
@@ -116,6 +117,7 @@ fn remove_pending_requests_once_handled() {
             doc.actor_id.clone() => 1,
         },
         max_op: 4,
+        pending_changes: 0,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
@@ -148,6 +150,7 @@ fn remove_pending_requests_once_handled() {
             doc.actor_id.clone() => 2,
         },
         max_op: 5,
+        pending_changes: 0,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
@@ -203,6 +206,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         actor: None,
         seq: None,
         max_op: 10,
+        pending_changes: 0,
         clock: hashmap! {
             remote.clone() => 1,
         },
@@ -238,6 +242,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             remote => 1,
         },
         max_op: 11,
+        pending_changes: 0,
         deps: Vec::new(),
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
@@ -285,6 +290,7 @@ fn dont_allow_out_of_order_request_patches() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         max_op: 8,
+        pending_changes: 0,
         clock: hashmap! {
             doc.actor_id.clone() => 2,
         },
@@ -332,6 +338,7 @@ fn handle_concurrent_insertions_into_lists() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(1),
         max_op: 1,
+        pending_changes: 0,
         clock: hashmap! {
             doc.actor_id.clone() => 1,
         },
@@ -398,6 +405,7 @@ fn handle_concurrent_insertions_into_lists() {
             remote.clone() => 1,
         },
         max_op: 3,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: Vec::new(),
@@ -435,6 +443,7 @@ fn handle_concurrent_insertions_into_lists() {
         actor: Some(doc.actor_id.clone()),
         seq: Some(2),
         max_op: 3,
+        pending_changes: 0,
         clock: hashmap!{
             doc.actor_id.clone() => 2,
             remote => 1,

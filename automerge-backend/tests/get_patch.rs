@@ -55,6 +55,7 @@ fn test_include_most_recent_value_for_key() {
         actor: None,
         seq: None,
         max_op: 2,
+        pending_changes: 0,
         clock: hashmap! {
             actor.clone() => 2,
         },
@@ -126,6 +127,7 @@ fn test_includes_conflicting_values_for_key() {
             actor2.clone() => 1,
         },
         max_op: 1,
+        pending_changes: 0,
         seq: None,
         actor: None,
         deps: vec![change1.hash, change2.hash],
@@ -197,6 +199,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
             actor.clone() => 2,
         },
         max_op: 2,
+        pending_changes: 0,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -283,6 +286,7 @@ fn test_creates_nested_maps() {
         actor: None,
         seq: None,
         max_op: 4,
+        pending_changes: 0,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -346,6 +350,7 @@ fn test_create_lists() {
             actor.clone() => 1,
         },
         max_op: 2,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -429,6 +434,7 @@ fn test_includes_latests_state_of_list() {
             actor.clone() => 1
         },
         max_op: 4,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -497,6 +503,7 @@ fn test_includes_date_objects_at_root() {
             actor.clone() => 1,
         },
         max_op: 1,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: vec![change1.hash],
@@ -554,6 +561,7 @@ fn test_includes_date_objects_in_a_list() {
             actor.clone() => 1,
         },
         max_op: 2,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: vec![change1.hash],

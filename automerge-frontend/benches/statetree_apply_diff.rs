@@ -13,6 +13,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         clock: hashmap! {actor_id.clone() => 1},
         deps: Vec::new(),
         max_op: 1,
+        pending_changes: 0,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
@@ -35,6 +36,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             clock: hashmap!{actor_id.clone() => op_num as u64},
             deps: Vec::new(),
             max_op: op_num as u64,
+            pending_changes:0,
             diffs: Some(amp::Diff::Map(amp::MapDiff{
                 object_id: amp::ObjectId::Root,
                 obj_type: amp::MapType::Map,
@@ -104,6 +106,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         clock: hashmap! {actor_id => 1},
         deps: Vec::new(),
         max_op: 1,
+        pending_changes: 0,
         diffs: Some(amp::Diff::Map(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
