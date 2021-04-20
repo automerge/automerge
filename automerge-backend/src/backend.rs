@@ -51,6 +51,7 @@ impl Backend {
             self.op_set.deps.iter().cloned().collect()
         };
         deps.sort_unstable();
+        let pending_changes = self.get_missing_deps(&[]).len();
         Ok(amp::Patch {
             diffs,
             deps,
@@ -62,6 +63,7 @@ impl Backend {
                 .collect(),
             actor: actor_seq.clone().map(|(actor, _)| actor),
             seq: actor_seq.map(|(_, seq)| seq),
+            pending_changes,
         })
     }
 
@@ -263,25 +265,11 @@ impl Backend {
         Ok(backend)
     }
 
-    pub fn get_missing_deps(
-        &self,
-        changes: &[Change],
-        heads: &[ChangeHash],
-    ) -> Vec<amp::ChangeHash> {
-        let in_queue: HashSet<_> = self
-            .queue
-            .iter()
-            .chain(changes.iter())
-            .map(|change| change.hash)
-            .collect();
+    pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
-        for head in self
-            .queue
-            .iter()
-            .chain(changes.iter())
-            .flat_map(|change| change.deps.clone())
-        {
+        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
             if !self.hashes.contains_key(&head) {
                 missing.insert(head);
             }
