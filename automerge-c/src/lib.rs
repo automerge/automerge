@@ -379,9 +379,23 @@ pub unsafe extern "C" fn automerge_get_changes(
 
 /// # Safety
 /// This must me called with a valid backend pointer
+/// binary must be a valid pointer to len bytes
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_missing_deps(backend: *mut Backend) -> isize {
-    let missing = (*backend).get_missing_deps(&[], &[]);
+pub unsafe extern "C" fn automerge_get_missing_deps(
+    backend: *mut Backend,
+    len: usize,
+    binary: *const u8,
+) -> isize {
+    let mut heads = Vec::new();
+    for i in 0..len {
+        heads.push(
+            from_buf_raw(binary.offset(i as isize * 32), 32)
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        )
+    }
+    let missing = (*backend).get_missing_deps(&heads);
     (*backend).generate_json(Ok(missing))
 }
 

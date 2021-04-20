@@ -82,8 +82,9 @@ intptr_t automerge_get_last_local_change(Backend *backend);
 /**
  * # Safety
  * This must me called with a valid backend pointer
+ * binary must be a valid pointer to len bytes
  */
-intptr_t automerge_get_missing_deps(Backend *backend);
+intptr_t automerge_get_missing_deps(Backend *backend, uintptr_t len, const uint8_t *binary);
 
 /**
  * # Safety
