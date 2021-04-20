@@ -15,7 +15,6 @@ pub struct RawSyncState {
     last_sent_heads: Option<Vec<ChangeHash>>,
     their_heads: Option<Vec<ChangeHash>>,
     their_need: Option<Vec<ChangeHash>>,
-    our_need: Vec<ChangeHash>,
     their_have: Option<Vec<RawSyncHave>>,
     sent_changes: Vec<BinaryChange>,
 }
@@ -43,7 +42,6 @@ impl TryFrom<SyncState> for RawSyncState {
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
-            our_need: value.our_need,
             their_have: have,
             sent_changes,
         })
@@ -73,7 +71,6 @@ impl TryFrom<RawSyncState> for SyncState {
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
-            our_need: value.our_need,
             their_have: have,
             sent_changes,
         })
