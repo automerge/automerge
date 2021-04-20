@@ -40,6 +40,7 @@ fn test_incremental_diffs_in_a_map() {
         deps: vec![change.hash],
         clock: hashmap! {actor.clone() => 1},
         max_op: 1,
+        pending_changes: 0,
         diffs: Some(
             MapDiff {
                 object_id: ObjectId::Root,
@@ -100,6 +101,7 @@ fn test_increment_key_in_map() {
         seq: None,
         clock: hashmap! {actor.clone() => 2},
         max_op: 2,
+        pending_changes: 0,
         deps: vec![change2.hash],
         diffs: Some(
             MapDiff {
@@ -172,6 +174,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
         },
         deps: vec![change2.hash],
         max_op: 2,
+        pending_changes: 0,
         diffs: Some(
             MapDiff {
                 object_id: ObjectId::Root,
@@ -240,6 +243,7 @@ fn delete_key_from_map() {
         clock: hashmap! {actor => 2},
         deps: vec![change2.hash],
         max_op: 2,
+        pending_changes: 0,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
@@ -290,6 +294,7 @@ fn create_nested_maps() {
     let expected_patch: Patch = Patch {
         actor: None,
         max_op: 2,
+        pending_changes: 0,
         deps: vec![change.hash],
         seq: None,
         clock: hashmap! {actor.clone() => 1},
@@ -376,6 +381,7 @@ fn test_assign_to_nested_keys_in_map() {
         actor: None,
         seq: None,
         max_op: 3,
+        pending_changes: 0,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -439,6 +445,7 @@ fn test_create_lists() {
             actor.clone() => 1,
         },
         max_op: 2,
+        pending_changes: 0,
         actor: None,
         seq: None,
         deps: vec![change.hash],
@@ -526,6 +533,7 @@ fn test_apply_updates_inside_lists() {
             actor.clone() => 2
         },
         max_op: 3,
+        pending_changes: 0,
         seq: None,
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -609,6 +617,7 @@ fn test_delete_list_elements() {
         seq: None,
         actor: None,
         max_op: 3,
+        pending_changes: 0,
         clock: hashmap! {
             actor.clone() => 2
         },
@@ -694,6 +703,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         seq: None,
         actor: None,
         max_op: 3,
+        pending_changes: 0,
         deps: vec![change2.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -792,6 +802,7 @@ fn test_handle_changes_within_conflicted_objects() {
             actor2.clone() => 2,
         },
         max_op: 2,
+        pending_changes: 0,
         deps: vec![change1.hash, change3.hash],
         diffs: Some(Diff::Map(MapDiff {
             object_id: ObjectId::Root,
@@ -851,6 +862,7 @@ fn test_support_date_objects_at_root() {
             actor.clone() => 1,
         },
         max_op: 1,
+        pending_changes: 0,
         seq: None,
         actor: None,
         deps: vec![change.hash],
@@ -907,6 +919,7 @@ fn test_support_date_objects_in_a_list() {
             actor.clone() => 1,
         },
         max_op: 2,
+        pending_changes: 0,
         deps: vec![change.hash],
         actor: None,
         seq: None,
@@ -979,6 +992,7 @@ fn test_cursor_objects() {
             actor.clone() => 1,
         },
         max_op: 3,
+        pending_changes: 0,
         deps: vec![binchange.hash],
         actor: None,
         seq: None,
@@ -1106,6 +1120,7 @@ fn test_updating_sequences_updates_referring_cursors() {
             actor.clone() => 2,
         },
         max_op: 4,
+        pending_changes: 0,
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,
@@ -1208,6 +1223,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
             actor.clone() => 2,
         },
         max_op: 5,
+        pending_changes: 0,
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,

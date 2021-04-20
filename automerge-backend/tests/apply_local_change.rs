@@ -59,6 +59,7 @@ fn test_apply_local_change() {
     let expected_patch = Patch {
         actor: Some(actor.clone()),
         max_op: 1,
+        pending_changes: 0,
         seq: Some(1),
         clock: hashmap! {
             actor => 1,
@@ -508,6 +509,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         actor: Some(actor.clone()),
         seq: Some(2),
         max_op: 3,
+        pending_changes: 0,
         clock: hashmap! {
             actor.clone() => 2
         },
