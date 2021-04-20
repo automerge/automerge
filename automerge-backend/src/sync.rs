@@ -18,11 +18,12 @@ use crate::{
 };
 
 mod bloom;
+mod state;
 
 pub use bloom::BloomFilter;
+pub use state::SyncState;
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
-const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
 impl Backend {
     pub fn generate_sync_message(
@@ -238,56 +239,6 @@ impl Backend {
                 }
             }
             changes_to_send
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct SyncState {
-    pub shared_heads: Vec<ChangeHash>,
-    pub last_sent_heads: Option<Vec<ChangeHash>>,
-    pub their_heads: Option<Vec<ChangeHash>>,
-    pub their_need: Option<Vec<ChangeHash>>,
-    pub their_have: Option<Vec<SyncHave>>,
-    pub sent_changes: Vec<Change>,
-}
-
-impl SyncState {
-    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
-        let mut buf = vec![SYNC_STATE_TYPE];
-        encode_hashes(&mut buf, &self.shared_heads)?;
-        Ok(buf)
-    }
-
-    pub fn decode(bytes: &[u8]) -> Result<Self, AutomergeError> {
-        let mut decoder = Decoder::new(Cow::Borrowed(bytes));
-
-        let record_type = decoder.read::<u8>()?;
-        if record_type != SYNC_STATE_TYPE {
-            return Err(AutomergeError::EncodingError);
-        }
-
-        let shared_heads = decode_hashes(&mut decoder)?;
-        Ok(Self {
-            shared_heads,
-            last_sent_heads: Some(Vec::new()),
-            their_heads: None,
-            their_need: None,
-            their_have: Some(Vec::new()),
-            sent_changes: Vec::new(),
-        })
-    }
-}
-
-impl Default for SyncState {
-    fn default() -> Self {
-        Self {
-            shared_heads: Vec::new(),
-            last_sent_heads: Some(Vec::new()),
-            their_heads: None,
-            their_need: None,
-            their_have: None,
-            sent_changes: Vec::new(),
         }
     }
 }
