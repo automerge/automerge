@@ -21,6 +21,7 @@ mod bloom;
 mod state;
 
 pub use bloom::BloomFilter;
+pub use state::SyncHave;
 pub use state::SyncState;
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
@@ -340,12 +341,6 @@ fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeErro
     }
 
     Ok(hashes)
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SyncHave {
-    pub last_sync: Vec<ChangeHash>,
-    pub bloom: BloomFilter,
 }
 
 fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) -> Vec<Change> {

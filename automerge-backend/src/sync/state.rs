@@ -1,9 +1,8 @@
-use crate::AutomergeError;
+use crate::{AutomergeError, BloomFilter};
 use std::borrow::Cow;
 
 use automerge_protocol::ChangeHash;
 
-use super::SyncHave;
 use super::{decode_hashes, encode_hashes};
 use crate::{encoding::Decoder, Change};
 
@@ -17,6 +16,12 @@ pub struct SyncState {
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<SyncHave>>,
     pub sent_changes: Vec<Change>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncHave {
+    pub last_sync: Vec<ChangeHash>,
+    pub bloom: BloomFilter,
 }
 
 impl SyncState {
