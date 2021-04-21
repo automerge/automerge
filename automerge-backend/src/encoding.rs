@@ -543,9 +543,7 @@ pub(crate) trait Encodable {
         self.encode(buf)
     }
 
-    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
-        Ok(0)
-    }
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize>;
 }
 
 impl Encodable for String {
