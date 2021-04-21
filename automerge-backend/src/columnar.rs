@@ -44,6 +44,11 @@ impl Encodable for amp::ActorId {
     ) -> io::Result<usize> {
         map_actor(self, actors).encode(buf)
     }
+
+    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
+        // we instead encode actors as their position on a sequence
+        Ok(0)
+    }
 }
 
 impl Encodable for Vec<u8> {
