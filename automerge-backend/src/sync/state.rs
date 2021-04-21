@@ -8,7 +8,7 @@ use crate::{encoding::Decoder, Change};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncState {
     pub shared_heads: Vec<ChangeHash>,
     pub last_sent_heads: Option<Vec<ChangeHash>>,

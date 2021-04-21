@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_backend::SyncState;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
@@ -9,7 +11,9 @@ fn sync(
     b_sync_state: &mut SyncState,
 ) {
     const MAX_ITER: u32 = 10;
+    #[allow(unused_assignments)]
     let mut a_to_b_msg = None;
+    #[allow(unused_assignments)]
     let mut b_to_a_msg = None;
     let mut i = 0;
     loop {
@@ -37,12 +41,14 @@ fn sync(
     }
 }
 
-fn sync_per_change(count: u32, sync_interval: u32) {
+fn sync_per_change(
+    count: u32,
+    sync_interval: u32,
+) -> Vec<(Backend, Backend, SyncState, SyncState)> {
     let mut n1 = Backend::init();
     let mut n2 = Backend::init();
     let mut s1 = SyncState::default();
     let mut s2 = SyncState::default();
-    let mut sync_count = 0;
 
     let mut f1 = Frontend::new_with_timestamper(Box::new(|| None));
 
@@ -60,6 +66,8 @@ fn sync_per_change(count: u32, sync_interval: u32) {
     let (patch, _) = n1.apply_local_change(change).unwrap();
     f1.apply_patch(patch).unwrap();
 
+    let mut sync_args = Vec::new();
+
     for i in 0..count {
         let change = f1
             .change::<_, _, InvalidChangeRequest>(None, |d| {
@@ -76,11 +84,12 @@ fn sync_per_change(count: u32, sync_interval: u32) {
         f1.apply_patch(patch).unwrap();
 
         if i % sync_interval == sync_interval - 1 {
-            sync_count += 1;
+            sync_args.push((n1.clone(), n2.clone(), s1.clone(), s2.clone()));
             sync(&mut n1, &mut n2, &mut s1, &mut s2);
             assert_eq!(n1, n2)
         }
     }
+    sync_args
 }
 
 pub fn sync_matrix(c: &mut Criterion) {
@@ -92,11 +101,34 @@ pub fn sync_matrix(c: &mut Criterion) {
                 group.bench_function(
                     format!("{} changes every {} intervals", count, interval),
                     |b| {
-                        b.iter(|| {
-                            #[allow(clippy::unit_arg)]
-                            black_box(sync_per_change(*count, *interval))
-                        })
+                        b.iter_batched(
+                            || sync_per_change(*count, *interval),
+                            |args| {
+                                #[allow(clippy::unit_arg)]
+                                black_box(for (mut n1, mut n2, mut s1, mut s2) in args {
+                                    sync(&mut n1, &mut n2, &mut s1, &mut s2)
+                                })
+                            },
+                            criterion::BatchSize::SmallInput,
+                        )
                     },
+                );
+            }
+        }
+    }
+
+    group.finish();
+}
+
+pub fn sync_with_changes_matrix(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Sync with changes");
+
+    for count in [100, 200, 500, 1000].iter() {
+        for interval in [1, 10, 100, 1000].iter() {
+            if interval < count {
+                group.bench_function(
+                    format!("{} changes every {} intervals", count, interval),
+                    |b| b.iter(|| black_box(sync_per_change(*count, *interval))),
                 );
             }
         }
@@ -107,7 +139,7 @@ pub fn sync_matrix(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10);
-    targets = sync_matrix
+    config = Criterion::default().sample_size(10).measurement_time(Duration::from_secs(30));
+    targets = sync_matrix, sync_with_changes_matrix
 }
 criterion_main!(benches);
