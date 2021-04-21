@@ -179,7 +179,7 @@ impl Backend {
                 .collect()
         } else {
             let mut last_sync_hashes = HashSet::new();
-            let mut bloom_filters = Vec::new();
+            let mut bloom_filters = Vec::with_capacity(have.len());
 
             for h in have {
                 let SyncHave { last_sync, bloom } = h;
@@ -192,7 +192,7 @@ impl Backend {
 
             let changes = self.get_changes(&last_sync_hashes);
 
-            let mut change_hashes = HashSet::new();
+            let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
             let mut hashes_to_send = HashSet::new();
 
@@ -282,7 +282,7 @@ impl SyncMessage {
         let heads = decode_hashes(&mut decoder)?;
         let need = decode_hashes(&mut decoder)?;
         let have_count = decoder.read::<u32>()?;
-        let mut have = Vec::new();
+        let mut have = Vec::with_capacity(have_count as usize);
         for _ in 0..have_count {
             let last_sync = decode_hashes(&mut decoder)?;
             let bloom_bytes: Vec<u8> = decoder.read()?;
@@ -291,7 +291,7 @@ impl SyncMessage {
         }
 
         let change_count = decoder.read::<u32>()?;
-        let mut changes = Vec::new();
+        let mut changes = Vec::with_capacity(change_count as usize);
         for _ in 0..change_count {
             let change = decoder.read()?;
             changes.push(Change::from_bytes(change)?);
@@ -329,7 +329,7 @@ impl Encodable for &[ChangeHash] {
 
 fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeError> {
     let length = decoder.read::<u32>()?;
-    let mut hashes = Vec::new();
+    let mut hashes = Vec::with_capacity(length as usize);
 
     const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
     for _ in 0..length {
@@ -349,7 +349,7 @@ pub struct SyncHave {
 }
 
 fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) -> Vec<Change> {
-    let mut index: HashMap<u32, Vec<usize>> = HashMap::new();
+    let mut index: HashMap<u32, Vec<usize>> = HashMap::with_capacity(previous_changes.len());
 
     for (i, change) in previous_changes.iter().enumerate() {
         let checksum = change.checksum();
@@ -385,11 +385,8 @@ fn advance_heads(
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut advanced_heads = HashSet::new();
-    for head in new_heads {
-        advanced_heads.insert(head);
-    }
-    for head in common_heads {
+    let mut advanced_heads = HashSet::with_capacity(new_heads.len() + common_heads.len());
+    for head in new_heads.into_iter().chain(common_heads) {
         advanced_heads.insert(head);
     }
     let mut advanced_heads = advanced_heads.into_iter().collect::<Vec<_>>();
