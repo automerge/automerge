@@ -27,10 +27,7 @@ pub use state::SyncState;
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Backend {
-    pub fn generate_sync_message(
-        &self,
-        mut sync_state: SyncState,
-    ) -> (SyncState, Option<SyncMessage>) {
+    pub fn generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
         let our_heads = self.get_heads();
 
         let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
@@ -59,7 +56,7 @@ impl Backend {
                         have: vec![SyncHave::default()],
                         changes: Vec::new(),
                     };
-                    return (sync_state, Some(reset_msg));
+                    return Some(reset_msg);
                 }
             }
         }
@@ -86,7 +83,7 @@ impl Backend {
         };
 
         if heads_unchanged && heads_equal && changes_to_send.is_empty() && our_need.is_empty() {
-            return (sync_state, None);
+            return None;
         }
 
         if !sync_state.sent_changes.is_empty() && !changes_to_send.is_empty() {
@@ -103,14 +100,14 @@ impl Backend {
         sync_state.last_sent_heads = Some(our_heads);
         sync_state.sent_changes.extend(changes_to_send);
 
-        (sync_state, Some(sync_message))
+        Some(sync_message)
     }
 
     pub fn receive_sync_message(
         &mut self,
-        mut sync_state: SyncState,
+        sync_state: &mut SyncState,
         message: SyncMessage,
-    ) -> Result<(SyncState, Option<Patch>), AutomergeError> {
+    ) -> Result<Option<Patch>, AutomergeError> {
         let mut patch = None;
 
         let before_heads = self.get_heads();
@@ -158,7 +155,7 @@ impl Backend {
         sync_state.their_heads = Some(message_heads);
         sync_state.their_need = Some(message_need);
 
-        Ok((sync_state, patch))
+        Ok(patch)
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {
@@ -244,7 +241,7 @@ impl Backend {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SyncMessage {
     pub heads: Vec<ChangeHash>,
     pub need: Vec<ChangeHash>,
