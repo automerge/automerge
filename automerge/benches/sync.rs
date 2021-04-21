@@ -96,8 +96,8 @@ pub fn sync_matrix(c: &mut Criterion) {
     let mut group = c.benchmark_group("Sync");
 
     for count in [100, 200, 500, 1000].iter() {
-        for interval in [1, 10, 100, 1000].iter() {
-            if interval < count {
+        for interval in [1, 10, 100, 1000].iter().rev() {
+            if interval <= count {
                 group.bench_function(
                     format!("{} changes every {} intervals", count, interval),
                     |b| {
@@ -124,8 +124,8 @@ pub fn sync_with_changes_matrix(c: &mut Criterion) {
     let mut group = c.benchmark_group("Sync with changes");
 
     for count in [100, 200, 500, 1000].iter() {
-        for interval in [1, 10, 100, 1000].iter() {
-            if interval < count {
+        for interval in [1, 10, 100, 1000].iter().rev() {
+            if interval <= count {
                 group.bench_function(
                     format!("{} changes every {} intervals", count, interval),
                     |b| b.iter(|| black_box(sync_per_change(*count, *interval))),
