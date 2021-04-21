@@ -108,8 +108,8 @@ impl Backend {
 
     pub fn receive_sync_message(
         &mut self,
-        message: SyncMessage,
         mut sync_state: SyncState,
+        message: SyncMessage,
     ) -> Result<(SyncState, Option<Patch>), AutomergeError> {
         let mut patch = None;
 

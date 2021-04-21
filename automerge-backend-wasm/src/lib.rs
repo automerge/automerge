@@ -239,7 +239,7 @@ pub fn receive_sync_message(
         SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
             .map_err(to_js_err)?;
 
-    let (sync_state, patch) = match state.0.receive_sync_message(message, sync_state) {
+    let (sync_state, patch) = match state.0.receive_sync_message(sync_state, message) {
         Ok(r) => r,
         Err(err) => {
             input.set_state(state);
