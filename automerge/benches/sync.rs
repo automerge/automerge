@@ -99,7 +99,7 @@ pub fn sync_matrix(c: &mut Criterion) {
         for interval in [1, 10, 100, 1000].iter().rev() {
             if interval <= count {
                 group.bench_function(
-                    format!("{} changes every {} intervals", count, interval),
+                    format!("{} changes, syncing every {} intervals", count, interval),
                     |b| {
                         b.iter_batched(
                             || sync_per_change(*count, *interval),
@@ -127,7 +127,7 @@ pub fn sync_with_changes_matrix(c: &mut Criterion) {
         for interval in [1, 10, 100, 1000].iter().rev() {
             if interval <= count {
                 group.bench_function(
-                    format!("{} changes every {} intervals", count, interval),
+                    format!("{} changes, syncing every {} intervals", count, interval),
                     |b| b.iter(|| black_box(sync_per_change(*count, *interval))),
                 );
             }
