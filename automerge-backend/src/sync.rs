@@ -86,19 +86,22 @@ impl Backend {
             return None;
         }
 
-        if !sync_state.sent_changes.is_empty() && !changes_to_send.is_empty() {
-            changes_to_send = deduplicate_changes(&sync_state.sent_changes, changes_to_send)
+        if !sync_state.sent_hashes.is_empty() && !changes_to_send.is_empty() {
+            let sent_changes_set = sync_state.sent_hashes.iter().collect::<HashSet<_>>();
+            changes_to_send.retain(|change| !sent_changes_set.contains(&change.hash))
         }
 
+        sync_state.last_sent_heads = Some(our_heads.clone());
+        sync_state
+            .sent_hashes
+            .extend(changes_to_send.iter().map(|c| c.hash));
+
         let sync_message = SyncMessage {
-            heads: our_heads.clone(),
+            heads: our_heads,
             have: our_have,
             need: our_need,
-            changes: changes_to_send.clone(),
+            changes: changes_to_send.into_iter().cloned().collect(),
         };
-
-        sync_state.last_sent_heads = Some(our_heads);
-        sync_state.sent_changes.extend(changes_to_send);
 
         Some(sync_message)
     }
@@ -170,10 +173,10 @@ impl Backend {
         }
     }
 
-    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<Change> {
+    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<&Change> {
         if have.is_empty() {
             need.iter()
-                .filter_map(|hash| self.get_change_by_hash(hash).cloned())
+                .filter_map(|hash| self.get_change_by_hash(hash))
                 .collect()
         } else {
             let mut last_sync_hashes = HashSet::new();
@@ -226,14 +229,14 @@ impl Backend {
                 if !change_hashes.contains(&hash) {
                     let change = self.get_change_by_hash(&hash);
                     if let Some(change) = change {
-                        changes_to_send.push(change.clone())
+                        changes_to_send.push(change)
                     }
                 }
             }
 
             for change in changes {
                 if hashes_to_send.contains(&change.hash) {
-                    changes_to_send.push(change.clone())
+                    changes_to_send.push(change)
                 }
             }
             changes_to_send
@@ -338,26 +341,6 @@ fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeErro
     }
 
     Ok(hashes)
-}
-
-fn deduplicate_changes(previous_changes: &[Change], new_changes: Vec<Change>) -> Vec<Change> {
-    let mut index: HashMap<u32, Vec<usize>> = HashMap::with_capacity(previous_changes.len());
-
-    for (i, change) in previous_changes.iter().enumerate() {
-        let checksum = change.checksum();
-        index.entry(checksum).or_default().push(i);
-    }
-
-    new_changes
-        .into_iter()
-        .filter(|change| {
-            if let Some(positions) = index.get(&change.checksum()) {
-                !positions.iter().any(|i| change == &previous_changes[*i])
-            } else {
-                true
-            }
-        })
-        .collect()
 }
 
 fn advance_heads(
