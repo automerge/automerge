@@ -18,6 +18,7 @@ pub struct Backend {
     actors: ActorMap,
     hashes: HashMap<amp::ChangeHash, Change>,
     history: Vec<amp::ChangeHash>,
+    history_idx: HashMap<amp::ChangeHash, usize>,
 }
 
 impl Backend {
@@ -29,6 +30,7 @@ impl Backend {
             actors: ActorMap::new(),
             states: HashMap::new(),
             history: Vec::new(),
+            history_idx: HashMap::new(),
             hashes: HashMap::new(),
         }
     }
@@ -195,6 +197,7 @@ impl Backend {
             .or_default()
             .push(change.clone());
 
+        self.history_idx.insert(change.hash, self.history.len());
         self.history.push(change.hash);
         self.hashes.insert(change.hash, change.clone());
     }
@@ -230,6 +233,47 @@ impl Backend {
     }
 
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
+        if have_deps.len() == 0 {
+            return self
+                .history
+                .iter()
+                .filter_map(|h| self.hashes.get(h))
+                .collect();
+        }
+
+        let lowest_idx = have_deps
+            .iter()
+            .filter_map(|h| self.history_idx.get(h))
+            .min();
+        let lowest_idx = match lowest_idx {
+            Some(i) => i,
+            None => {
+                return vec![];
+            }
+        };
+
+        let mut missing_changes = vec![];
+        let mut has_seen: HashSet<_> = have_deps.iter().collect();
+        for hash in &self.history[*lowest_idx..] {
+            let change = self.hashes.get(hash).unwrap();
+            let mut deps_seen = 0;
+            for dep in &change.deps {
+                if has_seen.contains(dep) {
+                    deps_seen += 1;
+                }
+            }
+            if deps_seen > 0 && deps_seen == change.deps.len() {
+                missing_changes.push(change);
+                has_seen.insert(hash);
+            } else if deps_seen > 0 {
+                break;
+            }
+        }
+
+        if self.get_heads().iter().all(|h| has_seen.contains(h)) {
+            return missing_changes;
+        }
+
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
