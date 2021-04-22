@@ -270,11 +270,6 @@ impl Change {
     pub fn raw_bytes(&self) -> &[u8] {
         self.bytes.raw()
     }
-
-    pub fn checksum(&self) -> u32 {
-        let bytes = self.bytes.uncompressed();
-        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]])
-    }
 }
 
 impl From<&Change> for amp::UncompressedChange {

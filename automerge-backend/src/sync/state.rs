@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use automerge_protocol::ChangeHash;
 
 use super::{decode_hashes, encode_hashes};
-use crate::{encoding::Decoder, Change};
+use crate::encoding::Decoder;
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
@@ -15,7 +15,7 @@ pub struct SyncState {
     pub their_heads: Option<Vec<ChangeHash>>,
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<SyncHave>>,
-    pub sent_changes: Vec<Change>,
+    pub sent_hashes: Vec<ChangeHash>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -46,7 +46,7 @@ impl SyncState {
             their_heads: None,
             their_need: None,
             their_have: Some(Vec::new()),
-            sent_changes: Vec::new(),
+            sent_hashes: Vec::new(),
         })
     }
 }
@@ -59,7 +59,7 @@ impl Default for SyncState {
             their_heads: None,
             their_need: None,
             their_have: None,
-            sent_changes: Vec::new(),
+            sent_hashes: Vec::new(),
         }
     }
 }

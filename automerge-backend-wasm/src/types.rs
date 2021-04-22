@@ -25,7 +25,7 @@ pub struct RawSyncState {
     their_heads: Option<Vec<ChangeHash>>,
     their_need: Option<Vec<ChangeHash>>,
     their_have: Option<Vec<RawSyncHave>>,
-    sent_changes: Vec<BinaryChange>,
+    sent_hashes: Vec<ChangeHash>,
 }
 
 impl TryFrom<SyncState> for RawSyncState {
@@ -41,18 +41,13 @@ impl TryFrom<SyncState> for RawSyncState {
         } else {
             None
         };
-        let sent_changes = value
-            .sent_changes
-            .into_iter()
-            .map(|c| BinaryChange(c.raw_bytes().to_vec()))
-            .collect();
         Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
             their_have: have,
-            sent_changes,
+            sent_hashes: value.sent_hashes,
         })
     }
 }
@@ -70,18 +65,13 @@ impl TryFrom<RawSyncState> for SyncState {
         } else {
             None
         };
-        let sent_changes = value
-            .sent_changes
-            .into_iter()
-            .map(|b| Change::from_bytes(b.0))
-            .collect::<Result<_, _>>()?;
         Ok(Self {
             shared_heads: value.shared_heads,
             last_sent_heads: value.last_sent_heads,
             their_heads: value.their_heads,
             their_need: value.their_need,
             their_have: have,
-            sent_changes,
+            sent_hashes: value.sent_hashes,
         })
     }
 }
