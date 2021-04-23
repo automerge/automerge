@@ -1,6 +1,5 @@
 //#![feature(set_stdio)]
 
-mod ser;
 mod types;
 
 use automerge_backend::{AutomergeError, Backend, Change};
@@ -9,10 +8,10 @@ use automerge_protocol::{ChangeHash, UncompressedChange};
 use js_sys::Array;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::convert::TryFrom;
-use std::fmt::Display;
+use std::{collections::HashMap, convert::TryFrom};
+use std::{collections::HashSet, fmt::Display};
+use types::RawSyncMessage;
 use types::{BinaryChange, BinaryDocument, BinarySyncMessage, BinarySyncState};
-use types::{RawSyncMessage, RawSyncState};
 use wasm_bindgen::prelude::*;
 
 extern crate web_sys;
@@ -71,6 +70,36 @@ extern "C" {
 
     #[wasm_bindgen(method, setter)]
     fn set_heads(this: &Object, heads: Array);
+}
+
+#[wasm_bindgen]
+#[derive(Clone)]
+pub struct JsSyncState(SyncState);
+
+#[wasm_bindgen]
+impl JsSyncState {
+    #[wasm_bindgen(getter, js_name = sharedHeads)]
+    pub fn shared_heads(&self) -> JsValue {
+        rust_to_js(&self.0.shared_heads).unwrap()
+    }
+
+    #[wasm_bindgen(getter, js_name = lastSentHeads)]
+    pub fn last_sent_heads(&self) -> JsValue {
+        rust_to_js(self.0.last_sent_heads.as_ref()).unwrap()
+    }
+
+    #[wasm_bindgen(setter, js_name = lastSentHeads)]
+    pub fn set_last_sent_heads(&mut self, heads: JsValue) {
+        let heads: Option<Vec<ChangeHash>> = js_to_rust(&heads).unwrap();
+        self.0.last_sent_heads = heads
+    }
+
+    #[wasm_bindgen(setter, js_name = sentHashes)]
+    pub fn set_sent_hashes(&mut self, hashes: JsValue) {
+        let hashes_map: HashMap<ChangeHash, bool> = js_to_rust(&hashes).unwrap();
+        let hashes_set: HashSet<ChangeHash> = hashes_map.keys().cloned().collect();
+        self.0.sent_hashes = hashes_set
+    }
 }
 
 #[wasm_bindgen]
@@ -203,18 +232,12 @@ fn export_changes(changes: Vec<&Change>) -> Array {
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
-pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsValue, JsValue> {
+pub fn generate_sync_message(input: Object, sync_state: &JsSyncState) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let mut sync_state =
-            SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
-                .map_err(to_js_err)?;
-
-        let message = state.0.generate_sync_message(&mut sync_state);
+        let mut sync_state = sync_state.clone();
+        let message = state.0.generate_sync_message(&mut sync_state.0);
         let result = Array::new();
-        let p = RawSyncState::try_from(sync_state)
-            .map_err(to_js_err)?
-            .serialize(&ser::Serializer::new())?;
-        result.push(&p);
+        result.push(&JsValue::from(sync_state));
         let message = if let Some(message) = message {
             serde_wasm_bindgen::to_value(&BinarySyncMessage(message.encode().map_err(to_js_err)?))?
         } else {
@@ -228,18 +251,16 @@ pub fn generate_sync_message(input: Object, sync_state: JsValue) -> Result<JsVal
 #[wasm_bindgen(js_name = receiveSyncMessage)]
 pub fn receive_sync_message(
     input: Object,
-    sync_state: JsValue,
+    sync_state: &JsSyncState,
     message: JsValue,
 ) -> Result<JsValue, JsValue> {
     let mut state: State = get_state(&input)?;
 
     let binary_message: BinarySyncMessage = serde_wasm_bindgen::from_value(message)?;
     let message = SyncMessage::decode(&binary_message.0).map_err(to_js_err)?;
-    let mut sync_state =
-        SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
-            .map_err(to_js_err)?;
 
-    let patch = match state.0.receive_sync_message(&mut sync_state, message) {
+    let mut sync_state = sync_state.clone();
+    let patch = match state.0.receive_sync_message(&mut sync_state.0, message) {
         Ok(r) => r,
         Err(err) => {
             input.set_state(state);
@@ -260,10 +281,7 @@ pub fn receive_sync_message(
         result.push(&input);
     }
 
-    let sync_state = RawSyncState::try_from(sync_state)
-        .map_err(to_js_err)?
-        .serialize(&ser::Serializer::new())?;
-    result.push(&sync_state);
+    result.push(&JsValue::from(sync_state));
 
     let p = rust_to_js(&patch)?;
     result.push(&p);
@@ -272,31 +290,21 @@ pub fn receive_sync_message(
 }
 
 #[wasm_bindgen(js_name = initSyncState)]
-pub fn init_sync_state() -> Result<JsValue, JsValue> {
-    RawSyncState::try_from(SyncState::default())
-        .map_err(to_js_err)?
-        .serialize(&ser::Serializer::new())
-        .map_err(to_js_err)
+pub fn init_sync_state() -> Result<JsSyncState, JsValue> {
+    Ok(JsSyncState(SyncState::default()))
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(sync_state: JsValue) -> Result<JsValue, JsValue> {
-    let sync_state =
-        SyncState::try_from(serde_wasm_bindgen::from_value::<RawSyncState>(sync_state)?)
-            .map_err(to_js_err)?;
-
-    let binary_sync_state = BinarySyncState(sync_state.encode().map_err(to_js_err)?);
+pub fn encode_sync_state(sync_state: &JsSyncState) -> Result<JsValue, JsValue> {
+    let binary_sync_state = BinarySyncState(sync_state.0.clone().encode().map_err(to_js_err)?);
     Ok(serde_wasm_bindgen::to_value(&binary_sync_state)?)
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(sync_state_bytes: JsValue) -> Result<JsValue, JsValue> {
+pub fn decode_sync_state(sync_state_bytes: JsValue) -> Result<JsSyncState, JsValue> {
     let bytes: BinarySyncState = serde_wasm_bindgen::from_value(sync_state_bytes)?;
     let sync_state = SyncState::decode(&bytes.0).map_err(to_js_err)?;
-    RawSyncState::try_from(sync_state)
-        .map_err(to_js_err)?
-        .serialize(&ser::Serializer::new())
-        .map_err(to_js_err)
+    Ok(JsSyncState(sync_state))
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
@@ -314,9 +322,7 @@ pub fn encode_sync_message(sync_message: JsValue) -> Result<JsValue, JsValue> {
 pub fn decode_sync_message(sync_message_bytes: JsValue) -> Result<JsValue, JsValue> {
     let bytes: BinarySyncMessage = serde_wasm_bindgen::from_value(sync_message_bytes)?;
     let sync_message = SyncMessage::decode(&bytes.0).map_err(to_js_err)?;
-    RawSyncMessage::try_from(sync_message)
-        .map_err(to_js_err)?
-        .serialize(&ser::Serializer::new())
+    serde_wasm_bindgen::to_value(&RawSyncMessage::try_from(sync_message).map_err(to_js_err)?)
         .map_err(to_js_err)
 }
 

@@ -1,9 +1,8 @@
 use automerge_backend::{AutomergeError, Change};
-use automerge_backend::{BloomFilter, SyncHave, SyncMessage, SyncState};
+use automerge_backend::{BloomFilter, SyncHave, SyncMessage};
 use automerge_protocol::ChangeHash;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::convert::TryFrom;
 
 #[derive(Serialize, Deserialize)]
@@ -17,65 +16,6 @@ pub struct BinarySyncState(#[serde(with = "serde_bytes")] pub Vec<u8>);
 
 #[derive(Serialize, Deserialize)]
 pub struct BinarySyncMessage(#[serde(with = "serde_bytes")] pub Vec<u8>);
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RawSyncState {
-    shared_heads: Vec<ChangeHash>,
-    last_sent_heads: Option<Vec<ChangeHash>>,
-    their_heads: Option<Vec<ChangeHash>>,
-    their_need: Option<Vec<ChangeHash>>,
-    their_have: Option<Vec<RawSyncHave>>,
-    sent_hashes: HashMap<ChangeHash, bool>,
-}
-
-impl TryFrom<SyncState> for RawSyncState {
-    type Error = AutomergeError;
-
-    fn try_from(value: SyncState) -> Result<Self, Self::Error> {
-        let have = if let Some(have) = value.their_have {
-            Some(
-                have.into_iter()
-                    .map(RawSyncHave::try_from)
-                    .collect::<Result<_, _>>()?,
-            )
-        } else {
-            None
-        };
-        Ok(Self {
-            shared_heads: value.shared_heads,
-            last_sent_heads: value.last_sent_heads,
-            their_heads: value.their_heads,
-            their_need: value.their_need,
-            their_have: have,
-            sent_hashes: value.sent_hashes.into_iter().map(|h| (h, true)).collect(),
-        })
-    }
-}
-
-impl TryFrom<RawSyncState> for SyncState {
-    type Error = AutomergeError;
-
-    fn try_from(value: RawSyncState) -> Result<Self, Self::Error> {
-        let have = if let Some(have) = value.their_have {
-            Some(
-                have.into_iter()
-                    .map(SyncHave::try_from)
-                    .collect::<Result<_, _>>()?,
-            )
-        } else {
-            None
-        };
-        Ok(Self {
-            shared_heads: value.shared_heads,
-            last_sent_heads: value.last_sent_heads,
-            their_heads: value.their_heads,
-            their_need: value.their_need,
-            their_have: have,
-            sent_hashes: value.sent_hashes.keys().cloned().collect(),
-        })
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
