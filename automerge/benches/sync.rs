@@ -41,10 +41,7 @@ fn sync(
     }
 }
 
-fn sync_per_change(
-    count: u32,
-    sync_interval: u32,
-) -> Vec<(Backend, Backend, SyncState, SyncState)> {
+fn sync_per_change(count: u32, sync_interval: u32) {
     let mut n1 = Backend::init();
     let mut n2 = Backend::init();
     let mut s1 = SyncState::default();
@@ -66,8 +63,6 @@ fn sync_per_change(
     let (patch, _) = n1.apply_local_change(change).unwrap();
     f1.apply_patch(patch).unwrap();
 
-    let mut sync_args = Vec::new();
-
     for i in 0..count {
         let change = f1
             .change::<_, _, InvalidChangeRequest>(None, |d| {
@@ -84,20 +79,18 @@ fn sync_per_change(
         f1.apply_patch(patch).unwrap();
 
         if i % sync_interval == sync_interval - 1 {
-            sync_args.push((n1.clone(), n2.clone(), s1.clone(), s2.clone()));
             sync(&mut n1, &mut n2, &mut s1, &mut s2);
-            assert_eq!(n1, n2)
         }
     }
-    sync_args
 }
 
-pub fn sync_matrix(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Sync");
+pub fn sync_with_changes_matrix(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Sync with changes");
 
-    for count in [100, 200, 500, 1000].iter() {
-        for interval in [1, 10, 100, 1000].iter().rev() {
+    for count in [1000, 2000, 5000, 10_000].iter() {
+        for interval in [1, 10, 100, 1000, 10_000].iter().rev() {
             if interval <= count {
+                group.throughput(criterion::Throughput::Elements((count / interval) as u64));
                 group.bench_function(
                     format!(
                         "{} changes, syncing every {}, {} syncs total",
@@ -106,39 +99,11 @@ pub fn sync_matrix(c: &mut Criterion) {
                         count / interval
                     ),
                     |b| {
-                        b.iter_batched(
-                            || sync_per_change(*count, *interval),
-                            |args| {
-                                #[allow(clippy::unit_arg)]
-                                black_box(for (mut n1, mut n2, mut s1, mut s2) in args {
-                                    sync(&mut n1, &mut n2, &mut s1, &mut s2)
-                                })
-                            },
-                            criterion::BatchSize::SmallInput,
-                        )
+                        b.iter(|| {
+                            #[allow(clippy::unit_arg)]
+                            black_box(sync_per_change(*count, *interval))
+                        })
                     },
-                );
-            }
-        }
-    }
-
-    group.finish();
-}
-
-pub fn sync_with_changes_matrix(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Sync with changes");
-
-    for count in [100, 200, 500, 1000].iter() {
-        for interval in [1, 10, 100, 1000].iter().rev() {
-            if interval <= count {
-                group.bench_function(
-                    format!(
-                        "{} changes, syncing every {}, {} syncs total",
-                        count,
-                        interval,
-                        count / interval
-                    ),
-                    |b| b.iter(|| black_box(sync_per_change(*count, *interval))),
                 );
             }
         }
@@ -150,6 +115,6 @@ pub fn sync_with_changes_matrix(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(10).measurement_time(Duration::from_secs(30));
-    targets = sync_matrix, sync_with_changes_matrix
+    targets = sync_with_changes_matrix
 }
 criterion_main!(benches);
