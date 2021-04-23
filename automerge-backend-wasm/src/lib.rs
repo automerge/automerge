@@ -232,9 +232,11 @@ fn export_changes(changes: Vec<&Change>) -> Array {
 }
 
 #[wasm_bindgen(js_name = generateSyncMessage)]
-pub fn generate_sync_message(input: Object, sync_state: &JsSyncState) -> Result<JsValue, JsValue> {
+pub fn generate_sync_message(
+    input: Object,
+    mut sync_state: JsSyncState,
+) -> Result<JsValue, JsValue> {
     get_input(input, |state| {
-        let mut sync_state = sync_state.clone();
         let message = state.0.generate_sync_message(&mut sync_state.0);
         let result = Array::new();
         result.push(&JsValue::from(sync_state));
@@ -251,7 +253,7 @@ pub fn generate_sync_message(input: Object, sync_state: &JsSyncState) -> Result<
 #[wasm_bindgen(js_name = receiveSyncMessage)]
 pub fn receive_sync_message(
     input: Object,
-    sync_state: &JsSyncState,
+    mut sync_state: JsSyncState,
     message: JsValue,
 ) -> Result<JsValue, JsValue> {
     let mut state: State = get_state(&input)?;
@@ -259,7 +261,6 @@ pub fn receive_sync_message(
     let binary_message: BinarySyncMessage = serde_wasm_bindgen::from_value(message)?;
     let message = SyncMessage::decode(&binary_message.0).map_err(to_js_err)?;
 
-    let mut sync_state = sync_state.clone();
     let patch = match state.0.receive_sync_message(&mut sync_state.0, message) {
         Ok(r) => r,
         Err(err) => {
@@ -295,8 +296,8 @@ pub fn init_sync_state() -> Result<JsSyncState, JsValue> {
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(sync_state: &JsSyncState) -> Result<JsValue, JsValue> {
-    let binary_sync_state = BinarySyncState(sync_state.0.clone().encode().map_err(to_js_err)?);
+pub fn encode_sync_state(sync_state: JsSyncState) -> Result<JsValue, JsValue> {
+    let binary_sync_state = BinarySyncState(sync_state.0.encode().map_err(to_js_err)?);
     Ok(serde_wasm_bindgen::to_value(&binary_sync_state)?)
 }
 
