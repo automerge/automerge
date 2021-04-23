@@ -1,5 +1,5 @@
 use crate::{AutomergeError, BloomFilter};
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use automerge_protocol::ChangeHash;
 
@@ -15,7 +15,7 @@ pub struct SyncState {
     pub their_heads: Option<Vec<ChangeHash>>,
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<SyncHave>>,
-    pub sent_hashes: Vec<ChangeHash>,
+    pub sent_hashes: HashSet<ChangeHash>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -46,7 +46,7 @@ impl SyncState {
             their_heads: None,
             their_need: None,
             their_have: Some(Vec::new()),
-            sent_hashes: Vec::new(),
+            sent_hashes: HashSet::new(),
         })
     }
 }
@@ -59,7 +59,7 @@ impl Default for SyncState {
             their_heads: None,
             their_need: None,
             their_have: None,
-            sent_hashes: Vec::new(),
+            sent_hashes: HashSet::new(),
         }
     }
 }
