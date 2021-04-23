@@ -86,9 +86,7 @@ impl Backend {
             return None;
         }
 
-        if !sync_state.sent_hashes.is_empty() && !changes_to_send.is_empty() {
-            changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash))
-        }
+        changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash));
 
         sync_state.last_sent_heads = Some(our_heads.clone());
         sync_state
