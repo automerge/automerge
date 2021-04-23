@@ -3,6 +3,7 @@ use automerge_backend::{BloomFilter, SyncHave, SyncMessage, SyncState};
 use automerge_protocol::ChangeHash;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 
 #[derive(Serialize, Deserialize)]
@@ -25,7 +26,7 @@ pub struct RawSyncState {
     their_heads: Option<Vec<ChangeHash>>,
     their_need: Option<Vec<ChangeHash>>,
     their_have: Option<Vec<RawSyncHave>>,
-    sent_hashes: Vec<ChangeHash>,
+    sent_hashes: HashSet<ChangeHash>,
 }
 
 impl TryFrom<SyncState> for RawSyncState {
