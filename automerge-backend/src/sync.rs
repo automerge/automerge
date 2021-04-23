@@ -87,8 +87,7 @@ impl Backend {
         }
 
         if !sync_state.sent_hashes.is_empty() && !changes_to_send.is_empty() {
-            let sent_changes_set = sync_state.sent_hashes.iter().collect::<HashSet<_>>();
-            changes_to_send.retain(|change| !sent_changes_set.contains(&change.hash))
+            changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash))
         }
 
         sync_state.last_sent_heads = Some(our_heads.clone());
