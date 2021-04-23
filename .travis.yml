@@ -24,7 +24,7 @@ script:
 - cargo build --verbose --all-targets --workspace
 - travis_fold end "build"
 - travis_fold start "test"
-- cargo test --verbose --all-targets --workspace
+- cargo test --verbose --workspace
 - travis_fold end "test"
 - travis_fold start "wasm-build"
 - cd automerge-backend-wasm && yarn release
