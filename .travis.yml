@@ -5,6 +5,7 @@ rust:
 - stable
 - beta
 - nightly
+if: branch = main
 install:
 - rustup self update
 - rustup component add clippy
