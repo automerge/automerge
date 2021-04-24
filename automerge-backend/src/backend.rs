@@ -232,48 +232,44 @@ impl Backend {
             .unwrap_or_default())
     }
 
-    pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        if have_deps.len() == 0 {
-            return self
+    fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&Change>> {
+        if have_deps.is_empty() {
+            return Some(self
                 .history
                 .iter()
                 .filter_map(|h| self.hashes.get(h))
-                .collect();
+                .collect())
         }
 
         let lowest_idx = have_deps
             .iter()
             .filter_map(|h| self.history_idx.get(h))
-            .min();
-        let lowest_idx = match lowest_idx {
-            Some(i) => i,
-            None => {
-                return vec![];
-            }
-        };
+            .min()?;
 
         let mut missing_changes = vec![];
         let mut has_seen: HashSet<_> = have_deps.iter().collect();
         for hash in &self.history[*lowest_idx..] {
             let change = self.hashes.get(hash).unwrap();
-            let mut deps_seen = 0;
-            for dep in &change.deps {
-                if has_seen.contains(dep) {
-                    deps_seen += 1;
+            let deps_seen = change.deps.iter().filter(|h| has_seen.contains(h)).count();
+            if deps_seen > 0 {
+                if deps_seen != change.deps.len() {
+                    // future change depends on something we haven't seen - fast path cant work
+                    return None;
                 }
-            }
-            if deps_seen > 0 && deps_seen == change.deps.len() {
                 missing_changes.push(change);
                 has_seen.insert(hash);
-            } else if deps_seen > 0 {
-                break;
             }
         }
 
+        // if we get to the end and there is a head we haven't seen then fast path cant work
         if self.get_heads().iter().all(|h| has_seen.contains(h)) {
-            return missing_changes;
+            Some(missing_changes)
+        } else {
+            None
         }
+    }
 
+    fn get_changes_slow(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -287,6 +283,14 @@ impl Backend {
             .filter(|hash| !has_seen.contains(hash))
             .filter_map(|hash| self.hashes.get(hash))
             .collect()
+    }
+
+    pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
+        if let Some(changes) = self.get_changes_fast(have_deps) {
+            changes
+        } else {
+            self.get_changes_slow(have_deps)
+        }
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
@@ -313,5 +317,16 @@ impl Backend {
             .flat_map(|change| change.deps.clone())
             .filter(|h| !in_queue.contains(&h))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        let mut backend = Backend::init();
+        assert_eq!(3, 3);
     }
 }
