@@ -86,6 +86,7 @@ impl Backend {
             return None;
         }
 
+        // deduplicate the changes to send with those we have already sent
         changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash));
 
         sync_state.last_sent_heads = Some(our_heads.clone());
@@ -128,6 +129,9 @@ impl Backend {
                 &sync_state.shared_heads,
             )
         }
+
+        // trim down the sent hashes to those that we know they haven't seen
+        self.filter_changes(&message_heads, &mut sync_state.sent_hashes);
 
         if changes_is_empty && message_heads == before_heads {
             sync_state.last_sent_heads = Some(message_heads.clone())

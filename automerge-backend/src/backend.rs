@@ -9,7 +9,7 @@ use crate::Change;
 use amp::ChangeHash;
 use automerge_protocol as amp;
 use core::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Backend {
@@ -233,11 +233,14 @@ impl Backend {
     }
 
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        let mut stack = have_deps.to_owned();
+        let mut stack: Vec<_> = have_deps.iter().collect();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
+            if has_seen.contains(&hash) {
+                continue;
+            }
             if let Some(change) = self.hashes.get(&hash) {
-                stack.extend(change.deps.clone());
+                stack.extend(change.deps.iter());
             }
             has_seen.insert(hash);
         }
@@ -291,5 +294,49 @@ impl Backend {
 
     pub fn get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
         self.hashes.get(hash)
+    }
+
+    /// Filter the changes down to those that are not transitive dependencies of the heads.
+    ///
+    /// Thus a graph with these heads has not seen the remaining changes.
+    pub fn filter_changes(
+        &self,
+        heads: &[amp::ChangeHash],
+        changes: &mut HashSet<amp::ChangeHash>,
+    ) {
+        // TODO: with a topological sort we might be able to quicken some cases where changes lie
+        // to the right of the heads in our history (thus they are newer or concurrent).
+        // This may help to avoid searching all the predecessors of the heads when we know they
+        // won't be found.
+        let mut queue: VecDeque<_> = heads.iter().collect();
+        let mut seen = HashSet::new();
+        while let Some(hash) = queue.pop_front() {
+            if seen.contains(hash) {
+                continue;
+            }
+            seen.insert(hash);
+
+            let removed = changes.remove(&hash);
+            if changes.is_empty() {
+                break;
+            }
+
+            for dep in self
+                .hashes
+                .get(&hash)
+                .map(|c| c.deps.as_slice())
+                .unwrap_or_default()
+            {
+                // if we just removed something from our hashes then it is likely there is more
+                // down here so do a quick inspection on the children.
+                // When we don't remove anything it is less likely that there is something down
+                // that chain so delay it.
+                if removed {
+                    queue.push_front(dep)
+                } else {
+                    queue.push_back(dep)
+                }
+            }
+        }
     }
 }
