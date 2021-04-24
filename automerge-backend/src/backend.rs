@@ -341,7 +341,7 @@ mod tests {
         .try_into()
         .unwrap();
         let change_a2: Change = UncompressedChange {
-            actor_id: actor_a.clone(),
+            actor_id: actor_a,
             seq: 2,
             start_op: 2,
             time: 0,
@@ -398,7 +398,7 @@ mod tests {
         .try_into()
         .unwrap();
         let change_b3: Change = UncompressedChange {
-            actor_id: actor_b.clone(),
+            actor_id: actor_b,
             seq: 3,
             start_op: 3,
             time: 0,
@@ -423,11 +423,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            backend.get_changes_fast(&vec![]),
+            backend.get_changes_fast(&[]),
             Some(vec![&change_a1, &change_a2])
         );
         assert_eq!(
-            backend.get_changes_fast(&vec![change_a1.hash]),
+            backend.get_changes_fast(&[change_a1.hash]),
             Some(vec![&change_a2])
         );
         assert_eq!(backend.get_heads(), vec![change_a2.hash]);
@@ -437,17 +437,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            backend.get_changes_fast(&vec![]),
+            backend.get_changes_fast(&[]),
             Some(vec![&change_a1, &change_a2, &change_b1, &change_b2])
         );
-        assert_eq!(backend.get_changes_fast(&vec![change_a1.hash]), None);
-        assert_eq!(backend.get_changes_fast(&vec![change_a2.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_a1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_a2.hash]), None);
         assert_eq!(
-            backend.get_changes_fast(&vec![change_a1.hash, change_b1.hash]),
+            backend.get_changes_fast(&[change_a1.hash, change_b1.hash]),
             Some(vec![&change_a2, &change_b2])
         );
         assert_eq!(
-            backend.get_changes_fast(&vec![change_a2.hash, change_b1.hash]),
+            backend.get_changes_fast(&[change_a2.hash, change_b1.hash]),
             Some(vec![&change_b2])
         );
         assert_eq!(backend.get_heads(), vec![change_b2.hash, change_a2.hash]);
@@ -456,25 +456,25 @@ mod tests {
 
         assert_eq!(backend.get_heads(), vec![change_b3.hash]);
         assert_eq!(
-            backend.get_changes_fast(&vec![]),
+            backend.get_changes_fast(&[]),
             Some(vec![
                 &change_a1, &change_a2, &change_b1, &change_b2, &change_b3
             ])
         );
-        assert_eq!(backend.get_changes_fast(&vec![change_a1.hash]), None);
-        assert_eq!(backend.get_changes_fast(&vec![change_a2.hash]), None);
-        assert_eq!(backend.get_changes_fast(&vec![change_b1.hash]), None);
-        assert_eq!(backend.get_changes_fast(&vec![change_b2.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_a1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_a2.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_b1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&[change_b2.hash]), None);
         assert_eq!(
-            backend.get_changes_fast(&vec![change_a1.hash, change_b1.hash]),
+            backend.get_changes_fast(&[change_a1.hash, change_b1.hash]),
             Some(vec![&change_a2, &change_b2, &change_b3])
         );
         assert_eq!(
-            backend.get_changes_fast(&vec![change_a2.hash, change_b1.hash]),
+            backend.get_changes_fast(&[change_a2.hash, change_b1.hash]),
             Some(vec![&change_b2, &change_b3])
         );
         assert_eq!(
-            backend.get_changes_fast(&vec![change_b3.hash]),
+            backend.get_changes_fast(&[change_b3.hash]),
             Some(vec![])
         );
     }
