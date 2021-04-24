@@ -16,9 +16,8 @@ pub struct Backend {
     op_set: OpSet,
     states: HashMap<amp::ActorId, Vec<Change>>,
     actors: ActorMap,
-    hashes: HashMap<amp::ChangeHash, Change>,
-    history: Vec<amp::ChangeHash>,
-    history_idx: HashMap<amp::ChangeHash, usize>,
+    history: Vec<Change>,
+    history_index: HashMap<amp::ChangeHash, usize>,
 }
 
 impl Backend {
@@ -30,8 +29,7 @@ impl Backend {
             actors: ActorMap::new(),
             states: HashMap::new(),
             history: Vec::new(),
-            history_idx: HashMap::new(),
-            hashes: HashMap::new(),
+            history_index: HashMap::new(),
         }
     }
 
@@ -170,7 +168,7 @@ impl Backend {
         change: Change,
         diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
     ) -> Result<(), AutomergeError> {
-        if self.hashes.contains_key(&change.hash) {
+        if self.history_index.contains_key(&change.hash) {
             return Ok(());
         }
 
@@ -197,16 +195,19 @@ impl Backend {
             .or_default()
             .push(change.clone());
 
-        self.history_idx.insert(change.hash, self.history.len());
-        self.history.push(change.hash);
-        self.hashes.insert(change.hash, change.clone());
+        self.history_index.insert(change.hash, self.history.len());
+        self.history.push(change.clone());
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
         let mut index = 0;
         while index < self.queue.len() {
             let change = self.queue.get(index).unwrap();
-            if change.deps.iter().all(|d| self.hashes.contains_key(d)) {
+            if change
+                .deps
+                .iter()
+                .all(|d| self.history_index.contains_key(d))
+            {
                 return Some(self.queue.remove(index));
             }
             index += 1
@@ -234,23 +235,18 @@ impl Backend {
 
     fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&Change>> {
         if have_deps.is_empty() {
-            return Some(
-                self.history
-                    .iter()
-                    .filter_map(|h| self.hashes.get(h))
-                    .collect(),
-            );
+            return Some(self.history.iter().collect());
         }
 
         let lowest_idx = have_deps
             .iter()
-            .filter_map(|h| self.history_idx.get(h))
-            .min()?;
+            .filter_map(|h| self.history_index.get(h))
+            .min()?
+            + 1;
 
         let mut missing_changes = vec![];
         let mut has_seen: HashSet<_> = have_deps.iter().collect();
-        for hash in &self.history[*lowest_idx..] {
-            let change = self.hashes.get(hash).unwrap();
+        for change in &self.history[lowest_idx..] {
             let deps_seen = change.deps.iter().filter(|h| has_seen.contains(h)).count();
             if deps_seen > 0 {
                 if deps_seen != change.deps.len() {
@@ -258,7 +254,7 @@ impl Backend {
                     return None;
                 }
                 missing_changes.push(change);
-                has_seen.insert(hash);
+                has_seen.insert(&change.hash);
             }
         }
 
@@ -274,15 +270,14 @@ impl Backend {
         let mut stack = have_deps.to_owned();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
-            if let Some(change) = self.hashes.get(&hash) {
-                stack.extend(change.deps.clone());
+            if let Some(idx) = self.history_index.get(&hash) {
+                stack.extend(self.history[*idx].deps.clone());
             }
             has_seen.insert(hash);
         }
         self.history
             .iter()
-            .filter(|hash| !has_seen.contains(hash))
-            .filter_map(|hash| self.hashes.get(hash))
+            .filter(|change| !has_seen.contains(&change.hash))
             .collect()
     }
 
@@ -295,12 +290,7 @@ impl Backend {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let changes: Vec<amp::UncompressedChange> = self
-            .history
-            .iter()
-            .filter_map(|hash| self.hashes.get(&hash))
-            .map(|r| r.into())
-            .collect();
+        let changes: Vec<amp::UncompressedChange> = self.history.iter().map(|r| r.into()).collect();
         encode_document(changes)
     }
 
