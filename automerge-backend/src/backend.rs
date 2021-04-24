@@ -234,11 +234,12 @@ impl Backend {
 
     fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&Change>> {
         if have_deps.is_empty() {
-            return Some(self
-                .history
-                .iter()
-                .filter_map(|h| self.hashes.get(h))
-                .collect())
+            return Some(
+                self.history
+                    .iter()
+                    .filter_map(|h| self.hashes.get(h))
+                    .collect(),
+            );
         }
 
         let lowest_idx = have_deps
@@ -323,10 +324,168 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use automerge_protocol::{ActorId, ObjectId, Op, OpType, UncompressedChange};
+    use std::convert::TryInto;
 
     #[test]
     fn test_add() {
+        let actor_a: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
+        let actor_b: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
+        let change_a1: Change = UncompressedChange {
+            actor_id: actor_a.clone(),
+            seq: 1,
+            start_op: 1,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: Vec::new(),
+            operations: vec![Op {
+                obj: ObjectId::Root,
+                action: OpType::Set("magpie".into()),
+                key: "bird".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
+        let change_a2: Change = UncompressedChange {
+            actor_id: actor_a.clone(),
+            seq: 2,
+            start_op: 2,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: vec![change_a1.hash],
+            operations: vec![Op {
+                obj: ObjectId::Root,
+                action: OpType::Set("ant".into()),
+                key: "bug".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
+        let change_b1: Change = UncompressedChange {
+            actor_id: actor_b.clone(),
+            seq: 1,
+            start_op: 1,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: vec![],
+            operations: vec![Op {
+                obj: ObjectId::Root,
+                action: OpType::Set("dove".into()),
+                key: "bird".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
+        let change_b2: Change = UncompressedChange {
+            actor_id: actor_b.clone(),
+            seq: 2,
+            start_op: 2,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: vec![change_b1.hash],
+            operations: vec![Op {
+                obj: ObjectId::Root,
+                action: OpType::Set("stag beetle".into()),
+                key: "bug".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
+        let change_b3: Change = UncompressedChange {
+            actor_id: actor_b.clone(),
+            seq: 3,
+            start_op: 3,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: vec![change_a2.hash, change_b2.hash],
+            operations: vec![Op {
+                obj: ObjectId::Root,
+                action: OpType::Set("bugs and birds".into()),
+                key: "title".into(),
+                insert: false,
+                pred: Vec::new(),
+            }],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
         let mut backend = Backend::init();
-        assert_eq!(3, 3);
+
+        backend
+            .apply_changes(vec![change_a1.clone(), change_a2.clone()])
+            .unwrap();
+
+        assert_eq!(
+            backend.get_changes_fast(&vec![]),
+            Some(vec![&change_a1, &change_a2])
+        );
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_a1.hash]),
+            Some(vec![&change_a2])
+        );
+        assert_eq!(backend.get_heads(), vec![change_a2.hash]);
+
+        backend
+            .apply_changes(vec![change_b1.clone(), change_b2.clone()])
+            .unwrap();
+
+        assert_eq!(
+            backend.get_changes_fast(&vec![]),
+            Some(vec![&change_a1, &change_a2, &change_b1, &change_b2])
+        );
+        assert_eq!(backend.get_changes_fast(&vec![change_a1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&vec![change_a2.hash]), None);
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_a1.hash, change_b1.hash]),
+            Some(vec![&change_a2, &change_b2])
+        );
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_a2.hash, change_b1.hash]),
+            Some(vec![&change_b2])
+        );
+        assert_eq!(backend.get_heads(), vec![change_b2.hash, change_a2.hash]);
+
+        backend.apply_changes(vec![change_b3.clone()]).unwrap();
+
+        assert_eq!(backend.get_heads(), vec![change_b3.hash]);
+        assert_eq!(
+            backend.get_changes_fast(&vec![]),
+            Some(vec![
+                &change_a1, &change_a2, &change_b1, &change_b2, &change_b3
+            ])
+        );
+        assert_eq!(backend.get_changes_fast(&vec![change_a1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&vec![change_a2.hash]), None);
+        assert_eq!(backend.get_changes_fast(&vec![change_b1.hash]), None);
+        assert_eq!(backend.get_changes_fast(&vec![change_b2.hash]), None);
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_a1.hash, change_b1.hash]),
+            Some(vec![&change_a2, &change_b2, &change_b3])
+        );
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_a2.hash, change_b1.hash]),
+            Some(vec![&change_b2, &change_b3])
+        );
+        assert_eq!(
+            backend.get_changes_fast(&vec![change_b3.hash]),
+            Some(vec![])
+        );
     }
 }
