@@ -473,9 +473,6 @@ mod tests {
             backend.get_changes_fast(&[change_a2.hash, change_b1.hash]),
             Some(vec![&change_b2, &change_b3])
         );
-        assert_eq!(
-            backend.get_changes_fast(&[change_b3.hash]),
-            Some(vec![])
-        );
+        assert_eq!(backend.get_changes_fast(&[change_b3.hash]), Some(vec![]));
     }
 }
