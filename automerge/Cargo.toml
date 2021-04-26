@@ -12,6 +12,7 @@ description = "Rust implementation of the Automerge replicated JSON datatype"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "automerge"
+bench = false
 
 [dependencies]
 serde = { version = "^1.0", features=["derive"] }

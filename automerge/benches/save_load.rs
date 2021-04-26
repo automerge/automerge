@@ -6,7 +6,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 fn small_change_backend() -> Backend {
     let mut frontend = Frontend::new();
     let mut backend = Backend::init();
-    let (_,change) = frontend
+    let (_, change) = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("a"),
@@ -149,7 +149,7 @@ fn medium_change_backend() -> Backend {
             Ok(())
         })
         .unwrap();
-    if let (_,Some(change)) = c {
+    if let (_, Some(change)) = c {
         change1s.push(change.clone());
         backend.apply_local_change(change).unwrap();
     }
@@ -166,7 +166,7 @@ fn medium_change_backend() -> Backend {
             Ok(())
         })
         .unwrap();
-    if let (_,Some(change)) = c {
+    if let (_, Some(change)) = c {
         change2s.push(change.clone());
         backend.apply_local_change(change).unwrap();
     }
