@@ -276,8 +276,8 @@ impl Backend {
             if has_seen.contains(&hash) {
                 continue;
             }
-            if let Some(idx) = self.history_index.get(&hash) {
-                stack.extend(self.history[*idx].deps.iter());
+            if let Some(change) = self.history_index.get(&hash).and_then(|i| self.history.get(*i)) {
+                stack.extend(change.deps.iter());
             }
             has_seen.insert(hash);
         }
@@ -365,7 +365,8 @@ impl Backend {
             for dep in self
                 .history_index
                 .get(&hash)
-                .map(|i| self.history[*i].deps.as_slice())
+                .and_then(|i| self.history.get(*i))
+                .map(|c| c.deps.as_slice())
                 .unwrap_or_default()
             {
                 // if we just removed something from our hashes then it is likely there is more
@@ -389,7 +390,7 @@ mod tests {
     use std::convert::TryInto;
 
     #[test]
-    fn test_add() {
+    fn test_get_changes_fast_behavior() {
         let actor_a: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
         let actor_b: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
         let change_a1: Change = UncompressedChange {
