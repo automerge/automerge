@@ -1,10 +1,9 @@
-use crate::{AutomergeError, BloomFilter};
 use std::{borrow::Cow, collections::HashSet};
 
 use automerge_protocol::ChangeHash;
 
 use super::{decode_hashes, encode_hashes};
-use crate::encoding::Decoder;
+use crate::{encoding::Decoder, AutomergeError, BloomFilter};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 

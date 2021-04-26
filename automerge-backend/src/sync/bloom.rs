@@ -1,11 +1,11 @@
-use std::convert::TryFrom;
-
-use crate::AutomergeError;
-use std::borrow::Cow;
+use std::{borrow::Cow, convert::TryFrom};
 
 use automerge_protocol::ChangeHash;
 
-use crate::encoding::{Decoder, Encodable};
+use crate::{
+    encoding::{Decoder, Encodable},
+    AutomergeError,
+};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
