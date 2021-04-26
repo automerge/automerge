@@ -12,6 +12,7 @@ license = "MIT"
 
 [lib]
 crate-type = ["cdylib","rlib"]
+bench = false
 
 [features]
 # default = ["console_error_panic_hook", "wee_alloc"]
