@@ -274,7 +274,11 @@ impl Backend {
             if has_seen.contains(&hash) {
                 continue;
             }
-            if let Some(change) = self.history_index.get(&hash).and_then(|i| self.history.get(*i)) {
+            if let Some(change) = self
+                .history_index
+                .get(&hash)
+                .and_then(|i| self.history.get(*i))
+            {
                 stack.extend(change.deps.iter());
             }
             has_seen.insert(hash);
