@@ -114,12 +114,12 @@ int main() {
   len = automerge_get_heads(dbB);
   while (len > 0) {
     assert(len == 32);
-    int nextlen = automerge_read_binary(dbB,buff + (num_heads * 32));
+    int nextlen = automerge_read_binary(dbB,buff3 + (num_heads * 32));
     num_heads++;
     len = nextlen;
   }
   assert(num_heads == 2);
-  len = automerge_get_changes(dbB,num_heads,buff);
+  len = automerge_get_changes(dbB,num_heads,buff3);
   assert(len == 0);
 
   printf("*** copy changes from dbB to A ***\n\n");
@@ -161,7 +161,7 @@ int main() {
   printf("*** get_patch of dbA & dbE -- equal? *** --> %s\n\n",strlen(buff) == strlen(buff2) ? "true" : "false");
   assert(strlen(buff) == strlen(buff2));
 
-  len = automerge_get_missing_deps(dbE);
+  len = automerge_get_missing_deps(dbE, num_heads, buff3);
   automerge_read_json(dbE, buff); // [] - nothing missing
   assert(strlen(buff) == 2);
 
