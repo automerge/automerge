@@ -387,9 +387,11 @@ impl Backend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use automerge_protocol::{ActorId, ObjectId, Op, OpType, UncompressedChange};
     use std::convert::TryInto;
+
+    use automerge_protocol::{ActorId, ObjectId, Op, OpType, UncompressedChange};
+
+    use super::*;
 
     #[test]
     fn test_get_changes_fast_behavior() {

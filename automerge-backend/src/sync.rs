@@ -1,28 +1,23 @@
-use std::convert::TryFrom;
-use std::io;
-use std::io::Write;
-
-use automerge_protocol::Patch;
-
-use crate::AutomergeError;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    convert::TryFrom,
+    io,
+    io::Write,
 };
 
-use automerge_protocol::ChangeHash;
+use automerge_protocol::{ChangeHash, Patch};
 
 use crate::{
     encoding::{Decoder, Encodable},
-    Backend, Change,
+    AutomergeError, Backend, Change,
 };
 
 mod bloom;
 mod state;
 
 pub use bloom::BloomFilter;
-pub use state::SyncHave;
-pub use state::SyncState;
+pub use state::{SyncHave, SyncState};
 
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
