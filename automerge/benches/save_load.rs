@@ -7,7 +7,7 @@ fn small_change_backend() -> Backend {
     let mut frontend = Frontend::new();
     let mut backend = Backend::init();
     let change = frontend
-        .change::<_, InvalidChangeRequest>(None, |doc| {
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("a"),
                 Value::Primitive(Primitive::Str("hello world".to_owned())),
@@ -15,6 +15,7 @@ fn small_change_backend() -> Backend {
             Ok(())
         })
         .unwrap()
+        .1
         .unwrap();
     backend.apply_local_change(change).unwrap();
     backend
@@ -143,13 +144,14 @@ fn medium_change_backend() -> Backend {
     frontend.apply_patch(patch).unwrap();
 
     let c = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             for change in &changes1 {
                 d.add_change(change.clone())?
             }
             Ok(())
         })
-        .unwrap();
+        .unwrap()
+        .1;
     if let Some(change) = c {
         change1s.push(change.clone());
         backend.apply_local_change(change).unwrap();
@@ -160,13 +162,14 @@ fn medium_change_backend() -> Backend {
     frontend.apply_patch(patch).unwrap();
 
     let c = frontend
-        .change::<_, InvalidChangeRequest>(None, |d| {
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
             for change in &changes2 {
                 d.add_change(change.clone())?
             }
             Ok(())
         })
-        .unwrap();
+        .unwrap()
+        .1;
     if let Some(change) = c {
         change2s.push(change.clone());
         backend.apply_local_change(change).unwrap();
