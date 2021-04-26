@@ -11,7 +11,7 @@ install:
 - rustup self update
 - rustup component add clippy
 - rustup component add rustfmt
-- curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+- cargo install --force --version 0.9.1 wasm-pack
 - nvm install 10
 before_script:
 - export -f travis_fold
