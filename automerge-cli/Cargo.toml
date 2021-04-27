@@ -7,6 +7,7 @@ edition = "2018"
 [[bin]]
 name = "automerge"
 path = "src/main.rs"
+bench = false
 
 [dependencies]
 clap = "3.0.0-beta.2"
