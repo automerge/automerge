@@ -24,7 +24,7 @@ pub struct SyncHave {
 }
 
 impl SyncState {
-    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn encode(&self) -> Result<Vec<u8>, AutomergeError> {
         let mut buf = vec![SYNC_STATE_TYPE];
         encode_hashes(&mut buf, &self.shared_heads)?;
         Ok(buf)
