@@ -42,8 +42,8 @@ impl Backend {
             self.op_set
                 .deps
                 .iter()
+                .filter(|&dep| dep != &last_hash)
                 .cloned()
-                .filter(|dep| dep != &last_hash)
                 .collect()
         } else {
             self.op_set.deps.iter().cloned().collect()
@@ -322,21 +322,22 @@ impl Backend {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
-            if !self.history_index.contains_key(&head) {
+        for head in self.queue.iter().flat_map(|change| &change.deps) {
+            if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
         }
 
         for head in heads {
             if !self.history_index.contains_key(&head) {
-                missing.insert(*head);
+                missing.insert(head);
             }
         }
 
         let mut missing = missing
             .into_iter()
             .filter(|hash| !in_queue.contains(hash))
+            .cloned()
             .collect::<Vec<_>>();
         missing.sort();
         missing
