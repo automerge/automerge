@@ -174,7 +174,11 @@ impl Backend {
             return Ok(());
         }
 
-        self.update_history(&change);
+        let change_index = self.update_history(change);
+
+        // SAFETY: change_index is the index for the change we've just added so this can't (and
+        // shouldn't) panic. This is to get around the borrow checker.
+        let change = &self.history[change_index];
 
         let op_set = &mut self.op_set;
 
@@ -191,7 +195,7 @@ impl Backend {
         Ok(())
     }
 
-    fn update_history(&mut self, change: &Change) {
+    fn update_history(&mut self, change: Change) -> usize {
         let history_index = self.history.len();
 
         self.states
@@ -200,7 +204,9 @@ impl Backend {
             .push(history_index);
 
         self.history_index.insert(change.hash, history_index);
-        self.history.push(change.clone());
+        self.history.push(change);
+
+        history_index
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {

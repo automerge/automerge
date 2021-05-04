@@ -20,7 +20,7 @@ pub(crate) struct OpHandle {
 }
 
 impl OpHandle {
-    pub fn extract(change: Change, actors: &mut ActorMap) -> Vec<OpHandle> {
+    pub fn extract(change: &Change, actors: &mut ActorMap) -> Vec<OpHandle> {
         change
             .iter_ops()
             .enumerate()
