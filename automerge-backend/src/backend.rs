@@ -13,7 +13,7 @@ use crate::{
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
-    states: HashMap<amp::ActorId, Vec<Change>>,
+    states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
@@ -98,6 +98,7 @@ impl Backend {
         self.states
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|&i| self.history.get(i))
             .map(|c| c.hash)
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
@@ -191,12 +192,14 @@ impl Backend {
     }
 
     fn update_history(&mut self, change: &Change) {
+        let history_index = self.history.len();
+
         self.states
             .entry(change.actor_id().clone())
             .or_default()
-            .push(change.clone());
+            .push(history_index);
 
-        self.history_index.insert(change.hash, self.history.len());
+        self.history_index.insert(change.hash, history_index);
         self.history.push(change.clone());
     }
 
@@ -230,7 +233,7 @@ impl Backend {
         Ok(self
             .states
             .get(actor_id)
-            .map(|vec| vec.iter().collect())
+            .map(|vec| vec.iter().filter_map(|&i| self.history.get(i)).collect())
             .unwrap_or_default())
     }
 
