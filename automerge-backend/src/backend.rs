@@ -85,7 +85,7 @@ impl Backend {
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
-        for change in changes.into_iter() {
+        for change in changes {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
@@ -128,8 +128,7 @@ impl Backend {
         if self
             .states
             .get(&change.actor_id)
-            .map(|v| v.len() as u64)
-            .unwrap_or(0)
+            .map_or(0, |v| v.len() as u64)
             >= change.seq
         {
             return Err(AutomergeError::DuplicateChange(format!(
@@ -184,7 +183,7 @@ impl Backend {
 
         let start_op = change.start_op;
 
-        op_set.update_deps(&change);
+        op_set.update_deps(change);
 
         let ops = OpHandle::extract(change, &mut self.actors);
 
@@ -285,7 +284,7 @@ impl Backend {
             }
             if let Some(change) = self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
             {
                 stack.extend(change.deps.iter());
@@ -308,9 +307,11 @@ impl Backend {
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let changes: Vec<amp::UncompressedChange> = self.history.iter().map(|r| r.into()).collect();
-        encode_document(changes)
+        encode_document(&changes)
     }
 
+    // allow this for API reasons
+    #[allow(clippy::needless_pass_by_value)]
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
         let mut backend = Self::init();
@@ -329,7 +330,7 @@ impl Backend {
         }
 
         for head in heads {
-            if !self.history_index.contains_key(&head) {
+            if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
         }
@@ -369,14 +370,14 @@ impl Backend {
             }
             seen.insert(hash);
 
-            let removed = changes.remove(&hash);
+            let removed = changes.remove(hash);
             if changes.is_empty() {
                 break;
             }
 
             for dep in self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
                 .map(|c| c.deps.as_slice())
                 .unwrap_or_default()

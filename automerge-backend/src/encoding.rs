@@ -226,7 +226,7 @@ where
                 }
             }
             RleState::LoneVal(value) => self.flush_lit_run(vec![value]),
-            RleState::Run(value, len) => self.flush_run(value, len),
+            RleState::Run(value, len) => self.flush_run(&value, len),
             RleState::LiteralRun(last, mut run) => {
                 run.push(last);
                 self.flush_lit_run(run);
@@ -236,20 +236,20 @@ where
         ColData::new(col, self.buf)
     }
 
-    fn flush_run(&mut self, val: T, len: usize) {
-        self.encode(len as i64);
+    fn flush_run(&mut self, val: &T, len: usize) {
+        self.encode(&(len as i64));
         self.encode(val);
     }
 
     fn flush_null_run(&mut self, len: usize) {
-        self.encode::<i64>(0);
-        self.encode(len);
+        self.encode::<i64>(&0);
+        self.encode(&len);
     }
 
     fn flush_lit_run(&mut self, run: Vec<T>) {
-        self.encode(-(run.len() as i64));
+        self.encode(&-(run.len() as i64));
         for val in run {
-            self.encode(val);
+            self.encode(&val);
         }
     }
 
@@ -268,7 +268,7 @@ where
                 RleState::NullRun(1)
             }
             RleState::Run(other, len) => {
-                self.flush_run(other, len);
+                self.flush_run(&other, len);
                 RleState::NullRun(1)
             }
             RleState::LiteralRun(last, mut run) => {
@@ -293,7 +293,7 @@ where
                 if other == value {
                     RleState::Run(other, len + 1)
                 } else {
-                    self.flush_run(other, len);
+                    self.flush_run(&other, len);
                     RleState::LoneVal(value)
                 }
             }
@@ -313,7 +313,7 @@ where
         }
     }
 
-    fn encode<V>(&mut self, val: V)
+    fn encode<V>(&mut self, val: &V)
     where
         V: Encodable,
     {
@@ -639,13 +639,13 @@ impl Encodable for usize {
 
 impl Encodable for u32 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        (*self as u64).encode(buf)
+        u64::from(*self).encode(buf)
     }
 }
 
 impl Encodable for i32 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        (*self as i64).encode(buf)
+        i64::from(*self).encode(buf)
     }
 }
 

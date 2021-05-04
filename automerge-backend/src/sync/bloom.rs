@@ -92,7 +92,7 @@ impl BloomFilter {
 }
 
 fn bits_capacity(num_entries: u32, num_bits_per_entry: u32) -> usize {
-    let f = ((num_entries as f64 * num_bits_per_entry as f64) / 8f64).ceil();
+    let f = ((f64::from(num_entries) * f64::from(num_bits_per_entry)) / 8_f64).ceil();
     f as usize
 }
 

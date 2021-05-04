@@ -19,6 +19,7 @@ mod state;
 pub use bloom::BloomFilter;
 pub use state::{SyncHave, SyncState};
 
+const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Backend {
@@ -222,8 +223,8 @@ impl Backend {
             let mut changes_to_send = Vec::new();
             for hash in need {
                 hashes_to_send.insert(*hash);
-                if !change_hashes.contains(&hash) {
-                    let change = self.get_change_by_hash(&hash);
+                if !change_hashes.contains(hash) {
+                    let change = self.get_change_by_hash(hash);
                     if let Some(change) = change {
                         changes_to_send.push(change)
                     }
@@ -328,7 +329,6 @@ fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeErro
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);
 
-    const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
     for _ in 0..length {
         let hash_bytes = decoder.read_bytes(HASH_SIZE)?;
         let hash = ChangeHash::try_from(hash_bytes)
