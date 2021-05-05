@@ -26,7 +26,7 @@ fn test_deflate_correctly() {
     ];
     let change: Change = Change::from_bytes(init_change.clone()).unwrap();
     let mut backend = Backend::init();
-    backend.apply_changes(vec![change.clone()]).unwrap();
+    backend.apply_changes(vec![change]).unwrap();
 
     let change_back = backend.get_changes(&[]);
     assert_eq!(change_back[0].raw_bytes().to_vec(), init_change);
