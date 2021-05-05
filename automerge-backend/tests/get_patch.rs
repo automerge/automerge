@@ -696,6 +696,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
                 }
             },
         })),
+        pending_changes: 0,
     };
 
     let mut backend = Backend::init();

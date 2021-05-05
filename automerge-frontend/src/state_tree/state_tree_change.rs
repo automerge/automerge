@@ -1,5 +1,3 @@
-use std::ops::{Add, AddAssign};
-
 use automerge_protocol as amp;
 
 use super::{Cursors, StateTreeComposite};
@@ -57,7 +55,7 @@ impl StateTreeChange {
     pub(super) fn union(&self, other: StateTreeChange) -> StateTreeChange {
         StateTreeChange {
             objects: self.objects.clone().union(other.objects.clone()),
-            new_cursors: self.new_cursors.clone().union(other.new_cursors.clone()),
+            new_cursors: self.new_cursors.clone().union(other.new_cursors),
         }
     }
 }

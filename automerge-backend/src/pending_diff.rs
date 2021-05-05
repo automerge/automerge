@@ -1,7 +1,6 @@
 use automerge_protocol as amp;
 
 use crate::{
-    actor_map::ActorMap,
     internal::{Key, OpId},
     op_handle::OpHandle,
 };

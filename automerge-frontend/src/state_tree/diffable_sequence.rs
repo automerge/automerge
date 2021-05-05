@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use automerge_protocol as amp;
 
 use super::{
