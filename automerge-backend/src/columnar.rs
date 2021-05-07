@@ -1159,7 +1159,7 @@ impl Decodable for Action {
         R: Read,
     {
         let num = usize::decode::<R>(bytes)?;
-        ACTIONS.get(num).cloned()
+        ACTIONS.get(num).copied()
     }
 }
 

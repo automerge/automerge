@@ -174,7 +174,7 @@ where
     K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     fn remove_index(&mut self, index: usize) -> Option<K> {
-        let key = self.key_of(index).cloned();
+        let key = self.key_of(index).copied();
         if let Some(ref k) = &key {
             self.remove(k);
         }
@@ -234,7 +234,7 @@ where
             self.insert_head(key)
         } else {
             self.key_of(index - 1)
-                .cloned()
+                .copied()
                 .map_or(false, |suc| self.insert_after(&suc, key))
         }
     }
@@ -427,7 +427,7 @@ where
     fn predecessors(&self, predecessor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
         let mut pre = Vec::with_capacity(max_level);
         pre.push(Link {
-            key: predecessor.cloned(),
+            key: predecessor.copied(),
             count: 1,
         });
 
@@ -451,7 +451,7 @@ where
     fn successors(&self, successor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
         let mut suc = Vec::with_capacity(max_level);
         suc.push(Link {
-            key: successor.cloned(),
+            key: successor.copied(),
             count: 1,
         });
 
