@@ -46,7 +46,7 @@ impl ObjState {
     }
 
     fn get_parent(&self, id: &ElementId) -> Option<ElementId> {
-        self.insertions.get(&id).and_then(|i| i.key.as_element_id())
+        self.insertions.get(id).and_then(|i| i.key.as_element_id())
     }
 
     fn insertions_after(&self, parent: &ElementId) -> Vec<ElementId> {

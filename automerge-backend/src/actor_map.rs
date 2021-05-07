@@ -15,7 +15,7 @@ impl ActorMap {
     pub fn import_key(&mut self, key: &amp::Key) -> Key {
         match key {
             amp::Key::Map(string) => Key::Map(string.to_string()),
-            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(&eid)),
+            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(eid)),
         }
     }
 
@@ -48,7 +48,7 @@ impl ActorMap {
 
     pub fn import_op(&mut self, op: amp::Op) -> InternalOp {
         InternalOp {
-            action: self.import_optype(&op.action),
+            action: Self::import_optype(&op.action),
             obj: self.import_obj(&op.obj),
             key: self.import_key(&op.key),
             pred: op
@@ -60,7 +60,7 @@ impl ActorMap {
         }
     }
 
-    pub fn import_optype(&mut self, optype: &amp::OpType) -> InternalOpType {
+    pub fn import_optype(optype: &amp::OpType) -> InternalOpType {
         match optype {
             amp::OpType::Make(val) => InternalOpType::Make(*val),
             amp::OpType::Del => InternalOpType::Del,
@@ -126,13 +126,13 @@ impl ActorMap {
     }
 
     fn cmp_opid(&self, op1: &OpId, op2: &OpId) -> Ordering {
-        if op1.0 != op2.0 {
-            op1.0.cmp(&op2.0)
-        } else {
+        if op1.0 == op2.0 {
             let actor1 = &self.0[(op1.1).0];
             let actor2 = &self.0[(op2.1).0];
-            actor1.cmp(&actor2)
+            actor1.cmp(actor2)
             //op1.1.cmp(&op2.1)
+        } else {
+            op1.0.cmp(&op2.0)
         }
     }
 }

@@ -244,7 +244,7 @@ impl Change {
         if m.is_empty() {
             None
         } else {
-            str::from_utf8(&m).map(|s| s.to_string()).ok()
+            str::from_utf8(m).map(ToString::to_string).ok()
         }
     }
 
@@ -263,7 +263,7 @@ impl Change {
     }
 
     pub fn iter_ops(&self) -> OperationIterator {
-        OperationIterator::new(&self.bytes.uncompressed(), &self.actors, &self.ops)
+        OperationIterator::new(self.bytes.uncompressed(), &self.actors, &self.ops)
     }
 
     pub fn extra_bytes(&self) -> &[u8] {
@@ -438,10 +438,10 @@ fn decode_column_info(
 
 fn decode_columns(
     cursor: &mut Range<usize>,
-    columns: Vec<(u32, usize)>,
+    columns: &[(u32, usize)],
 ) -> HashMap<u32, Range<usize>> {
     let mut ops = HashMap::new();
-    for (id, length) in columns.iter() {
+    for (id, length) in columns {
         let start = cursor.start;
         let end = start + length;
         *cursor = end..cursor.end;
@@ -472,7 +472,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
         ChangeBytes::Uncompressed(bytes)
     };
 
-    let (chunktype, hash, body) = decode_header(&bytes.uncompressed())?;
+    let (chunktype, hash, body) = decode_header(bytes.uncompressed())?;
 
     if chunktype != BLOCK_TYPE_CHANGE {
         return Err(AutomergeError::EncodingError);
@@ -480,19 +480,19 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 
     let mut cursor = body;
 
-    let deps = decode_hashes(&bytes.uncompressed(), &mut cursor)?;
+    let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
 
     let actor =
-        amp::ActorId::from(&bytes.uncompressed()[slice_bytes(&bytes.uncompressed(), &mut cursor)?]);
-    let seq = read_slice(&bytes.uncompressed(), &mut cursor)?;
-    let start_op = read_slice(&bytes.uncompressed(), &mut cursor)?;
-    let time = read_slice(&bytes.uncompressed(), &mut cursor)?;
-    let message = slice_bytes(&bytes.uncompressed(), &mut cursor)?;
+        amp::ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
+    let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
+    let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
+    let time = read_slice(bytes.uncompressed(), &mut cursor)?;
+    let message = slice_bytes(bytes.uncompressed(), &mut cursor)?;
 
-    let actors = decode_actors(&bytes.uncompressed(), &mut cursor, Some(actor))?;
+    let actors = decode_actors(bytes.uncompressed(), &mut cursor, Some(actor))?;
 
-    let ops_info = decode_column_info(&bytes.uncompressed(), &mut cursor, false)?;
-    let ops = decode_columns(&mut cursor, ops_info);
+    let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
+    let ops = decode_columns(&mut cursor, &ops_info);
 
     Ok(Change {
         bytes,
@@ -559,8 +559,8 @@ fn group_doc_change_and_doc_ops(
         let op = ops[i].clone(); // this is safe - avoid borrow checker issues
                                  //let id = (op.ctr, op.actor);
                                  //op_by_id.insert(id, i);
-        for succ in op.succ.iter() {
-            if let Some(index) = op_by_id.get(&succ) {
+        for succ in &op.succ {
+            if let Some(index) = op_by_id.get(succ) {
                 ops[*index].pred.push((op.ctr, op.actor))
             } else {
                 let key = if op.insert {
@@ -650,7 +650,7 @@ fn doc_changes_to_uncompressed_changes(
 
 fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
     let mut changes = Vec::new();
-    for slice in split_blocks(bytes).into_iter() {
+    for slice in split_blocks(bytes) {
         decode_block(slice, &mut changes)?;
     }
     Ok(changes)
@@ -685,25 +685,25 @@ fn pop_block(bytes: &[u8]) -> Option<Range<usize>> {
 }
 
 fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
-    let (chunktype, _hash, mut cursor) = decode_header(&bytes)?;
+    let (chunktype, _hash, mut cursor) = decode_header(bytes)?;
 
     if chunktype > 0 {
         return Err(AutomergeError::EncodingError);
     }
 
-    let actors = decode_actors(&bytes, &mut cursor, None)?;
+    let actors = decode_actors(bytes, &mut cursor, None)?;
     // FIXME
     // I should calculate the deads generated on decode and confirm they match these
-    let _heads = decode_hashes(&bytes, &mut cursor)?;
+    let _heads = decode_hashes(bytes, &mut cursor)?;
 
-    let changes_info = decode_column_info(&bytes, &mut cursor, true)?;
-    let ops_info = decode_column_info(&bytes, &mut cursor, true)?;
+    let changes_info = decode_column_info(bytes, &mut cursor, true)?;
+    let ops_info = decode_column_info(bytes, &mut cursor, true)?;
 
-    let changes_data = decode_columns(&mut cursor, changes_info);
-    let mut doc_changes: Vec<_> = ChangeIterator::new(&bytes, &changes_data).collect();
+    let changes_data = decode_columns(&mut cursor, &changes_info);
+    let mut doc_changes: Vec<_> = ChangeIterator::new(bytes, &changes_data).collect();
 
-    let ops_data = decode_columns(&mut cursor, ops_info);
-    let mut doc_ops: Vec<_> = DocOpIterator::new(&bytes, &actors, &ops_data).collect();
+    let ops_data = decode_columns(&mut cursor, &ops_info);
+    let mut doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
 
     group_doc_change_and_doc_ops(&mut doc_changes, &mut doc_ops, &actors)?;
 
@@ -723,7 +723,7 @@ fn compress_doc_changes(
 
     for i in 0..doc_changes.len() {
         let deps = &mut uncompressed_changes.get_mut(i)?.deps;
-        for idx in doc_changes.get(i)?.deps.iter() {
+        for idx in &doc_changes.get(i)?.deps {
             deps.push(changes.get(*idx)?.hash)
         }
         changes.push(uncompressed_changes.get(i)?.into());
@@ -746,9 +746,7 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
                 is_seq.insert(opid.clone().into());
             }
 
-            let key = if !op.insert {
-                op.key.clone()
-            } else {
+            let key = if op.insert {
                 by_ref
                     .entry(objid.clone())
                     .or_default()
@@ -756,6 +754,8 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
                     .or_default()
                     .push(opid.clone());
                 opid.clone().into()
+            } else {
+                op.key.clone()
             };
 
             by_obj_id
@@ -837,20 +837,20 @@ fn get_heads(changes: &[amp::UncompressedChange]) -> HashSet<amp::ChangeHash> {
         if let Some(hash) = c.hash {
             acc.insert(hash);
         }
-        for dep in c.deps.iter() {
-            acc.remove(&dep);
+        for dep in &c.deps {
+            acc.remove(dep);
         }
         acc
     })
 }
 
 pub(crate) fn encode_document(
-    changes: Vec<amp::UncompressedChange>,
+    changes: &[amp::UncompressedChange],
 ) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
-    let heads = get_heads(&changes);
+    let heads = get_heads(changes);
 
     // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
     // so long as we have a full history
@@ -862,9 +862,9 @@ pub(crate) fn encode_document(
         .cloned()
         .collect();
 
-    let (change_bytes, change_info) = ChangeEncoder::encode_changes(&changes, &actors);
+    let (change_bytes, change_info) = ChangeEncoder::encode_changes(changes, &actors);
 
-    let doc_ops = group_doc_ops(&changes, &actors);
+    let doc_ops = group_doc_ops(changes, &actors);
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(&doc_ops, &mut actors);
 
@@ -876,7 +876,7 @@ pub(crate) fn encode_document(
 
     actors.len().encode(&mut chunk)?;
 
-    for a in actors.iter() {
+    for a in &actors {
         a.to_bytes().encode(&mut chunk)?;
     }
 
@@ -1128,7 +1128,7 @@ mod tests {
             .map(|c| c.decode())
             .collect();
         let decoded_preload: Vec<amp::UncompressedChange> =
-            changes.clone().into_iter().map(|c| c.decode()).collect();
+            changes.clone().into_iter().map(Change::decode).collect();
         assert_eq!(decoded_loaded, decoded_preload);
         assert_eq!(
             loaded_changes,
@@ -1180,7 +1180,7 @@ mod tests {
             .map(|c| c.decode())
             .collect();
         let decoded_preload: Vec<amp::UncompressedChange> =
-            changes.clone().into_iter().map(|c| c.decode()).collect();
+            changes.clone().into_iter().map(Change::decode).collect();
         assert_eq!(decoded_loaded[0].operations.len(), 257);
         assert_eq!(decoded_loaded, decoded_preload);
         assert_eq!(
@@ -1202,7 +1202,7 @@ mod tests {
             deps: Vec::new(),
             extra_bytes: Vec::new(),
         };
-        let mut doc = encode_document(vec![change]).unwrap();
+        let mut doc = encode_document(&[change]).unwrap();
         let hash = doc[4..8].try_into().unwrap();
         doc[4] = 0;
         doc[5] = 0;

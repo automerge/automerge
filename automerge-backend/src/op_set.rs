@@ -99,7 +99,7 @@ impl OpSet {
             tracing::debug!(referred_opid=?oid, "Adding cursor");
             let internal_opid = actors.import_opid(oid);
             let mut target_found = false;
-            for (obj_id, obj) in self.objs.iter() {
+            for (obj_id, obj) in &self.objs {
                 if obj.insertions.contains_key(&internal_opid.into()) {
                     target_found = true;
                     self.cursors.entry(*obj_id).or_default().push(CursorState {
@@ -120,7 +120,7 @@ impl OpSet {
         }
 
         let object_id = &op.obj;
-        let object = self.get_obj_mut(&object_id)?;
+        let object = self.get_obj_mut(object_id)?;
 
         let (diff, overwritten) = if object.is_seq() {
             if op.insert {
@@ -199,7 +199,7 @@ impl OpSet {
 
         for old in overwritten.iter() {
             if let Some(child) = old.child() {
-                self.get_obj_mut(&child)?.inbound.remove(&old);
+                self.get_obj_mut(&child)?.inbound.remove(old);
             }
         }
         Ok(())
@@ -207,13 +207,13 @@ impl OpSet {
 
     pub fn get_obj(&self, object_id: &ObjectId) -> Result<&ObjState, AutomergeError> {
         self.objs
-            .get(&object_id)
+            .get(object_id)
             .ok_or(AutomergeError::MissingObjectError)
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectId) -> Result<&mut ObjState, AutomergeError> {
         self.objs
-            .get_mut(&object_id)
+            .get_mut(object_id)
             .ok_or(AutomergeError::MissingObjectError)
     }
 
@@ -226,7 +226,7 @@ impl OpSet {
     ) -> Result<amp::Diff, AutomergeError> {
         let mut props = HashMap::new();
 
-        for (key, ops) in object.props.iter() {
+        for (key, ops) in &object.props {
             if !ops.is_empty() {
                 let mut opid_to_value = HashMap::new();
                 for op in ops.iter() {
@@ -261,7 +261,7 @@ impl OpSet {
         let mut index = 0;
         let mut max_counter = 0;
 
-        for opid in object.seq.into_iter() {
+        for opid in &object.seq {
             max_counter = max(max_counter, opid.0);
             let key = (*opid).into(); // FIXME - something is wrong here
             let elem_id = actors.export_opid(opid).into();
@@ -298,7 +298,7 @@ impl OpSet {
         object_id: &ObjectId,
         actors: &ActorMap,
     ) -> Result<amp::Diff, AutomergeError> {
-        let object = self.get_obj(&object_id)?;
+        let object = self.get_obj(object_id)?;
         match object.obj_type {
             amp::ObjType::Map(map_type) => self.construct_map(object_id, object, actors, map_type),
             amp::ObjType::Sequence(seq_type) => {
@@ -322,7 +322,7 @@ impl OpSet {
         // diff for the cursor
         let mut cursor_changes: HashMap<ObjectId, Vec<PendingDiff>> = HashMap::new();
         for obj_id in pending.keys() {
-            if let Some(cursors) = self.cursors.get_mut(&obj_id) {
+            if let Some(cursors) = self.cursors.get_mut(obj_id) {
                 for cursor in cursors.iter_mut() {
                     if let Some(obj) = self.objs.get(&cursor.internal_referred_object_id) {
                         cursor.index = obj.index_of(cursor.internal_element_opid).unwrap_or(0);
@@ -370,10 +370,10 @@ impl OpSet {
         let mut props = HashMap::new();
         let edits = pending.iter().filter_map(|p| p.edit(actors)).collect();
         // i may have duplicate keys - this makes sure I hit each one only once
-        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
-        for key in keys.iter() {
+        let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
+        for key in &keys {
             let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
                     InternalOpType::Make(_) => {
@@ -410,11 +410,11 @@ impl OpSet {
     ) -> Result<amp::Diff, AutomergeError> {
         let mut props = HashMap::new();
         // I may have duplicate keys - I do this to make sure I visit each one only once
-        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
-        for key in keys.iter() {
+        let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
+        for key in &keys {
             let key_string = actors.key_to_string(key);
             let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
                     InternalOpType::Make(_) => {
@@ -438,7 +438,7 @@ impl OpSet {
     pub fn update_deps(&mut self, change: &Change) {
         //self.max_op = max(self.max_op, change.max_op());
 
-        for d in change.deps.iter() {
+        for d in &change.deps {
             self.deps.remove(d);
         }
         self.deps.insert(change.hash);

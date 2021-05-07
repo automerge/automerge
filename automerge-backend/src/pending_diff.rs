@@ -17,9 +17,9 @@ pub(crate) enum PendingDiff {
 impl PendingDiff {
     pub fn operation_key(&self) -> Key {
         match self {
-            Self::SeqInsert(op, _, _) => op.operation_key(),
-            Self::SeqRemove(op, _) => op.operation_key(),
-            Self::Set(op) => op.operation_key(),
+            Self::SeqInsert(op, _, _) | Self::SeqRemove(op, _) | Self::Set(op) => {
+                op.operation_key()
+            }
             Self::CursorChange(k) => k.clone(),
         }
     }

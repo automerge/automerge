@@ -13,7 +13,7 @@ use crate::{
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
-    states: HashMap<amp::ActorId, Vec<Change>>,
+    states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
@@ -42,8 +42,8 @@ impl Backend {
             self.op_set
                 .deps
                 .iter()
+                .filter(|&dep| dep != &last_hash)
                 .cloned()
-                .filter(|dep| dep != &last_hash)
                 .collect()
         } else {
             self.op_set.deps.iter().cloned().collect()
@@ -85,7 +85,7 @@ impl Backend {
     ) -> Result<amp::Patch, AutomergeError> {
         let mut pending_diffs = HashMap::new();
 
-        for change in changes.into_iter() {
+        for change in changes {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
         }
 
@@ -98,6 +98,7 @@ impl Backend {
         self.states
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|&i| self.history.get(i))
             .map(|c| c.hash)
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
@@ -127,8 +128,7 @@ impl Backend {
         if self
             .states
             .get(&change.actor_id)
-            .map(|v| v.len() as u64)
-            .unwrap_or(0)
+            .map_or(0, |v| v.len() as u64)
             >= change.seq
         {
             return Err(AutomergeError::DuplicateChange(format!(
@@ -173,13 +173,17 @@ impl Backend {
             return Ok(());
         }
 
-        self.update_history(&change);
+        let change_index = self.update_history(change);
+
+        // SAFETY: change_index is the index for the change we've just added so this can't (and
+        // shouldn't) panic. This is to get around the borrow checker.
+        let change = &self.history[change_index];
 
         let op_set = &mut self.op_set;
 
         let start_op = change.start_op;
 
-        op_set.update_deps(&change);
+        op_set.update_deps(change);
 
         let ops = OpHandle::extract(change, &mut self.actors);
 
@@ -190,14 +194,18 @@ impl Backend {
         Ok(())
     }
 
-    fn update_history(&mut self, change: &Change) {
+    fn update_history(&mut self, change: Change) -> usize {
+        let history_index = self.history.len();
+
         self.states
             .entry(change.actor_id().clone())
             .or_default()
-            .push(change.clone());
+            .push(history_index);
 
-        self.history_index.insert(change.hash, self.history.len());
-        self.history.push(change.clone());
+        self.history_index.insert(change.hash, history_index);
+        self.history.push(change);
+
+        history_index
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -230,7 +238,7 @@ impl Backend {
         Ok(self
             .states
             .get(actor_id)
-            .map(|vec| vec.iter().collect())
+            .map(|vec| vec.iter().filter_map(|&i| self.history.get(i)).collect())
             .unwrap_or_default())
     }
 
@@ -276,7 +284,7 @@ impl Backend {
             }
             if let Some(change) = self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
             {
                 stack.extend(change.deps.iter());
@@ -299,9 +307,11 @@ impl Backend {
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let changes: Vec<amp::UncompressedChange> = self.history.iter().map(|r| r.into()).collect();
-        encode_document(changes)
+        encode_document(&changes)
     }
 
+    // allow this for API reasons
+    #[allow(clippy::needless_pass_by_value)]
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
         let mut backend = Self::init();
@@ -313,21 +323,22 @@ impl Backend {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
-            if !self.history_index.contains_key(&head) {
+        for head in self.queue.iter().flat_map(|change| &change.deps) {
+            if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
         }
 
         for head in heads {
-            if !self.history_index.contains_key(&head) {
-                missing.insert(*head);
+            if !self.history_index.contains_key(head) {
+                missing.insert(head);
             }
         }
 
         let mut missing = missing
             .into_iter()
             .filter(|hash| !in_queue.contains(hash))
+            .cloned()
             .collect::<Vec<_>>();
         missing.sort();
         missing
@@ -359,14 +370,14 @@ impl Backend {
             }
             seen.insert(hash);
 
-            let removed = changes.remove(&hash);
+            let removed = changes.remove(hash);
             if changes.is_empty() {
                 break;
             }
 
             for dep in self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
                 .map(|c| c.deps.as_slice())
                 .unwrap_or_default()
