@@ -8,7 +8,7 @@ pub struct EventHandlerId(usize);
 /// A sequence of event handlers.
 ///
 /// This maintains the order of insertion so handlers will be called in a consistent order.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct EventHandlers(Vec<EventHandler>);
 
 impl Clone for EventHandlers {
@@ -61,12 +61,5 @@ impl Debug for EventHandler {
             Self::BeforeApplyChange(_) => write!(f, "BeforeApplyChange"),
             Self::AfterApplyChange(_) => write!(f, "AfterApplyChange"),
         }
-    }
-}
-
-impl PartialEq for EventHandler {
-    fn eq(&self, _other: &Self) -> bool {
-        // TODO: check if this seems sensible to do
-        false
     }
 }
