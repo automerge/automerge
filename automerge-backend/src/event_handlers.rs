@@ -2,6 +2,12 @@ use std::fmt::Debug;
 
 use crate::Change;
 
+#[derive(Clone, Copy)]
+pub struct EventHandlerId(usize);
+
+/// A sequence of event handlers.
+///
+/// This maintains the order of insertion so handlers will be called in a consistent order.
 #[derive(Debug, Default, PartialEq)]
 pub struct EventHandlers(Vec<EventHandler>);
 
@@ -12,34 +18,39 @@ impl Clone for EventHandlers {
 }
 
 impl EventHandlers {
-    pub fn before_apply_change(&mut self, change: &Change) {
+    pub(crate) fn before_apply_change(&mut self, change: &Change) {
         for handler in &mut self.0 {
             if let EventHandler::BeforeApplyChange(f) = handler {
-                f(change)
+                f.0(change)
             }
         }
     }
 
-    pub fn after_apply_change(&mut self, change: &Change) {
+    pub(crate) fn after_apply_change(&mut self, change: &Change) {
         for handler in &mut self.0 {
             if let EventHandler::AfterApplyChange(f) = handler {
-                f(change)
+                f.0(change)
             }
         }
     }
 
-    pub fn add_before_apply_change_handler(&mut self, handler: ChangeEventHandler) {
-        self.0.push(EventHandler::BeforeApplyChange(handler))
+    /// Remove the handler with the given id.
+    pub fn remove_handler(&mut self, id: EventHandlerId) {
+        self.0.remove(id.0);
     }
 
-    pub fn add_after_apply_change_handler(&mut self, handler: ChangeEventHandler) {
-        self.0.push(EventHandler::AfterApplyChange(handler))
+    /// Adds the event handler and returns the id of the handler.
+    pub fn add_handler(&mut self, handler: EventHandler) -> EventHandlerId {
+        self.0.push(handler);
+        EventHandlerId(self.0.len() - 1)
     }
 }
 
-type ChangeEventHandler = Box<dyn FnMut(&Change) + Send>;
+/// A handler for changes.
+pub struct ChangeEventHandler(pub Box<dyn FnMut(&Change) + Send>);
 
-enum EventHandler {
+/// An general event handler.
+pub enum EventHandler {
     BeforeApplyChange(ChangeEventHandler),
     AfterApplyChange(ChangeEventHandler),
 }
