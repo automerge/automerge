@@ -51,7 +51,9 @@ pub struct ChangeEventHandler(pub Box<dyn FnMut(&Change) + Send>);
 
 /// An general event handler.
 pub enum EventHandler {
+    /// An event handler that gets called before a change is applied to the history.
     BeforeApplyChange(ChangeEventHandler),
+    /// An event handler that gets called after a change has been applied to the history.
     AfterApplyChange(ChangeEventHandler),
 }
 
