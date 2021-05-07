@@ -146,7 +146,7 @@ impl Backend {
                 .chain(known_heads)
                 .collect::<HashSet<_>>()
                 .into_iter()
-                .cloned()
+                .copied()
                 .collect::<Vec<_>>();
             sync_state.shared_heads.sort();
         }
@@ -209,7 +209,7 @@ impl Backend {
                 }
             }
 
-            let mut stack = hashes_to_send.iter().cloned().collect::<Vec<_>>();
+            let mut stack = hashes_to_send.iter().copied().collect::<Vec<_>>();
             while let Some(hash) = stack.pop() {
                 if let Some(deps) = dependents.get(&hash) {
                     for dep in deps {
@@ -347,13 +347,13 @@ fn advance_heads(
     let new_heads = my_new_heads
         .iter()
         .filter(|head| !my_old_heads.contains(head))
-        .cloned()
+        .copied()
         .collect::<Vec<_>>();
 
     let common_heads = our_old_shared_heads
         .iter()
         .filter(|head| my_new_heads.contains(head))
-        .cloned()
+        .copied()
         .collect::<Vec<_>>();
 
     let mut advanced_heads = HashSet::with_capacity(new_heads.len() + common_heads.len());

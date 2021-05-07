@@ -43,10 +43,10 @@ impl Backend {
                 .deps
                 .iter()
                 .filter(|&dep| dep != &last_hash)
-                .cloned()
+                .copied()
                 .collect()
         } else {
-            self.op_set.deps.iter().cloned().collect()
+            self.op_set.deps.iter().copied().collect()
         };
         deps.sort_unstable();
         let pending_changes = self.get_missing_deps(&[]).len();
@@ -338,7 +338,7 @@ impl Backend {
         let mut missing = missing
             .into_iter()
             .filter(|hash| !in_queue.contains(hash))
-            .cloned()
+            .copied()
             .collect::<Vec<_>>();
         missing.sort();
         missing

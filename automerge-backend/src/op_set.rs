@@ -79,7 +79,7 @@ impl OpSet {
     }
 
     pub fn heads(&self) -> Vec<amp::ChangeHash> {
-        let mut deps: Vec<_> = self.deps.iter().cloned().collect();
+        let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
@@ -338,7 +338,7 @@ impl OpSet {
             pending.entry(obj_id).or_default().extend(cursor_change)
         }
 
-        let mut objs: Vec<_> = pending.keys().cloned().collect();
+        let mut objs: Vec<_> = pending.keys().copied().collect();
         while let Some(obj_id) = objs.pop() {
             let obj = self.get_obj(&obj_id)?;
             if let Some(inbound) = obj.inbound.iter().next() {

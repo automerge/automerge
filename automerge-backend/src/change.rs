@@ -72,7 +72,7 @@ fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
     let hash_result = hasher.result();
     let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
 
-    bytes.splice(HASH_RANGE, hash_result[0..4].iter().cloned());
+    bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 
     // any time I make changes to the encoder decoder its a good idea
     // to run it through a round trip to detect errors the tests might not
@@ -899,7 +899,7 @@ pub(crate) fn encode_document(
     let hash_result = hasher.result();
     //let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
 
-    bytes.splice(HASH_RANGE, hash_result[0..4].iter().cloned());
+    bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 
     Ok(bytes)
 }
