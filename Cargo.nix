@@ -476,6 +476,14 @@ rec {
             packageId = "serde";
           }
           {
+            name = "serde-wasm-bindgen";
+            packageId = "serde-wasm-bindgen";
+          }
+          {
+            name = "serde_bytes";
+            packageId = "serde_bytes";
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
           }
@@ -3939,6 +3947,64 @@ rec {
           "derive" = [ "serde_derive" ];
         };
         resolvedDefaultFeatures = [ "default" "derive" "serde_derive" "std" ];
+      };
+      "serde-wasm-bindgen" = rec {
+        crateName = "serde-wasm-bindgen";
+        version = "0.1.3";
+        edition = "2018";
+        sha256 = "0djnmksp2dxa56vcam93jkmssb5wp9ys6390alpavryhgqpz3rky";
+        authors = [
+          "Ingvar Stepanyan <me@rreverser.com>"
+        ];
+        dependencies = [
+          {
+            name = "fnv";
+            packageId = "fnv";
+          }
+          {
+            name = "js-sys";
+            packageId = "js-sys";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "wasm-bindgen";
+            packageId = "wasm-bindgen";
+          }
+        ];
+        devDependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+        ];
+        features = {
+        };
+      };
+      "serde_bytes" = rec {
+        crateName = "serde_bytes";
+        version = "0.11.5";
+        edition = "2018";
+        sha256 = "1fcb6sw8wkrj4ylm118wkb31hw124nkjnqyhbgqnd8w85zfhgbhn";
+        authors = [
+          "David Tolnay <dtolnay@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            usesDefaultFeatures = false;
+          }
+        ];
+        features = {
+          "alloc" = [ "serde/alloc" ];
+          "default" = [ "std" ];
+          "std" = [ "serde/std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "serde_cbor" = rec {
         crateName = "serde_cbor";
