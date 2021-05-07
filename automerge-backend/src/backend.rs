@@ -8,9 +8,15 @@ use amp::ChangeHash;
 use automerge_protocol as amp;
 
 use crate::{
-    actor_map::ActorMap, change::encode_document, error::AutomergeError,
-    event_handlers::EventHandlers, internal::ObjectId, op_handle::OpHandle, op_set::OpSet,
-    pending_diff::PendingDiff, Change,
+    actor_map::ActorMap,
+    change::encode_document,
+    error::AutomergeError,
+    event_handlers::{EventHandlerId, EventHandlers},
+    internal::ObjectId,
+    op_handle::OpHandle,
+    op_set::OpSet,
+    pending_diff::PendingDiff,
+    Change, EventHandler,
 };
 
 #[derive(Debug, Clone)]
@@ -21,7 +27,7 @@ pub struct Backend {
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
-    pub event_handlers: EventHandlers,
+    event_handlers: EventHandlers,
 }
 
 impl Backend {
@@ -403,6 +409,16 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Adds the event handler and returns the id of the handler.
+    pub fn add_event_handler(&mut self, handler: EventHandler) -> EventHandlerId {
+        self.event_handlers.add_handler(handler)
+    }
+
+    /// Remove the handler with the given id, returning whether it removed a handler or not.
+    pub fn remove_event_handler(&mut self, id: EventHandlerId) -> bool {
+        self.event_handlers.remove_handler(id)
     }
 }
 
