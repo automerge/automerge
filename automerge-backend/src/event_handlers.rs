@@ -34,15 +34,20 @@ impl EventHandlers {
         }
     }
 
-    /// Remove the handler with the given id.
-    pub fn remove_handler(&mut self, id: EventHandlerId) {
-        self.0.remove(id.0);
-    }
-
     /// Adds the event handler and returns the id of the handler.
     pub fn add_handler(&mut self, handler: EventHandler) -> EventHandlerId {
         self.0.push(handler);
         EventHandlerId(self.0.len() - 1)
+    }
+
+    /// Remove the handler with the given id, returning whether it removed a handler or not.
+    pub fn remove_handler(&mut self, id: EventHandlerId) -> bool {
+        if id.0 < self.0.len() {
+            self.0.remove(id.0);
+            true
+        } else {
+            false
+        }
     }
 }
 
