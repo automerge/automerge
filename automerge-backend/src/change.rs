@@ -158,10 +158,15 @@ fn encode_chunk(
     uncompressed_change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
-    let expanded_ops = ExpandedOpIterator::new(&uncompressed_change.operations);
+    let expanded_ops = ExpandedOpIterator::new(
+        &uncompressed_change.operations,
+        uncompressed_change.start_op,
+        uncompressed_change.actor_id.clone(),
+    )
+    .collect::<Vec<_>>();
 
     // encode ops into a side buffer - collect all other actors
-    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
+    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops.into_iter(), &mut actors);
 
     // encode all other actors
     actors[1..].encode(&mut bytes).unwrap();
@@ -756,7 +761,10 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
     let mut ops = Vec::new();
 
     for change in changes {
-        for (i, op) in ExpandedOpIterator::new(&change.operations[..]).enumerate() {
+        for (i, op) in
+            ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone())
+                .enumerate()
+        {
             //for (i, op) in change.operations.iter().enumerate() {
             let opid = amp::OpId(change.start_op + i as u64, change.actor_id.clone());
             let objid = op.obj.clone();
