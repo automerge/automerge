@@ -249,14 +249,18 @@ where
                         updating.insert(i, UpdatingSequenceElement::New(mv.value));
                     }
                 }
-                amp::DiffEdit::Update { index, value, opid } => {
+                amp::DiffEdit::Update {
+                    index,
+                    value,
+                    op_id,
+                } => {
                     if let Some(elem) = updating.get_mut(*index as usize) {
                         let change = elem.apply_diff(
-                            opid,
+                            op_id,
                             DiffToApply {
                                 current_objects,
                                 parent_object_id: object_id,
-                                parent_key: &opid,
+                                parent_key: &op_id,
                                 diff: value,
                             },
                         )?;

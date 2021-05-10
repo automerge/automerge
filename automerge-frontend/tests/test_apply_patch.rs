@@ -470,7 +470,7 @@ fn apply_updates_inside_lists() {
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
-                            opid: actor.op_id_at(3),
+                            op_id: actor.op_id_at(3),
                             value: amp::Diff::Value("greenfinch".into()),
                         }],
                     })
@@ -582,7 +582,7 @@ fn apply_updates_inside_list_conflicts() {
                             },
                             amp::DiffEdit::Update{
                                 index: 0,
-                                opid: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
@@ -650,7 +650,7 @@ fn apply_updates_inside_list_conflicts() {
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
-                                opid: actor1.op_id_at(2),
+                                op_id: actor1.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
@@ -663,7 +663,7 @@ fn apply_updates_inside_list_conflicts() {
                             },
                             amp::DiffEdit::Update{
                                 index: 0,
-                                opid: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Unchanged(amp::ObjDiff{
                                     object_id: actor2.op_id_at(2).into(),
                                     obj_type: amp::ObjType::Map(amp::MapType::Map),
@@ -722,7 +722,7 @@ fn apply_updates_inside_list_conflicts() {
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
-                                opid: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Unchanged(amp::ObjDiff{
                                     object_id: actor2.op_id_at(2).into(),
                                     obj_type: amp::ObjType::Map(amp::MapType::Map),
@@ -924,7 +924,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
-                            opid: actor.op_id_at(4).into(),
+                            op_id: actor.op_id_at(4).into(),
                             value: amp::Diff::Map(amp::MapDiff{
                                 object_id: actor.op_id_at(4).into(),
                                 obj_type: amp::MapType::Map,
@@ -1028,7 +1028,7 @@ fn test_text_objects() {
                             amp::DiffEdit::Remove { index: 1, count: 1 },
                             amp::DiffEdit::Update{
                                 index: 1,
-                                opid: actor.op_id_at(5),
+                                op_id: actor.op_id_at(5),
                                 value: amp::Diff::Value(amp::ScalarValue::Str("i".to_string())),
                             }
                         ],

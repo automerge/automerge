@@ -688,7 +688,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
                             },
                             DiffEdit::Update{
                                 index: 0,
-                                opid: actor2.op_id_at(1).into(),
+                                op_id: actor2.op_id_at(1).into(),
                                 value: Diff::Value("remote2".into())
                             },
                         ],

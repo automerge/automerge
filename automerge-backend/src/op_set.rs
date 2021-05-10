@@ -281,13 +281,14 @@ impl OpSet {
                         if seen_indices.contains(&index) {
                             edits.append_edit(amp::DiffEdit::Update {
                                 index,
-                                opid: amp_opid,
+                                op_id: amp_opid,
                                 value,
                             });
                         } else {
                             edits.append_edit(amp::DiffEdit::SingleElementInsert {
                                 index,
-                                elem_id: amp_opid.into(),
+                                elem_id: amp_opid.clone().into(),
+                                op_id: amp_opid,
                                 value,
                             });
                         }
@@ -390,9 +391,11 @@ impl OpSet {
                         }
                         _ => panic!("del or inc found in field operations"),
                     };
+                    let op_id = actors.export_opid(&opid);
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
                         index: *index as u64,
-                        elem_id: actors.export_opid(&opid).into(),
+                        elem_id: op_id.clone().into(),
+                        op_id,
                         value,
                     });
                 }
@@ -406,7 +409,7 @@ impl OpSet {
                     };
                     edits.append_edit(amp::DiffEdit::Update {
                         index: *index as u64,
-                        opid: actors.export_opid(&opid).into(),
+                        op_id: actors.export_opid(&opid).into(),
                         value,
                     });
                 }

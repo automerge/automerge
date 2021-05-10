@@ -406,29 +406,46 @@ pub struct CursorDiff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
-    #[serde(rename = "insert")]
+    /// Describes the insertion of a single element into a list or text object.
+    /// The element can be a nested object.
+    #[serde(rename = "insert", rename_all = "camelCase")]
     SingleElementInsert {
+        /// the list index at which to insert the new element
         index: u64,
-        #[serde(rename = "elemId")]
+        /// the unique element ID of the new list element
         elem_id: ElementId,
+        /// ID of the operation that assigned this value
+        op_id: OpId,
         value: Diff,
     },
-    #[serde(rename = "multi-insert")]
+    /// Describes the insertion of a consecutive sequence of primitive values into
+    /// a list or text object. In the case of text, the values are strings (each
+    /// character as a separate string value). Each inserted value is given a
+    /// consecutive element ID: starting with `elemId` for the first value, the
+    /// subsequent values are given elemIds with the same actor ID and incrementing
+    /// counters. To insert non-primitive values, use SingleInsertEdit.
+    #[serde(rename = "multi-insert", rename_all = "camelCase")]
     MultiElementInsert {
+        /// the list index at which to insert the first value
         index: u64,
-        #[serde(rename = "elemId")]
-        first_opid: OpId,
+        /// the unique ID of the first inserted element
+        elem_id: ElementId,
         values: Vec<ScalarValue>,
     },
+    /// Describes the update of the value or nested object at a particular index
+    /// of a list or text object. In the case where there are multiple conflicted
+    /// values at the same list index, multiple UpdateEdits with the same index
+    /// (but different opIds) appear in the edits array of ListDiff.
+    #[serde(rename_all = "camelCase")]
     Update {
+        /// the list index to update
         index: u64,
-        opid: OpId,
+        /// ID of the operation that assigned this value
+        op_id: OpId,
         value: Diff,
     },
-    Remove {
-        index: u64,
-        count: u64,
-    },
+    #[serde(rename_all = "camelCase")]
+    Remove { index: u64, count: u64 },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
