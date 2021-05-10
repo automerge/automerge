@@ -389,7 +389,6 @@ pub struct MapDiff {
     pub object_id: ObjectId,
     #[serde(rename = "type")]
     pub obj_type: MapType,
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
