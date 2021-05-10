@@ -1,7 +1,7 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{collections::HashMap, convert::TryFrom, fmt};
+use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 
 use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
 
@@ -145,6 +145,13 @@ impl ElementId {
             ElementId::Id(_) => true,
         }
     }
+
+    pub fn increment_by(&self, by: u64) -> Option<Self> {
+        match self {
+            ElementId::Head => None,
+            ElementId::Id(id) => Some(ElementId::Id(id.increment_by(by))),
+        }
+    }
 }
 
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
@@ -177,6 +184,12 @@ impl Key {
         match self.as_element_id()? {
             ElementId::Id(id) => Some(id),
             ElementId::Head => None,
+        }
+    }
+    pub fn increment_by(&self, by: u64) -> Option<Self> {
+        match self {
+            Key::Map(_) => None,
+            Key::Seq(eid) => eid.increment_by(by).map(Key::Seq),
         }
     }
 }
@@ -288,7 +301,8 @@ impl ScalarValue {
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
     Make(ObjType),
-    Del,
+    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
+    Del(NonZeroU32),
     Inc(i64),
     Set(ScalarValue),
     MultiSet(Vec<ScalarValue>),

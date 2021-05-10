@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use std::{convert::TryInto, str::FromStr};
+use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
 
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
@@ -227,7 +227,7 @@ fn delete_key_from_map() {
         deps: vec![change1.hash],
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             key: "bird".into(),
             pred: vec![actor.op_id_at(1)],
             insert: false,
@@ -460,6 +460,7 @@ fn test_create_lists() {
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: Diff::Value(ScalarValue::Str("chaffinch".into())),
 
                         }],
@@ -545,7 +546,7 @@ fn test_apply_updates_inside_lists() {
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: Diff::Value("greenfinch".into()),
                         }],
                     })
@@ -601,7 +602,7 @@ fn test_delete_list_elements() {
         hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: ObjectId::from(actor.op_id_at(1)),
             key: actor.op_id_at(2).into(),
             pred: vec![actor.op_id_at(2)],
@@ -682,7 +683,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 pred: Vec::new(),
             },
             Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: ObjectId::from(actor.op_id_at(1)),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
@@ -715,6 +716,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                             DiffEdit::SingleElementInsert{
                                 index: 0,
                                 elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                                 value: amp::Diff::Value("chaffinch".into()),
                             },
                             DiffEdit::Remove{index: 0, count: 1},
@@ -935,6 +937,7 @@ fn test_support_date_objects_in_a_list() {
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                             value: Diff::Value(ScalarValue::Timestamp(1_586_528_191_421))
                         }],
                     })
@@ -1007,6 +1010,7 @@ fn test_cursor_objects() {
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                             value: Diff::Value(ScalarValue::Str("something".into())),
                         }],
                     })
@@ -1134,6 +1138,7 @@ fn test_updating_sequences_updates_referring_cursors() {
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(4).into(),
+                                op_id: actor.op_id_at(4),
                             value: Diff::Value(ScalarValue::Str("something else".into())),
                         }],
                     })
@@ -1204,7 +1209,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         message: None,
         hash: None,
         operations: vec![Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: actor.op_id_at(1).into(),
             key: actor.op_id_at(2).into(),
             insert: false,

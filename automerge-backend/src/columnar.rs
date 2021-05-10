@@ -18,6 +18,7 @@ use crate::{
         BooleanDecoder, BooleanEncoder, ColData, Decodable, Decoder, DeltaDecoder, DeltaEncoder,
         Encodable, RleDecoder, RleEncoder,
     },
+    expanded_op::ExpandedOp,
     internal::InternalOpType,
 };
 
@@ -122,8 +123,9 @@ impl<'a> OperationIterator<'a> {
 }
 
 impl<'a> Iterator for OperationIterator<'a> {
-    type Item = amp::Op;
-    fn next(&mut self) -> Option<amp::Op> {
+    type Item = ExpandedOp<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let action = self.action.next()??;
         let insert = self.insert.next()?;
         let obj = self.objs.next()?;
@@ -131,19 +133,19 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => amp::OpType::Set(value),
-            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
-            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
-            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
-            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
-            Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+            Action::Set => InternalOpType::Set(value),
+            Action::MakeList => InternalOpType::Make(amp::ObjType::list()),
+            Action::MakeText => InternalOpType::Make(amp::ObjType::text()),
+            Action::MakeMap => InternalOpType::Make(amp::ObjType::map()),
+            Action::MakeTable => InternalOpType::Make(amp::ObjType::table()),
+            Action::Del => InternalOpType::Del,
+            Action::Inc => InternalOpType::Inc(value.to_i64()?),
         };
-        Some(amp::Op {
+        Some(ExpandedOp {
             action,
-            obj,
-            key,
-            pred,
+            obj: Cow::Owned(obj),
+            key: Cow::Owned(key),
+            pred: Cow::Owned(pred),
             insert,
         })
     }
@@ -994,9 +996,9 @@ impl DocOpEncoder {
 
 struct ColumnOp<'a> {
     action: InternalOpType,
-    obj: &'a amp::ObjectId,
-    key: &'a amp::Key,
-    pred: &'a [amp::OpId],
+    obj: Cow<'a, amp::ObjectId>,
+    key: Cow<'a, amp::Key>,
+    pred: Cow<'a, [amp::OpId]>,
     insert: bool,
 }
 
@@ -1015,27 +1017,15 @@ impl ColumnEncoder {
         actors: &'a mut Vec<amp::ActorId>,
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
-        I: IntoIterator<Item = &'b amp::Op>,
+        I: IntoIterator<Item = ExpandedOp<'b>>,
     {
         let mut e = Self::new();
-        let colops = ops.into_iter().flat_map(|o| {
-            let optypes = match &o.action {
-                amp::OpType::Set(v) => vec![InternalOpType::Set(v.clone())],
-                amp::OpType::Inc(i) => vec![InternalOpType::Inc(*i)],
-                amp::OpType::Del => vec![InternalOpType::Del],
-                amp::OpType::Make(objtype) => vec![InternalOpType::Make(objtype.clone())],
-                amp::OpType::MultiSet(vs) => vs
-                    .into_iter()
-                    .map(|s| InternalOpType::Set(s.clone()))
-                    .collect(),
-            };
-            optypes.into_iter().map(move |optype| ColumnOp {
-                obj: &o.obj,
-                key: &o.key,
-                action: optype,
-                pred: &o.pred,
-                insert: o.insert,
-            })
+        let colops = ops.into_iter().map(|o| ColumnOp {
+            obj: o.obj,
+            key: o.key,
+            action: o.action,
+            pred: o.pred,
+            insert: o.insert,
         });
         e.encode(colops, actors);
         e.finish()
@@ -1065,7 +1055,7 @@ impl ColumnEncoder {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
-        self.pred.append(op.pred, actors);
+        self.pred.append(&op.pred, actors);
         let action = match &op.action {
             InternalOpType::Set(value) => {
                 self.val.append_value(value, actors);

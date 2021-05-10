@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroU32};
 
 use automerge_protocol as amp;
 
@@ -247,7 +247,7 @@ impl ResolvedRoot {
         LocalOperationResult {
             new_state: self.root.remove(key),
             new_ops: vec![amp::Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: amp::ObjectId::Root,
                 key: key.into(),
                 insert: false,
@@ -335,7 +335,7 @@ impl ResolvedMap {
         LocalOperationResult {
             new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
                 key: key.into(),
                 insert: false,
@@ -396,7 +396,7 @@ impl ResolvedTable {
         LocalOperationResult {
             new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
                 key: key.into(),
                 insert: false,
@@ -538,7 +538,7 @@ impl ResolvedText {
         Ok(LocalOperationResult {
             new_state,
             new_ops: vec![amp::Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,
@@ -706,7 +706,7 @@ impl ResolvedList {
         Ok(LocalOperationResult {
             new_state: self.focus.update(treechange),
             new_ops: vec![amp::Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,

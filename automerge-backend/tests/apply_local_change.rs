@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use std::{collections::HashSet, convert::TryInto};
+use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
 
 use automerge_backend::{Backend, Change};
 use automerge_protocol as protocol;
@@ -495,7 +495,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Del,
+                action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
                 pred: vec![actor.op_id_at(2)],
@@ -525,6 +525,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                             DiffEdit::SingleElementInsert{
                                 index: 0,
                                 elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                                 value: Diff::Value("magpie".into()),
                             },
                             DiffEdit::Remove{index: 0, count: 1},
@@ -584,7 +585,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Del,
+                action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
                 insert: false,

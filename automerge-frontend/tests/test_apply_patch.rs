@@ -403,6 +403,7 @@ fn create_lists() {
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: amp::Diff::Value("chaffinch".into()),
                         }],
                     })
@@ -442,6 +443,7 @@ fn apply_updates_inside_lists() {
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: amp::Diff::Value("chaffinch".into()),
                         }],
                     })
@@ -507,7 +509,7 @@ fn apply_multi_insert_updates_inside_lists() {
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::MultiElementInsert {
                             index: 0,
-                            first_opid: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(2).into(),
                             values: vec![
                                 "greenfinch".into(),
                                 "bullfinch".into(),
@@ -517,6 +519,7 @@ fn apply_multi_insert_updates_inside_lists() {
                 }
             },
         })),
+        pending_changes: 0,
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -567,6 +570,7 @@ fn apply_updates_inside_list_conflicts() {
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,
                                 elem_id: actor1.op_id_at(2).into(),
+                                op_id: actor1.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
@@ -708,7 +712,7 @@ fn apply_updates_inside_list_conflicts() {
         max_op: 5,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.clone() => 2,
+            actor1 => 2,
             actor2.clone() => 1,
         },
         diffs: Some(amp::Diff::Map(amp::MapDiff {
@@ -733,6 +737,7 @@ fn apply_updates_inside_list_conflicts() {
                 }
             },
         })),
+        pending_changes: 0,
     };
 
     frontend.apply_patch(patch3).unwrap();
@@ -782,11 +787,13 @@ fn delete_list_elements() {
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
                                 elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                                 value: amp::Diff::Value("chaffinch".into())
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 1,
                                 elem_id: actor.op_id_at(3).into(),
+                                op_id: actor.op_id_at(3),
                                 value: amp::Diff::Value("goldfinch".into()),
                             },
                         ],
@@ -863,6 +870,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(4).into(),
+                            op_id: actor.op_id_at(4),
                             value:  amp::Diff::Map(amp::MapDiff{
                                 object_id: actor.op_id_at(4).into(),
                                 obj_type: amp::MapType::Map,
@@ -924,7 +932,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                         obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(4).into(),
+                            op_id: actor.op_id_at(4),
                             value: amp::Diff::Map(amp::MapDiff{
                                 object_id: actor.op_id_at(4).into(),
                                 obj_type: amp::MapType::Map,
@@ -980,16 +988,19 @@ fn test_text_objects() {
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
                                 elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                                 value: amp::Diff::Value("b".into()),
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 1,
                                 elem_id: actor.op_id_at(3).into(),
+                                op_id: actor.op_id_at(3),
                                 value: amp::Diff::Value("e".into()),
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 2,
                                 elem_id: actor.op_id_at(4).into(),
+                                op_id: actor.op_id_at(4),
                                 value: amp::Diff::Value("n".into()),
                             },
                         ],

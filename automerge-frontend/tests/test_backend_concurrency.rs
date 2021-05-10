@@ -354,6 +354,7 @@ fn handle_concurrent_insertions_into_lists() {
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: doc.actor_id.op_id_at(1).into(),
+                            op_id: doc.actor_id.op_id_at(1),
                             value: amp::Diff::Value("goldfinch".into()),
                         }],
                     })
@@ -419,6 +420,7 @@ fn handle_concurrent_insertions_into_lists() {
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 1,
                             elem_id: remote.op_id_at(1).into(),
+                            op_id: doc.actor_id.op_id_at(1),
                             value: amp::Diff::Value("bullfinch".into()),
                         }],
                     })
@@ -459,11 +461,13 @@ fn handle_concurrent_insertions_into_lists() {
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
                                 elem_id: doc.actor_id.op_id_at(2).into(),
+                                op_id: doc.actor_id.op_id_at(2),
                                 value: amp::Diff::Value("chaffinch".into()),
                             },
                             amp::DiffEdit::SingleElementInsert{
                                 index: 2,
                                 elem_id: doc.actor_id.op_id_at(3).into(),
+                                op_id: doc.actor_id.op_id_at(3),
                                 value: amp::Diff::Value("greenfinch".into()),
                             },
                         ],

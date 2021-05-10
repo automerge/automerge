@@ -195,13 +195,10 @@ where
                 }
                 amp::DiffEdit::SingleElementInsert {
                     index,
-                    elem_id,
+                    elem_id: _,
+                    op_id,
                     value,
                 } => {
-                    let op_id = match elem_id {
-                        amp::ElementId::Head => return Err(InvalidPatch::DiffEditWithHeadElemId),
-                        amp::ElementId::Id(oid) => oid.clone(),
-                    };
                     opids_in_this_diff.insert(op_id.clone());
                     let node = T::construct(
                         &op_id,
@@ -212,17 +209,17 @@ where
                             diff: value,
                         },
                     )?;
-                    if (*index) == updating.len() {
+                    if (*index as usize) == updating.len() {
                         old_conflicts.push(None);
                         updating.push(UpdatingSequenceElement::new(node.value));
                     } else {
-                        old_conflicts.insert(*index, None);
-                        updating.insert(*index, UpdatingSequenceElement::new(node.value));
+                        old_conflicts.insert(*index as usize, None);
+                        updating.insert(*index as usize, UpdatingSequenceElement::new(node.value));
                     };
                     changes.update_with(node.change);
                 }
                 amp::DiffEdit::MultiElementInsert {
-                    first_opid,
+                    elem_id,
                     values,
                     index,
                 } => {
@@ -234,7 +231,7 @@ where
                         });
                     }
                     for (i, value) in values.iter().enumerate() {
-                        let opid = first_opid.increment_by(i as u64);
+                        let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let current_objects = changes.objects().union(current_objects.clone());
                         let mv = T::construct(
                             &opid,
@@ -281,8 +278,7 @@ where
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
-        let a = self.underlying.remove(index);
-        a
+        self.underlying.remove(index)
     }
 
     pub(super) fn len(&self) -> usize {

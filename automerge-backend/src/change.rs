@@ -1,13 +1,16 @@
 //use crate::columnar;
 use core::fmt::Debug;
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     convert::{TryFrom, TryInto},
     io::{Read, Write},
+    num::NonZeroU32,
     ops::Range,
     str,
 };
 
+use amp::OpType;
 use automerge_protocol as amp;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -155,9 +158,10 @@ fn encode_chunk(
     uncompressed_change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
+    let expanded_ops = ExpandedOpIterator::new(&uncompressed_change.operations);
+
     // encode ops into a side buffer - collect all other actors
-    let (ops_buf, mut ops) =
-        ColumnEncoder::encode_ops(uncompressed_change.operations.iter(), &mut actors);
+    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
 
     // encode all other actors
     actors[1..].encode(&mut bytes).unwrap();
@@ -261,7 +265,21 @@ impl Change {
             message: self.message(),
             actor_id: self.actors[0].clone(),
             deps: self.deps.clone(),
-            operations: self.iter_ops().collect(),
+            operations: self
+                .iter_ops()
+                .map(|op| amp::Op {
+                    action: match op.action {
+                        InternalOpType::Make(obj_type) => OpType::Make(obj_type),
+                        InternalOpType::Del => OpType::Del(NonZeroU32::new(1).unwrap()),
+                        InternalOpType::Inc(i) => OpType::Inc(i),
+                        InternalOpType::Set(value) => OpType::Set(value),
+                    },
+                    obj: op.obj.clone().into_owned(),
+                    key: op.key.into_owned(),
+                    pred: op.pred.into_owned(),
+                    insert: op.insert,
+                })
+                .collect(),
             extra_bytes: self.extra_bytes().into(),
         }
     }
@@ -276,12 +294,6 @@ impl Change {
 
     pub fn raw_bytes(&self) -> &[u8] {
         self.bytes.raw()
-    }
-}
-
-impl From<&Change> for amp::UncompressedChange {
-    fn from(change: &Change) -> amp::UncompressedChange {
-        change.decode()
     }
 }
 
@@ -486,9 +498,8 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
 
     let deps = decode_hashes(&bytes.uncompressed(), &mut cursor)?;
 
-    let actor = amp::ActorId::from(
-        &bytes.uncompressed()[slice_bytes(&bytes.uncompressed(), &mut cursor)?],
-    );
+    let actor =
+        amp::ActorId::from(&bytes.uncompressed()[slice_bytes(&bytes.uncompressed(), &mut cursor)?]);
     let seq = read_slice(&bytes.uncompressed(), &mut cursor)?;
     let start_op = read_slice(&bytes.uncompressed(), &mut cursor)?;
     let time = read_slice(&bytes.uncompressed(), &mut cursor)?;
@@ -757,18 +768,18 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
                 op.key.clone()
             } else {
                 by_ref
-                    .entry(objid.clone())
+                    .entry(objid.clone().into_owned())
                     .or_default()
-                    .entry(op.key.clone())
+                    .entry(op.key.clone().into_owned())
                     .or_default()
                     .push(opid.clone());
-                opid.clone().into()
+                Cow::Owned(opid.clone().into())
             };
 
             by_obj_id
-                .entry(objid.clone())
+                .entry(objid.clone().into_owned())
                 .or_default()
-                .entry(key.clone())
+                .entry(key.clone().into_owned())
                 .or_default()
                 .insert(
                     opid.clone(),
@@ -776,19 +787,19 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
                         actor: actors.iter().position(|a| a == &opid.1).unwrap(),
                         ctr: opid.0,
                         action: op.action.clone(),
-                        obj: op.obj.clone(),
-                        key: op.key.clone(),
+                        obj: op.obj.clone().into_owned(),
+                        key: op.key.into_owned(),
                         succ: Vec::new(),
                         pred: Vec::new(),
                         insert: op.insert,
                     },
                 );
 
-            for pred in op.pred {
+            for pred in op.pred.iter() {
                 by_obj_id
-                    .entry(objid.clone())
+                    .entry(objid.clone().into_owned())
                     .or_default()
-                    .entry(key.clone())
+                    .entry(key.clone().into_owned())
                     .or_default()
                     .get_mut(pred)
                     .unwrap()
@@ -918,7 +929,7 @@ pub(crate) const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::{num::NonZeroU32, str::FromStr};
 
     use amp::{ActorId, UncompressedChange};
 
@@ -1030,14 +1041,14 @@ mod tests {
                     pred: vec![opid1.clone(), opid5.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Del,
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                     obj: obj3.clone(),
                     key: keyseq1,
                     insert: true,
                     pred: vec![opid4.clone(), opid5.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Del,
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                     obj: obj3.clone(),
                     key: keyseq2,
                     insert: true,

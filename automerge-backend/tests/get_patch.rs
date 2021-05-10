@@ -1,5 +1,5 @@
 extern crate automerge_backend;
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroU32};
 
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
@@ -262,7 +262,7 @@ fn test_creates_nested_maps() {
         operations: vec![
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: "wrens".into(),
                 pred: vec![actor.op_id_at(2)],
                 insert: false,
@@ -366,6 +366,7 @@ fn test_create_lists() {
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: Diff::Value("chaffinch".into()),
                         }],
                     })
@@ -446,6 +447,7 @@ fn test_includes_latests_state_of_list() {
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: Diff::Map(MapDiff{
                                     object_id: actor.op_id_at(2).into(),
                                     obj_type: MapType::Map,
@@ -572,6 +574,7 @@ fn test_includes_date_objects_in_a_list() {
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
                             value: Diff::Value(ScalarValue::Timestamp(1_586_541_089_595)),
                         }],
                     })
@@ -684,11 +687,12 @@ fn test_includes_updates_for_conflicting_list_elements() {
                             DiffEdit::SingleElementInsert{
                                 index: 0,
                                 elem_id: actor1.op_id_at(1).into(),
+                                op_id: actor1.op_id_at(1),
                                 value: Diff::Value("remote1".into()),
                             },
                             DiffEdit::Update{
                                 index: 0,
-                                op_id: actor2.op_id_at(1).into(),
+                                op_id: actor2.op_id_at(1),
                                 value: Diff::Value("remote2".into())
                             },
                         ],

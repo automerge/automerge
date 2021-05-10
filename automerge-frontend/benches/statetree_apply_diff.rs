@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use automerge_frontend::Frontend;
 use automerge_protocol as amp;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
@@ -49,6 +47,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
                             edits: vec![amp::DiffEdit::SingleElementInsert{
                                 index,
                                 elem_id: this_op_id.clone().into(),
+                                op_id: this_op_id.clone(),
                                 value: amp::Diff::Value(amp::ScalarValue::Str("c".to_string())),
                             }],
                         })
@@ -90,6 +89,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         edits.push(amp::DiffEdit::SingleElementInsert {
             index,
             elem_id: this_op_id.clone().into(),
+            op_id: this_op_id.clone(),
             value: amp::Diff::Value(amp::ScalarValue::Str("c".to_string())),
         });
     }

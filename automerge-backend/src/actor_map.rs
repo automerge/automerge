@@ -2,7 +2,10 @@ use std::cmp::Ordering;
 
 use automerge_protocol as amp;
 
-use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
+use crate::{
+    expanded_op::ExpandedOp,
+    internal::{ActorId, ElementId, InternalOp, Key, ObjectId, OpId},
+};
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct ActorMap(Vec<amp::ActorId>);
@@ -46,33 +49,14 @@ impl ActorMap {
         }
     }
 
-    // Note that this returns a vector because some operations in the JSON protocol can expand to
-    // multiple operations. Specifically set operations with a "values" key and delete operations
-    // with a "count" larger than 1
-    pub fn import_ops(&mut self, op: amp::Op) -> Vec<InternalOp> {
+    pub fn import_op(&mut self, op: ExpandedOp) -> InternalOp {
         let pred: Vec<OpId> = op.pred.iter().map(|ref id| self.import_opid(id)).collect();
-        self.import_optypes(&op.action)
-            .into_iter()
-            .map(|action| InternalOp {
-                action,
-                obj: self.import_obj(&op.obj),
-                key: self.import_key(&op.key),
-                pred: pred.clone(),
-                insert: op.insert,
-            })
-            .collect()
-    }
-
-    fn import_optypes(&mut self, optype: &amp::OpType) -> Vec<InternalOpType> {
-        match optype {
-            amp::OpType::Make(val) => vec![InternalOpType::Make(*val)],
-            amp::OpType::Del => vec![InternalOpType::Del],
-            amp::OpType::Inc(val) => vec![InternalOpType::Inc(*val)],
-            amp::OpType::Set(val) => vec![InternalOpType::Set(val.clone())],
-            amp::OpType::MultiSet(values) => values
-                .into_iter()
-                .map(|v| InternalOpType::Set(v.clone()))
-                .collect(),
+        InternalOp {
+            action: op.action,
+            obj: self.import_obj(&op.obj),
+            key: self.import_key(&op.key),
+            pred,
+            insert: op.insert,
         }
     }
 

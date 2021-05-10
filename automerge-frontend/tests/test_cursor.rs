@@ -160,11 +160,13 @@ fn test_set_cursor_to_new_element_in_diff() {
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,
                                 elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
                                 value: amp::Diff::Value("one".into()),
                             },
                             amp::DiffEdit::SingleElementInsert{
                                 index: 1,
                                 elem_id: actor.op_id_at(3).into(),
+                                op_id: actor.op_id_at(3),
                                 value: amp::Diff::Value("two".into()),
                             },
                         ],

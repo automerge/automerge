@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     ser::SerializeStruct,
@@ -23,7 +25,7 @@ impl Serialize for Op {
         match &self.action {
             OpType::Set(ScalarValue::Timestamp(_)) => fields += 2,
             OpType::Set(ScalarValue::Counter(_)) => fields += 2,
-            OpType::Inc(_) | OpType::Set(_) => fields += 1,
+            OpType::Inc(_) | OpType::Set(_) | OpType::Del(_) => fields += 1,
             _ => {}
         }
 
@@ -53,7 +55,8 @@ impl Serialize for Op {
             }
             OpType::Set(value) => op.serialize_field("value", &value)?,
             OpType::MultiSet(values) => op.serialize_field("values", &values)?,
-            OpType::Make(..) | OpType::Del => {}
+            OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
+            OpType::Make(..) => {}
         }
         op.serialize_field("pred", &self.pred)?;
         op.end()
@@ -99,6 +102,7 @@ impl<'de> Deserialize<'de> for Op {
                 let mut value: Option<Option<ScalarValue>> = None;
                 let mut ref_id: Option<OpId> = None;
                 let mut values: Option<Vec<ScalarValue>> = None;
+                let mut multi_op: Option<u32> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -111,6 +115,7 @@ impl<'de> Deserialize<'de> for Op {
                         "value" => read_field("value", &mut value, &mut map)?,
                         "ref" => read_field("ref", &mut ref_id, &mut map)?,
                         "values" => read_field("values", &mut values, &mut map)?,
+                        "multiOp" => read_field("multiOp", &mut multi_op, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
                 }
@@ -124,7 +129,11 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
                     RawOpType::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
                     RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
-                    RawOpType::Del => OpType::Del,
+                    RawOpType::Del => OpType::Del(
+                        multi_op
+                            .map(|i| NonZeroU32::new(i).unwrap())
+                            .unwrap_or_else(|| NonZeroU32::new(1).unwrap()),
+                    ),
                     RawOpType::Set => {
                         if let Some(values) = values {
                             OpType::MultiSet(values)

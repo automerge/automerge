@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use automerge_protocol as amp;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
@@ -91,7 +93,7 @@ impl From<OpId> for Key {
 impl From<&InternalOpType> for amp::OpType {
     fn from(i: &InternalOpType) -> amp::OpType {
         match i {
-            InternalOpType::Del => amp::OpType::Del,
+            InternalOpType::Del => amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             InternalOpType::Make(ot) => amp::OpType::Make(ot.clone()),
             InternalOpType::Set(v) => amp::OpType::Set(v.clone()),
             InternalOpType::Inc(i) => amp::OpType::Inc(*i),

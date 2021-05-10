@@ -1,4 +1,6 @@
 extern crate automerge_protocol as amp;
+use std::num::NonZeroU32;
+
 use proptest::prelude::*;
 
 fn arb_maptype() -> impl Strategy<Value = amp::MapType> {
@@ -35,7 +37,7 @@ fn arb_scalar_value() -> impl Strategy<Value = amp::ScalarValue> {
 fn arb_optype() -> impl Strategy<Value = amp::OpType> {
     prop_oneof![
         arb_objtype().prop_map(amp::OpType::Make),
-        Just(amp::OpType::Del),
+        any::<u32>().prop_map(|u| amp::OpType::Del(NonZeroU32::new(u + 1).unwrap())),
         any::<i64>().prop_map(amp::OpType::Inc),
         arb_scalar_value().prop_map(amp::OpType::Set),
     ]
