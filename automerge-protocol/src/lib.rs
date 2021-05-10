@@ -107,6 +107,12 @@ impl OpId {
     pub fn increment_by(&self, by: u64) -> OpId {
         OpId(self.0 + by, self.1.clone())
     }
+
+    /// Returns true if `other` has the same actor ID, and their counter is `delta` greater than
+    /// ours.
+    pub fn delta(&self, other: &Self, delta: u64) -> bool {
+        self.1 == other.1 && self.0 + delta == other.0
+    }
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
@@ -402,7 +408,7 @@ pub struct CursorDiff {
 pub enum DiffEdit {
     #[serde(rename = "insert")]
     SingleElementInsert {
-        index: usize,
+        index: u64,
         #[serde(rename = "elemId")]
         elem_id: ElementId,
         value: Diff,
@@ -410,7 +416,7 @@ pub enum DiffEdit {
     #[serde(rename = "multi-insert")]
     MultiElementInsert {
         index: u64,
-        #[serde(rename = "opId")]
+        #[serde(rename = "elemId")]
         first_opid: OpId,
         values: Vec<ScalarValue>,
     },

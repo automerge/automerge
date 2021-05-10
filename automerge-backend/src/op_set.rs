@@ -261,7 +261,7 @@ impl OpSet {
         actors: &ActorMap,
         seq_type: amp::SequenceType,
     ) -> Result<amp::Diff, AutomergeError> {
-        let mut edits = Vec::new();
+        let mut edits = Edits::new();
         let mut index = 0;
         let mut max_counter = 0;
         let mut seen_indices: std::collections::HashSet<u64> = std::collections::HashSet::new();
@@ -279,14 +279,14 @@ impl OpSet {
                         };
                         let amp_opid = actors.export_opid(&op.id);
                         if seen_indices.contains(&index) {
-                            edits.push(amp::DiffEdit::Update {
+                            edits.append_edit(amp::DiffEdit::Update {
                                 index,
                                 opid: amp_opid,
                                 value,
                             });
                         } else {
-                            edits.push(amp::DiffEdit::SingleElementInsert {
-                                index: index as usize,
+                            edits.append_edit(amp::DiffEdit::SingleElementInsert {
+                                index,
                                 elem_id: amp_opid.into(),
                                 value,
                             });
@@ -300,7 +300,7 @@ impl OpSet {
         Ok(amp::SeqDiff {
             object_id: actors.export_obj(object_id),
             obj_type: seq_type,
-            edits,
+            edits: edits.into_vec(),
         }
         .into())
     }
@@ -391,7 +391,7 @@ impl OpSet {
                         _ => panic!("del or inc found in field operations"),
                     };
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
-                        index: *index,
+                        index: *index as u64,
                         elem_id: actors.export_opid(&opid).into(),
                         value,
                     });
@@ -420,7 +420,7 @@ impl OpSet {
         Ok(amp::SeqDiff {
             object_id: actors.export_obj(obj_id),
             obj_type: seq_type,
-            edits: edits.to_vec(),
+            edits: edits.into_vec(),
         }
         .into())
     }
