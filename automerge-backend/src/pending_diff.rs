@@ -28,6 +28,7 @@ impl PendingDiff {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct Edits(Vec<amp::DiffEdit>);
 
 impl Edits {
