@@ -285,9 +285,10 @@ impl OpSet {
                                 value,
                             });
                         } else {
+                            let key = actors.export_opid(&key.to_opid().unwrap_or(op.id)).into();
                             edits.append_edit(amp::DiffEdit::SingleElementInsert {
                                 index,
-                                elem_id: amp_opid.clone().into(),
+                                elem_id: key,
                                 op_id: amp_opid,
                                 value,
                             });
