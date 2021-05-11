@@ -145,7 +145,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.index_of(opid).unwrap_or(0);
                     tracing::debug!("updating existing element");
-                    Some(PendingDiff::SeqUpdate(op.clone(), index, opid))
+                    Some(PendingDiff::SeqUpdate(op.clone(), index, op.id))
                 }
                 (true, false) => {
                     let opid = op
