@@ -63,11 +63,11 @@ impl OpSet {
 
     pub(crate) fn apply_ops(
         &mut self,
-        mut ops: Vec<OpHandle>,
+        ops: Vec<OpHandle>,
         diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &mut ActorMap,
     ) -> Result<(), AutomergeError> {
-        for op in ops.drain(..) {
+        for op in ops {
             let obj_id = op.obj;
 
             let pending_diff = self.apply_op(op, actors)?;
