@@ -64,7 +64,7 @@ fn test_apply_local_change() {
             actor => 1,
         },
         deps: Vec::new(),
-        diffs: Some(Diff::Map(MapDiff {
+        diffs: Some(MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -72,7 +72,7 @@ fn test_apply_local_change() {
                     "1@eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap() => Diff::Value("magpie".into())
                 }
             },
-        })),
+        }),
     };
     assert_eq!(patch, expected_patch);
 }
@@ -513,7 +513,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             actor.clone() => 2
         },
         deps: Vec::new(),
-        diffs: Some(Diff::Map(MapDiff {
+        diffs: Some(MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -533,7 +533,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                     })
                 }
             },
-        })),
+        }),
     };
 
     let mut backend = Backend::init();

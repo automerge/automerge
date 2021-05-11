@@ -228,7 +228,7 @@ impl OpSet {
         object: &ObjState,
         actors: &ActorMap,
         map_type: amp::MapType,
-    ) -> Result<amp::Diff, AutomergeError> {
+    ) -> Result<amp::MapDiff, AutomergeError> {
         let mut props = HashMap::new();
 
         for (key, ops) in object.props.iter() {
@@ -250,8 +250,7 @@ impl OpSet {
             object_id: actors.export_obj(object_id),
             obj_type: map_type,
             props,
-        }
-        .into())
+        })
     }
 
     pub fn construct_list(
@@ -260,7 +259,7 @@ impl OpSet {
         object: &ObjState,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
-    ) -> Result<amp::Diff, AutomergeError> {
+    ) -> Result<amp::SeqDiff, AutomergeError> {
         let mut edits = Edits::new();
         let mut index = 0;
         let mut max_counter = 0;
@@ -302,8 +301,7 @@ impl OpSet {
             object_id: actors.export_obj(object_id),
             obj_type: seq_type,
             edits: edits.into_vec(),
-        }
-        .into())
+        })
     }
 
     pub fn construct_object(
@@ -313,10 +311,12 @@ impl OpSet {
     ) -> Result<amp::Diff, AutomergeError> {
         let object = self.get_obj(&object_id)?;
         match object.obj_type {
-            amp::ObjType::Map(map_type) => self.construct_map(object_id, object, actors, map_type),
-            amp::ObjType::Sequence(seq_type) => {
-                self.construct_list(object_id, object, actors, seq_type)
-            }
+            amp::ObjType::Map(map_type) => self
+                .construct_map(object_id, object, actors, map_type)
+                .map(amp::Diff::Map),
+            amp::ObjType::Sequence(seq_type) => self
+                .construct_list(object_id, object, actors, seq_type)
+                .map(amp::Diff::Seq),
         }
     }
 
@@ -326,7 +326,7 @@ impl OpSet {
         &mut self,
         mut pending: HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
-    ) -> Result<Option<amp::Diff>, AutomergeError> {
+    ) -> Result<Option<amp::MapDiff>, AutomergeError> {
         if pending.is_empty() {
             return Ok(None);
         }
@@ -364,10 +364,13 @@ impl OpSet {
             }
         }
 
-        Ok(Some(self.gen_obj_diff(
+        Ok(Some(self.gen_map_diff(
             &ObjectId::Root,
+            self.get_obj(&ObjectId::Root)?,
+            &pending.remove(&ObjectId::Root).unwrap(),
             &mut pending,
             actors,
+            amp::MapType::Map,
         )?))
     }
 
@@ -379,7 +382,7 @@ impl OpSet {
         pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
-    ) -> Result<amp::Diff, AutomergeError> {
+    ) -> Result<amp::SeqDiff, AutomergeError> {
         let mut edits = Edits::new();
         for pending_edit in pending.iter() {
             match pending_edit {
@@ -424,8 +427,7 @@ impl OpSet {
             object_id: actors.export_obj(obj_id),
             obj_type: seq_type,
             edits: edits.into_vec(),
-        }
-        .into())
+        })
     }
 
     fn gen_map_diff(
@@ -436,7 +438,7 @@ impl OpSet {
         pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         map_type: amp::MapType,
-    ) -> Result<amp::Diff, AutomergeError> {
+    ) -> Result<amp::MapDiff, AutomergeError> {
         let mut props = HashMap::new();
         // I may have duplicate keys - I do this to make sure I visit each one only once
         let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
@@ -460,8 +462,7 @@ impl OpSet {
             object_id: actors.export_obj(obj_id),
             obj_type: map_type,
             props,
-        }
-        .into())
+        })
     }
 
     pub fn update_deps(&mut self, change: &Change) {
@@ -482,12 +483,12 @@ impl OpSet {
         let obj = self.get_obj(obj_id)?;
         if let Some(pending) = pending_diffs.remove(obj_id) {
             match obj.obj_type {
-                amp::ObjType::Sequence(seq_type) => {
-                    self.gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors, seq_type)
-                }
-                amp::ObjType::Map(map_type) => {
-                    self.gen_map_diff(obj_id, obj, &pending, pending_diffs, actors, map_type)
-                }
+                amp::ObjType::Sequence(seq_type) => self
+                    .gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors, seq_type)
+                    .map(amp::Diff::Seq),
+                amp::ObjType::Map(map_type) => self
+                    .gen_map_diff(obj_id, obj, &pending, pending_diffs, actors, map_type)
+                    .map(amp::Diff::Map),
             }
         } else {
             Ok(amp::Diff::Unchanged(amp::ObjDiff {

@@ -25,7 +25,7 @@ fn use_version_and_sequence_number_from_backend() {
             remote_actor2 => 41,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -33,7 +33,7 @@ fn use_version_and_sequence_number_from_backend() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::F64(24.0))
                 }
             },
-        })),
+        }),
         max_op: 4,
         pending_changes: 0,
     };
@@ -119,7 +119,7 @@ fn remove_pending_requests_once_handled() {
         max_op: 4,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -127,7 +127,7 @@ fn remove_pending_requests_once_handled() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -152,7 +152,7 @@ fn remove_pending_requests_once_handled() {
         max_op: 5,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -160,7 +160,7 @@ fn remove_pending_requests_once_handled() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -211,7 +211,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             remote.clone() => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -219,7 +219,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(2))
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -244,7 +244,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         max_op: 11,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -252,7 +252,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -295,7 +295,7 @@ fn dont_allow_out_of_order_request_patches() {
             doc.actor_id.clone() => 2,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -303,7 +303,7 @@ fn dont_allow_out_of_order_request_patches() {
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
-        })),
+        }),
     });
 
     assert_eq!(
@@ -343,7 +343,7 @@ fn handle_concurrent_insertions_into_lists() {
             doc.actor_id.clone() => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -360,7 +360,7 @@ fn handle_concurrent_insertions_into_lists() {
                     })
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -409,7 +409,7 @@ fn handle_concurrent_insertions_into_lists() {
         actor: None,
         seq: None,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -426,7 +426,7 @@ fn handle_concurrent_insertions_into_lists() {
                     })
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 
@@ -449,7 +449,7 @@ fn handle_concurrent_insertions_into_lists() {
             remote => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
+        diffs: Some(amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -474,7 +474,7 @@ fn handle_concurrent_insertions_into_lists() {
                     })
                 }
             },
-        })),
+        }),
     })
     .unwrap();
 

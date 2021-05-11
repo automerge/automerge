@@ -94,7 +94,7 @@ impl FrontendState {
                     }
                 }
                 let new_reconciled_root_state = if let Some(diff) = &patch.diffs {
-                    reconciled_root_state.apply_diff(diff)?
+                    reconciled_root_state.apply_root_diff(diff)?
                 } else {
                     reconciled_root_state
                 };
@@ -114,7 +114,7 @@ impl FrontendState {
             }
             FrontendState::Reconciled { root_state, .. } => {
                 let new_root_state = if let Some(diff) = &patch.diffs {
-                    root_state.apply_diff(diff)?
+                    root_state.apply_root_diff(diff)?
                 } else {
                     root_state
                 };

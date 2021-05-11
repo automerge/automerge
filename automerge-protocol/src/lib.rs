@@ -476,7 +476,7 @@ pub struct Patch {
     //    pub can_redo: bool,
     //    pub version: u64,
     #[serde(serialize_with = "Patch::top_level_serialize")]
-    pub diffs: Option<Diff>,
+    pub diffs: Option<MapDiff>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -528,7 +528,7 @@ impl Patch {
     // the top level scope where not even Root is referenced
 
     pub(crate) fn top_level_serialize<S>(
-        maybe_diff: &Option<Diff>,
+        maybe_diff: &Option<MapDiff>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where

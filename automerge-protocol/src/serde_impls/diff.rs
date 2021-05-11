@@ -9,8 +9,7 @@ use serde::{
 
 use super::read_field;
 use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectId, OpId, ScalarValue,
-    SeqDiff,
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjType, ObjectId, OpId, ScalarValue, SeqDiff,
 };
 
 impl Serialize for Diff {
@@ -151,33 +150,20 @@ impl<'de> Deserialize<'de> for Diff {
                     match diff_type.obj_type() {
                         Some(obj_type) => match obj_type {
                             ObjType::Sequence(seq_type) => {
-                                if let Some(edits) = edits {
-                                //let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
-                                    Ok(Diff::Seq(SeqDiff {
-                                        object_id,
-                                        obj_type: seq_type,
-                                        edits,
-                                    }))
-                                } else {
-                                    Ok(Diff::Unchanged(ObjDiff{
-                                        object_id,
-                                        obj_type,
-                                    }))
-                                }
+                                let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
+                                Ok(Diff::Seq(SeqDiff {
+                                    object_id,
+                                    obj_type: seq_type,
+                                    edits,
+                                }))
                             },
                             ObjType::Map(map_type) => {
-                                if let Some(props) = props {
-                                    Ok(Diff::Map(MapDiff{
-                                        object_id,
-                                        obj_type: map_type,
-                                        props,
-                                    }))
-                                } else {
-                                    Ok(Diff::Unchanged(ObjDiff{
-                                        object_id,
-                                        obj_type,
-                                    }))
-                                }
+                                let props = props.ok_or_else(|| Error::missing_field("props"))?;
+                                Ok(Diff::Map(MapDiff{
+                                    object_id,
+                                    obj_type: map_type,
+                                    props,
+                                }))
                             },
                         }
                         None => Err(Error::custom("'type' field must be one of ['list', 'text', 'table', 'map'] for an object diff"))

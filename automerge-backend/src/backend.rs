@@ -34,7 +34,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Option<amp::Diff>,
+        diffs: Option<amp::MapDiff>,
         actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
@@ -217,9 +217,12 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
-        let diffs = self
-            .op_set
-            .construct_object(&ObjectId::Root, &self.actors)?;
+        let diffs = self.op_set.construct_map(
+            &ObjectId::Root,
+            self.op_set.get_obj(&ObjectId::Root).unwrap(),
+            &self.actors,
+            amp::MapType::Map,
+        )?;
         self.make_patch(Some(diffs), None)
     }
 
