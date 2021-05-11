@@ -424,6 +424,10 @@ impl OpSet {
                         InternalOpType::Make(_) => {
                             self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
                         }
+                        InternalOpType::Del => {
+                            // do nothing
+                            continue;
+                        }
                         _ => panic!("del or inc found in field operations"),
                     };
                     edits.append_edit(amp::DiffEdit::Update {
