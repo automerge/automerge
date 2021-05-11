@@ -388,16 +388,20 @@ impl OpSet {
     fn gen_seq_diff(
         &self,
         obj_id: &ObjectId,
-        _obj: &ObjState,
+        obj: &ObjState,
         pending: &[PendingDiff],
         pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
         actors: &ActorMap,
         seq_type: amp::SequenceType,
     ) -> Result<amp::SeqDiff, AutomergeError> {
         let mut edits = Edits::new();
+        // used to ensure we don't generate duplicate patches for some op ids (added to the pending
+        // list to ensure we have a tree for deeper operations)
+        let mut seen_op_ids = HashSet::new();
         for pending_edit in pending.iter() {
             match pending_edit {
                 PendingDiff::SeqInsert(op, index, opid) => {
+                    seen_op_ids.insert(op.id);
                     let value = match op.action {
                         InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
                         InternalOpType::Make(_) => {
@@ -414,6 +418,7 @@ impl OpSet {
                     });
                 }
                 PendingDiff::SeqUpdate(op, index, opid) => {
+                    seen_op_ids.insert(op.id);
                     let value = match op.action {
                         InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
                         InternalOpType::Make(_) => {
@@ -427,11 +432,34 @@ impl OpSet {
                         value,
                     });
                 }
-                PendingDiff::SeqRemove(_, index) => edits.append_edit(amp::DiffEdit::Remove {
-                    index: (*index) as u64,
-                    count: 1,
-                }),
-                _ => {}
+                PendingDiff::SeqRemove(op, index) => {
+                    seen_op_ids.insert(op.id);
+
+                    edits.append_edit(amp::DiffEdit::Remove {
+                        index: (*index) as u64,
+                        count: 1,
+                    })
+                }
+                PendingDiff::Set(op) => {
+                    if !seen_op_ids.contains(&op.id) {
+                        seen_op_ids.insert(op.id);
+                        let value = match op.action {
+                            InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
+                            InternalOpType::Make(_) => {
+                                self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
+                            }
+                            _ => panic!("del or inc found in field operations"),
+                        };
+                        edits.append_edit(amp::DiffEdit::Update {
+                            index: obj.index_of(op.id).unwrap_or(0) as u64,
+                            op_id: actors.export_opid(&op.id),
+                            value,
+                        })
+                    }
+                }
+                PendingDiff::CursorChange(_) => {
+                    panic!("found cursor change pending diff while generating sequence diff")
+                }
             }
         }
         Ok(amp::SeqDiff {
