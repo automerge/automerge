@@ -366,14 +366,23 @@ impl OpSet {
             }
         }
 
-        Ok(Some(self.gen_map_diff(
-            &ObjectId::Root,
-            self.get_obj(&ObjectId::Root)?,
-            &pending.remove(&ObjectId::Root).unwrap(),
-            &mut pending,
-            actors,
-            amp::MapType::Map,
-        )?))
+        let diff = if let Some(root) = pending.remove(&ObjectId::Root) {
+            self.gen_map_diff(
+                &ObjectId::Root,
+                self.get_obj(&ObjectId::Root)?,
+                &root,
+                &mut pending,
+                actors,
+                amp::MapType::Map,
+            )?
+        } else {
+            MapDiff {
+                object_id: actors.export_obj(&ObjectId::Root),
+                obj_type: amp::MapType::Map,
+                props: HashMap::new(),
+            }
+        };
+        Ok(Some(diff))
     }
 
     fn gen_seq_diff(
