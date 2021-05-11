@@ -467,7 +467,7 @@ fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), Automerge
 fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
     let (chunktype, body) = decode_header_without_hash(&bytes)?;
     let bytes = if chunktype == BLOCK_TYPE_DEFLATE {
-        decompress_chunk(&bytes[..PREAMBLE_BYTES], &bytes[body])?
+        decompress_chunk(0..PREAMBLE_BYTES, body, bytes)?
     } else {
         ChangeBytes::Uncompressed(bytes)
     };
@@ -508,18 +508,22 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, AutomergeError> {
     })
 }
 
-fn decompress_chunk(preamble: &[u8], buf: &[u8]) -> Result<ChangeBytes, AutomergeError> {
-    let mut decoder = DeflateDecoder::new(buf);
+fn decompress_chunk(
+    preamble: Range<usize>,
+    body: Range<usize>,
+    compressed: Vec<u8>,
+) -> Result<ChangeBytes, AutomergeError> {
+    let mut decoder = DeflateDecoder::new(&compressed[body]);
     let mut decompressed = Vec::new();
     decoder.read_to_end(&mut decompressed)?;
     let mut result = Vec::with_capacity(decompressed.len() + preamble.len());
-    result.extend(preamble);
+    result.extend(&compressed[preamble]);
     result.push(BLOCK_TYPE_CHANGE);
     leb128::write::unsigned::<Vec<u8>>(&mut result, decompressed.len() as u64).unwrap();
     result.extend(decompressed);
     Ok(ChangeBytes::Compressed {
         uncompressed: result,
-        compressed: buf.into(),
+        compressed,
     })
 }
 
