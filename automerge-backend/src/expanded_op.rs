@@ -54,15 +54,14 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
                                 // the last
                                 self.offset += 1;
                                 self.expand_count = None;
-                                c
                             } else {
                                 // somewhere in the middle
                                 self.expand_count = Some(c + 1);
-                                c + 1
                             }
+                            c
                         } else {
                             // first one of the series
-                            self.expand_count = Some(0);
+                            self.expand_count = Some(1);
                             0
                         };
                         let pred = op.pred[0].increment_by(index as u64);
@@ -138,6 +137,8 @@ impl<'a> ExpandedOpIterator<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use amp::{ObjectId, Op, OpType, ScalarValue};
     use pretty_assertions::assert_eq;
 
@@ -249,6 +250,46 @@ mod tests {
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(5, actor)))),
                     pred: Cow::Owned(vec![]),
+                    insert: true
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_multi_del() {
+        let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
+        let pred = OpId(1, actor.clone());
+        let ops = [Op {
+            action: OpType::Del(NonZeroU32::new(3).unwrap()),
+            obj: ObjectId::Id(OpId(1, actor.clone())),
+            key: Key::Seq(ElementId::Id(OpId(1, actor.clone()))),
+            pred: vec![pred],
+            insert: true,
+        }];
+        let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            expanded_ops,
+            vec![
+                ExpandedOp {
+                    action: InternalOpType::Del,
+                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(1, actor.clone())))),
+                    pred: Cow::Owned(vec![OpId(1, actor.clone())]),
+                    insert: true
+                },
+                ExpandedOp {
+                    action: InternalOpType::Del,
+                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
+                    pred: Cow::Owned(vec![OpId(2, actor.clone())]),
+                    insert: true
+                },
+                ExpandedOp {
+                    action: InternalOpType::Del,
+                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
+                    pred: Cow::Owned(vec![OpId(3, actor)]),
                     insert: true
                 },
             ]
