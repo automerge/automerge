@@ -9,6 +9,7 @@
 use core::cmp::max;
 use std::collections::{HashMap, HashSet};
 
+use amp::{MapDiff, SeqDiff};
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
 use tracing::instrument;
@@ -412,7 +413,7 @@ impl OpSet {
                     };
                     edits.append_edit(amp::DiffEdit::Update {
                         index: *index as u64,
-                        op_id: actors.export_opid(&opid).into(),
+                        op_id: actors.export_opid(&opid),
                         value,
                     });
                 }
@@ -491,10 +492,19 @@ impl OpSet {
                     .map(amp::Diff::Map),
             }
         } else {
-            Ok(amp::Diff::Unchanged(amp::ObjDiff {
-                object_id: actors.export_obj(obj_id),
-                obj_type: obj.obj_type,
-            }))
+            // no changes so just return empty edits or props
+            Ok(match obj.obj_type {
+                amp::ObjType::Map(map_type) => amp::Diff::Map(MapDiff {
+                    object_id: actors.export_obj(obj_id),
+                    obj_type: map_type,
+                    props: HashMap::new(),
+                }),
+                amp::ObjType::Sequence(seq_type) => amp::Diff::Seq(SeqDiff {
+                    object_id: actors.export_obj(obj_id),
+                    obj_type: seq_type,
+                    edits: Vec::new(),
+                }),
+            })
         }
     }
 

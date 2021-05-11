@@ -435,7 +435,6 @@ impl StateTreeComposite {
                     actual_type: Some(self.obj_type()),
                 }),
             },
-            amp::Diff::Unchanged(..) => Ok(DiffApplicationResult::pure(self.clone())),
             amp::Diff::Value(..) => {
                 // TODO throw an error
                 panic!("SHould never be called")
@@ -566,31 +565,6 @@ impl StateTreeValue {
             }
             .apply_diff(&diff)
             .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
-            amp::Diff::Unchanged(amp::ObjDiff {
-                obj_type,
-                object_id,
-            }) => match obj_type {
-                amp::ObjType::Sequence(seq_type) => StateTreeValue::new_from_diff(DiffToApply {
-                    current_objects: diff.current_objects,
-                    parent_key: diff.parent_key,
-                    parent_object_id: diff.parent_object_id,
-                    diff: &amp::Diff::Seq(amp::SeqDiff {
-                        object_id: object_id.clone(),
-                        obj_type: *seq_type,
-                        edits: Vec::new(),
-                    }),
-                }),
-                amp::ObjType::Map(map_type) => StateTreeValue::new_from_diff(DiffToApply {
-                    current_objects: diff.current_objects,
-                    parent_key: diff.parent_key,
-                    parent_object_id: diff.parent_object_id,
-                    diff: &amp::Diff::Map(amp::MapDiff {
-                        object_id: object_id.clone(),
-                        obj_type: *map_type,
-                        props: HashMap::new(),
-                    }),
-                }),
-            },
             amp::Diff::Cursor(ref c) => {
                 Ok(DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())))
             }
@@ -1085,7 +1059,6 @@ fn diff_object_type(diff: &amp::Diff) -> Option<amp::ObjType> {
     match diff {
         amp::Diff::Map(mapdiff) => Some(amp::ObjType::Map(mapdiff.obj_type)),
         amp::Diff::Seq(seqdiff) => Some(amp::ObjType::Sequence(seqdiff.obj_type)),
-        amp::Diff::Unchanged(udiff) => Some(udiff.obj_type),
         amp::Diff::Value(..) => None,
         amp::Diff::Cursor(..) => None,
     }
@@ -1096,7 +1069,6 @@ fn diff_object_id(diff: &amp::Diff) -> Option<amp::ObjectId> {
     match diff {
         amp::Diff::Map(mapdiff) => Some(mapdiff.object_id.clone()),
         amp::Diff::Seq(seqdiff) => Some(seqdiff.object_id.clone()),
-        amp::Diff::Unchanged(udiff) => Some(udiff.object_id.clone()),
         amp::Diff::Value(..) => None,
         amp::Diff::Cursor(amp::CursorDiff { object_id, .. }) => Some(object_id.clone()),
     }

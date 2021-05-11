@@ -20,7 +20,6 @@ impl Serialize for Diff {
         match self {
             Diff::Map(diff) => diff.serialize(serializer),
             Diff::Seq(diff) => diff.serialize(serializer),
-            Diff::Unchanged(diff) => diff.serialize(serializer),
             Diff::Value(val) => match val {
                 ScalarValue::Counter(_) => {
                     let mut op = serializer.serialize_struct("Value", 3)?;

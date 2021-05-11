@@ -18,9 +18,10 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    make_list_opid.clone() => amp::Diff::Unchanged(amp::ObjDiff{
+                    make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
                         object_id: make_list_opid.clone().into(),
-                        obj_type: amp::ObjType::text(),
+                        obj_type: amp::SequenceType::Text,
+                        edits: Vec::new(),
                     }),
                 }
             },

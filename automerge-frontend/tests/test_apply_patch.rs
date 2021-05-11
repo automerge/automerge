@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use automerge_frontend::{Frontend, Path, Primitive, Value};
 use automerge_protocol as amp;
@@ -293,9 +293,10 @@ fn apply_updates_inside_map_conflicts() {
                             }
                         },
                     }),
-                    actor2.op_id_at(1) => amp::Diff::Unchanged(amp::ObjDiff{
+                    actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor2.op_id_at(1).into(),
-                        obj_type: amp::ObjType::Map(amp::MapType::Map),
+                        obj_type: amp::MapType::Map,
+                        props: HashMap::new(),
                     })
                 }
             },
@@ -668,9 +669,10 @@ fn apply_updates_inside_list_conflicts() {
                             amp::DiffEdit::Update{
                                 index: 0,
                                 op_id: actor2.op_id_at(2),
-                                value: amp::Diff::Unchanged(amp::ObjDiff{
+                                value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
-                                    obj_type: amp::ObjType::Map(amp::MapType::Map),
+                                    obj_type: amp::MapType::Map,
+                                    props: HashMap::new(),
                                 })
                             }
                         ],
@@ -727,9 +729,10 @@ fn apply_updates_inside_list_conflicts() {
                             amp::DiffEdit::Update{
                                 index: 0,
                                 op_id: actor2.op_id_at(2),
-                                value: amp::Diff::Unchanged(amp::ObjDiff{
+                                value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
-                                    obj_type: amp::ObjType::Map(amp::MapType::Map),
+                                    obj_type: amp::MapType::Map,
+                                    props: HashMap::new(),
                                 })
                             }
                         ],
@@ -1074,9 +1077,10 @@ fn test_unchanged_diff_creates_empty_objects() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Unchanged(amp::ObjDiff{
+                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Seq(amp::SeqDiff{
                         object_id: "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap(),
-                        obj_type: amp::ObjType::Sequence(amp::SequenceType::Text)
+                        obj_type: amp::SequenceType::Text,
+                        edits: Vec::new(),
                     })
                 }
             },

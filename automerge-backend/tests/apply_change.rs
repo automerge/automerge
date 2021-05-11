@@ -4,10 +4,11 @@ use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjDiff, ObjType, ObjectId,
-    Op, Patch, ScalarValue, SeqDiff, SequenceType, UncompressedChange,
+    ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch,
+    ScalarValue, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
@@ -41,14 +42,11 @@ fn test_incremental_diffs_in_a_map() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
-            }
-            .into(),
-        ),
+        diffs: Some(MapDiff {
+            object_id: ObjectId::Root,
+            obj_type: MapType::Map,
+            props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
+        }),
     };
     assert_eq!(patch, expected_patch)
 }
@@ -103,17 +101,14 @@ fn test_increment_key_in_map() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!(
-                "counter".into() => hashmap!{
-                    actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
-                }),
-            }
-            .into(),
-        ),
+        diffs: Some(MapDiff {
+            object_id: ObjectId::Root,
+            obj_type: MapType::Map,
+            props: hashmap!(
+            "counter".into() => hashmap!{
+                actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
+            }),
+        }),
     };
     let mut backend = Backend::init();
     backend.apply_changes(vec![change1]).unwrap();
@@ -175,17 +170,14 @@ fn test_conflict_on_assignment_to_same_map_key() {
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!( "bird".into() => hashmap!(
-                            actor_1.op_id_at(1) => "magpie".into(),
-                            actor_2.op_id_at(2) => "blackbird".into(),
-                )),
-            }
-            .into(),
-        ),
+        diffs: Some(MapDiff {
+            object_id: ObjectId::Root,
+            obj_type: MapType::Map,
+            props: hashmap!( "bird".into() => hashmap!(
+                        actor_1.op_id_at(1) => "magpie".into(),
+                        actor_2.op_id_at(2) => "blackbird".into(),
+            )),
+        }),
     };
     let mut backend = Backend::init();
     let _patch1 = backend.apply_changes(vec![change1]).unwrap();
@@ -812,9 +804,10 @@ fn test_handle_changes_within_conflicted_objects() {
             obj_type: MapType::Map,
             props: hashmap! {
                 "conflict".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::Unchanged(ObjDiff{
+                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor1.op_id_at(1).into(),
-                        obj_type: ObjType::Sequence(SequenceType::List),
+                        obj_type: SequenceType::List,
+                        edits: Vec::new(),
                     }),
                     actor2.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: actor2.op_id_at(1).into(),

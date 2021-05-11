@@ -378,7 +378,6 @@ impl fmt::Debug for ChangeHash {
 pub enum Diff {
     Map(MapDiff),
     Seq(SeqDiff),
-    Unchanged(ObjDiff),
     Value(ScalarValue),
     Cursor(CursorDiff),
 }
