@@ -29,6 +29,7 @@ mod columnar;
 mod concurrent_operations;
 mod encoding;
 mod error;
+mod event_handlers;
 mod internal;
 mod object_store;
 mod op_handle;
@@ -40,6 +41,7 @@ mod sync;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
+pub use event_handlers::{ChangeEventHandler, EventHandler};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]

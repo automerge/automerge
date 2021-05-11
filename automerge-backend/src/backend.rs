@@ -1,15 +1,25 @@
 use core::cmp::max;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Debug,
+};
 
 use amp::ChangeHash;
 use automerge_protocol as amp;
 
 use crate::{
-    actor_map::ActorMap, change::encode_document, error::AutomergeError, internal::ObjectId,
-    op_handle::OpHandle, op_set::OpSet, pending_diff::PendingDiff, Change,
+    actor_map::ActorMap,
+    change::encode_document,
+    error::AutomergeError,
+    event_handlers::{EventHandlerId, EventHandlers},
+    internal::ObjectId,
+    op_handle::OpHandle,
+    op_set::OpSet,
+    pending_diff::PendingDiff,
+    Change, EventHandler,
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Clone)]
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
@@ -17,6 +27,7 @@ pub struct Backend {
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
+    event_handlers: EventHandlers,
 }
 
 impl Backend {
@@ -29,6 +40,7 @@ impl Backend {
             states: HashMap::new(),
             history: Vec::new(),
             history_index: HashMap::new(),
+            event_handlers: EventHandlers::default(),
         }
     }
 
@@ -173,6 +185,8 @@ impl Backend {
             return Ok(());
         }
 
+        self.event_handlers.before_apply_change(&change);
+
         let change_index = self.update_history(change);
 
         // SAFETY: change_index is the index for the change we've just added so this can't (and
@@ -190,6 +204,8 @@ impl Backend {
         op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;
+
+        self.event_handlers.after_apply_change(change);
 
         Ok(())
     }
@@ -393,6 +409,16 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Adds the event handler and returns the id of the handler.
+    pub fn add_event_handler(&mut self, handler: EventHandler) -> EventHandlerId {
+        self.event_handlers.add_handler(handler)
+    }
+
+    /// Remove the handler with the given id, returning whether it removed a handler or not.
+    pub fn remove_event_handler(&mut self, id: EventHandlerId) -> bool {
+        self.event_handlers.remove_handler(id)
     }
 }
 
