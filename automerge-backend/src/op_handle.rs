@@ -62,14 +62,16 @@ impl OpHandle {
         }
     }
 
-    pub fn maybe_increment(&mut self, inc: &OpHandle) {
+    pub fn maybe_increment(&mut self, inc: &OpHandle) -> bool {
         if let InternalOpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
                 if let InternalOpType::Set(amp::ScalarValue::Counter(_)) = self.action {
                     self.delta += amount;
+                    return true;
                 }
             }
         }
+        false
     }
 }
 

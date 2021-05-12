@@ -134,7 +134,7 @@ impl OpSet {
 
             let ops = object.props.entry(op.operation_key()).or_default();
             let before = !ops.is_empty();
-            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
 
             let diff = match (before, after) {
@@ -175,7 +175,7 @@ impl OpSet {
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
-            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
             self.unlink(&op, &overwritten_ops)?;
 
