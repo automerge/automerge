@@ -6,6 +6,28 @@
 
 #define BUFSIZE 4096
 
+void test_sync() {
+  printf("begin sync test\n");
+  int len;
+
+  // In a real application you would need to check to make sure your buffer is large enough for any given read
+  char buff[BUFSIZE];
+
+  Backend * dbA = automerge_init();
+  Backend * dbB = automerge_init();
+
+  SyncState * ssA = automerge_sync_state_init();
+  SyncState * ssB = automerge_sync_state_init();
+
+  len = automerge_generate_sync_message(dbA, ssA);
+  // In a real application, we would use `len` to allocate `buff` here
+  int len2 = automerge_read_binary(dbA, buff);
+  automerge_receive_sync_message(dbB, ssB, buff, len);
+  len = automerge_generate_sync_message(dbB, ssB);
+  // No more sync messages were generated
+  assert(len == 0);
+}
+
 int main() {
   int len;
 
@@ -164,6 +186,8 @@ int main() {
   len = automerge_get_missing_deps(dbE, num_heads, buff3);
   automerge_read_json(dbE, buff); // [] - nothing missing
   assert(strlen(buff) == 2);
+
+  test_sync();
 
   printf("free resources\n");
   automerge_free(dbA);

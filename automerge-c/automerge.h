@@ -8,6 +8,8 @@
 
 typedef struct Backend Backend;
 
+typedef struct SyncState SyncState;
+
 /**
  * # Safety
  * This must me called with a valid backend pointer
@@ -50,6 +52,8 @@ const char *automerge_error(Backend *backend);
  * This must me called with a valid backend pointer
  */
 void automerge_free(Backend *backend);
+
+intptr_t automerge_generate_sync_message(Backend *backend, SyncState *sync_state);
 
 /**
  * # Safety
@@ -123,11 +127,17 @@ intptr_t automerge_read_binary(Backend *backend, uint8_t *buffer);
  */
 intptr_t automerge_read_json(Backend *backend, char *buffer);
 
+intptr_t automerge_receive_sync_message(Backend *backend, SyncState *sync_state, const uint8_t *encoded_msg_ptr, uintptr_t encoded_msg_len);
+
 /**
  * # Safety
  * This must me called with a valid backend pointer
  */
 intptr_t automerge_save(Backend *backend);
+
+void automerge_sync_state_free(SyncState *sync_state);
+
+SyncState *automerge_sync_state_init(void);
 
 /**
  * # Safety
