@@ -450,3 +450,69 @@ pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *m
         (*backend).handle_error("no binary to be read")
     }
 }
+
+pub struct SyncState {
+    handle: automerge_backend::SyncState,
+}
+
+impl From<SyncState> for *mut SyncState {
+    fn from(s: SyncState) -> Self {
+        Box::into_raw(Box::new(s))
+    }
+}
+
+// Returns an `isize` indicating the length of the patch as a JSON string
+// (-1 if there was an error, 0 if there is no patch)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_receive_sync_message(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+    encoded_msg_ptr: *const u8,
+    encoded_msg_len: usize,
+) -> isize {
+    let slice = std::slice::from_raw_parts(encoded_msg_ptr, encoded_msg_len);
+    let decoded = automerge_backend::SyncMessage::decode(slice);
+    let msg = match decoded {
+        Ok(msg) => msg,
+        Err(e) => {
+            return (*backend).handle_error(e);
+        }
+    };
+    let patch = (*backend).receive_sync_message(&mut sync_state.handle, msg);
+    if let Ok(None) = patch {
+        0
+    } else {
+        (*backend).generate_json(patch)
+    }
+}
+
+// Returns an `isize` indicating the length of the binary message
+// (-1 if there was an error, 0 if there is no message)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_generate_sync_message(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+) -> isize {
+    let msg = (*backend).generate_sync_message(&mut sync_state.handle);
+    if let Some(msg) = msg {
+        (*backend).handle_binary(msg.encode())
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
+    let state = SyncState {
+        handle: automerge_backend::SyncState {
+            ..Default::default()
+        },
+    };
+    state.into()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn automerge_sync_state_free(sync_state: *mut SyncState) {
+    let sync_state: SyncState = *Box::from_raw(sync_state);
+    drop(sync_state);
+}
