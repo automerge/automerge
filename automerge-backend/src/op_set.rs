@@ -72,8 +72,8 @@ impl OpSet {
 
             let pending_diff = self.apply_op(op, actors)?;
 
-            if let Some(diff) = pending_diff {
-                diffs.entry(obj_id).or_default().push(diff);
+            if let Some(mut diff) = pending_diff {
+                diffs.entry(obj_id).or_default().append(&mut diff);
             }
         }
         Ok(())
@@ -90,7 +90,7 @@ impl OpSet {
         &mut self,
         op: OpHandle,
         actors: &mut ActorMap,
-    ) -> Result<Option<PendingDiff>, AutomergeError> {
+    ) -> Result<Option<Vec<PendingDiff>>, AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             //let child = actors.import_obj(child);
             self.objs.insert(child, ObjState::new(obj_type));
@@ -137,15 +137,31 @@ impl OpSet {
             let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
 
-            let diff = match (before, after) {
+            let diffs = match (before, after) {
                 (true, true) => {
                     let opid = op
                         .operation_key()
                         .to_opid()
                         .ok_or(AutomergeError::HeadToOpId)?;
+                    let ops = ops.clone();
                     let index = object.index_of(opid).unwrap_or(0);
+
+                    let mut diffs = vec![PendingDiff::SeqUpdate(op.clone(), index, op.id)];
+                    for existing_op in ops.iter() {
+                        if existing_op.id != op.id {
+                            let i = object.index_of(existing_op.id).unwrap_or(0);
+                            if i == index {
+                                diffs.push(PendingDiff::SeqUpdate(
+                                    existing_op.clone(),
+                                    index,
+                                    existing_op.id,
+                                ))
+                            }
+                        }
+                    }
+
                     tracing::debug!("updating existing element");
-                    Some(PendingDiff::SeqUpdate(op.clone(), index, op.id))
+                    Some(diffs)
                 }
                 (true, false) => {
                     let opid = op
@@ -154,7 +170,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     tracing::debug!(opid=?opid, index=%index, "deleting element");
-                    Some(PendingDiff::SeqRemove(op.clone(), index))
+                    Some(vec![PendingDiff::SeqRemove(op.clone(), index)])
                 }
                 (false, true) => {
                     let id = op
@@ -164,14 +180,14 @@ impl OpSet {
                     let index = object.index_of(id).unwrap_or(0);
                     tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
-                    Some(PendingDiff::SeqInsert(op.clone(), index, op.id))
+                    Some(vec![PendingDiff::SeqInsert(op.clone(), index, op.id)])
                 }
                 (false, false) => None,
             };
 
             self.unlink(&op, &overwritten_ops)?;
 
-            (diff, overwritten_ops)
+            (diffs, overwritten_ops)
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
@@ -181,7 +197,7 @@ impl OpSet {
 
             if before || after {
                 tracing::debug!(overwritten_ops=?overwritten_ops, "setting new value");
-                (Some(PendingDiff::Set(op)), overwritten_ops)
+                (Some(vec![PendingDiff::Set(op)]), overwritten_ops)
             } else {
                 tracing::debug!(overwritten_ops=?overwritten_ops, "deleting value");
                 (None, overwritten_ops)
