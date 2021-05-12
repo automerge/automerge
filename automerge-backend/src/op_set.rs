@@ -159,6 +159,14 @@ impl OpSet {
                             }
                         }
                     }
+                    diffs.sort_by_key(|d| {
+                        if let PendingDiff::SeqUpdate(op, _, _) = d {
+                            actors.export_actor(op.id.1)
+                        } else {
+                            // SAFETY: we only add SeqUpdates to this vec above.
+                            unreachable!()
+                        }
+                    });
 
                     tracing::debug!("updating existing element");
                     Some(diffs)
