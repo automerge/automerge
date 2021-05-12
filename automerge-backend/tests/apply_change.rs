@@ -538,7 +538,7 @@ fn test_apply_updates_inside_lists() {
                         obj_type: SequenceType::List,
                         edits: vec![DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(2),
+                            op_id: actor.op_id_at(3),
                             value: Diff::Value("greenfinch".into()),
                         }],
                     })
