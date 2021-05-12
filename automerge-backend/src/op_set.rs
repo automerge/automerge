@@ -139,6 +139,7 @@ impl OpSet {
 
             let diffs = match (before, after) {
                 (true, true) => {
+                    tracing::debug!("updating existing element");
                     let opid = op
                         .operation_key()
                         .to_opid()
@@ -168,7 +169,6 @@ impl OpSet {
                         }
                     });
 
-                    tracing::debug!("updating existing element");
                     Some(diffs)
                 }
                 (true, false) => {
@@ -348,6 +348,7 @@ impl OpSet {
 
     // this recursively walks through all the objects touched by the changes
     // to generate a diff in a single pass
+    #[instrument(skip(self))]
     pub fn finalize_diffs(
         &mut self,
         mut pending: HashMap<ObjectId, Vec<PendingDiff>>,
@@ -389,6 +390,7 @@ impl OpSet {
                 }
             }
         }
+        tracing::debug!(pending=?pending, "calculated pending diffs");
 
         let diff = if let Some(root) = pending.remove(&ObjectId::Root) {
             self.gen_map_diff(

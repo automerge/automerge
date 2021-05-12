@@ -830,6 +830,191 @@ fn test_handle_changes_within_conflicted_objects() {
     assert_eq!(patch, expected_patch)
 }
 
+
+#[test_env_log::test]
+fn test_handle_changes_within_conflicted_lists() {
+    let actor1: ActorId = "01234567".try_into().unwrap();
+    let actor2: ActorId = "89abcdef".try_into().unwrap();
+    let change1: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: Vec::new(),
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: ObjectId::Root,
+                key: "todos".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: amp::ElementId::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            }
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let change2: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 2,
+        start_op: 3,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: vec![change1.hash],
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: actor1.op_id_at(2).into(),
+                pred: vec![actor1.op_id_at(2)],
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set("buy milk".into()),
+                obj: actor1.op_id_at(3).into(),
+                key: "title".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(false.into()),
+                obj: actor1.op_id_at(3).into(),
+                key: "done".into(),
+                pred: Vec::new(),
+                insert: false,
+            }
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let change3: Change = UncompressedChange {
+        actor_id: actor2.clone(),
+        seq: 1,
+        start_op: 3,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: vec![change1.hash],
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: actor1.op_id_at(2).into(),
+                pred: vec![actor1.op_id_at(2)],
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set("water plants".into()),
+                obj: actor2.op_id_at(3).into(),
+                key: "title".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(false.into()),
+                obj: actor2.op_id_at(3).into(),
+                key: "done".into(),
+                pred: Vec::new(),
+                insert: false,
+            }
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let mut change4_deps = vec![change2.hash, change3.hash];
+    change4_deps.sort();
+
+    let change4: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 3,
+        start_op: 6,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: change4_deps,
+        operations: vec![
+            Op {
+                action: amp::OpType::Set(true.into()),
+                obj: actor1.op_id_at(3).into(),
+                key: "done".into(),
+                pred: vec![actor1.op_id_at(5)],
+                insert: false,
+            },
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let expected_patch = Patch {
+        actor: None,
+        seq: None,
+        clock: hashmap! {
+            actor2.clone() => 1,
+            actor1.clone() => 3,
+        },
+        max_op: 6,
+        pending_changes: 0,
+        deps: vec![change4.hash],
+        diffs: Some(MapDiff {
+            object_id: ObjectId::Root,
+            obj_type: MapType::Map,
+            props: hashmap! {
+                "todos".into() => hashmap!{
+                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor1.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: vec![
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor1.op_id_at(3),
+                                value: Diff::Map(MapDiff{
+                                    object_id: actor1.op_id_at(3).into(),
+                                    obj_type: MapType::Map,
+                                    props: hashmap!{
+                                        "done".to_string() => hashmap!{
+                                            actor1.op_id_at(6) => Diff::Value(true.into())
+                                        }
+                                    }
+                                })
+                            },
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor2.op_id_at(3),
+                                value: Diff::Map(MapDiff{
+                                    obj_type: MapType::Map,
+                                    object_id: actor2.op_id_at(3).into(),
+                                    props: hashmap!{},
+                                })
+                            }
+                        ]
+                    }),
+                }
+            },
+        }),
+    };
+
+    let mut backend = Backend::init();
+    backend.apply_changes(vec![change1, change2, change3]).unwrap();
+    let patch = backend.apply_changes(vec![change4]).unwrap();
+    assert_eq!(patch, expected_patch)
+}
+
 #[test]
 fn test_support_date_objects_at_root() {
     let actor: ActorId = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
