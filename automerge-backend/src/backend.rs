@@ -5,8 +5,14 @@ use amp::ChangeHash;
 use automerge_protocol as amp;
 
 use crate::{
-    actor_map::ActorMap, change::encode_document, error::AutomergeError, internal::ObjectId,
-    op_handle::OpHandle, op_set::OpSet, pending_diff::PendingDiff, Change,
+    actor_map::ActorMap,
+    change::encode_document,
+    error::AutomergeError,
+    internal::ObjectId,
+    op_handle::OpHandle,
+    op_set::OpSet,
+    pending_diff::PendingDiffs,
+    Change,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -83,7 +89,7 @@ impl Backend {
         changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut pending_diffs = HashMap::new();
+        let mut pending_diffs = PendingDiffs::new();
 
         for change in changes.into_iter() {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
@@ -144,7 +150,7 @@ impl Backend {
         &mut self,
         change: Change,
         local: bool,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut PendingDiffs,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, diffs)
@@ -156,7 +162,7 @@ impl Backend {
 
     fn apply_queued_ops(
         &mut self,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut PendingDiffs,
     ) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, diffs)?;
@@ -167,7 +173,7 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Change,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut PendingDiffs,
     ) -> Result<(), AutomergeError> {
         if self.history_index.contains_key(&change.hash) {
             return Ok(());

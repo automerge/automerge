@@ -21,7 +21,7 @@ use crate::{
     object_store::ObjState,
     op_handle::OpHandle,
     ordered_set::OrderedSet,
-    pending_diff::{Edits, PendingDiff},
+    pending_diff::{Edits, PendingDiff, PendingDiffs},
     Change,
 };
 
@@ -64,7 +64,7 @@ impl OpSet {
     pub(crate) fn apply_ops(
         &mut self,
         ops: Vec<OpHandle>,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut PendingDiffs,
         actors: &mut ActorMap,
     ) -> Result<(), AutomergeError> {
         for op in ops {
@@ -72,10 +72,11 @@ impl OpSet {
 
             let pending_diff = self.apply_op(op, actors)?;
 
-            if let Some(mut diff) = pending_diff {
-                diffs.entry(obj_id).or_default().append(&mut diff);
+            if let Some(these_diffs) = pending_diff {
+                diffs.append_diffs(&obj_id, these_diffs);
             }
         }
+        self.update_cursors(diffs);
         Ok(())
     }
 
@@ -346,22 +347,13 @@ impl OpSet {
         }
     }
 
-    // this recursively walks through all the objects touched by the changes
-    // to generate a diff in a single pass
-    #[instrument(skip(self))]
-    pub fn finalize_diffs(
-        &mut self,
-        mut pending: HashMap<ObjectId, Vec<PendingDiff>>,
-        actors: &ActorMap,
-    ) -> Result<Option<amp::MapDiff>, AutomergeError> {
-        if pending.is_empty() {
-            return Ok(None);
-        }
-
+    /// Update any cursors which will be affected by the changes in `pending` 
+    /// and add the changed cursors to `pending`
+    fn update_cursors(&mut self, pending: &mut PendingDiffs) {
         // For each cursor, if the cursor references an object which has been changed we generate a
         // diff for the cursor
         let mut cursor_changes: HashMap<ObjectId, Vec<PendingDiff>> = HashMap::new();
-        for obj_id in pending.keys() {
+        for obj_id in pending.changed_object_ids() {
             if let Some(cursors) = self.cursors.get_mut(&obj_id) {
                 for cursor in cursors.iter_mut() {
                     if let Some(obj) = self.objs.get(&cursor.internal_referred_object_id) {
@@ -375,10 +367,23 @@ impl OpSet {
             }
         }
         for (obj_id, cursor_change) in cursor_changes {
-            pending.entry(obj_id).or_default().extend(cursor_change)
+            pending.append_diffs(&obj_id, cursor_change);
+        }
+    }
+
+    // this recursively walks through all the objects touched by the changes
+    // to generate a diff in a single pass
+    #[instrument(skip(self))]
+    pub fn finalize_diffs(
+        &mut self,
+        mut pending: PendingDiffs,
+        actors: &ActorMap,
+    ) -> Result<Option<amp::MapDiff>, AutomergeError> {
+        if pending.is_empty() {
+            return Ok(None);
         }
 
-        let mut objs: Vec<_> = pending.keys().cloned().collect();
+        let mut objs: Vec<_> = pending.changed_object_ids().cloned().collect();
         while let Some(obj_id) = objs.pop() {
             let obj = self.get_obj(&obj_id)?;
             if let Some(inbound) = obj.inbound.iter().next() {
@@ -386,18 +391,17 @@ impl OpSet {
                     diffs.push(PendingDiff::Set(inbound.clone()))
                 } else {
                     objs.push(inbound.obj);
-                    pending.insert(inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
+                    pending.append_diffs(&inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
                 }
             }
         }
-        tracing::debug!(pending=?pending, "calculated pending diffs");
 
-        let diff = if let Some(root) = pending.remove(&ObjectId::Root) {
+        let diff = if let Some(root) = pending.0.remove(&ObjectId::Root) {
             self.gen_map_diff(
                 &ObjectId::Root,
                 self.get_obj(&ObjectId::Root)?,
                 &root,
-                &mut pending,
+                &mut pending.0,
                 actors,
                 amp::MapType::Map,
             )?
