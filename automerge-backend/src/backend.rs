@@ -369,15 +369,33 @@ impl Backend {
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
-    pub fn filter_changes(
+    pub(crate) fn filter_changes(
         &self,
         heads: &[amp::ChangeHash],
         changes: &mut HashSet<amp::ChangeHash>,
     ) {
-        // TODO: with a topological sort we might be able to quicken some cases where changes lie
-        // to the right of the heads in our history (thus they are newer or concurrent).
-        // This may help to avoid searching all the predecessors of the heads when we know they
-        // won't be found.
+        // Reduce the working set to find to those which we may be able to find.
+        // This filters out those hashes that are successors of or concurrent with all of the
+        // heads.
+        // This can help in avoiding traversing the entire graph back to the roots when we try to
+        // search for a hash we can know won't be found there.
+        let mut may_find: HashSet<ChangeHash> = changes
+            .iter()
+            .filter(|hash| {
+                let change_index = self.history_index.get(hash).unwrap_or(&0);
+                // wont be finding this if it is concurrent or a successor of a head
+                !heads.iter().all(|head| {
+                    let head_index = self.history_index.get(head).unwrap_or(&0);
+                    change_index > head_index
+                })
+            })
+            .copied()
+            .collect();
+
+        if may_find.is_empty() {
+            return;
+        }
+
         let mut queue: VecDeque<_> = heads.iter().collect();
         let mut seen = HashSet::new();
         while let Some(hash) = queue.pop_front() {
@@ -386,8 +404,9 @@ impl Backend {
             }
             seen.insert(hash);
 
-            let removed = changes.remove(hash);
-            if changes.is_empty() {
+            let removed = may_find.remove(hash);
+            changes.remove(hash);
+            if may_find.is_empty() {
                 break;
             }
 
