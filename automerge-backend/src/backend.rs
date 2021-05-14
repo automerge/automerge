@@ -11,7 +11,7 @@ use crate::{
     internal::ObjectId,
     op_handle::OpHandle,
     op_set::OpSet,
-    pending_diff::PendingDiffs,
+    patches::PendingDiffs,
     Change,
 };
 

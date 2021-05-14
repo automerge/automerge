@@ -18,7 +18,7 @@ mod object_store;
 mod op_handle;
 mod op_set;
 mod ordered_set;
-mod pending_diff;
+mod patches;
 mod sync;
 
 pub use backend::Backend;
