@@ -8,10 +8,9 @@ use crate::{
     actor_map::ActorMap,
     change::encode_document,
     error::AutomergeError,
-    internal::ObjectId,
     op_handle::OpHandle,
     op_set::OpSet,
-    patches::PendingDiffs,
+    patches::{generate_from_scratch_diff, IncrementalPatch},
     Change,
 };
 
@@ -89,7 +88,7 @@ impl Backend {
         changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut pending_diffs = PendingDiffs::new();
+        let mut pending_diffs = IncrementalPatch::new();
 
         for change in changes.into_iter() {
             self.add_change(change, actor.is_some(), &mut pending_diffs)?;
@@ -150,7 +149,7 @@ impl Backend {
         &mut self,
         change: Change,
         local: bool,
-        diffs: &mut PendingDiffs,
+        diffs: &mut IncrementalPatch,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, diffs)
@@ -160,10 +159,7 @@ impl Backend {
         }
     }
 
-    fn apply_queued_ops(
-        &mut self,
-        diffs: &mut PendingDiffs,
-    ) -> Result<(), AutomergeError> {
+    fn apply_queued_ops(&mut self, diffs: &mut IncrementalPatch) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, diffs)?;
         }
@@ -173,7 +169,7 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Change,
-        diffs: &mut PendingDiffs,
+        diffs: &mut IncrementalPatch,
     ) -> Result<(), AutomergeError> {
         if self.history_index.contains_key(&change.hash) {
             return Ok(());
@@ -223,12 +219,8 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
-        let diffs = self.op_set.construct_map(
-            &ObjectId::Root,
-            self.op_set.get_obj(&ObjectId::Root).unwrap(),
-            &self.actors,
-            amp::MapType::Map,
-        )?;
+        let workshop = self.op_set.patch_workshop(&self.actors);
+        let diffs = generate_from_scratch_diff(&workshop);
         self.make_patch(Some(diffs), None)
     }
 

@@ -1,16 +1,13 @@
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-};
+use std::collections::{HashMap, HashSet};
 
 use automerge_protocol as amp;
 
+use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
 use crate::{
     internal::{InternalOpType, Key, ObjectId, OpId},
     object_store::ObjState,
     op_handle::OpHandle,
 };
-use super::PatchWorkshop;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum PendingDiff {
@@ -33,12 +30,24 @@ impl PendingDiff {
     }
 }
 
+/// `IncrementalPatch` is used to build patches which are a result of applying
+/// a `Change`. As the `OpSet` applies each op in the change it records the
+/// difference that will make in the `IncrementalPatch`. At the end of the
+/// change process the `IncrementalPatch::finalize` method is used to generate
+/// a `automerge_protocol::Diff` to send to the frontend.
+///
+/// The reason this is called an "incremental" patch is because it impliciatly
+/// generates a diff between the "current" state - represented by whatever was
+/// in the OpSet before the change was received - and the new state after the
+/// change is applied. This is in contrast to when we are generating a diff
+/// without any existing state, as in the case when we first load a saved
+/// document.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PendingDiffs(pub(super) HashMap<ObjectId, Vec<PendingDiff>>);
+pub(crate) struct IncrementalPatch(pub(super) HashMap<ObjectId, Vec<PendingDiff>>);
 
-impl PendingDiffs {
-    pub(crate) fn new() -> PendingDiffs {
-        PendingDiffs(HashMap::new())
+impl IncrementalPatch {
+    pub(crate) fn new() -> IncrementalPatch {
+        IncrementalPatch(HashMap::new())
     }
 
     pub(crate) fn append_diffs(&mut self, oid: &ObjectId, mut diffs: Vec<PendingDiff>) {
@@ -144,7 +153,7 @@ impl PendingDiffs {
                 PendingDiff::SeqInsert(op, index, opid) => {
                     seen_op_ids.insert(op.id);
                     let value = match op.action {
-                        InternalOpType::Set(ref value) => self.gen_value_diff(op, value, workshop),
+                        InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                         _ => panic!("del or inc found in field operations"),
                     };
@@ -159,7 +168,7 @@ impl PendingDiffs {
                 PendingDiff::SeqUpdate(op, index, opid) => {
                     seen_op_ids.insert(op.id);
                     let value = match op.action {
-                        InternalOpType::Set(ref value) => self.gen_value_diff(op, value, workshop),
+                        InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                         InternalOpType::Del => {
                             // do nothing
@@ -185,9 +194,7 @@ impl PendingDiffs {
                     if !seen_op_ids.contains(&op.id) {
                         seen_op_ids.insert(op.id);
                         let value = match op.action {
-                            InternalOpType::Set(ref value) => {
-                                self.gen_value_diff(op, value, workshop)
-                            }
+                            InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                             InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                             _ => panic!("del or inc found in field operations"),
                         };
@@ -226,7 +233,7 @@ impl PendingDiffs {
             let mut opid_to_value = HashMap::new();
             for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
-                    InternalOpType::Set(ref value) => self.gen_value_diff(op, value, workshop),
+                    InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                     InternalOpType::Make(_) => {
                         // FIXME
                         self.gen_obj_diff(&op.id.into(), workshop)
@@ -242,99 +249,5 @@ impl PendingDiffs {
             obj_type: map_type,
             props,
         }
-    }
-
-    fn gen_value_diff(
-        &self,
-        op: &OpHandle,
-        value: &amp::ScalarValue,
-        workshop: &dyn PatchWorkshop,
-    ) -> amp::Diff {
-        match value {
-            amp::ScalarValue::Cursor(oid) => {
-                // .expect() is okay here because we check that the cursr exists at the start of
-                // `OpSet::apply_op()`
-                amp::Diff::Cursor(workshop.find_cursor(oid).expect("missing cursor"))
-            }
-            _ => op.adjusted_value().into(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct Edits(Vec<amp::DiffEdit>);
-
-impl Edits {
-    pub(crate) fn new() -> Edits {
-        Edits(Vec::new())
-    }
-
-    /// Append an edit to this sequence, collapsing it into the last edit if possible.
-    ///
-    /// The collapsing handles conversion of a sequence of inserts to a multi-insert.
-    pub(crate) fn append_edit(&mut self, edit: amp::DiffEdit) {
-        if let Some(mut last) = self.0.last_mut() {
-            match (&mut last, edit) {
-                (
-                    amp::DiffEdit::SingleElementInsert {
-                        index,
-                        elem_id,
-                        op_id,
-                        value: amp::Diff::Value(value),
-                    },
-                    amp::DiffEdit::SingleElementInsert {
-                        index: next_index,
-                        elem_id: next_elem_id,
-                        op_id: next_op_id,
-                        value: amp::Diff::Value(next_value),
-                    },
-                ) if *index + 1 == next_index
-                    && elem_id.as_opid() == Some(op_id)
-                    && next_elem_id.as_opid() == Some(&next_op_id)
-                    && op_id.delta(&next_op_id, 1) =>
-                {
-                    *last = amp::DiffEdit::MultiElementInsert {
-                        index: *index,
-                        elem_id: elem_id.clone(),
-                        values: vec![mem::replace(value, amp::ScalarValue::Null), next_value],
-                    };
-                }
-                (
-                    amp::DiffEdit::MultiElementInsert {
-                        index,
-                        elem_id,
-                        values,
-                    },
-                    amp::DiffEdit::SingleElementInsert {
-                        index: next_index,
-                        elem_id: next_elem_id,
-                        op_id,
-                        value: amp::Diff::Value(value),
-                    },
-                ) if *index + (values.len() as u64) == next_index
-                    && next_elem_id.as_opid() == Some(&op_id)
-                    && elem_id
-                        .as_opid()
-                        .unwrap()
-                        .delta(&op_id, values.len() as u64) =>
-                {
-                    values.push(value);
-                }
-                (
-                    amp::DiffEdit::Remove { index, count },
-                    amp::DiffEdit::Remove {
-                        index: new_index,
-                        count: new_count,
-                    },
-                ) if *index == new_index => *count += new_count,
-                (_, edit) => self.0.push(edit),
-            }
-        } else {
-            self.0.push(edit)
-        }
-    }
-
-    pub(crate) fn into_vec(self) -> Vec<amp::DiffEdit> {
-        self.0
     }
 }
