@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn test_encode_decode_document() {
         let actor = amp::ActorId::random();
-        let mut backend = crate::Backend::init();
+        let mut backend = crate::Backend::new();
         let change1 = amp::UncompressedChange {
             start_op: 1,
             seq: 1,
@@ -1163,7 +1163,7 @@ mod tests {
     #[test_env_log::test]
     fn test_encode_decode_document_large_enough_for_compression() {
         let actor = amp::ActorId::random();
-        let mut backend = crate::Backend::init();
+        let mut backend = crate::Backend::new();
         let mut change1 = amp::UncompressedChange {
             start_op: 1,
             seq: 1,

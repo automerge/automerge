@@ -22,12 +22,12 @@ fn test_allow_cursor_on_list_element() {
         .unwrap()
         .1
         .unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend
         .apply_changes(vec![change.try_into().unwrap()])
         .unwrap();
 
-    let mut backend2 = Backend::init();
+    let mut backend2 = Backend::new();
     backend2
         .apply_changes(backend.get_changes(&[]).into_iter().cloned().collect())
         .unwrap();
@@ -63,12 +63,12 @@ fn test_allow_cursor_on_text_element() {
         .unwrap()
         .1
         .unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend
         .apply_changes(vec![change.try_into().unwrap()])
         .unwrap();
 
-    let mut backend2 = Backend::init();
+    let mut backend2 = Backend::new();
     backend2
         .apply_changes(backend.get_changes(&[]).into_iter().cloned().collect())
         .unwrap();

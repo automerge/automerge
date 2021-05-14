@@ -25,7 +25,7 @@ fn test_deflate_correctly() {
         49, 70, 74, 86, 10, 18, 99, 18, 229, 36, 183, 50, 20, 113, 229, 103, 206, 190, 0,
     ];
     let change: Change = Change::from_bytes(init_change.clone()).unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change]).unwrap();
 
     let change_back = backend.get_changes(&[]);

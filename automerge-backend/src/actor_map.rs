@@ -4,14 +4,10 @@ use automerge_protocol as amp;
 
 use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default)]
 pub(crate) struct ActorMap(Vec<amp::ActorId>);
 
 impl ActorMap {
-    pub fn new() -> ActorMap {
-        ActorMap(Vec::new())
-    }
-
     pub fn import_key(&mut self, key: &amp::Key) -> Key {
         match key {
             amp::Key::Map(string) => Key::Map(string.to_string()),

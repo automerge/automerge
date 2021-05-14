@@ -19,7 +19,7 @@ use crate::{
     Change, EventHandler,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
@@ -31,17 +31,8 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn init() -> Backend {
-        let op_set = OpSet::init();
-        Backend {
-            op_set,
-            queue: Vec::new(),
-            actors: ActorMap::new(),
-            states: HashMap::new(),
-            history: Vec::new(),
-            history_index: HashMap::new(),
-            event_handlers: EventHandlers::default(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn make_patch(
@@ -330,7 +321,7 @@ impl Backend {
     #[allow(clippy::needless_pass_by_value)]
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
-        let mut backend = Self::init();
+        let mut backend = Self::new();
         backend.load_changes(changes)?;
         Ok(backend)
     }
@@ -549,7 +540,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let mut backend = Backend::init();
+        let mut backend = Backend::new();
 
         backend
             .apply_changes(vec![change_a1.clone(), change_a2.clone()])

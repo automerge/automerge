@@ -553,7 +553,7 @@ fn allow_interleaving_of_patches_and_changes() {
         }
     );
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let (patch1, _) = backend.apply_local_change(req1).unwrap();
     doc.apply_patch(patch1).unwrap();
 
@@ -634,11 +634,11 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     let (doc, change1) =
         Frontend::new_with_initial_state(hashmap! {"number" => Primitive::Int(1)}.into()).unwrap();
 
-    let mut backend1 = Backend::init();
+    let mut backend1 = Backend::new();
     let (_, binchange1) = backend1.apply_local_change(change1).unwrap();
 
     let mut doc2 = Frontend::new();
-    let mut backend2 = Backend::init();
+    let mut backend2 = Backend::new();
     let patch1 = backend2.apply_changes(vec![binchange1.clone()]).unwrap();
     doc2.apply_patch(patch1.clone()).unwrap();
 
