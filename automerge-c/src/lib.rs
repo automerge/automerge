@@ -168,7 +168,7 @@ impl From<Vec<ChangeHash>> for BinaryResults {
 
 #[no_mangle]
 pub extern "C" fn automerge_init() -> *mut Backend {
-    Backend::init(automerge_backend::Backend::init()).into()
+    Backend::init(automerge_backend::Backend::new()).into()
 }
 
 /// # Safety

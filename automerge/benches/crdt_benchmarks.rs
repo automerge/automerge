@@ -21,13 +21,13 @@ pub fn b1_1(c: &mut Criterion) {
                     .unwrap()
                     .1
                     .unwrap();
-                let mut backend1 = Backend::init();
+                let mut backend1 = Backend::new();
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
                 doc1.apply_patch(patch1).unwrap();
 
                 let mut doc2 = Frontend::new();
                 let changedoc2 = backend1.get_changes(&[]);
-                let mut backend2 = Backend::init();
+                let mut backend2 = Backend::new();
                 let patch2 = backend2
                     .apply_changes(changedoc2.into_iter().cloned().collect())
                     .unwrap();
@@ -88,13 +88,13 @@ pub fn b1_2(c: &mut Criterion) {
                     .unwrap()
                     .1
                     .unwrap();
-                let mut backend1 = Backend::init();
+                let mut backend1 = Backend::new();
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
                 doc1.apply_patch(patch1).unwrap();
 
                 let mut doc2 = Frontend::new();
                 let changedoc2 = backend1.get_changes(&[]);
-                let mut backend2 = Backend::init();
+                let mut backend2 = Backend::new();
                 let patch2 = backend2
                     .apply_changes(changedoc2.into_iter().cloned().collect())
                     .unwrap();
@@ -143,7 +143,7 @@ pub fn b3_1(c: &mut Criterion) {
                 let n: f64 = 6000.0;
                 let root_n: i64 = n.sqrt().floor() as i64;
                 let mut local_doc = Frontend::new();
-                let mut local_backend = Backend::init();
+                let mut local_backend = Backend::new();
                 let init_change = local_doc
                     .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
@@ -163,7 +163,7 @@ pub fn b3_1(c: &mut Criterion) {
                     .into_iter()
                     .enumerate()
                     .map(|(index, mut doc)| {
-                        let mut backend = Backend::init();
+                        let mut backend = Backend::new();
                         let patch = backend.apply_changes(vec![init_binchange.clone()]).unwrap();
                         doc.apply_patch(patch).unwrap();
                         let change = doc

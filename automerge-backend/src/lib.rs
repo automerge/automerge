@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn sync_and_send_backend() {
-        let b = crate::Backend::init();
+        let b = crate::Backend::new();
         let mb = Arc::new(Mutex::new(b));
         thread::spawn(move || {
             let b = mb.lock().unwrap();

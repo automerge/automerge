@@ -47,8 +47,14 @@ pub(crate) struct OpSet {
     cursors: HashMap<ObjectId, Vec<CursorState>>,
 }
 
+impl Default for OpSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpSet {
-    pub fn init() -> OpSet {
+    pub fn new() -> OpSet {
         let mut objs = HashMap::default();
         objs.insert(ObjectId::Root, ObjState::new(amp::ObjType::map()));
 

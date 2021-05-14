@@ -105,7 +105,7 @@ impl JsSyncState {
 
 #[wasm_bindgen]
 pub fn init() -> Result<Object, JsValue> {
-    Ok(wrapper(State(Backend::init()), false, Vec::new()))
+    Ok(wrapper(State(Backend::new()), false, Vec::new()))
 }
 
 #[wasm_bindgen(js_name = getHeads)]

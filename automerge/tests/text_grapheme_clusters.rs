@@ -12,7 +12,7 @@ fn create_frontend_with_grapheme_clusters() {
         automerge::MapType::Map,
     ))
     .unwrap();
-    let mut b = automerge::Backend::init();
+    let mut b = automerge::Backend::new();
     let (p, _) = b.apply_local_change(c).unwrap();
     f.apply_patch(p).unwrap();
 }

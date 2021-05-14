@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
-    let mut backend = automerge_backend::Backend::init();
+    let mut backend = automerge_backend::Backend::new();
     let changes = automerge_backend::Change::load_document(&input_data)?;
     let patch = backend.apply_changes(changes)?;
 
@@ -50,7 +50,7 @@ mod tests {
 
         let (_, initial_change) =
             automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
-        let mut backend = automerge_backend::Backend::init();
+        let mut backend = automerge_backend::Backend::new();
         backend.apply_local_change(initial_change).unwrap();
 
         let change_bytes = backend.save().unwrap();
@@ -76,7 +76,7 @@ mod tests {
 
         let (_, initial_change) =
             automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
-        let mut backend = automerge_backend::Backend::init();
+        let mut backend = automerge_backend::Backend::new();
         backend.apply_local_change(initial_change).unwrap();
 
         let change_bytes = backend.save().unwrap();

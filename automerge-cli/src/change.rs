@@ -175,7 +175,7 @@ pub fn change(
     mut writer: impl std::io::Write,
     script: &str,
 ) -> Result<(), ChangeError> {
-    let mut backend = amb::Backend::init();
+    let mut backend = amb::Backend::new();
     let mut buf: Vec<u8> = Vec::new();
     reader
         .read_to_end(&mut buf)
