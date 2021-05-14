@@ -461,6 +461,10 @@ impl From<SyncState> for *mut SyncState {
     }
 }
 
+/// # Safety
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// `encoded_msg_[ptr|len]` must be the address & length of a byte array
 // Returns an `isize` indicating the length of the patch as a JSON string
 // (-1 if there was an error, 0 if there is no patch)
 #[no_mangle]
@@ -486,8 +490,11 @@ pub unsafe extern "C" fn automerge_receive_sync_message(
     }
 }
 
-// Returns an `isize` indicating the length of the binary message
-// (-1 if there was an error, 0 if there is no message)
+/// # Safety
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// Returns an `isize` indicating the length of the binary message
+/// (-1 if there was an error, 0 if there is no message)
 #[no_mangle]
 pub unsafe extern "C" fn automerge_generate_sync_message(
     backend: *mut Backend,
@@ -511,6 +518,8 @@ pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
     state.into()
 }
 
+/// # Safety
+/// sync_state must be a valid pointer to a SyncState
 #[no_mangle]
 pub unsafe extern "C" fn automerge_sync_state_free(sync_state: *mut SyncState) {
     let sync_state: SyncState = *Box::from_raw(sync_state);
