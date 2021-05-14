@@ -323,7 +323,7 @@ impl Backend {
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let changes: Vec<amp::UncompressedChange> = self.history.iter().map(|r| r.into()).collect();
-        encode_document(&changes)
+        Ok(encode_document(&changes)?)
     }
 
     // allow this for API reasons

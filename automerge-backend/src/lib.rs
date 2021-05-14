@@ -27,6 +27,7 @@ mod backend;
 mod change;
 mod columnar;
 mod concurrent_operations;
+mod decoding;
 mod encoding;
 mod error;
 mod event_handlers;

@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashSet};
 use automerge_protocol::ChangeHash;
 
 use super::{decode_hashes, encode_hashes};
-use crate::{encoding::Decoder, AutomergeError, BloomFilter};
+use crate::{decoding, decoding::Decoder, encoding, BloomFilter};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
@@ -24,18 +24,21 @@ pub struct SyncHave {
 }
 
 impl SyncState {
-    pub fn encode(&self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn encode(&self) -> Result<Vec<u8>, encoding::Error> {
         let mut buf = vec![SYNC_STATE_TYPE];
         encode_hashes(&mut buf, &self.shared_heads)?;
         Ok(buf)
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<Self, AutomergeError> {
+    pub fn decode(bytes: &[u8]) -> Result<Self, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let record_type = decoder.read::<u8>()?;
         if record_type != SYNC_STATE_TYPE {
-            return Err(AutomergeError::EncodingError);
+            return Err(decoding::Error::WrongType {
+                expected_one_of: vec![SYNC_STATE_TYPE],
+                found: record_type,
+            });
         }
 
         let shared_heads = decode_hashes(&mut decoder)?;
