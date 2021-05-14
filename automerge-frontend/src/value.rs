@@ -13,6 +13,7 @@ impl From<HashMap<amp::OpId, Value>> for Conflicts {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Value {
     Map(HashMap<String, Value>, amp::MapType),
@@ -23,6 +24,7 @@ pub enum Value {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Primitive {
     Str(String),
     Int(i64),
@@ -37,6 +39,7 @@ pub enum Primitive {
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Cursor {
     pub index: u32,
     pub(crate) object: amp::ObjectId,
