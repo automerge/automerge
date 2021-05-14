@@ -379,15 +379,16 @@ impl Backend {
         // heads.
         // This can help in avoiding traversing the entire graph back to the roots when we try to
         // search for a hash we can know won't be found there.
+        let max_head_index = heads
+            .iter()
+            .map(|h| self.history_index.get(h).unwrap_or(&0))
+            .max()
+            .unwrap_or(&0);
         let mut may_find: HashSet<ChangeHash> = changes
             .iter()
             .filter(|hash| {
                 let change_index = self.history_index.get(hash).unwrap_or(&0);
-                // wont be finding this if it is concurrent or a successor of a head
-                !heads.iter().all(|head| {
-                    let head_index = self.history_index.get(head).unwrap_or(&0);
-                    change_index > head_index
-                })
+                change_index <= max_head_index
             })
             .copied()
             .collect();
