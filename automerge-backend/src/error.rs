@@ -4,7 +4,9 @@ use std::fmt::Debug;
 use automerge_protocol as amp;
 use thiserror::Error;
 
-#[derive(Error, Debug, PartialEq)]
+use crate::{decoding, encoding};
+
+#[derive(Error, Debug)]
 pub enum AutomergeError {
     #[error("Missing object ID")]
     MissingObjectError,
@@ -36,8 +38,6 @@ pub enum AutomergeError {
     DuplicateChange(String),
     #[error("Diverged state {0}")]
     DivergedState(String),
-    #[error("Change decompression error: {0}")]
-    ChangeDecompressError(String),
     #[error("Invalid seq {0}")]
     InvalidSeq(u64),
     #[error("Map key in seq")]
@@ -52,58 +52,16 @@ pub enum AutomergeError {
     EncodeFailed,
     #[error("Decode failed")]
     DecodeFailed,
-    #[error("Invalid change")]
-    InvalidChange {
-        #[from]
-        source: InvalidChangeError,
-    },
-    #[error("Change bad format: {source}")]
-    ChangeBadFormat {
-        #[source]
-        source: amp::error::InvalidChangeHashSlice,
-    },
-    #[error("Encoding error")]
-    EncodingError,
+    #[error("Encoding error {0}")]
+    EncodingError(#[from] encoding::Error),
+    #[error("Decoding error {0}")]
+    DecodingError(#[from] decoding::Error),
     #[error("Attempted to create a cursor for opid {opid} which was not an element in a sequence")]
     InvalidCursor { opid: amp::OpId },
-    #[error("Found mismatching checksum values, calculated {calculated:?} but found {found:?}")]
-    InvalidChecksum { found: [u8; 4], calculated: [u8; 4] },
     #[error("A compressed chunk could not be decompressed")]
     BadCompressedChunk,
-    #[error("A change contained compressed columns, which is not supported")]
-    ChangeContainedCompressedColumns,
 }
 
 #[derive(Error, Debug)]
 #[error("Invalid element ID: {0}")]
 pub struct InvalidElementId(pub String);
-
-impl From<leb128::read::Error> for AutomergeError {
-    fn from(_err: leb128::read::Error) -> Self {
-        AutomergeError::EncodingError
-    }
-}
-
-impl From<std::io::Error> for AutomergeError {
-    fn from(_err: std::io::Error) -> Self {
-        AutomergeError::EncodingError
-    }
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub enum InvalidChangeError {
-    #[error("Change contained an operation with action 'set' which did not have a 'value'")]
-    SetOpWithoutValue,
-    #[error("Received an inc operation which had an invalid value, value was: {op_value:?}")]
-    IncOperationWithInvalidValue { op_value: Option<amp::ScalarValue> },
-    #[error("Change contained an invalid object id: {}", source.0)]
-    InvalidObjectId {
-        #[from]
-        source: amp::error::InvalidObjectId,
-    },
-    #[error("Change contained an invalid hash: {:?}", source.0)]
-    InvalidChangeHash {
-        #[from]
-        source: amp::error::InvalidChangeHashSlice,
-    },
-}

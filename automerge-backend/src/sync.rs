@@ -9,8 +9,7 @@ use std::{
 use automerge_protocol::{ChangeHash, Patch};
 
 use crate::{
-    encoding::{Decoder, Encodable},
-    AutomergeError, Backend, Change,
+    decoding, decoding::Decoder, encoding, encoding::Encodable, AutomergeError, Backend, Change,
 };
 
 mod bloom;
@@ -250,7 +249,7 @@ pub struct SyncMessage {
 }
 
 impl SyncMessage {
-    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn encode(self) -> Result<Vec<u8>, encoding::Error> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
         encode_hashes(&mut buf, &self.heads)?;
@@ -269,12 +268,15 @@ impl SyncMessage {
         Ok(buf)
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, AutomergeError> {
+    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let message_type = decoder.read::<u8>()?;
         if message_type != MESSAGE_TYPE_SYNC {
-            return Err(AutomergeError::EncodingError);
+            return Err(decoding::Error::WrongType {
+                expected_one_of: vec![MESSAGE_TYPE_SYNC],
+                found: message_type,
+            });
         }
 
         let heads = decode_hashes(&mut decoder)?;
@@ -304,7 +306,7 @@ impl SyncMessage {
     }
 }
 
-fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), AutomergeError> {
+fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), encoding::Error> {
     debug_assert!(
         hashes.windows(2).all(|h| h[0] <= h[1]),
         "hashes were not sorted"
@@ -325,14 +327,13 @@ impl Encodable for &[ChangeHash] {
     }
 }
 
-fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeError> {
+fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, decoding::Error> {
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);
 
     for _ in 0..length {
         let hash_bytes = decoder.read_bytes(HASH_SIZE)?;
-        let hash = ChangeHash::try_from(hash_bytes)
-            .map_err(|source| AutomergeError::ChangeBadFormat { source })?;
+        let hash = ChangeHash::try_from(hash_bytes).map_err(decoding::Error::BadChangeFormat)?;
         hashes.push(hash);
     }
 

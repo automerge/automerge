@@ -2,10 +2,7 @@ use std::{borrow::Cow, convert::TryFrom};
 
 use automerge_protocol::ChangeHash;
 
-use crate::{
-    encoding::{Decoder, Encodable},
-    AutomergeError,
-};
+use crate::{decoding, decoding::Decoder, encoding, encoding::Encodable};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
@@ -22,7 +19,7 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    pub fn into_bytes(self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn into_bytes(self) -> Result<Vec<u8>, encoding::Error> {
         if self.num_entries == 0 {
             Ok(Vec::new())
         } else {
@@ -116,7 +113,7 @@ impl From<&[ChangeHash]> for BloomFilter {
 }
 
 impl TryFrom<&[u8]> for BloomFilter {
-    type Error = AutomergeError;
+    type Error = decoding::Error;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
         if bytes.is_empty() {

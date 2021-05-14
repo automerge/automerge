@@ -1049,12 +1049,17 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
     let err = backend
         .apply_changes(vec![Change::from(change)])
         .expect_err("Should be an error");
-    assert_eq!(
-        err,
-        AutomergeError::InvalidCursor {
-            opid: actor.op_id_at(2)
+    if let AutomergeError::InvalidCursor { opid } = err {
+        if opid != actor.op_id_at(2) {
+            panic!(
+                "Expected InvalidCursor error with opid {:?} but found one with {:?}",
+                actor.op_id_at(2),
+                opid
+            )
         }
-    );
+    } else {
+        panic!("Expected InvalidCursor error but found {:?}", err)
+    }
 }
 
 #[test]

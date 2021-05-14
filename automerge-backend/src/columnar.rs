@@ -12,9 +12,9 @@ use std::{
 use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
 
-use crate::encoding::{
-    BooleanDecoder, BooleanEncoder, ColData, Decodable, Decoder, DeltaDecoder, DeltaEncoder,
-    Encodable, RleDecoder, RleEncoder,
+use crate::{
+    decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
+    encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
 };
 
 impl Encodable for Action {
