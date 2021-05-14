@@ -15,11 +15,11 @@ use tracing::instrument;
 use crate::{
     actor_map::ActorMap,
     error::AutomergeError,
-    internal::{InternalOpType, ObjectId},
+    internal::{InternalOpType, Key, ObjectId},
     object_store::ObjState,
     op_handle::OpHandle,
     ordered_set::OrderedSet,
-    patches::{PendingDiff, IncrementalPatch, PatchWorkshop},
+    patches::{IncrementalPatch, PatchWorkshop},
     Change,
 };
 
@@ -62,19 +62,13 @@ impl OpSet {
     pub(crate) fn apply_ops(
         &mut self,
         ops: Vec<OpHandle>,
-        diffs: &mut IncrementalPatch,
+        patch: &mut IncrementalPatch,
         actors: &mut ActorMap,
     ) -> Result<(), AutomergeError> {
         for op in ops {
-            let obj_id = op.obj;
-
-            let pending_diff = self.apply_op(op, actors)?;
-
-            if let Some(these_diffs) = pending_diff {
-                diffs.append_diffs(&obj_id, these_diffs);
-            }
+            self.apply_op(op, actors, patch)?;
         }
-        self.update_cursors(diffs);
+        self.update_cursors(patch);
         Ok(())
     }
 
@@ -89,7 +83,8 @@ impl OpSet {
         &mut self,
         op: OpHandle,
         actors: &mut ActorMap,
-    ) -> Result<Option<Vec<PendingDiff>>, AutomergeError> {
+        patch: &mut IncrementalPatch,
+    ) -> Result<(), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             //let child = actors.import_obj(child);
             self.objs.insert(child, ObjState::new(obj_type));
@@ -119,10 +114,10 @@ impl OpSet {
             }
         }
 
-        let object_id = &op.obj;
+        let object_id = op.obj;
         let object = self.get_obj_mut(&object_id)?;
 
-        let (diff, overwritten) = if object.is_seq() {
+        let overwritten = if object.is_seq() {
             if op.insert {
                 object.insert_after(
                     op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?,
@@ -136,7 +131,7 @@ impl OpSet {
             let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
 
-            let diffs = match (before, after) {
+            match (before, after) {
                 (true, true) => {
                     tracing::debug!("updating existing element");
                     let opid = op
@@ -146,29 +141,7 @@ impl OpSet {
                     let ops = ops.clone();
                     let index = object.index_of(opid).unwrap_or(0);
 
-                    let mut diffs = vec![PendingDiff::SeqUpdate(op.clone(), index, op.id)];
-                    for existing_op in ops.iter() {
-                        if existing_op.id != op.id {
-                            let i = object.index_of(existing_op.id).unwrap_or(0);
-                            if i == index {
-                                diffs.push(PendingDiff::SeqUpdate(
-                                    existing_op.clone(),
-                                    index,
-                                    existing_op.id,
-                                ))
-                            }
-                        }
-                    }
-                    diffs.sort_by_key(|d| {
-                        if let PendingDiff::SeqUpdate(op, _, _) = d {
-                            actors.export_actor(op.id.1)
-                        } else {
-                            // SAFETY: we only add SeqUpdates to this vec above.
-                            unreachable!()
-                        }
-                    });
-
-                    Some(diffs)
+                    patch.record_seq_updates(object_id, object, index, ops.iter(), actors);
                 }
                 (true, false) => {
                     let opid = op
@@ -177,7 +150,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     tracing::debug!(opid=?opid, index=%index, "deleting element");
-                    Some(vec![PendingDiff::SeqRemove(op.clone(), index)])
+                    patch.record_seq_remove(object_id, op.clone(), index);
                 }
                 (false, true) => {
                     let id = op
@@ -187,14 +160,14 @@ impl OpSet {
                     let index = object.index_of(id).unwrap_or(0);
                     tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
-                    Some(vec![PendingDiff::SeqInsert(op.clone(), index, op.id)])
+                    patch.record_seq_insert(object_id, op.clone(), index, op.id);
                 }
-                (false, false) => None,
+                (false, false) => {}
             };
 
             self.unlink(&op, &overwritten_ops)?;
 
-            (diffs, overwritten_ops)
+            overwritten_ops
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
@@ -203,12 +176,9 @@ impl OpSet {
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
-                tracing::debug!(overwritten_ops=?overwritten_ops, "setting new value");
-                (Some(vec![PendingDiff::Set(op)]), overwritten_ops)
-            } else {
-                tracing::debug!(overwritten_ops=?overwritten_ops, "deleting value");
-                (None, overwritten_ops)
+                patch.record_set(object_id, op);
             }
+            overwritten_ops
         };
 
         for op in overwritten {
@@ -218,7 +188,7 @@ impl OpSet {
                 }
             }
         }
-        Ok(diff)
+        Ok(())
     }
 
     fn unlink(&mut self, op: &OpHandle, overwritten: &[OpHandle]) -> Result<(), AutomergeError> {
@@ -246,13 +216,13 @@ impl OpSet {
             .ok_or(AutomergeError::MissingObjectError)
     }
 
-    /// Update any cursors which will be affected by the changes in `pending` 
+    /// Update any cursors which will be affected by the changes in `pending`
     /// and add the changed cursors to `pending`
-    fn update_cursors(&mut self, pending: &mut IncrementalPatch) {
+    fn update_cursors(&mut self, patch: &mut IncrementalPatch) {
         // For each cursor, if the cursor references an object which has been changed we generate a
         // diff for the cursor
-        let mut cursor_changes: HashMap<ObjectId, Vec<PendingDiff>> = HashMap::new();
-        for obj_id in pending.changed_object_ids() {
+        let mut cursor_changes: HashMap<ObjectId, Vec<Key>> = HashMap::new();
+        for obj_id in patch.changed_object_ids() {
             if let Some(cursors) = self.cursors.get_mut(&obj_id) {
                 for cursor in cursors.iter_mut() {
                     if let Some(obj) = self.objs.get(&cursor.internal_referred_object_id) {
@@ -260,29 +230,16 @@ impl OpSet {
                         cursor_changes
                             .entry(cursor.internal_referring_object_id)
                             .or_default()
-                            .push(PendingDiff::CursorChange(cursor.key.clone()))
+                            .push(cursor.key.clone())
                     }
                 }
             }
         }
-        for (obj_id, cursor_change) in cursor_changes {
-            pending.append_diffs(&obj_id, cursor_change);
+        for (obj_id, keys) in cursor_changes {
+            for key in keys {
+                patch.record_cursor_change(obj_id, key)
+            }
         }
-    }
-
-    // this recursively walks through all the objects touched by the changes
-    // to generate a diff in a single pass
-    #[instrument(skip(self))]
-    pub fn finalize_diffs(
-        &mut self,
-        mut pending: IncrementalPatch,
-        actors: &ActorMap,
-    ) -> Result<Option<amp::MapDiff>, AutomergeError> {
-        let workshop = PatchWorkshopImpl {
-            opset: self,
-            actors,
-        };
-        Ok(pending.finalize(&workshop))
     }
 
     pub fn update_deps(&mut self, change: &Change) {
@@ -300,8 +257,6 @@ impl OpSet {
             actors,
         }
     }
-
-
 }
 
 /// `CursorState` is the information we need to track in order to update cursors as changes come
@@ -358,8 +313,7 @@ impl<'a> PatchWorkshop for PatchWorkshopImpl<'a> {
     }
 
     fn find_cursor(&self, opid: &amp::OpId) -> Option<amp::CursorDiff> {
-        self
-            .opset
+        self.opset
             .cursors
             .values()
             .flatten()

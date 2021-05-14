@@ -5,10 +5,13 @@ use std::collections::HashMap;
 
 use automerge_protocol as amp;
 
+/// Used to generate a diff when there is no previous state to diff against.
+/// This works by starting at the root object and then recursively constructing
+/// all the objects contained in it.
 pub(crate) fn generate_from_scratch_diff(workshop: &dyn PatchWorkshop) -> amp::MapDiff {
     construct_map(
         &ObjectId::Root,
-        workshop.get_obj(&&ObjectId::Root).unwrap(),
+        workshop.get_obj(&ObjectId::Root).unwrap(),
         amp::MapType::Map,
         workshop,
     )

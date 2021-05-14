@@ -830,7 +830,6 @@ fn test_handle_changes_within_conflicted_objects() {
     assert_eq!(patch, expected_patch)
 }
 
-
 #[test_env_log::test]
 fn test_handle_changes_within_conflicted_lists() {
     let actor1: ActorId = "01234567".try_into().unwrap();
@@ -857,7 +856,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
-            }
+            },
         ],
         extra_bytes: Vec::new(),
     }
@@ -893,7 +892,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 key: "done".into(),
                 pred: Vec::new(),
                 insert: false,
-            }
+            },
         ],
         extra_bytes: Vec::new(),
     }
@@ -929,7 +928,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 key: "done".into(),
                 pred: Vec::new(),
                 insert: false,
-            }
+            },
         ],
         extra_bytes: Vec::new(),
     }
@@ -947,15 +946,13 @@ fn test_handle_changes_within_conflicted_lists() {
         message: None,
         hash: None,
         deps: change4_deps,
-        operations: vec![
-            Op {
-                action: amp::OpType::Set(true.into()),
-                obj: actor1.op_id_at(3).into(),
-                key: "done".into(),
-                pred: vec![actor1.op_id_at(5)],
-                insert: false,
-            },
-        ],
+        operations: vec![Op {
+            action: amp::OpType::Set(true.into()),
+            obj: actor1.op_id_at(3).into(),
+            key: "done".into(),
+            pred: vec![actor1.op_id_at(5)],
+            insert: false,
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1010,7 +1007,9 @@ fn test_handle_changes_within_conflicted_lists() {
     };
 
     let mut backend = Backend::init();
-    backend.apply_changes(vec![change1, change2, change3]).unwrap();
+    backend
+        .apply_changes(vec![change1, change2, change3])
+        .unwrap();
     let patch = backend.apply_changes(vec![change4]).unwrap();
     assert_eq!(patch, expected_patch)
 }

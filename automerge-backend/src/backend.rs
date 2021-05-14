@@ -88,14 +88,14 @@ impl Backend {
         changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut pending_diffs = IncrementalPatch::new();
+        let mut patch = IncrementalPatch::new();
 
         for change in changes.into_iter() {
-            self.add_change(change, actor.is_some(), &mut pending_diffs)?;
+            self.add_change(change, actor.is_some(), &mut patch)?;
         }
 
-        let op_set = &mut self.op_set;
-        let diffs = op_set.finalize_diffs(pending_diffs, &self.actors)?;
+        let workshop = self.op_set.patch_workshop(&self.actors);
+        let diffs = patch.finalize(&workshop);
         self.make_patch(diffs, actor)
     }
 

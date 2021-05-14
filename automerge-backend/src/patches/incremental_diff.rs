@@ -4,13 +4,15 @@ use automerge_protocol as amp;
 
 use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
 use crate::{
+    actor_map::ActorMap,
     internal::{InternalOpType, Key, ObjectId, OpId},
     object_store::ObjState,
     op_handle::OpHandle,
 };
 
+/// Records a change that has happened as a result of an operation
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PendingDiff {
+enum PendingDiff {
     SeqInsert(OpHandle, usize, OpId),
     SeqUpdate(OpHandle, usize, OpId),
     SeqRemove(OpHandle, usize),
@@ -30,40 +32,87 @@ impl PendingDiff {
     }
 }
 
-/// `IncrementalPatch` is used to build patches which are a result of applying
-/// a `Change`. As the `OpSet` applies each op in the change it records the
-/// difference that will make in the `IncrementalPatch`. At the end of the
-/// change process the `IncrementalPatch::finalize` method is used to generate
-/// a `automerge_protocol::Diff` to send to the frontend.
+/// `IncrementalPatch` is used to build patches which are a result of applying a `Change`. As the
+/// `OpSet` applies each op in the change it records the difference that will make in the
+/// `IncrementalPatch` using the various `record_*` methods. At the end of the change process the
+/// `IncrementalPatch::finalize` method is used to generate a `automerge_protocol::Diff` to send to
+/// the frontend.
 ///
-/// The reason this is called an "incremental" patch is because it impliciatly
-/// generates a diff between the "current" state - represented by whatever was
-/// in the OpSet before the change was received - and the new state after the
-/// change is applied. This is in contrast to when we are generating a diff
-/// without any existing state, as in the case when we first load a saved
+/// The reason this is called an "incremental" patch is because it impliciatly generates a diff
+/// between the "current" state - represented by whatever was in the OpSet before the change was
+/// received - and the new state after the change is applied. This is in contrast to when we are
+/// generating a diff without any existing state, as in the case when we first load a saved
 /// document.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct IncrementalPatch(pub(super) HashMap<ObjectId, Vec<PendingDiff>>);
+pub(crate) struct IncrementalPatch(HashMap<ObjectId, Vec<PendingDiff>>);
 
 impl IncrementalPatch {
     pub(crate) fn new() -> IncrementalPatch {
         IncrementalPatch(HashMap::new())
     }
 
-    pub(crate) fn append_diffs(&mut self, oid: &ObjectId, mut diffs: Vec<PendingDiff>) {
-        self.0.entry(oid.clone()).or_default().append(&mut diffs)
+    pub(crate) fn record_set(&mut self, oid: ObjectId, op: OpHandle) {
+        self.append_diff(oid, PendingDiff::Set(op))
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub(crate) fn record_cursor_change(&mut self, oid: ObjectId, key: Key) {
+        self.append_diff(oid, PendingDiff::CursorChange(key));
+    }
+
+    pub(crate) fn record_seq_insert(
+        &mut self,
+        oid: ObjectId,
+        op: OpHandle,
+        index: usize,
+        opid: OpId,
+    ) {
+        self.append_diff(oid, PendingDiff::SeqInsert(op, index, opid));
+    }
+
+    pub(crate) fn record_seq_updates<'a, 'b, I: Iterator<Item = &'b OpHandle>>(
+        &'a mut self,
+        oid: ObjectId,
+        object: &ObjState,
+        index: usize,
+        ops: I,
+        actors: &ActorMap,
+    ) {
+        // TODO: Remove the actors argument and instead add a new case to the `PendingDiff`
+        // enum to represent multiple seq updates, then sort by actor ID at the point at which we
+        // finalize the diffs, when we have access to a `PatchWorkshop` to perform the sorting
+        let mut diffs = Vec::new();
+        for op in ops {
+            let i = object.index_of(op.id).unwrap_or(0);
+            if i == index {
+                diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id))
+            }
+        }
+        diffs.sort_by_key(|d| {
+            if let PendingDiff::SeqUpdate(op, _, _) = d {
+                actors.export_actor(op.id.1)
+            } else {
+                // SAFETY: we only add SeqUpdates to this vec above.
+                unreachable!()
+            }
+        });
+
+        self.append_diffs(oid, diffs);
+    }
+
+    pub(crate) fn record_seq_remove(&mut self, oid: ObjectId, op: OpHandle, index: usize) {
+        self.append_diff(oid, PendingDiff::SeqRemove(op, index))
+    }
+
+    fn append_diff(&mut self, oid: ObjectId, diff: PendingDiff) {
+        self.0.entry(oid.clone()).or_default().push(diff);
+    }
+
+    fn append_diffs(&mut self, oid: ObjectId, mut diffs: Vec<PendingDiff>) {
+        self.0.entry(oid.clone()).or_default().append(&mut diffs)
     }
 
     pub(crate) fn changed_object_ids(&self) -> impl Iterator<Item = &ObjectId> {
         self.0.keys()
-    }
-
-    pub(crate) fn get_mut(&mut self, obj_id: &ObjectId) -> Option<&mut Vec<PendingDiff>> {
-        self.0.get_mut(obj_id)
     }
 
     pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> Option<amp::MapDiff> {
@@ -81,7 +130,7 @@ impl IncrementalPatch {
                     diffs.push(PendingDiff::Set(inbound.clone()))
                 } else {
                     objs.push(inbound.obj);
-                    self.append_diffs(&inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
+                    self.append_diffs(inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
                 }
             }
         }
