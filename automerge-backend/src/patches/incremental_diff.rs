@@ -13,7 +13,9 @@ use crate::{
 /// Records a change that has happened as a result of an operation
 #[derive(Debug, Clone, PartialEq)]
 enum PendingDiff {
+    // contains the op handle, the index to insert after and the new element's id
     SeqInsert(OpHandle, usize, OpId),
+    // contains the op handle, the index to insert after and the new element's id
     SeqUpdate(OpHandle, usize, OpId),
     SeqRemove(OpHandle, usize),
     Set(OpHandle),
@@ -80,18 +82,34 @@ impl IncrementalPatch {
         // TODO: Remove the actors argument and instead add a new case to the `PendingDiff`
         // enum to represent multiple seq updates, then sort by actor ID at the point at which we
         // finalize the diffs, when we have access to a `PatchWorkshop` to perform the sorting
-        let mut diffs = Vec::new();
-        for op in ops {
+        let diffs = self.0.entry(oid).or_default();
+        let mut new_diffs = Vec::new();
+        'outer: for op in ops {
             let i = op
                 .key
                 .to_opid()
                 .and_then(|opid| object.index_of(opid))
                 .unwrap_or(0);
             if i == index {
-                diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id))
+                // go through existing diffs and find an insert
+                for diff in diffs.iter_mut() {
+                    match diff {
+                        // if this insert was for the index we are now updating, and it is from the
+                        // same actor,
+                        // then change the insert to just insert our data instead
+                        PendingDiff::SeqInsert(original_op, index, original_opid)
+                            if i == *index && original_op.id.1 == op.id.1 =>
+                        {
+                            *diff = PendingDiff::SeqInsert(op.clone(), *index, *original_opid);
+                            continue 'outer;
+                        }
+                        _ => {}
+                    }
+                }
+                new_diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id))
             }
         }
-        diffs.sort_by_key(|d| {
+        new_diffs.sort_by_key(|d| {
             if let PendingDiff::SeqUpdate(op, _, _) = d {
                 actors.export_actor(op.id.1)
             } else {
@@ -99,8 +117,7 @@ impl IncrementalPatch {
                 unreachable!()
             }
         });
-
-        self.append_diffs(oid, diffs);
+        self.append_diffs(oid, new_diffs);
     }
 
     pub(crate) fn record_seq_remove(&mut self, oid: ObjectId, op: OpHandle, index: usize) {
@@ -214,7 +231,7 @@ impl IncrementalPatch {
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
                         index: *index as u64,
                         elem_id: op_id.clone().into(),
-                        op_id,
+                        op_id: workshop.make_external_opid(&op.id),
                         value,
                     });
                 }
