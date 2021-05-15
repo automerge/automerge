@@ -8,6 +8,7 @@ use automerge_protocol::{
     SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn test_include_most_recent_value_for_key() {
@@ -686,7 +687,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
-                                elem_id: actor1.op_id_at(1).into(),
+                                elem_id: local_actor.op_id_at(2).into(),
                                 op_id: actor1.op_id_at(1),
                                 value: Diff::Value("remote1".into()),
                             },
