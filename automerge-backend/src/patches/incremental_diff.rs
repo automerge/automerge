@@ -82,7 +82,11 @@ impl IncrementalPatch {
         // finalize the diffs, when we have access to a `PatchWorkshop` to perform the sorting
         let mut diffs = Vec::new();
         for op in ops {
-            let i = object.index_of(op.id).unwrap_or(0);
+            let opid = op
+                .key
+                .to_opid()
+                .expect("Expected key to be for a sequence and so contain an opid");
+            let i = object.index_of(opid).unwrap_or(0);
             if i == index {
                 diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id))
             }
