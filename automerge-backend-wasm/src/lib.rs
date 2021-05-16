@@ -105,6 +105,7 @@ impl JsSyncState {
 
 #[wasm_bindgen]
 pub fn init() -> Result<Object, JsValue> {
+    console_error_panic_hook::set_once();
     Ok(wrapper(State(Backend::new()), false, Vec::new()))
 }
 
