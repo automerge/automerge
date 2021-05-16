@@ -42,7 +42,7 @@ mod sync;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
-pub use event_handlers::{ChangeEventHandler, EventHandler};
+pub use event_handlers::{ChangeEventHandler, EventHandler, EventHandlerId};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
