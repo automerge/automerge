@@ -446,8 +446,8 @@ impl ResolvedText {
         })
     }
 
-    pub(crate) fn insert_many<'a, I>(
-        &'a self,
+    pub(crate) fn insert_many<I>(
+        &self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
@@ -745,7 +745,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
             prim_vals.push(prim);
             preds.extend(v.pred.clone());
         }
-        while let Some(o) = op_iter.next() {
+        for o in op_iter {
             if let Some(prim) = prim_from_op_action(&o.action) {
                 prim_vals.push(prim);
                 preds.extend(o.pred.clone());

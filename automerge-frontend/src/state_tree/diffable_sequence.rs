@@ -170,7 +170,7 @@ where
             .underlying
             .clone()
             .into_iter()
-            .map(|e| UpdatingSequenceElement::from_original(e))
+            .map(UpdatingSequenceElement::from_original)
             .collect();
         let mut changes = StateTreeChange::empty();
         for edit in edits.iter() {

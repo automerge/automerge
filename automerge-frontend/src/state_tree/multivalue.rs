@@ -1,4 +1,4 @@
-use std::iter::Iterator;
+use std::{cmp::Ordering, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
@@ -177,24 +177,26 @@ impl MultiValue {
                 winning_value: self.winning_value.clone(),
                 conflicts: im_rc::HashMap::new(),
             })
-        } else if let Some(value) = self.conflicts.get(opid) {
-            Some(MultiValue {
+        } else {
+            self.conflicts.get(opid).map(|value| MultiValue {
                 winning_value: (opid.clone(), value.clone()),
                 conflicts: im_rc::HashMap::new(),
             })
-        } else {
-            None
         }
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiValue) {
         for (opid, value) in other.tree_values().iter() {
-            if opid > &self.winning_value.0 {
-                let mut temp = (opid.clone(), value.clone());
-                std::mem::swap(&mut temp, &mut self.winning_value);
-                self.conflicts.insert(temp.0, temp.1);
-            } else if opid < &self.winning_value.0 {
-                self.conflicts.insert(opid.clone(), value.clone());
+            match opid.cmp(&self.winning_value.0) {
+                Ordering::Greater => {
+                    let mut temp = (opid.clone(), value.clone());
+                    std::mem::swap(&mut temp, &mut self.winning_value);
+                    self.conflicts.insert(temp.0, temp.1);
+                }
+                Ordering::Less => {
+                    self.conflicts.insert(opid.clone(), value.clone());
+                }
+                Ordering::Equal => {}
             }
         }
     }
@@ -392,13 +394,14 @@ impl MultiGrapheme {
                 winning_value: self.winning_value.clone(),
                 conflicts: None,
             })
-        } else if let Some(value) = self.conflicts.as_ref().and_then(|c| c.get(opid)) {
-            Some(MultiGrapheme {
-                winning_value: (opid.clone(), value.clone()),
-                conflicts: None,
-            })
         } else {
-            None
+            self.conflicts
+                .as_ref()
+                .and_then(|c| c.get(opid))
+                .map(|value| MultiGrapheme {
+                    winning_value: (opid.clone(), value.clone()),
+                    conflicts: None,
+                })
         }
     }
 

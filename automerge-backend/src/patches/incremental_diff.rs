@@ -125,11 +125,11 @@ impl IncrementalPatch {
     }
 
     fn append_diff(&mut self, oid: ObjectId, diff: PendingDiff) {
-        self.0.entry(oid.clone()).or_default().push(diff);
+        self.0.entry(oid).or_default().push(diff);
     }
 
     fn append_diffs(&mut self, oid: ObjectId, mut diffs: Vec<PendingDiff>) {
-        self.0.entry(oid.clone()).or_default().append(&mut diffs)
+        self.0.entry(oid).or_default().append(&mut diffs)
     }
 
     pub(crate) fn changed_object_ids(&self) -> impl Iterator<Item = &ObjectId> {

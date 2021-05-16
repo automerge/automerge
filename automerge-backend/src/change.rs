@@ -162,11 +162,10 @@ fn encode_chunk(
         &uncompressed_change.operations,
         uncompressed_change.start_op,
         uncompressed_change.actor_id.clone(),
-    )
-    .collect::<Vec<_>>();
+    );
 
     // encode ops into a side buffer - collect all other actors
-    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops.into_iter(), &mut actors);
+    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
 
     // encode all other actors
     actors[1..].encode(&mut bytes).unwrap();
@@ -1099,9 +1098,9 @@ mod tests {
             }],
             extra_bytes: Vec::new(),
         };
-        let bin1 = Change::try_from(change1.clone()).unwrap();
+        let bin1 = Change::try_from(change1).unwrap();
         let change2 = bin1.decode();
-        let bin2 = Change::try_from(change2.clone()).unwrap();
+        let bin2 = Change::try_from(change2).unwrap();
         assert_eq!(bin1, bin2);
     }
 

@@ -1051,7 +1051,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn append<'a, 'b, 'c>(&'a mut self, op: ColumnOp<'b>, actors: &'c mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
