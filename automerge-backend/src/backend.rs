@@ -39,7 +39,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Option<amp::MapDiff>,
+        diffs: amp::MapDiff,
         actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
@@ -221,7 +221,7 @@ impl Backend {
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
         let workshop = self.op_set.patch_workshop(&self.actors);
         let diffs = generate_from_scratch_diff(&workshop);
-        self.make_patch(Some(diffs), None)
+        self.make_patch(diffs, None)
     }
 
     pub fn get_changes_for_actor_id(

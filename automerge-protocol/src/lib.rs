@@ -3,7 +3,7 @@ mod serde_impls;
 mod utility_impls;
 use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 pub struct ActorId(Vec<u8>);
@@ -353,7 +353,6 @@ impl fmt::Debug for ChangeHash {
 // Diff {
 //  object_id: 123,
 //  obj_type: map,
-//  edits: None,
 //  props: {
 //      "key1": {
 //          "10@abc123":
@@ -474,8 +473,7 @@ pub struct Patch {
     //    pub can_undo: bool,
     //    pub can_redo: bool,
     //    pub version: u64,
-    #[serde(serialize_with = "Patch::top_level_serialize")]
-    pub diffs: Option<MapDiff>,
+    pub diffs: MapDiff,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -518,26 +516,5 @@ impl UncompressedChange {
             }
         }
         None
-    }
-}
-
-impl Patch {
-    // the default behavior is to return {} for an empty patch
-    // this patch implementation comes with ObjectID::Root baked in so this covered
-    // the top level scope where not even Root is referenced
-
-    pub(crate) fn top_level_serialize<S>(
-        maybe_diff: &Option<MapDiff>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if let Some(diff) = maybe_diff {
-            diff.serialize(serializer)
-        } else {
-            let map = serializer.serialize_map(Some(0))?;
-            map.end()
-        }
     }
 }

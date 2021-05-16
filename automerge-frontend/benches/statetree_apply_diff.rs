@@ -13,7 +13,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -25,7 +25,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
                     }),
                 }
             },
-        }),
+        },
     }];
     for index in 0..6000 {
         let op_num = index + 2;
@@ -37,7 +37,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             deps: Vec::new(),
             max_op: op_num as u64,
             pending_changes: 0,
-            diffs: Some(amp::MapDiff {
+            diffs: amp::MapDiff {
                 object_id: amp::ObjectId::Root,
                 obj_type: amp::MapType::Map,
                 props: hashmap! {
@@ -54,7 +54,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
                         })
                     }
                 },
-            }),
+            },
         });
     }
     c.bench_function(
@@ -101,7 +101,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -113,7 +113,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
                     }),
                 }
             },
-        }),
+        },
     };
     c.bench_function(
         "StateTreeValue::apply_diff sequential text inserts in a single patch",

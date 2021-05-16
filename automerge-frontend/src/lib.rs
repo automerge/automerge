@@ -93,11 +93,8 @@ impl FrontendState {
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
-                let new_reconciled_root_state = if let Some(diff) = &patch.diffs {
-                    reconciled_root_state.apply_root_diff(diff)?
-                } else {
-                    reconciled_root_state
-                };
+                let new_reconciled_root_state =
+                    reconciled_root_state.apply_root_diff(&patch.diffs)?;
                 Ok(match new_in_flight_requests[..] {
                     [] => FrontendState::Reconciled {
                         root_state: new_reconciled_root_state,
@@ -113,11 +110,7 @@ impl FrontendState {
                 })
             }
             FrontendState::Reconciled { root_state, .. } => {
-                let new_root_state = if let Some(diff) = &patch.diffs {
-                    root_state.apply_root_diff(diff)?
-                } else {
-                    root_state
-                };
+                let new_root_state = root_state.apply_root_diff(&patch.diffs)?;
                 Ok(FrontendState::Reconciled {
                     root_state: new_root_state,
                     max_op: patch.max_op,

@@ -136,9 +136,18 @@ impl IncrementalPatch {
         self.0.keys()
     }
 
-    pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> Option<amp::MapDiff> {
+    pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::MapDiff {
         if self.0.is_empty() {
-            return None;
+            // No pending diffs so return root diff with no changes in props.
+            //
+            // TODO: make this a special type e.g. amp::RootDiff as it is always the same object id
+            // and object type. This can then push things to parse time (from js) rather than
+            // validation in the frontend.
+            return amp::MapDiff {
+                object_id: amp::ObjectId::Root,
+                obj_type: amp::MapType::Map,
+                props: HashMap::new(),
+            };
         }
 
         let mut objs: Vec<_> = self.changed_object_ids().cloned().collect();
@@ -157,19 +166,19 @@ impl IncrementalPatch {
         }
 
         if let Some(root) = self.0.remove(&ObjectId::Root) {
-            Some(self.gen_map_diff(
+            self.gen_map_diff(
                 &ObjectId::Root,
                 workshop.get_obj(&&ObjectId::Root).expect("no root found"),
                 &root,
                 workshop,
                 amp::MapType::Map,
-            ))
+            )
         } else {
-            Some(amp::MapDiff {
+            amp::MapDiff {
                 object_id: amp::ObjectId::Root,
                 obj_type: amp::MapType::Map,
                 props: HashMap::new(),
-            })
+            }
         }
     }
 

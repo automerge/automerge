@@ -62,7 +62,7 @@ fn test_include_most_recent_value_for_key() {
             actor.clone() => 2,
         },
         deps: vec![change2.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -70,7 +70,7 @@ fn test_include_most_recent_value_for_key() {
                     actor.op_id_at(2) => Diff::Value("blackbird".into()),
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -133,7 +133,7 @@ fn test_includes_conflicting_values_for_key() {
         seq: None,
         actor: None,
         deps: vec![change1.hash, change2.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -142,7 +142,7 @@ fn test_includes_conflicting_values_for_key() {
                     actor2.op_id_at(1) => Diff::Value("blackbird".into()),
                 },
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -203,7 +203,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -211,7 +211,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
                     actor.op_id_at(1) => Diff::Value(ScalarValue::Counter(3))
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -290,7 +290,7 @@ fn test_creates_nested_maps() {
         max_op: 4,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -306,7 +306,7 @@ fn test_creates_nested_maps() {
                     })
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -356,7 +356,7 @@ fn test_create_lists() {
         actor: None,
         seq: None,
         deps: vec![change1.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -373,7 +373,7 @@ fn test_create_lists() {
                     })
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -437,7 +437,7 @@ fn test_includes_latests_state_of_list() {
         actor: None,
         seq: None,
         deps: vec![change1.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -465,7 +465,7 @@ fn test_includes_latests_state_of_list() {
                     })
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -506,7 +506,7 @@ fn test_includes_date_objects_at_root() {
         actor: None,
         seq: None,
         deps: vec![change1.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -514,7 +514,7 @@ fn test_includes_date_objects_at_root() {
                     actor.op_id_at(1) => Diff::Value(ScalarValue::Timestamp(1_586_541_033_457))
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -564,7 +564,7 @@ fn test_includes_date_objects_in_a_list() {
         actor: None,
         seq: None,
         deps: vec![change1.hash],
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -581,7 +581,7 @@ fn test_includes_date_objects_in_a_list() {
                     })
                 }
             },
-        }),
+        },
     };
 
     let mut backend = Backend::init();
@@ -676,7 +676,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
         actor: None,
         seq: None,
         deps,
-        diffs: Some(MapDiff {
+        diffs: MapDiff {
             object_id: ObjectId::Root,
             obj_type: MapType::Map,
             props: hashmap! {
@@ -700,7 +700,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
                     })
                 }
             },
-        }),
+        },
         pending_changes: 0,
     };
 

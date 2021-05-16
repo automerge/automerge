@@ -17,7 +17,7 @@ fn set_object_root_properties() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -25,7 +25,7 @@ fn set_object_root_properties() {
                     actor.op_id_at(1) => "magpie".into()
                 }
             },
-        }),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch).unwrap();
@@ -59,7 +59,7 @@ fn reveal_conflicts_on_root_properties() {
             actor2.clone() => 2,
         },
         deps: Vec::new(),
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -68,7 +68,7 @@ fn reveal_conflicts_on_root_properties() {
                     actor2.op_id_at(1) => amp::Diff::Value("wagtail".into()),
                 }
             },
-        }),
+        },
     };
     let mut doc = Frontend::new();
     doc.apply_patch(patch).unwrap();
@@ -101,7 +101,7 @@ fn create_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -117,7 +117,7 @@ fn create_nested_maps() {
                     })
                 }
             },
-        }),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch).unwrap();
@@ -139,7 +139,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -155,7 +155,7 @@ fn apply_updates_inside_nested_maps() {
                     })
                 }
             },
-        }),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch1).unwrap();
@@ -171,7 +171,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -187,7 +187,7 @@ fn apply_updates_inside_nested_maps() {
                     })
                 }
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -224,7 +224,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -249,7 +249,7 @@ fn apply_updates_inside_map_conflicts() {
                     })
                 }
             },
-        }),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch1).unwrap();
@@ -279,7 +279,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -300,7 +300,7 @@ fn apply_updates_inside_map_conflicts() {
                     })
                 }
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -334,7 +334,7 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -345,7 +345,7 @@ fn delete_keys_in_maps() {
                     actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(15))
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch1).unwrap();
     assert_eq!(
@@ -364,13 +364,13 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "magpies".into() => hashmap!{}
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -393,7 +393,7 @@ fn create_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -410,7 +410,7 @@ fn create_lists() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -433,7 +433,7 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -450,7 +450,7 @@ fn apply_updates_inside_lists() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -463,7 +463,7 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -479,7 +479,7 @@ fn apply_updates_inside_lists() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
@@ -500,7 +500,7 @@ fn apply_multi_insert_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -519,7 +519,7 @@ fn apply_multi_insert_updates_inside_lists() {
                     })
                 }
             },
-        }),
+        },
         pending_changes: 0,
     };
     frontend.apply_patch(patch).unwrap();
@@ -559,7 +559,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -605,7 +605,7 @@ fn apply_updates_inside_list_conflicts() {
                     })
                 }
             },
-        }),
+        },
     };
 
     let mut frontend = Frontend::new();
@@ -644,7 +644,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -679,7 +679,7 @@ fn apply_updates_inside_list_conflicts() {
                     })
                 }
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -717,7 +717,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1 => 2,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -739,7 +739,7 @@ fn apply_updates_inside_list_conflicts() {
                     })
                 }
             },
-        }),
+        },
         pending_changes: 0,
     };
 
@@ -778,7 +778,7 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -803,7 +803,7 @@ fn delete_list_elements() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
@@ -820,7 +820,7 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -832,7 +832,7 @@ fn delete_list_elements() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
@@ -851,7 +851,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -890,7 +890,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     })
                 },
             },
-        }),
+        },
     };
 
     let mut frontend = Frontend::new();
@@ -914,7 +914,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -949,7 +949,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     })
                 },
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -979,7 +979,7 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -1010,7 +1010,7 @@ fn test_text_objects() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -1030,7 +1030,7 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 3,
         },
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -1049,7 +1049,7 @@ fn test_text_objects() {
                     })
                 }
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -1072,7 +1072,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -1084,7 +1084,7 @@ fn test_unchanged_diff_creates_empty_objects() {
                     })
                 }
             },
-        }),
+        },
     };
     doc.apply_patch(patch).unwrap();
     assert_eq!(

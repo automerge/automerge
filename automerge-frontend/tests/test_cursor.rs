@@ -148,7 +148,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 3,
         pending_changes: 0,
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             obj_type: amp::MapType::Map,
             object_id: amp::ObjectId::Root,
             props: hashmap! {
@@ -180,7 +180,7 @@ fn test_set_cursor_to_new_element_in_diff() {
                     })
                 },
             },
-        }),
+        },
     };
 
     frontend.apply_patch(patch1).unwrap();
@@ -191,7 +191,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         clock: hashmap! {actor.clone() => 2},
         max_op: 5,
         pending_changes: 0,
-        diffs: Some(amp::MapDiff {
+        diffs: amp::MapDiff {
             object_id: amp::ObjectId::Root,
             obj_type: amp::MapType::Map,
             props: hashmap! {
@@ -203,7 +203,7 @@ fn test_set_cursor_to_new_element_in_diff() {
                     })
                 }
             },
-        }),
+        },
     };
     frontend.apply_patch(patch2).unwrap();
 
