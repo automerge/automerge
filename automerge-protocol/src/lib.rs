@@ -473,7 +473,13 @@ pub struct Patch {
     //    pub can_undo: bool,
     //    pub can_redo: bool,
     //    pub version: u64,
-    pub diffs: MapDiff,
+    pub diffs: RootDiff,
+}
+
+/// A custom MapDiff that implicitly has the object_id Root and is a map object.
+#[derive(Debug, PartialEq, Clone)]
+pub struct RootDiff {
+    pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

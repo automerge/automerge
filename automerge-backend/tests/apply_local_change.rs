@@ -4,10 +4,11 @@ use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
 use automerge_backend::{Backend, Change};
 use automerge_protocol as protocol;
 use automerge_protocol::{
-    ActorId, ChangeHash, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjType, ObjectId, Op,
-    OpType, Patch, SeqDiff, SequenceType, UncompressedChange,
+    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ObjType, ObjectId, Op, OpType, Patch, SeqDiff,
+    SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use protocol::RootDiff;
 
 #[test]
 fn test_apply_local_change() {
@@ -64,9 +65,7 @@ fn test_apply_local_change() {
             actor => 1,
         },
         deps: Vec::new(),
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     "1@eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap() => Diff::Value("magpie".into())
@@ -513,9 +512,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             actor.clone() => 2
         },
         deps: Vec::new(),
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{

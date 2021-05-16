@@ -39,7 +39,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: amp::MapDiff,
+        diffs: amp::RootDiff,
         actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {

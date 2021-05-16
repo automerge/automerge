@@ -13,6 +13,7 @@ mod object_id;
 mod op;
 mod op_type;
 mod opid;
+mod root_diff;
 mod scalar_value;
 
 // Helper method for use in custom deserialize impls

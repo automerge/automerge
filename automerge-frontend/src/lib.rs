@@ -62,7 +62,7 @@ impl FrontendState {
     /// Apply a patch received from the backend to this frontend state,
     /// returns the updated cached value (if it has changed) and a new
     /// `FrontendState` which replaces this one
-    fn apply_remote_patch(self, self_actor: &ActorId, patch: &Patch) -> Result<Self, InvalidPatch> {
+    fn apply_remote_patch(self, self_actor: &ActorId, patch: Patch) -> Result<Self, InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
@@ -94,12 +94,12 @@ impl FrontendState {
                     }
                 }
                 let new_reconciled_root_state =
-                    reconciled_root_state.apply_root_diff(&patch.diffs)?;
+                    reconciled_root_state.apply_root_diff(patch.diffs)?;
                 Ok(match new_in_flight_requests[..] {
                     [] => FrontendState::Reconciled {
                         root_state: new_reconciled_root_state,
                         max_op: patch.max_op,
-                        deps_of_last_received_patch: patch.deps.clone(),
+                        deps_of_last_received_patch: patch.deps,
                     },
                     _ => FrontendState::WaitingForInFlightRequests {
                         in_flight_requests: new_in_flight_requests,
@@ -110,11 +110,11 @@ impl FrontendState {
                 })
             }
             FrontendState::Reconciled { root_state, .. } => {
-                let new_root_state = root_state.apply_root_diff(&patch.diffs)?;
+                let new_root_state = root_state.apply_root_diff(patch.diffs)?;
                 Ok(FrontendState::Reconciled {
                     root_state: new_root_state,
                     max_op: patch.max_op,
-                    deps_of_last_received_patch: patch.deps.clone(),
+                    deps_of_last_received_patch: patch.deps,
                 })
             }
         }
@@ -413,17 +413,17 @@ impl Frontend {
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), InvalidPatch> {
         // TODO this leaves the `state` as `None` if there's an error, it shouldn't
         self.cached_value = None;
-        let new_state = self
-            .state
-            .take()
-            .unwrap()
-            .apply_remote_patch(&self.actor_id, &patch)?;
-        self.state = Some(new_state);
         if let Some(seq) = patch.clock.get(&self.actor_id) {
             if *seq > self.seq {
                 self.seq = *seq;
             }
         }
+        let new_state = self
+            .state
+            .take()
+            .unwrap()
+            .apply_remote_patch(&self.actor_id, patch)?;
+        self.state = Some(new_state);
         Ok(())
     }
 

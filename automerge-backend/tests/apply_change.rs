@@ -1,6 +1,7 @@
 extern crate automerge_backend;
 use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
 
+use amp::RootDiff;
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
@@ -42,9 +43,7 @@ fn test_incremental_diffs_in_a_map() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 1,
         pending_changes: 0,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
         },
     };
@@ -101,9 +100,7 @@ fn test_increment_key_in_map() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap!(
             "counter".into() => hashmap!{
                 actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
@@ -170,9 +167,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     actor_1.op_id_at(1) => "magpie".into(),
@@ -238,9 +233,7 @@ fn delete_key_from_map() {
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{}
             },
@@ -292,9 +285,7 @@ fn create_nested_maps() {
         deps: vec![change.hash],
         seq: None,
         clock: hashmap! {actor.clone() => 1},
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
@@ -377,9 +368,7 @@ fn test_assign_to_nested_keys_in_map() {
         max_op: 3,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
@@ -443,9 +432,7 @@ fn test_create_lists() {
         actor: None,
         seq: None,
         deps: vec![change.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -530,9 +517,7 @@ fn test_apply_updates_inside_lists() {
         max_op: 3,
         pending_changes: 0,
         seq: None,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -616,9 +601,7 @@ fn test_delete_list_elements() {
             actor.clone() => 2
         },
         deps: vec![change2.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -698,9 +681,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         max_op: 3,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -801,9 +782,7 @@ fn test_handle_changes_within_conflicted_objects() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change1.hash, change3.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "conflict".into() => hashmap!{
                     actor1.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -970,9 +949,7 @@ fn test_handle_changes_within_conflicted_lists() {
         max_op: 6,
         pending_changes: 0,
         deps: vec![change4.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "todos".into() => hashmap!{
                     actor1.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -1049,9 +1026,7 @@ fn test_support_date_objects_at_root() {
         seq: None,
         actor: None,
         deps: vec![change.hash],
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "now".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Value(ScalarValue::Timestamp(1_586_528_122_277))
@@ -1106,9 +1081,7 @@ fn test_support_date_objects_in_a_list() {
         deps: vec![change.hash],
         actor: None,
         seq: None,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -1179,9 +1152,7 @@ fn test_cursor_objects() {
         deps: vec![binchange.hash],
         actor: None,
         seq: None,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -1307,9 +1278,7 @@ fn test_updating_sequences_updates_referring_cursors() {
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
@@ -1410,9 +1379,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,
-        diffs: MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{

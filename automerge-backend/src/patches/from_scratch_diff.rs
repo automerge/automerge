@@ -1,20 +1,33 @@
-use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
-use crate::{internal::ObjectId, object_store::ObjState};
 use core::cmp::max;
 use std::collections::HashMap;
 
 use automerge_protocol as amp;
 
+use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
+use crate::{internal::ObjectId, object_store::ObjState};
+
 /// Used to generate a diff when there is no previous state to diff against.
 /// This works by starting at the root object and then recursively constructing
 /// all the objects contained in it.
-pub(crate) fn generate_from_scratch_diff(workshop: &dyn PatchWorkshop) -> amp::MapDiff {
-    construct_map(
-        &ObjectId::Root,
-        workshop.get_obj(&ObjectId::Root).unwrap(),
-        amp::MapType::Map,
-        workshop,
-    )
+pub(crate) fn generate_from_scratch_diff(workshop: &dyn PatchWorkshop) -> amp::RootDiff {
+    let mut props = HashMap::new();
+
+    for (key, ops) in workshop.get_obj(&ObjectId::Root).unwrap().props.iter() {
+        if !ops.is_empty() {
+            let mut opid_to_value = HashMap::new();
+            for op in ops.iter() {
+                let amp_opid = workshop.make_external_opid(&op.id);
+                if let Some(child_id) = op.child() {
+                    opid_to_value.insert(amp_opid, construct_object(&child_id, workshop));
+                } else {
+                    opid_to_value
+                        .insert(amp_opid, gen_value_diff(op, &op.adjusted_value(), workshop));
+                }
+            }
+            props.insert(workshop.key_to_string(key), opid_to_value);
+        }
+    }
+    amp::RootDiff { props }
 }
 
 fn construct_map(

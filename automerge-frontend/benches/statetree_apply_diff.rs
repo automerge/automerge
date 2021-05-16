@@ -1,3 +1,4 @@
+use amp::RootDiff;
 use automerge_frontend::Frontend;
 use automerge_protocol as amp;
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
@@ -13,9 +14,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
                     make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
@@ -37,9 +36,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             deps: Vec::new(),
             max_op: op_num as u64,
             pending_changes: 0,
-            diffs: amp::MapDiff {
-                object_id: amp::ObjectId::Root,
-                obj_type: amp::MapType::Map,
+            diffs: RootDiff {
                 props: hashmap! {
                     "text".to_string() => hashmap!{
                         make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
@@ -101,9 +98,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
                     make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{

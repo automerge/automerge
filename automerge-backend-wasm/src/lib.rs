@@ -143,7 +143,7 @@ pub fn apply_changes(input: Object, changes: Array) -> Result<JsValue, JsValue> 
     get_mut_input(input, |state| {
         let ch = import_changes(&changes)?;
         let patch = state.0.apply_changes(ch)?;
-        Ok(array(&vec![patch]).unwrap())
+        Ok(array(&[patch]).unwrap())
     })
 }
 

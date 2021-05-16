@@ -1,5 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
+use amp::RootDiff;
 use automerge_frontend::{Frontend, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -17,9 +18,7 @@ fn set_object_root_properties() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     actor.op_id_at(1) => "magpie".into()
@@ -59,9 +58,7 @@ fn reveal_conflicts_on_root_properties() {
             actor2.clone() => 2,
         },
         deps: Vec::new(),
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBird".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Value("robin".into()),
@@ -101,9 +98,7 @@ fn create_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -139,9 +134,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -171,9 +164,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -224,9 +215,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -279,9 +268,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -334,9 +321,7 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "magpies".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Int(2))
@@ -364,9 +349,7 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "magpies".into() => hashmap!{}
             },
@@ -393,9 +376,7 @@ fn create_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -433,9 +414,7 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -463,9 +442,7 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -500,9 +477,7 @@ fn apply_multi_insert_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -559,9 +534,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -644,9 +617,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -717,9 +688,7 @@ fn apply_updates_inside_list_conflicts() {
             actor1 => 2,
             actor2.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -778,9 +747,7 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -820,9 +787,7 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -851,9 +816,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -914,9 +877,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -979,9 +940,7 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -1030,9 +989,7 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 3,
         },
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -1072,9 +1029,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
                     "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Seq(amp::SeqDiff{

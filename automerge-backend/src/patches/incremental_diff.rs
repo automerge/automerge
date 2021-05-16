@@ -136,16 +136,10 @@ impl IncrementalPatch {
         self.0.keys()
     }
 
-    pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::MapDiff {
+    pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::RootDiff {
         if self.0.is_empty() {
             // No pending diffs so return root diff with no changes in props.
-            //
-            // TODO: make this a special type e.g. amp::RootDiff as it is always the same object id
-            // and object type. This can then push things to parse time (from js) rather than
-            // validation in the frontend.
-            return amp::MapDiff {
-                object_id: amp::ObjectId::Root,
-                obj_type: amp::MapType::Map,
+            return amp::RootDiff {
                 props: HashMap::new(),
             };
         }
@@ -166,17 +160,29 @@ impl IncrementalPatch {
         }
 
         if let Some(root) = self.0.remove(&ObjectId::Root) {
-            self.gen_map_diff(
-                &ObjectId::Root,
-                workshop.get_obj(&&ObjectId::Root).expect("no root found"),
-                &root,
-                workshop,
-                amp::MapType::Map,
-            )
+            let mut props = HashMap::new();
+            // I may have duplicate keys - I do this to make sure I visit each one only once
+            let keys: HashSet<_> = root.iter().map(|p| p.operation_key()).collect();
+            let obj = workshop.get_obj(&&ObjectId::Root).expect("no root found");
+            for key in keys.iter() {
+                let key_string = workshop.key_to_string(key);
+                let mut opid_to_value = HashMap::new();
+                for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+                    let link = match op.action {
+                        InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
+                        InternalOpType::Make(_) => {
+                            // FIXME
+                            self.gen_obj_diff(&op.id.into(), workshop)
+                        }
+                        _ => panic!("del or inc found in field_operations"),
+                    };
+                    opid_to_value.insert(workshop.make_external_opid(&op.id), link);
+                }
+                props.insert(key_string, opid_to_value);
+            }
+            amp::RootDiff { props }
         } else {
-            amp::MapDiff {
-                object_id: amp::ObjectId::Root,
-                obj_type: amp::MapType::Map,
+            amp::RootDiff {
                 props: HashMap::new(),
             }
         }

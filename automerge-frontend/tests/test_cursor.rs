@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 
+use amp::RootDiff;
 use automerge_backend::Backend;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
@@ -148,9 +149,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 3,
         pending_changes: 0,
-        diffs: amp::MapDiff {
-            obj_type: amp::MapType::Map,
-            object_id: amp::ObjectId::Root,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".to_string() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
@@ -191,9 +190,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         clock: hashmap! {actor.clone() => 2},
         max_op: 5,
         pending_changes: 0,
-        diffs: amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "cursor".to_string() => hashmap!{
                     actor.op_id_at(4) => amp::Diff::Cursor(amp::CursorDiff{
