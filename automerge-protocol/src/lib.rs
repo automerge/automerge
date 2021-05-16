@@ -217,6 +217,14 @@ pub enum DataType {
     Bytes,
     #[serde(rename = "cursor")]
     Cursor,
+    #[serde(rename = "uint")]
+    Uint,
+    #[serde(rename = "int")]
+    Int,
+    #[serde(rename = "float32")]
+    F32,
+    #[serde(rename = "float64")]
+    F64,
     #[serde(rename = "undefined")]
     Undefined,
 }
@@ -295,6 +303,38 @@ impl ScalarValue {
                 unexpected: v.to_string(),
                 datatype,
             }),
+            (DataType::Int, v) => Ok(ScalarValue::Int(v.to_i64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an int".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::Uint, v) => Ok(ScalarValue::Uint(v.to_u64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "a uint".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::F32, v) => Ok(ScalarValue::F32(v.to_f32().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "a uint".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "a uint".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
             (DataType::Undefined, _) => Ok(self.clone()),
         }
     }
@@ -312,10 +352,51 @@ impl ScalarValue {
         }
     }
 
+    pub fn to_u64(&self) -> Option<u64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as u64),
+            ScalarValue::Uint(n) => Some(*n),
+            ScalarValue::F32(n) => Some(*n as u64),
+            ScalarValue::F64(n) => Some(*n as u64),
+            ScalarValue::Counter(n) => Some(*n as u64),
+            ScalarValue::Timestamp(n) => Some(*n as u64),
+            _ => None,
+        }
+    }
+
+    pub fn to_f32(&self) -> Option<f32> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as f32),
+            ScalarValue::Uint(n) => Some(*n as f32),
+            ScalarValue::F32(n) => Some(*n),
+            ScalarValue::F64(n) => Some(*n as f32),
+            ScalarValue::Counter(n) => Some(*n as f32),
+            ScalarValue::Timestamp(n) => Some(*n as f32),
+            _ => None,
+        }
+    }
+
+    pub fn to_f64(&self) -> Option<f64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as f64),
+            ScalarValue::Uint(n) => Some(*n as f64),
+            ScalarValue::F32(n) => Some(*n as f64),
+            ScalarValue::F64(n) => Some(*n),
+            ScalarValue::Counter(n) => Some(*n as f64),
+            ScalarValue::Timestamp(n) => Some(*n as f64),
+            _ => None,
+        }
+    }
+
     pub fn datatype(&self) -> Option<DataType> {
         match self {
             ScalarValue::Counter(..) => Some(DataType::Counter),
             ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            ScalarValue::Int(..) => Some(DataType::Int),
+            ScalarValue::Uint(..) => Some(DataType::Uint),
+            ScalarValue::F32(..) => Some(DataType::F32),
+            ScalarValue::F64(..) => Some(DataType::F64),
+            ScalarValue::Cursor(..) => Some(DataType::Cursor),
             _ => None,
         }
     }
