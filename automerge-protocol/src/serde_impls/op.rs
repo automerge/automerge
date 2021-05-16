@@ -51,6 +51,22 @@ impl Serialize for Op {
                 op.serialize_field("value", &value)?;
                 op.serialize_field("datatype", &DataType::Timestamp)?;
             }
+            OpType::Set(ScalarValue::Int(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Int)?;
+            }
+            OpType::Set(ScalarValue::Uint(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::Uint)?;
+            }
+            OpType::Set(ScalarValue::F32(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::F32)?;
+            }
+            OpType::Set(ScalarValue::F64(value)) => {
+                op.serialize_field("value", &value)?;
+                op.serialize_field("datatype", &DataType::F64)?;
+            }
             OpType::Set(value) => op.serialize_field("value", &value)?,
             OpType::MultiSet(values) => op.serialize_field("values", &values)?,
             OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
@@ -291,10 +307,47 @@ mod tests {
                     "obj": "_root",
                     "key": "somekey",
                     "value": -123,
+                    "datatype": "int",
                     "pred": []
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Int(-123)),
+                    obj: ObjectId::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                }),
+            },
+            Scenario {
+                name: "Set with F32",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "value": -123,
+                    "datatype": "float32",
+                    "pred": []
+                }),
+                expected: Ok(Op {
+                    action: OpType::Set(ScalarValue::F32(-123.0)),
+                    obj: ObjectId::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                }),
+            },
+            Scenario {
+                name: "Set with F64",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "value": -123,
+                    "datatype": "float64",
+                    "pred": []
+                }),
+                expected: Ok(Op {
+                    action: OpType::Set(ScalarValue::F64(-123.0)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,

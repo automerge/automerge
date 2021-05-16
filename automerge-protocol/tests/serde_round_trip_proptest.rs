@@ -111,66 +111,19 @@ prop_compose! {
     }
 }
 
-enum Mode {
-    Json,
-    MessagePack,
-}
-
-/// We're roundtripping through json, which doesn't have a 32 bit float type or a uint type.
-/// This means that inputs with f32 values will round trip into 64 bit floats, and any
-/// positive i64's will round trip into u64's. This function performs that normalisation on an
-/// existing change so  it can be compared with a round tripped change.
-fn normalize_change(change: &amp::Change, mode: Mode) -> amp::Change {
-    let mut result = change.clone();
-    for op in result.operations.iter_mut() {
-        let new_action = match &op.action {
-            amp::OpType::Set(amp::ScalarValue::F32(f)) => {
-                let deserialized: f64 = match mode {
-                    Mode::Json => {
-                        let serialized = serde_json::to_string(f).unwrap();
-                        serde_json::from_str(&serialized).unwrap()
-                    }
-                    Mode::MessagePack => {
-                        let serialized = rmp_serde::to_vec(&f).unwrap();
-                        rmp_serde::from_slice(&serialized).unwrap()
-                    }
-                };
-                amp::OpType::Set(amp::ScalarValue::F64(deserialized))
-            }
-            amp::OpType::Set(amp::ScalarValue::Int(i)) => {
-                let val = if *i > 0 {
-                    amp::ScalarValue::Uint((*i) as u64)
-                } else {
-                    amp::ScalarValue::Int(*i)
-                };
-                amp::OpType::Set(val)
-            }
-            //amp::OpType::Set(amp::ScalarValue::Uint(u)) => {
-            //if *u > (i64::max_value() as u64) {
-            //amp::OpType::Set(amp::ScalarValue::Uint(*u))
-            //} else {
-            //amp::OpType::Set(amp::ScalarValue::Int((*u).try_into().unwrap()))
-            //}
-            //}
-            a => a.clone(),
-        };
-        op.action = new_action;
-    }
-    result
-}
-
 proptest! {
     #[test]
     fn test_round_trip_serialization_json(change in arb_change()) {
         let serialized = serde_json::to_string(&change)?;
-        let deserialized: amp::Change = serde_json::from_str(&serialized)?;
-        prop_assert_eq!(normalize_change(&change, Mode::Json), deserialized);
+        let deserialized: amp::UncompressedChange = serde_json::from_str(&serialized)?;
+        prop_assert_eq!(change, deserialized);
     }
 
     #[test]
     fn test_round_trip_serialization_msgpack(change in arb_change()) {
         let serialized = rmp_serde::to_vec_named(&change).unwrap();
-        let deserialized: amp::Change = rmp_serde::from_slice(&serialized)?;
-        prop_assert_eq!(normalize_change(&change, Mode::MessagePack), deserialized);
+        let deserialized: amp::UncompressedChange = rmp_serde::from_slice(&serialized)?;
+        //prop_assert_eq!(normalize_change(&change, Mode::MessagePack), deserialized);
+        prop_assert_eq!(change, deserialized);
     }
 }
