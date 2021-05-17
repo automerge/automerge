@@ -149,6 +149,9 @@ impl IncrementalPatch {
             let obj = workshop
                 .get_obj(&obj_id)
                 .expect("missing object when finalizing diffs");
+            // TODO if the object is a list, somehow find the index of any 
+            // objects within it which we update, and emit updates for all
+            // ops at that index
             if let Some(inbound) = obj.inbound.iter().next() {
                 if let Some(diffs) = self.0.get_mut(&inbound.obj) {
                     diffs.push(PendingDiff::Set(inbound.clone()))
