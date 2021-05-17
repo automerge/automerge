@@ -1,6 +1,6 @@
-use std::num::NonZeroU32;
-
 use automerge_protocol as amp;
+
+use nonzero_ext::nonzero;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ActorId(pub usize);
@@ -93,7 +93,7 @@ impl From<OpId> for Key {
 impl From<&InternalOpType> for amp::OpType {
     fn from(i: &InternalOpType) -> amp::OpType {
         match i {
-            InternalOpType::Del => amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+            InternalOpType::Del => amp::OpType::Del(nonzero!(1_u32)),
             InternalOpType::Make(ot) => amp::OpType::Make(*ot),
             InternalOpType::Set(v) => amp::OpType::Set(v.clone()),
             InternalOpType::Inc(i) => amp::OpType::Inc(*i),

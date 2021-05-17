@@ -1,5 +1,8 @@
 use core::cmp::max;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fmt::Debug,
+};
 
 use amp::ChangeHash;
 use automerge_protocol as amp;
@@ -8,33 +11,27 @@ use crate::{
     actor_map::ActorMap,
     change::encode_document,
     error::AutomergeError,
+    event_handlers::{EventHandlerId, EventHandlers},
     op_handle::OpHandle,
     op_set::OpSet,
     patches::{generate_from_scratch_diff, IncrementalPatch},
-    Change,
+    Change, EventHandler,
 };
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
-    states: HashMap<amp::ActorId, Vec<Change>>,
+    states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
+    event_handlers: EventHandlers,
 }
 
 impl Backend {
-    pub fn init() -> Backend {
-        let op_set = OpSet::init();
-        Backend {
-            op_set,
-            queue: Vec::new(),
-            actors: ActorMap::new(),
-            states: HashMap::new(),
-            history: Vec::new(),
-            history_index: HashMap::new(),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     fn make_patch(
@@ -47,11 +44,11 @@ impl Backend {
             self.op_set
                 .deps
                 .iter()
-                .cloned()
-                .filter(|dep| dep != &last_hash)
+                .filter(|&dep| dep != &last_hash)
+                .copied()
                 .collect()
         } else {
-            self.op_set.deps.iter().cloned().collect()
+            self.op_set.deps.iter().copied().collect()
         };
         deps.sort_unstable();
         let pending_changes = self.get_missing_deps(&[]).len();
@@ -90,7 +87,7 @@ impl Backend {
     ) -> Result<amp::Patch, AutomergeError> {
         let mut patch = IncrementalPatch::new();
 
-        for change in changes.into_iter() {
+        for change in changes {
             self.add_change(change, actor.is_some(), &mut patch)?;
         }
 
@@ -103,6 +100,7 @@ impl Backend {
         self.states
             .get(actor)
             .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|&i| self.history.get(i))
             .map(|c| c.hash)
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
@@ -132,8 +130,7 @@ impl Backend {
         if self
             .states
             .get(&change.actor_id)
-            .map(|v| v.len() as u64)
-            .unwrap_or(0)
+            .map_or(0, |v| v.len() as u64)
             >= change.seq
         {
             return Err(AutomergeError::DuplicateChange(format!(
@@ -175,13 +172,19 @@ impl Backend {
             return Ok(());
         }
 
-        self.update_history(&change);
+        self.event_handlers.before_apply_change(&change);
+
+        let change_index = self.update_history(change);
+
+        // SAFETY: change_index is the index for the change we've just added so this can't (and
+        // shouldn't) panic. This is to get around the borrow checker.
+        let change = &self.history[change_index];
 
         let op_set = &mut self.op_set;
 
         let start_op = change.start_op;
 
-        op_set.update_deps(&change);
+        op_set.update_deps(change);
 
         let ops = OpHandle::extract(change, &mut self.actors);
 
@@ -189,17 +192,23 @@ impl Backend {
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;
 
+        self.event_handlers.after_apply_change(change);
+
         Ok(())
     }
 
-    fn update_history(&mut self, change: &Change) {
+    fn update_history(&mut self, change: Change) -> usize {
+        let history_index = self.history.len();
+
         self.states
             .entry(change.actor_id().clone())
             .or_default()
-            .push(change.clone());
+            .push(history_index);
 
-        self.history_index.insert(change.hash, self.history.len());
-        self.history.push(change.clone());
+        self.history_index.insert(change.hash, history_index);
+        self.history.push(change);
+
+        history_index
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
@@ -231,7 +240,7 @@ impl Backend {
         Ok(self
             .states
             .get(actor_id)
-            .map(|vec| vec.iter().collect())
+            .map(|vec| vec.iter().filter_map(|&i| self.history.get(i)).collect())
             .unwrap_or_default())
     }
 
@@ -277,7 +286,7 @@ impl Backend {
             }
             if let Some(change) = self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
             {
                 stack.extend(change.deps.iter());
@@ -300,13 +309,16 @@ impl Backend {
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let changes: Vec<amp::UncompressedChange> =
-            self.history.iter().map(|change| change.decode()).collect();
-        encode_document(changes)
+            self.history.iter().map(Change::decode).collect();
+        //self.history.iter().map(|change| change.decode()).collect();
+        Ok(encode_document(&changes)?)
     }
 
+    // allow this for API reasons
+    #[allow(clippy::needless_pass_by_value)]
     pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
-        let mut backend = Self::init();
+        let mut backend = Self::new();
         backend.load_changes(changes)?;
         Ok(backend)
     }
@@ -315,21 +327,22 @@ impl Backend {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| change.deps.clone()) {
-            if !self.history_index.contains_key(&head) {
+        for head in self.queue.iter().flat_map(|change| &change.deps) {
+            if !self.history_index.contains_key(head) {
                 missing.insert(head);
             }
         }
 
         for head in heads {
-            if !self.history_index.contains_key(&head) {
-                missing.insert(*head);
+            if !self.history_index.contains_key(head) {
+                missing.insert(head);
             }
         }
 
         let mut missing = missing
             .into_iter()
             .filter(|hash| !in_queue.contains(hash))
+            .copied()
             .collect::<Vec<_>>();
         missing.sort();
         missing
@@ -344,15 +357,34 @@ impl Backend {
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
-    pub fn filter_changes(
+    pub(crate) fn filter_changes(
         &self,
         heads: &[amp::ChangeHash],
         changes: &mut HashSet<amp::ChangeHash>,
     ) {
-        // TODO: with a topological sort we might be able to quicken some cases where changes lie
-        // to the right of the heads in our history (thus they are newer or concurrent).
-        // This may help to avoid searching all the predecessors of the heads when we know they
-        // won't be found.
+        // Reduce the working set to find to those which we may be able to find.
+        // This filters out those hashes that are successors of or concurrent with all of the
+        // heads.
+        // This can help in avoiding traversing the entire graph back to the roots when we try to
+        // search for a hash we can know won't be found there.
+        let max_head_index = heads
+            .iter()
+            .map(|h| self.history_index.get(h).unwrap_or(&0))
+            .max()
+            .unwrap_or(&0);
+        let mut may_find: HashSet<ChangeHash> = changes
+            .iter()
+            .filter(|hash| {
+                let change_index = self.history_index.get(hash).unwrap_or(&0);
+                change_index <= max_head_index
+            })
+            .copied()
+            .collect();
+
+        if may_find.is_empty() {
+            return;
+        }
+
         let mut queue: VecDeque<_> = heads.iter().collect();
         let mut seen = HashSet::new();
         while let Some(hash) = queue.pop_front() {
@@ -361,14 +393,15 @@ impl Backend {
             }
             seen.insert(hash);
 
-            let removed = changes.remove(&hash);
-            if changes.is_empty() {
+            let removed = may_find.remove(hash);
+            changes.remove(hash);
+            if may_find.is_empty() {
                 break;
             }
 
             for dep in self
                 .history_index
-                .get(&hash)
+                .get(hash)
                 .and_then(|i| self.history.get(*i))
                 .map(|c| c.deps.as_slice())
                 .unwrap_or_default()
@@ -384,6 +417,16 @@ impl Backend {
                 }
             }
         }
+    }
+
+    /// Adds the event handler and returns the id of the handler.
+    pub fn add_event_handler(&mut self, handler: EventHandler) -> EventHandlerId {
+        self.event_handlers.add_handler(handler)
+    }
+
+    /// Remove the handler with the given id, returning whether it removed a handler or not.
+    pub fn remove_event_handler(&mut self, id: EventHandlerId) -> bool {
+        self.event_handlers.remove_handler(id)
     }
 }
 
@@ -494,7 +537,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let mut backend = Backend::init();
+        let mut backend = Backend::new();
 
         backend
             .apply_changes(vec![change_a1.clone(), change_a2.clone()])

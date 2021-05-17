@@ -44,7 +44,7 @@ fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen]
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 struct State(Backend);
 
 #[wasm_bindgen]
@@ -105,7 +105,7 @@ impl JsSyncState {
 
 #[wasm_bindgen]
 pub fn init() -> Result<Object, JsValue> {
-    Ok(wrapper(State(Backend::init()), false, Vec::new()))
+    Ok(wrapper(State(Backend::new()), false, Vec::new()))
 }
 
 #[wasm_bindgen(js_name = getHeads)]

@@ -9,8 +9,7 @@ use std::{
 use automerge_protocol::{ChangeHash, Patch};
 
 use crate::{
-    encoding::{Decoder, Encodable},
-    AutomergeError, Backend, Change,
+    decoding, decoding::Decoder, encoding, encoding::Encodable, AutomergeError, Backend, Change,
 };
 
 mod bloom;
@@ -19,6 +18,7 @@ mod state;
 pub use bloom::BloomFilter;
 pub use state::{SyncHave, SyncState};
 
+const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Backend {
@@ -145,7 +145,7 @@ impl Backend {
                 .chain(known_heads)
                 .collect::<HashSet<_>>()
                 .into_iter()
-                .cloned()
+                .copied()
                 .collect::<Vec<_>>();
             sync_state.shared_heads.sort();
         }
@@ -208,7 +208,7 @@ impl Backend {
                 }
             }
 
-            let mut stack = hashes_to_send.iter().cloned().collect::<Vec<_>>();
+            let mut stack = hashes_to_send.iter().copied().collect::<Vec<_>>();
             while let Some(hash) = stack.pop() {
                 if let Some(deps) = dependents.get(&hash) {
                     for dep in deps {
@@ -222,8 +222,8 @@ impl Backend {
             let mut changes_to_send = Vec::new();
             for hash in need {
                 hashes_to_send.insert(*hash);
-                if !change_hashes.contains(&hash) {
-                    let change = self.get_change_by_hash(&hash);
+                if !change_hashes.contains(hash) {
+                    let change = self.get_change_by_hash(hash);
                     if let Some(change) = change {
                         changes_to_send.push(change)
                     }
@@ -249,7 +249,7 @@ pub struct SyncMessage {
 }
 
 impl SyncMessage {
-    pub fn encode(self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn encode(self) -> Result<Vec<u8>, encoding::Error> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
         encode_hashes(&mut buf, &self.heads)?;
@@ -268,12 +268,15 @@ impl SyncMessage {
         Ok(buf)
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, AutomergeError> {
+    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let message_type = decoder.read::<u8>()?;
         if message_type != MESSAGE_TYPE_SYNC {
-            return Err(AutomergeError::EncodingError);
+            return Err(decoding::Error::WrongType {
+                expected_one_of: vec![MESSAGE_TYPE_SYNC],
+                found: message_type,
+            });
         }
 
         let heads = decode_hashes(&mut decoder)?;
@@ -303,7 +306,7 @@ impl SyncMessage {
     }
 }
 
-fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), AutomergeError> {
+fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), encoding::Error> {
     debug_assert!(
         hashes.windows(2).all(|h| h[0] <= h[1]),
         "hashes were not sorted"
@@ -324,15 +327,13 @@ impl Encodable for &[ChangeHash] {
     }
 }
 
-fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, AutomergeError> {
+fn decode_hashes(decoder: &mut Decoder) -> Result<Vec<ChangeHash>, decoding::Error> {
     let length = decoder.read::<u32>()?;
     let mut hashes = Vec::with_capacity(length as usize);
 
-    const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
     for _ in 0..length {
         let hash_bytes = decoder.read_bytes(HASH_SIZE)?;
-        let hash = ChangeHash::try_from(hash_bytes)
-            .map_err(|source| AutomergeError::ChangeBadFormat { source })?;
+        let hash = ChangeHash::try_from(hash_bytes).map_err(decoding::Error::BadChangeFormat)?;
         hashes.push(hash);
     }
 
@@ -347,13 +348,13 @@ fn advance_heads(
     let new_heads = my_new_heads
         .iter()
         .filter(|head| !my_old_heads.contains(head))
-        .cloned()
+        .copied()
         .collect::<Vec<_>>();
 
     let common_heads = our_old_shared_heads
         .iter()
         .filter(|head| my_new_heads.contains(head))
-        .cloned()
+        .copied()
         .collect::<Vec<_>>();
 
     let mut advanced_heads = HashSet::with_capacity(new_heads.len() + common_heads.len());

@@ -6,6 +6,7 @@ use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 use serde::{Deserialize, Serialize};
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(Vec<u8>);
 
 impl fmt::Debug for ActorId {
@@ -79,6 +80,7 @@ impl fmt::Display for ObjType {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
 pub enum MapType {
     Map,
@@ -93,6 +95,7 @@ pub enum SequenceType {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OpId(pub u64, pub ActorId);
 
 impl OpId {
@@ -116,6 +119,7 @@ impl OpId {
 }
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ObjectId {
     Id(OpId),
     Root,

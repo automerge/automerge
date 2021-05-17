@@ -5,7 +5,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn small_change_backend() -> Backend {
     let mut frontend = Frontend::new();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let (_, change) = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -136,7 +136,7 @@ fn medium_change_backend() -> Backend {
         LocalChange::delete(Path::root().key("\u{1}")),
     ];
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
@@ -176,7 +176,7 @@ fn medium_change_backend() -> Backend {
 fn save_empty(c: &mut Criterion) {
     c.bench_function("save an empty backend", |b| {
         b.iter_batched(
-            Backend::init,
+            Backend::new,
             |b| black_box(b.save().unwrap()),
             criterion::BatchSize::SmallInput,
         )
@@ -206,7 +206,7 @@ fn save_medium(c: &mut Criterion) {
 fn load_empty(c: &mut Criterion) {
     c.bench_function("load an empty backend", |b| {
         b.iter_batched(
-            || Backend::init().save().unwrap(),
+            || Backend::new().save().unwrap(),
             |v| black_box(Backend::load(v).unwrap()),
             criterion::BatchSize::SmallInput,
         )

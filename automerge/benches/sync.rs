@@ -42,8 +42,8 @@ fn sync(
 }
 
 fn sync_per_change(count: u32, sync_interval: u32) {
-    let mut n1 = Backend::init();
-    let mut n2 = Backend::init();
+    let mut n1 = Backend::new();
+    let mut n2 = Backend::new();
     let mut s1 = SyncState::default();
     let mut s2 = SyncState::default();
 

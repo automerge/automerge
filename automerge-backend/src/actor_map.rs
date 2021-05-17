@@ -7,18 +7,14 @@ use crate::{
     internal::{ActorId, ElementId, InternalOp, Key, ObjectId, OpId},
 };
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Default)]
 pub(crate) struct ActorMap(Vec<amp::ActorId>);
 
 impl ActorMap {
-    pub fn new() -> ActorMap {
-        ActorMap(Vec::new())
-    }
-
     pub fn import_key(&mut self, key: &amp::Key) -> Key {
         match key {
             amp::Key::Map(string) => Key::Map(string.to_string()),
-            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(&eid)),
+            amp::Key::Seq(eid) => Key::Seq(self.import_element_id(eid)),
         }
     }
 
@@ -50,7 +46,7 @@ impl ActorMap {
     }
 
     pub fn import_op(&mut self, op: ExpandedOp) -> InternalOp {
-        let pred: Vec<OpId> = op.pred.iter().map(|ref id| self.import_opid(id)).collect();
+        let pred: Vec<OpId> = op.pred.iter().map(|id| self.import_opid(id)).collect();
         InternalOp {
             action: op.action,
             obj: self.import_obj(&op.obj),
@@ -117,13 +113,13 @@ impl ActorMap {
     }
 
     fn cmp_opid(&self, op1: &OpId, op2: &OpId) -> Ordering {
-        if op1.0 != op2.0 {
-            op1.0.cmp(&op2.0)
-        } else {
+        if op1.0 == op2.0 {
             let actor1 = &self.0[(op1.1).0];
             let actor2 = &self.0[(op2.1).0];
-            actor1.cmp(&actor2)
+            actor1.cmp(actor2)
             //op1.1.cmp(&op2.1)
+        } else {
+            op1.0.cmp(&op2.0)
         }
     }
 }

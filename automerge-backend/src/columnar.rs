@@ -14,10 +14,8 @@ use flate2::bufread::DeflateDecoder;
 use tracing::instrument;
 
 use crate::{
-    encoding::{
-        BooleanDecoder, BooleanEncoder, ColData, Decodable, Decoder, DeltaDecoder, DeltaEncoder,
-        Encodable, RleDecoder, RleEncoder,
-    },
+    decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
+    encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
     expanded_op::ExpandedOp,
     internal::InternalOpType,
 };
@@ -430,7 +428,7 @@ impl<'a> Iterator for ValueIterator<'a> {
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
-                let s = str::from_utf8(&data).ok()?;
+                let s = str::from_utf8(data).ok()?;
                 Some(amp::ScalarValue::Str(s.to_string()))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
@@ -496,7 +494,7 @@ impl<'a> Iterator for ObjIterator<'a> {
     fn next(&mut self) -> Option<amp::ObjectId> {
         if let (Some(actor), Some(ctr)) = (self.actor.next()?, self.ctr.next()?) {
             let actor_id = self.actors.get(actor)?;
-            Some(amp::ObjectId::Id(amp::OpId::new(ctr, &actor_id)))
+            Some(amp::ObjectId::Id(amp::OpId::new(ctr, actor_id)))
         } else {
             Some(amp::ObjectId::Root)
         }
@@ -568,12 +566,9 @@ impl ValEncoder {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
-        match val {
-            amp::ScalarValue::Cursor(_) => {}
-            _ => {
-                self.ref_actor.append_null();
-                self.ref_counter.append_null();
-            }
+        if !matches!(val, amp::ScalarValue::Cursor(_)) {
+            self.ref_actor.append_null();
+            self.ref_counter.append_null();
         }
         match val {
             amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
@@ -663,7 +658,7 @@ impl KeyEncoder {
                 self.str.append_null();
             }
             amp::Key::Seq(amp::ElementId::Id(amp::OpId(ctr, actor))) => {
-                self.actor.append_value(map_actor(&actor, actors));
+                self.actor.append_value(map_actor(actor, actors));
                 self.ctr.append_value(*ctr);
                 self.str.append_null();
             }
@@ -763,7 +758,7 @@ impl ObjEncoder {
                 self.ctr.append_null();
             }
             amp::ObjectId::Id(amp::OpId(ctr, actor)) => {
-                self.actor.append_value(map_actor(&actor, actors));
+                self.actor.append_value(map_actor(actor, actors));
                 self.ctr.append_value(*ctr);
             }
         }
@@ -831,7 +826,7 @@ impl ChangeEncoder {
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message.clone());
             self.deps_num.append_value(change.deps.len());
-            for dep in change.deps.iter() {
+            for dep in &change.deps {
                 if let Some(dep_index) = index_by_hash.get(dep) {
                     self.deps_index.append_value(*dep_index as u64)
                 } else {
@@ -870,11 +865,11 @@ impl ChangeEncoder {
             .count()
             .encode(&mut info)
             .ok();
-        for d in coldata.iter_mut() {
+        for d in &mut coldata {
             d.deflate();
             d.encode_col_len(&mut info).ok();
         }
-        for d in coldata.iter() {
+        for d in &coldata {
             data.write_all(d.data.as_slice()).ok();
         }
         (data, info)
@@ -981,11 +976,11 @@ impl DocOpEncoder {
             .count()
             .encode(&mut info)
             .ok();
-        for d in coldata.iter_mut() {
+        for d in &mut coldata {
             d.deflate();
             d.encode_col_len(&mut info).ok();
         }
-        for d in coldata.iter() {
+        for d in &coldata {
             data.write_all(d.data.as_slice()).ok();
         }
         (data, info)
@@ -1047,11 +1042,11 @@ impl ColumnEncoder {
         I: IntoIterator<Item = ColumnOp<'c>>,
     {
         for op in ops {
-            self.append(op, actors)
+            self.append(&op, actors)
         }
     }
 
-    fn append<'a>(&mut self, op: ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: &ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
@@ -1101,10 +1096,10 @@ impl ColumnEncoder {
             .count()
             .encode(&mut data)
             .ok();
-        for d in coldata.iter_mut() {
+        for d in &mut coldata {
             d.encode_col_len(&mut data).ok();
         }
-        for d in coldata.iter() {
+        for d in &coldata {
             let begin = data.len();
             data.write_all(d.data.as_slice()).ok();
             if !d.data.is_empty() {
@@ -1185,7 +1180,7 @@ impl Decodable for Action {
         R: Read,
     {
         let num = usize::decode::<R>(bytes)?;
-        ACTIONS.get(num).cloned()
+        ACTIONS.get(num).copied()
     }
 }
 

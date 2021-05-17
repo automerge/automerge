@@ -72,9 +72,9 @@ fn test_include_most_recent_value_for_key() {
         },
     };
 
-    let mut backend = Backend::init();
-    let patch = backend.apply_changes(vec![change1, change2]).unwrap();
-    //let patch = backend.get_patch().unwrap();
+    let mut backend = Backend::new();
+    backend.load_changes(vec![change1, change2]).unwrap();
+    let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
 }
 
@@ -142,7 +142,7 @@ fn test_includes_conflicting_values_for_key() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1, change2]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -209,7 +209,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1, change2]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -302,7 +302,7 @@ fn test_creates_nested_maps() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1, change2]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -367,7 +367,7 @@ fn test_create_lists() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -457,7 +457,7 @@ fn test_includes_latests_state_of_list() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -504,7 +504,7 @@ fn test_includes_date_objects_at_root() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -569,7 +569,7 @@ fn test_includes_date_objects_in_a_list() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.load_changes(vec![change1]).unwrap();
     let patch = backend.get_patch().unwrap();
     assert_eq!(patch, expected_patch)
@@ -687,7 +687,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
         pending_changes: 0,
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_local_change(local_change).unwrap();
     backend
         .load_changes(vec![remote_change_1, remote_change_2])

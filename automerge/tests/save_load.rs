@@ -125,7 +125,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
         LocalChange::delete(Path::root().key("\u{1}")),
     ];
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
@@ -687,7 +687,7 @@ fn missing_object_error_null_rle_decoding() {
         extra_bytes: vec![],
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_local_change(raw_change).unwrap();
 
     let backend_bytes = backend.save().unwrap();

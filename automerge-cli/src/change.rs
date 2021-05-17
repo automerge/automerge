@@ -1,5 +1,3 @@
-use std::iter::FromIterator;
-
 use automerge_backend as amb;
 use automerge_frontend as amf;
 use combine::{parser::char as charparser, EasyParser, ParseError, Parser};
@@ -68,7 +66,7 @@ where
         charparser::char('-'),
         charparser::char('_'),
     ));
-    combine::many1(key_char_parser).map(|chars: Vec<char>| String::from_iter(chars.into_iter()))
+    combine::many1(key_char_parser).map(|chars: Vec<char>| chars.into_iter().collect())
 }
 
 fn index_parser<Input>() -> impl Parser<Input, Output = u32>
@@ -177,7 +175,7 @@ pub fn change(
     mut writer: impl std::io::Write,
     script: &str,
 ) -> Result<(), ChangeError> {
-    let mut backend = amb::Backend::init();
+    let mut backend = amb::Backend::new();
     let mut buf: Vec<u8> = Vec::new();
     reader
         .read_to_end(&mut buf)

@@ -31,7 +31,7 @@ fn test_apply_local_change() {
         extra_bytes: Vec::new(),
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_local_change(change_request).unwrap().0;
 
     let changes = backend.get_changes(&[]);
@@ -114,7 +114,7 @@ fn test_error_on_duplicate_requests() {
         }],
         extra_bytes: Vec::new(),
     };
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_local_change(change_request1.clone()).unwrap();
     backend.apply_local_change(change_request2.clone()).unwrap();
     assert!(backend.apply_local_change(change_request1).is_err());
@@ -233,7 +233,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         }],
         extra_bytes: Vec::new(),
     };
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_local_change(local1).unwrap();
     let backend_after_first = backend.clone();
     let changes1 = backend_after_first.get_changes(&[]);
@@ -426,7 +426,7 @@ fn test_transform_list_indexes_into_element_ids() {
         extra_bytes: Vec::new(),
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![remote1.clone()]).unwrap();
     backend.apply_local_change(local1).unwrap();
     let backend_after_first = backend.clone();
@@ -533,7 +533,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_local_change(local1).unwrap();
     let patch = backend.apply_local_change(local2).unwrap().0;
     expected_patch.deps = patch.deps.clone();

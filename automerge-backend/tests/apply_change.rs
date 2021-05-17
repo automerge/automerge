@@ -34,7 +34,7 @@ fn test_incremental_diffs_in_a_map() {
     .try_into()
     .unwrap();
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![change.clone()]).unwrap();
     let expected_patch = Patch {
         actor: None,
@@ -107,7 +107,7 @@ fn test_increment_key_in_map() {
             }),
         },
     };
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch);
@@ -176,7 +176,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             },
         },
     };
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let _patch1 = backend.apply_changes(vec![change1]).unwrap();
     let patch2 = backend.apply_changes(vec![change2]).unwrap();
     //let patch = backend.get_patch().unwrap();
@@ -240,7 +240,7 @@ fn delete_key_from_map() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch)
@@ -302,7 +302,7 @@ fn create_nested_maps() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![change]).unwrap();
     assert_eq!(patch, expected_patch)
 }
@@ -385,7 +385,7 @@ fn test_assign_to_nested_keys_in_map() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch)
@@ -451,7 +451,7 @@ fn test_create_lists() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![change]).unwrap();
     assert_eq!(patch, expected_patch)
 }
@@ -534,7 +534,7 @@ fn test_apply_updates_inside_lists() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch)
@@ -614,7 +614,7 @@ fn test_delete_list_elements() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch)
@@ -702,7 +702,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     let patch = backend.apply_changes(vec![change2]).unwrap();
     assert_eq!(patch, expected_patch)
@@ -804,7 +804,7 @@ fn test_handle_changes_within_conflicted_objects() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     backend.apply_changes(vec![change2]).unwrap();
     let patch = backend.apply_changes(vec![change3]).unwrap();
@@ -985,7 +985,7 @@ fn test_handle_changes_within_conflicted_lists() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend
         .apply_changes(vec![change1, change2, change3])
         .unwrap();
@@ -1035,7 +1035,7 @@ fn test_support_date_objects_at_root() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![change]).unwrap();
     assert_eq!(patch, expected_patch)
 }
@@ -1099,7 +1099,7 @@ fn test_support_date_objects_in_a_list() {
         },
     };
 
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![change]).unwrap();
     assert_eq!(patch, expected_patch)
 }
@@ -1141,7 +1141,7 @@ fn test_cursor_objects() {
         extra_bytes: Vec::new(),
     };
     let binchange: Change = (&change).try_into().unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let patch = backend.apply_changes(vec![Change::from(change)]).unwrap();
     let expected_patch = amp::Patch {
         clock: hashmap! {
@@ -1199,16 +1199,21 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
         }],
         extra_bytes: Vec::new(),
     };
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     let err = backend
         .apply_changes(vec![Change::from(change)])
         .expect_err("Should be an error");
-    assert_eq!(
-        err,
-        AutomergeError::InvalidCursor {
-            opid: actor.op_id_at(2)
+    if let AutomergeError::InvalidCursor { opid } = err {
+        if opid != actor.op_id_at(2) {
+            panic!(
+                "Expected InvalidCursor error with opid {:?} but found one with {:?}",
+                actor.op_id_at(2),
+                opid
+            )
         }
-    );
+    } else {
+        panic!("Expected InvalidCursor error but found {:?}", err)
+    }
 }
 
 #[test]
@@ -1266,7 +1271,7 @@ fn test_updating_sequences_updates_referring_cursors() {
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![binchange1]).unwrap();
     let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
     let expected_patch = amp::Patch {
@@ -1367,7 +1372,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();
-    let mut backend = Backend::init();
+    let mut backend = Backend::new();
     backend.apply_changes(vec![binchange1]).unwrap();
     let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
     let expected_patch = amp::Patch {

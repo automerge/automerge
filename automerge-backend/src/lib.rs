@@ -1,3 +1,20 @@
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::shadow_unrelated)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::redundant_pub_crate)]
+#![allow(clippy::missing_const_for_fn)]
+#![allow(clippy::use_self)]
+#![allow(clippy::too_many_lines)]
+
 extern crate fxhash;
 extern crate hex;
 extern crate itertools;
@@ -10,8 +27,10 @@ mod backend;
 mod change;
 mod columnar;
 mod concurrent_operations;
+mod decoding;
 mod encoding;
 mod error;
+mod event_handlers;
 mod expanded_op;
 mod internal;
 mod object_store;
@@ -24,6 +43,7 @@ mod sync;
 pub use backend::Backend;
 pub use change::Change;
 pub use error::AutomergeError;
+pub use event_handlers::{ChangeEventHandler, EventHandler, EventHandlerId};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
@@ -35,7 +55,7 @@ mod tests {
 
     #[test]
     fn sync_and_send_backend() {
-        let b = crate::Backend::init();
+        let b = crate::Backend::new();
         let mb = Arc::new(Mutex::new(b));
         thread::spawn(move || {
             let b = mb.lock().unwrap();

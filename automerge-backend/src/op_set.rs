@@ -46,8 +46,14 @@ pub(crate) struct OpSet {
     cursors: HashMap<ObjectId, Vec<CursorState>>,
 }
 
+impl Default for OpSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OpSet {
-    pub fn init() -> OpSet {
+    pub fn new() -> OpSet {
         let mut objs = HashMap::default();
         objs.insert(ObjectId::Root, ObjState::new(amp::ObjType::map()));
 
@@ -73,7 +79,7 @@ impl OpSet {
     }
 
     pub fn heads(&self) -> Vec<amp::ChangeHash> {
-        let mut deps: Vec<_> = self.deps.iter().cloned().collect();
+        let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
@@ -94,7 +100,7 @@ impl OpSet {
             tracing::debug!(referred_opid=?oid, "Adding cursor");
             let internal_opid = actors.import_opid(oid);
             let mut target_found = false;
-            for (obj_id, obj) in self.objs.iter() {
+            for (obj_id, obj) in &self.objs {
                 if obj.insertions.contains_key(&internal_opid.into()) {
                     target_found = true;
                     self.cursors.entry(*obj_id).or_default().push(CursorState {
@@ -141,7 +147,7 @@ impl OpSet {
                     let ops = ops.clone();
                     let index = object.index_of(opid).unwrap_or(0);
 
-                    patch.record_seq_updates(object_id, object, index, ops.iter(), actors);
+                    patch.record_seq_updates(&object_id, object, index, ops.iter(), actors);
                 }
                 (true, false) => {
                     let opid = op
@@ -150,7 +156,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     tracing::debug!(opid=?opid, index=%index, "deleting element");
-                    patch.record_seq_remove(object_id, op.clone(), index);
+                    patch.record_seq_remove(&object_id, op.clone(), index);
                 }
                 (false, true) => {
                     let id = op
@@ -160,7 +166,7 @@ impl OpSet {
                     let index = object.index_of(id).unwrap_or(0);
                     tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
-                    patch.record_seq_insert(object_id, op.clone(), index, op.id);
+                    patch.record_seq_insert(&object_id, op.clone(), index, op.id);
                 }
                 (false, false) => {}
             };
@@ -176,7 +182,7 @@ impl OpSet {
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
-                patch.record_set(object_id, op);
+                patch.record_set(&object_id, op);
             }
             overwritten_ops
         };
@@ -198,7 +204,7 @@ impl OpSet {
 
         for old in overwritten.iter() {
             if let Some(child) = old.child() {
-                self.get_obj_mut(&child)?.inbound.remove(&old);
+                self.get_obj_mut(&child)?.inbound.remove(old);
             }
         }
         Ok(())
@@ -206,13 +212,13 @@ impl OpSet {
 
     pub fn get_obj(&self, object_id: &ObjectId) -> Result<&ObjState, AutomergeError> {
         self.objs
-            .get(&object_id)
+            .get(object_id)
             .ok_or(AutomergeError::MissingObjectError)
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectId) -> Result<&mut ObjState, AutomergeError> {
         self.objs
-            .get_mut(&object_id)
+            .get_mut(object_id)
             .ok_or(AutomergeError::MissingObjectError)
     }
 
@@ -223,7 +229,7 @@ impl OpSet {
         // diff for the cursor
         let mut cursor_changes: HashMap<ObjectId, Vec<Key>> = HashMap::new();
         for obj_id in patch.changed_object_ids() {
-            if let Some(cursors) = self.cursors.get_mut(&obj_id) {
+            if let Some(cursors) = self.cursors.get_mut(obj_id) {
                 for cursor in cursors.iter_mut() {
                     if let Some(obj) = self.objs.get(&cursor.internal_referred_object_id) {
                         cursor.index = obj.index_of(cursor.internal_element_opid).unwrap_or(0);
@@ -237,7 +243,7 @@ impl OpSet {
         }
         for (obj_id, keys) in cursor_changes {
             for key in keys {
-                patch.record_cursor_change(obj_id, key)
+                patch.record_cursor_change(&obj_id, key)
             }
         }
     }
@@ -245,7 +251,7 @@ impl OpSet {
     pub fn update_deps(&mut self, change: &Change) {
         //self.max_op = max(self.max_op, change.max_op());
 
-        for d in change.deps.iter() {
+        for d in &change.deps {
             self.deps.remove(d);
         }
         self.deps.insert(change.hash);

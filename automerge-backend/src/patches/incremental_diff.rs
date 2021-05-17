@@ -25,10 +25,10 @@ enum PendingDiff {
 impl PendingDiff {
     pub fn operation_key(&self) -> Key {
         match self {
-            Self::SeqInsert(op, ..) => op.operation_key(),
-            Self::SeqUpdate(op, ..) => op.operation_key(),
-            Self::SeqRemove(op, ..) => op.operation_key(),
-            Self::Set(op) => op.operation_key(),
+            Self::SeqInsert(op, ..)
+            | Self::SeqUpdate(op, ..)
+            | Self::SeqRemove(op, ..)
+            | Self::Set(op) => op.operation_key(),
             Self::CursorChange(k) => k.clone(),
         }
     }
@@ -53,17 +53,17 @@ impl IncrementalPatch {
         IncrementalPatch(HashMap::new())
     }
 
-    pub(crate) fn record_set(&mut self, oid: ObjectId, op: OpHandle) {
+    pub(crate) fn record_set(&mut self, oid: &ObjectId, op: OpHandle) {
         self.append_diff(oid, PendingDiff::Set(op))
     }
 
-    pub(crate) fn record_cursor_change(&mut self, oid: ObjectId, key: Key) {
+    pub(crate) fn record_cursor_change(&mut self, oid: &ObjectId, key: Key) {
         self.append_diff(oid, PendingDiff::CursorChange(key));
     }
 
     pub(crate) fn record_seq_insert(
         &mut self,
-        oid: ObjectId,
+        oid: &ObjectId,
         op: OpHandle,
         index: usize,
         opid: OpId,
@@ -73,7 +73,7 @@ impl IncrementalPatch {
 
     pub(crate) fn record_seq_updates<'a, 'b, I: Iterator<Item = &'b OpHandle>>(
         &'a mut self,
-        oid: ObjectId,
+        oid: &ObjectId,
         object: &ObjState,
         index: usize,
         ops: I,
@@ -82,7 +82,7 @@ impl IncrementalPatch {
         // TODO: Remove the actors argument and instead add a new case to the `PendingDiff`
         // enum to represent multiple seq updates, then sort by actor ID at the point at which we
         // finalize the diffs, when we have access to a `PatchWorkshop` to perform the sorting
-        let diffs = self.0.entry(oid).or_default();
+        let diffs = self.0.entry(*oid).or_default();
         let mut new_diffs = Vec::new();
         'outer: for op in ops {
             let i = op
@@ -120,16 +120,16 @@ impl IncrementalPatch {
         self.append_diffs(oid, new_diffs);
     }
 
-    pub(crate) fn record_seq_remove(&mut self, oid: ObjectId, op: OpHandle, index: usize) {
+    pub(crate) fn record_seq_remove(&mut self, oid: &ObjectId, op: OpHandle, index: usize) {
         self.append_diff(oid, PendingDiff::SeqRemove(op, index))
     }
 
-    fn append_diff(&mut self, oid: ObjectId, diff: PendingDiff) {
-        self.0.entry(oid).or_default().push(diff);
+    fn append_diff(&mut self, oid: &ObjectId, diff: PendingDiff) {
+        self.0.entry(*oid).or_default().push(diff);
     }
 
-    fn append_diffs(&mut self, oid: ObjectId, mut diffs: Vec<PendingDiff>) {
-        self.0.entry(oid).or_default().append(&mut diffs)
+    fn append_diffs(&mut self, oid: &ObjectId, mut diffs: Vec<PendingDiff>) {
+        self.0.entry(*oid).or_default().append(&mut diffs)
     }
 
     pub(crate) fn changed_object_ids(&self) -> impl Iterator<Item = &ObjectId> {
@@ -154,7 +154,7 @@ impl IncrementalPatch {
                     diffs.push(PendingDiff::Set(inbound.clone()))
                 } else {
                     objs.push(inbound.obj);
-                    self.append_diffs(inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
+                    self.append_diffs(&inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
                 }
             }
         }
@@ -162,12 +162,12 @@ impl IncrementalPatch {
         if let Some(root) = self.0.remove(&ObjectId::Root) {
             let mut props = HashMap::new();
             // I may have duplicate keys - I do this to make sure I visit each one only once
-            let keys: HashSet<_> = root.iter().map(|p| p.operation_key()).collect();
-            let obj = workshop.get_obj(&&ObjectId::Root).expect("no root found");
-            for key in keys.iter() {
+            let keys: HashSet<_> = root.iter().map(PendingDiff::operation_key).collect();
+            let obj = workshop.get_obj(&ObjectId::Root).expect("no root found");
+            for key in &keys {
                 let key_string = workshop.key_to_string(key);
                 let mut opid_to_value = HashMap::new();
-                for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+                for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
                     let link = match op.action {
                         InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => {
@@ -198,10 +198,10 @@ impl IncrementalPatch {
         if let Some(pending) = self.0.get(obj_id) {
             match obj.obj_type {
                 amp::ObjType::Sequence(seq_type) => {
-                    amp::Diff::Seq(self.gen_seq_diff(obj_id, obj, &pending, workshop, seq_type))
+                    amp::Diff::Seq(self.gen_seq_diff(obj_id, obj, pending, workshop, seq_type))
                 }
                 amp::ObjType::Map(map_type) => {
-                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, &pending, workshop, map_type))
+                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, pending, workshop, map_type))
                 }
             }
         } else {
@@ -242,7 +242,7 @@ impl IncrementalPatch {
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                         _ => panic!("del or inc found in field operations"),
                     };
-                    let op_id = workshop.make_external_opid(&opid);
+                    let op_id = workshop.make_external_opid(opid);
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
                         index: *index as u64,
                         elem_id: op_id.clone().into(),
@@ -255,15 +255,14 @@ impl IncrementalPatch {
                     let value = match op.action {
                         InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
-                        InternalOpType::Del => {
+                        InternalOpType::Del | InternalOpType::Inc(..) => {
                             // do nothing
                             continue;
                         }
-                        _ => panic!("del or inc found in field operations"),
                     };
                     edits.append_edit(amp::DiffEdit::Update {
                         index: *index as u64,
-                        op_id: workshop.make_external_opid(&opid),
+                        op_id: workshop.make_external_opid(opid),
                         value,
                     });
                 }
@@ -312,11 +311,11 @@ impl IncrementalPatch {
     ) -> amp::MapDiff {
         let mut props = HashMap::new();
         // I may have duplicate keys - I do this to make sure I visit each one only once
-        let keys: HashSet<_> = pending.iter().map(|p| p.operation_key()).collect();
-        for key in keys.iter() {
+        let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
+        for key in &keys {
             let key_string = workshop.key_to_string(key);
             let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(&key).iter().flat_map(|i| i.iter()) {
+            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                     InternalOpType::Make(_) => {

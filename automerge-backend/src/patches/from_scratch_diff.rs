@@ -12,7 +12,7 @@ use crate::{internal::ObjectId, object_store::ObjState};
 pub(crate) fn generate_from_scratch_diff(workshop: &dyn PatchWorkshop) -> amp::RootDiff {
     let mut props = HashMap::new();
 
-    for (key, ops) in workshop.get_obj(&ObjectId::Root).unwrap().props.iter() {
+    for (key, ops) in &workshop.get_obj(&ObjectId::Root).unwrap().props {
         if !ops.is_empty() {
             let mut opid_to_value = HashMap::new();
             for op in ops.iter() {
@@ -38,7 +38,7 @@ fn construct_map(
 ) -> amp::MapDiff {
     let mut props = HashMap::new();
 
-    for (key, ops) in object.props.iter() {
+    for (key, ops) in &object.props {
         if !ops.is_empty() {
             let mut opid_to_value = HashMap::new();
             for op in ops.iter() {
@@ -71,7 +71,7 @@ fn construct_list(
     let mut max_counter = 0;
     let mut seen_indices: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
-    for opid in object.seq.into_iter() {
+    for opid in &object.seq {
         max_counter = max(max_counter, opid.0);
         let key = (*opid).into(); // FIXME - something is wrong here
         if let Some(ops) = object.props.get(&key) {
@@ -116,7 +116,7 @@ fn construct_list(
 fn construct_object(object_id: &ObjectId, workshop: &dyn PatchWorkshop) -> amp::Diff {
     // Safety: if the object is missing when we're generating a diff from
     // scratch then the document is corrupt
-    let object = workshop.get_obj(&object_id).expect("missing object");
+    let object = workshop.get_obj(object_id).expect("missing object");
     match object.obj_type {
         amp::ObjType::Map(map_type) => {
             amp::Diff::Map(construct_map(object_id, object, map_type, workshop))

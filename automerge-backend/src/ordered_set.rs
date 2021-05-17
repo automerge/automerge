@@ -174,7 +174,7 @@ where
     K: Copy + Clone + Debug + Hash + PartialEq + Eq,
 {
     fn remove_index(&mut self, index: usize) -> Option<K> {
-        let key = self.key_of(index).cloned();
+        let key = self.key_of(index).copied();
         if let Some(ref k) = &key {
             self.remove(k);
         }
@@ -234,9 +234,8 @@ where
             self.insert_head(key)
         } else {
             self.key_of(index - 1)
-                .cloned()
-                .map(|suc| self.insert_after(&suc, key))
-                .unwrap_or(false)
+                .copied()
+                .map_or(false, |suc| self.insert_after(&suc, key))
         }
     }
 }
@@ -383,7 +382,7 @@ where
         let mut pre_level = 0;
         let mut suc_level = 0;
 
-        for level in 1..(max_level + 1) {
+        for level in 1..=max_level {
             let update_level = min(level, removed.level);
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
@@ -404,7 +403,7 @@ where
     }
 
     fn get_node(&self, key: Option<&K>) -> &Node<K> {
-        if let Some(ref k) = key {
+        if let Some(k) = key {
             self.nodes
                 .get(k)
                 .unwrap_or_else(|| panic!("get_node - missing key {:?}", key))
@@ -414,7 +413,7 @@ where
     }
 
     fn get_node_mut(&mut self, key: Option<&K>) -> &mut Node<K> {
-        if let Some(ref k) = key {
+        if let Some(k) = key {
             self.nodes
                 .get_mut(k)
                 .unwrap_or_else(|| panic!("get_node - missing key {:?}", key))
@@ -428,7 +427,7 @@ where
     fn predecessors(&self, predecessor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
         let mut pre = Vec::with_capacity(max_level);
         pre.push(Link {
-            key: predecessor.cloned(),
+            key: predecessor.copied(),
             count: 1,
         });
 
@@ -452,7 +451,7 @@ where
     fn successors(&self, successor: Option<&K>, max_level: usize) -> Vec<Link<K>> {
         let mut suc = Vec::with_capacity(max_level);
         suc.push(Link {
-            key: successor.cloned(),
+            key: successor.copied(),
             count: 1,
         });
 
@@ -499,7 +498,7 @@ where
 
         let mut pre_level = 0;
         let mut suc_level = 0;
-        for level in 1..(max_level + 1) {
+        for level in 1..=max_level {
             let update_level = min(level, new_level);
             if level == max_level
                 || pre.get(level).map(|l| &l.key) != pre.get(pre_level).map(|l| &l.key)
@@ -575,7 +574,7 @@ where
     fn next(&mut self) -> Option<&'a K> {
         let mut successor = match self.id {
             None => None,
-            Some(ref key) => self.nodes.get(key).and_then(|n| n.successor()),
+            Some(key) => self.nodes.get(key).and_then(Node::successor),
         };
         mem::swap(&mut successor, &mut self.id);
         successor
@@ -835,7 +834,7 @@ mod tests {
             .collect();
 
         let mut s = SkipList::<&str>::new();
-        for elem in elems.iter() {
+        for elem in &elems {
             s.insert_head(elem);
         }
 
