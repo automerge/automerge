@@ -35,6 +35,36 @@ fn set_object_root_properties() {
 }
 
 #[test]
+fn set_bytes_value() {
+    let actor = amp::ActorId::random();
+    let patch = amp::Patch {
+        actor: None,
+        seq: None,
+        max_op: 1,
+        pending_changes: 0,
+        deps: Vec::new(),
+        clock: hashmap! {
+            actor.clone() => 1,
+        },
+        diffs: Some(amp::Diff::Map(amp::MapDiff {
+            object_id: amp::ObjectId::Root,
+            obj_type: amp::MapType::Map,
+            props: hashmap! {
+                "bird".into() => hashmap!{
+                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
+                }
+            },
+        })),
+    };
+    let mut frontend = Frontend::new();
+    frontend.apply_patch(patch).unwrap();
+    assert_eq!(
+        frontend.state(),
+        &Into::<Value>::into(hashmap! {"bird" => Primitive::Bytes(vec![1, 2, 3])})
+    );
+}
+
+#[test]
 fn reveal_conflicts_on_root_properties() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 > actor2)
