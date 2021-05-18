@@ -19,7 +19,6 @@ thiserror = "1.0.16"
 im-rc = "15.0.0"
 unicode-segmentation = "1.7.1"
 arbitrary = { version = "1", features = ["derive"], optional = true }
-base64 = "0.13.0"
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2.2", features=["js"] }

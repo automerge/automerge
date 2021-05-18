@@ -51,7 +51,7 @@ fn set_bytes_value() {
             obj_type: amp::MapType::Map,
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
+                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes(vec![1, 2, 3])),
                 }
             },
         })),

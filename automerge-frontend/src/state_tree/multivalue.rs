@@ -676,7 +676,7 @@ where
             _ => Cursors::new(),
         };
         let value = match primitive {
-            Primitive::Bytes(b) => amp::ScalarValue::Bytes(base64::encode(b)),
+            Primitive::Bytes(b) => amp::ScalarValue::Bytes(b.clone()),
             Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
             Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
