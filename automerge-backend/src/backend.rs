@@ -357,6 +357,30 @@ impl Backend {
             .and_then(|index| self.history.get(*index))
     }
 
+    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
+        let mut stack: Vec<_> = other.op_set.deps.iter().collect();
+        let mut seen_hashes = HashSet::new();
+        let mut added_changes = Vec::new();
+        while let Some(hash) = stack.pop() {
+            if !seen_hashes.contains(&hash) && self.get_change_by_hash(&hash).is_some() {
+                seen_hashes.insert(hash);
+                added_changes.push(hash);
+                let idx = match other.history_index.get(&hash) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let change = &other.history[*idx];
+                for dep in &change.deps {
+                    stack.push(dep);
+                }
+            }
+        }
+        added_changes
+            .into_iter()
+            .filter_map(|h| other.get_change_by_hash(h))
+            .collect()
+    }
+
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
