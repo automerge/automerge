@@ -381,6 +381,17 @@ pub unsafe extern "C" fn automerge_get_changes(
 }
 
 /// # Safety
+/// `backend` and `other` must be valid pointers to Backends
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_changes_added(
+    backend: *mut Backend,
+    other: *mut Backend,
+) -> isize {
+    let changes = (*backend).get_changes_added(&*other);
+    (*backend).handle_binaries(Ok(changes).into())
+}
+
+/// # Safety
 /// This must me called with a valid backend pointer
 /// binary must be a valid pointer to len bytes
 #[no_mangle]
