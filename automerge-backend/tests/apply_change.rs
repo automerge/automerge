@@ -54,6 +54,54 @@ fn test_incremental_diffs_in_a_map() {
 }
 
 #[test]
+fn test_bytes() {
+    let actor: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
+    let change: Change = UncompressedChange {
+        actor_id: actor.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: Vec::new(),
+        operations: vec![Op {
+            obj: ObjectId::Root,
+            action: amp::OpType::Set(ScalarValue::Bytes("AQID".into())),
+            key: "bird".into(),
+            insert: false,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let mut backend = Backend::new();
+    let patch = backend.apply_changes(vec![change.clone()]).unwrap();
+    let expected_patch = Patch {
+        actor: None,
+        seq: None,
+        deps: vec![change.hash],
+        clock: hashmap! {actor.clone() => 1},
+        max_op: 1,
+        pending_changes: 0,
+        diffs: Some(
+            MapDiff {
+                object_id: ObjectId::Root,
+                obj_type: MapType::Map,
+                props: hashmap! {
+                    "bird".into() => hashmap!{
+                        actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
+                    }
+                },
+            }
+            .into(),
+        ),
+    };
+    assert_eq!(patch, expected_patch)
+}
+
+#[test]
 fn test_increment_key_in_map() {
     let actor: ActorId = "cdee6963c1664645920be8b41a933c2b".try_into().unwrap();
     let change1: Change = UncompressedChange {
