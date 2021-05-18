@@ -41,6 +41,7 @@ impl From<char> for ScalarValue {
 impl fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ScalarValue::Bytes(b) => write!(f, "\"{:?}\"", b),
             ScalarValue::Str(s) => write!(f, "\"{}\"", s),
             ScalarValue::Int(i) => write!(f, "{}", i),
             ScalarValue::Uint(i) => write!(f, "{}", i),

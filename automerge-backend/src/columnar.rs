@@ -574,6 +574,11 @@ impl ValEncoder {
             amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
             amp::ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
             amp::ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            amp::ScalarValue::Bytes(bytes) => {
+                let len = bytes.len();
+                self.raw.extend(bytes);
+                self.len.append_value(len << 4 | VALUE_TYPE_BYTES)
+            }
             amp::ScalarValue::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
