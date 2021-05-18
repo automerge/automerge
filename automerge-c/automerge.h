@@ -60,6 +60,12 @@ intptr_t automerge_get_changes(Backend *backend, uintptr_t len, const uint8_t *b
 
 /**
  * # Safety
+ * `backend` and `other` must be valid pointers to Backends
+ */
+intptr_t automerge_get_changes_added(Backend *backend, Backend *other);
+
+/**
+ * # Safety
  * This must me called with a valid backend pointer
  */
 intptr_t automerge_get_changes_for_actor(Backend *backend, const char *actor);
