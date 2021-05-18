@@ -2,7 +2,7 @@ os: linux
 dist: xenial
 language: rust
 
-if: branch = main
+if: branch = main OR type = pull_request
 
 install:
 - rustup self update
