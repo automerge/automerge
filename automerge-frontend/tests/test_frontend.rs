@@ -107,7 +107,7 @@ fn test_set_bytes() {
         hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
-            action: amp::OpType::Set(amp::ScalarValue::Bytes("AQID".into())),
+            action: amp::OpType::Set(amp::ScalarValue::Bytes(vec![1, 2, 3])),
             obj: "_root".try_into().unwrap(),
             key: "bird".into(),
             insert: false,

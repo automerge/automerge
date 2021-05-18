@@ -155,7 +155,10 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::F32(n)) => Ok(OpType::Inc(n as i64)),
                         Some(ScalarValue::Counter(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
-                        Some(ScalarValue::Str(s) | ScalarValue::Bytes(s)) => {
+                        Some(ScalarValue::Bytes(s)) => {
+                            Err(Error::invalid_value(Unexpected::Bytes(&s), &"a number"))
+                        }
+                        Some(ScalarValue::Str(s)) => {
                             Err(Error::invalid_value(Unexpected::Str(&s), &"a number"))
                         }
                         Some(ScalarValue::Boolean(b)) => {

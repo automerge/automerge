@@ -430,10 +430,7 @@ impl<'a> Iterator for ValueIterator<'a> {
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
-                Some(amp::ScalarValue::Bytes(
-                    // This unwrap is fine b/c we encode as valid UTF-8 when serializing
-                    String::from_utf8(data.into()).unwrap(),
-                ))
+                Some(amp::ScalarValue::Bytes(data.to_vec()))
             }
             v if v % 16 >= VALUE_TYPE_MIN_UNKNOWN && v % 16 <= VALUE_TYPE_MAX_UNKNOWN => {
                 let len = v >> 4;
@@ -572,8 +569,7 @@ impl ValEncoder {
             amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
             amp::ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
             amp::ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            amp::ScalarValue::Bytes(base64) => {
-                let bytes = base64.as_bytes();
+            amp::ScalarValue::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES)

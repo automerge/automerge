@@ -188,7 +188,7 @@ impl DataType {
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
-    Bytes(String),
+    Bytes(Vec<u8>),
     Str(String),
     Int(i64),
     Uint(u64),
