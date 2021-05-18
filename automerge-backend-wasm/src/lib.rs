@@ -209,6 +209,19 @@ pub fn get_all_changes(input: Object) -> Result<JsValue, JsValue> {
     })
 }
 
+#[wasm_bindgen(js_name = getChangesAdded)]
+pub fn get_changes_added(input: Object, input2: Object) -> Result<JsValue, JsValue> {
+    get_input(input, |state| {
+        get_input(input2, |state2| {
+            let hashes = state.0.get_changes_added(&state2.0);
+            let hashes: Vec<_> = hashes.into_iter().map(|h| { h.clone() }).collect();
+            // FIXME: unwrap
+            let hashes = rust_to_js(&hashes).unwrap();
+            Ok(hashes)
+        })
+    })
+}
+
 #[wasm_bindgen(js_name = getMissingDeps)]
 pub fn get_missing_deps(input: Object) -> Result<JsValue, JsValue> {
     get_input(input, |state| rust_to_js(state.0.get_missing_deps(&[])))
