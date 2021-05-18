@@ -188,7 +188,7 @@ impl DataType {
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
-    Bytes(Vec<u8>),
+    Bytes(String),
     Str(String),
     Int(i64),
     Uint(u64),
@@ -220,7 +220,7 @@ impl ScalarValue {
             (DataType::Bytes, ScalarValue::Bytes(bytes)) => Ok(ScalarValue::Bytes(bytes.clone())),
             (DataType::Bytes, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
-                expected: "a vec of bytes".to_string(),
+                expected: "a base64 encoded string of bytes".to_string(),
                 unexpected: v.to_string(),
                 datatype,
             }),
