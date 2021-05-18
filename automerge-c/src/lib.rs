@@ -511,9 +511,7 @@ pub unsafe extern "C" fn automerge_generate_sync_message(
 #[no_mangle]
 pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
     let state = SyncState {
-        handle: automerge_backend::SyncState {
-            ..Default::default()
-        },
+        handle: automerge_backend::SyncState::default(),
     };
     state.into()
 }
