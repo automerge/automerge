@@ -170,6 +170,8 @@ pub enum DataType {
     Counter,
     #[serde(rename = "timestamp")]
     Timestamp,
+    #[serde(rename = "bytes")]
+    Bytes,
     #[serde(rename = "cursor")]
     Cursor,
     #[serde(rename = "undefined")]
@@ -186,6 +188,7 @@ impl DataType {
 #[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
+    Bytes(Vec<u8>),
     Str(String),
     Int(i64),
     Uint(u64),
@@ -214,6 +217,13 @@ impl ScalarValue {
                     datatype,
                 }),
             },
+            (DataType::Bytes, ScalarValue::Bytes(bytes)) => Ok(ScalarValue::Bytes(bytes.clone())),
+            (DataType::Bytes, v) => Err(error::InvalidScalarValue {
+                raw_value: self.clone(),
+                expected: "a vec of bytes".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
             (DataType::Counter, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
                 expected: "an integer".to_string(),

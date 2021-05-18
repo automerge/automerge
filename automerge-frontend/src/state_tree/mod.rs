@@ -543,6 +543,7 @@ impl StateTreeValue {
         match diff.diff {
             amp::Diff::Value(v) => {
                 let value = match v {
+                    amp::ScalarValue::Bytes(b) => Primitive::Bytes(b.clone()),
                     amp::ScalarValue::Str(s) => Primitive::Str(s.clone()),
                     amp::ScalarValue::Int(i) => Primitive::Int(*i),
                     amp::ScalarValue::Uint(u) => Primitive::Uint(*u),

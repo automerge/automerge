@@ -81,6 +81,44 @@ fn test_set_root_object_properties() {
 }
 
 #[test]
+fn test_set_bytes() {
+    let mut doc = Frontend::new();
+    let change_request = doc
+        .change::<_, _, InvalidChangeRequest>(Some("set root object".into()), |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("bird"),
+                Value::Primitive(Primitive::Bytes(vec![1, 2, 3])),
+            ))?;
+            Ok(())
+        })
+        .unwrap()
+        .1
+        // Remove timestamp which is irrelevant to test
+        .map(|mut cr| {
+            cr.time = 0;
+            cr
+        });
+    let expected_change = amp::UncompressedChange {
+        actor_id: doc.actor_id,
+        start_op: 1,
+        seq: 1,
+        time: 0,
+        message: Some("set root object".into()),
+        hash: None,
+        deps: Vec::new(),
+        operations: vec![amp::Op {
+            action: amp::OpType::Set(amp::ScalarValue::Bytes(vec![1, 2, 3])),
+            obj: "_root".try_into().unwrap(),
+            key: "bird".into(),
+            insert: false,
+            pred: Vec::new(),
+        }],
+        extra_bytes: Vec::new(),
+    };
+    assert_eq!(change_request, Some(expected_change));
+}
+
+#[test]
 fn it_should_return_no_changes_if_nothing_was_changed() {
     let mut doc = Frontend::new();
     let change_request = doc

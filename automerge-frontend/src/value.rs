@@ -26,6 +26,7 @@ pub enum Value {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Primitive {
+    Bytes(Vec<u8>),
     Str(String),
     Int(i64),
     Uint(u64),
@@ -65,6 +66,7 @@ impl From<Cursor> for Value {
 impl From<&Primitive> for amp::ScalarValue {
     fn from(p: &Primitive) -> Self {
         match p {
+            Primitive::Bytes(b) => amp::ScalarValue::Bytes(b.clone()),
             Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
             Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
@@ -180,6 +182,11 @@ impl Value {
                 ),
                 Primitive::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
                 Primitive::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+                Primitive::Bytes(b) => serde_json::Value::Array(
+                    b.iter()
+                        .map(|byte| serde_json::Value::Number(serde_json::Number::from(*byte)))
+                        .collect(),
+                ),
                 Primitive::Str(s) => serde_json::Value::String(s.to_string()),
                 Primitive::Boolean(b) => serde_json::Value::Bool(*b),
                 Primitive::Counter(c) => serde_json::Value::Number(serde_json::Number::from(*c)),
