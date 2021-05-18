@@ -2,6 +2,7 @@ use std::{collections::HashMap, convert::TryInto};
 
 use amp::{MapDiff, ObjectId};
 use automerge_protocol as amp;
+use base64;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 
@@ -508,7 +509,10 @@ impl StateTreeValue {
         match diff.diff {
             amp::Diff::Value(v) => {
                 let value = match v {
-                    amp::ScalarValue::Bytes(b) => Primitive::Bytes(b.clone()),
+                    amp::ScalarValue::Bytes(b) => match base64::decode(b) {
+                        Ok(bytes) => Primitive::Bytes(bytes),
+                        Err(e) => return Err(error::InvalidPatch::InvalidBase64(e, b.clone())),
+                    },
                     amp::ScalarValue::Str(s) => Primitive::Str(s.clone()),
                     amp::ScalarValue::Int(i) => Primitive::Int(*i),
                     amp::ScalarValue::Uint(u) => Primitive::Uint(*u),

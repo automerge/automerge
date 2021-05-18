@@ -2,6 +2,7 @@ use std::{error::Error, fmt};
 
 use automerge_protocol as amp;
 use automerge_protocol::ObjectId;
+use base64::DecodeError;
 use thiserror::Error;
 
 use crate::{value::Value, Path};
@@ -80,6 +81,8 @@ pub enum InvalidPatch {
     DiffEditWithHeadElemId,
     #[error("Value diff containing cursor")]
     ValueDiffContainedCursor,
+    #[error("Base64 decoding error: {0} for string: \"{1}\"")]
+    InvalidBase64(DecodeError, String),
 }
 
 #[derive(Error, Debug, PartialEq)]
