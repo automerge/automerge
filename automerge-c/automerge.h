@@ -50,6 +50,7 @@ SyncState *automerge_decode_sync_state(const uint8_t *encoded_state_ptr, uintptr
 intptr_t automerge_encode_change(Backend *backend, const char *change);
 
 /**
+ * # Safety
  * Must be called with a valid backend pointer
  * sync_state must be a valid pointer to a SyncState
  * Returns an `isize` indicating the length of the binary message

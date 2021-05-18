@@ -517,6 +517,7 @@ pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
     state.into()
 }
 
+/// # Safety
 /// Must be called with a valid backend pointer
 /// sync_state must be a valid pointer to a SyncState
 /// Returns an `isize` indicating the length of the binary message
