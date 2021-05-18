@@ -1,7 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
 use automerge_protocol as amp;
-use base64;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 

@@ -1,7 +1,6 @@
 use std::{borrow::Borrow, collections::HashMap};
 
 use automerge_protocol as amp;
-use base64;
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
