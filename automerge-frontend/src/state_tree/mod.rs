@@ -844,7 +844,7 @@ impl StateTreeText {
     ) -> Result<(&amp::OpId, String), error::MissingIndexError> {
         self.graphemes
             .get(index)
-            .map(|mc| (mc.default_opid(), mc.default_grapheme()))
+            .map(|mc| (&mc.0, mc.1.default_grapheme()))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.graphemes.len(),
@@ -907,7 +907,7 @@ impl StateTreeText {
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
         self.graphemes
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.default_opid().clone()])
+            .map(|v| vec![v.1.default_opid().clone()])
             .unwrap_or_else(Vec::new)
     }
 
@@ -1013,17 +1013,17 @@ impl StateTreeList {
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
         self.elements
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.default_opid()])
+            .map(|v| vec![v.1.default_opid()])
             .unwrap_or_else(Vec::new)
     }
 
     pub(crate) fn elem_at(
         &self,
         index: usize,
-    ) -> Result<(amp::OpId, &MultiValue), error::MissingIndexError> {
+    ) -> Result<&(amp::OpId, MultiValue), error::MissingIndexError> {
+        dbg!(index);
         self.elements
             .get(index)
-            .map(|mv| (mv.default_opid(), mv))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.elements.len(),
