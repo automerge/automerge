@@ -29,6 +29,7 @@ void test_sync_basic() {
 }
 
 void test_sync_encode_decode() {
+  // TODO: Commented out b/c this fails.
   //printf("begin sync test - encode/decode\n");
   //int len;
 
@@ -42,11 +43,8 @@ void test_sync_encode_decode() {
   //SyncState * ssB = automerge_sync_state_init();
 
   //len = automerge_generate_sync_message(dbA, ssA);
-  //int len2 = automerge_read_binary(dbA, buff);
+  //automerge_read_binary(dbA, buff);
   //automerge_receive_sync_message(dbB, ssB, buff, len);
-
-  //len = automerge_generate_sync_message(dbB, ssB);
-  //printf("LEN2: %i\n", len);
 
   //// Save the sync state to `sync_state_buff`
   //int encoded_len = automerge_encode_sync_state(dbB, ssB);
@@ -56,7 +54,7 @@ void test_sync_encode_decode() {
   //ssB = automerge_decode_sync_state(sync_state_buff, encoded_len);
 
   //len = automerge_generate_sync_message(dbB, ssB);
-  //printf("LEN: %i\n", len);
+  // TODO: This assertion fails (len == 7 not 0)
   //assert(len == 0);
 }
 
