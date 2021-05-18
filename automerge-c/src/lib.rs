@@ -526,7 +526,6 @@ pub unsafe extern "C" fn automerge_encode_sync_state(
     backend: *mut Backend,
     sync_state: &mut SyncState,
 ) -> isize {
-    let enc = sync_state.handle.encode();
     (*backend).handle_binary(
         sync_state
             .handle
