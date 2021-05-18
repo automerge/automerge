@@ -357,19 +357,26 @@ impl Backend {
             .and_then(|index| self.history.get(*index))
     }
 
+    /**
+     * Returns all changes that are present in `self` but not present in `other`.
+     */
     pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
+        // Depth-first traversal from the heads through the dependency graph,
+        // until we reach a change that is already present in other
         let mut stack: Vec<_> = other.op_set.deps.iter().collect();
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
-            if !seen_hashes.contains(&hash) && self.get_change_by_hash(&hash).is_none() {
+            if !seen_hashes.contains(&hash) && self.get_change_by_hash(hash).is_none() {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
-                if let Some(change) = other.get_change_by_hash(&hash) {
+                if let Some(change) = other.get_change_by_hash(hash) {
                     stack.extend(&change.deps);
                 }
             }
         }
+        // Return those changes in the reverse of the order in which the depth-first search
+        // found them. This is not necessarily a topological sort, but should usually be close.
         added_change_hashes
             .into_iter()
             .filter_map(|h| other.get_change_by_hash(h))
