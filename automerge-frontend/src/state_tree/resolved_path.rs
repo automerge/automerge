@@ -606,7 +606,12 @@ impl ResolvedList {
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+            i => self
+                .value
+                .elem_at((i - 1).try_into().unwrap())?
+                .0
+                .clone()
+                .into(),
         };
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -646,7 +651,12 @@ impl ResolvedList {
     {
         let mut last_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+            i => self
+                .value
+                .elem_at((i - 1).try_into().unwrap())?
+                .0
+                .clone()
+                .into(),
         };
         let mut newvalues = DiffApplicationResult::pure(Vec::with_capacity(payload.value.len()));
         let mut op_num = payload.start_op;
@@ -720,7 +730,7 @@ impl ResolvedList {
         Ok(Cursor::new(
             index,
             self.value.object_id.clone(),
-            current_elemid,
+            current_elemid.clone(),
         ))
     }
 }

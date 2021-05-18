@@ -1,3 +1,4 @@
+use amp::OpId;
 use automerge_protocol as amp;
 
 use super::{
@@ -134,7 +135,8 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    underlying: Box<im_rc::Vector<T>>,
+    // stores the opid that created the element and the diffable value
+    underlying: Box<im_rc::Vector<(OpId, T)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -153,7 +155,7 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().collect()),
+            underlying: Box::new(i.into_iter().map(|i| (i.default_opid(), i)).collect()),
         }
     }
 
@@ -166,11 +168,11 @@ where
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
             std::collections::HashSet::new();
         let mut old_conflicts: Vec<Option<T>> = vec![None; self.underlying.len()];
-        let mut updating: Vec<UpdatingSequenceElement<T>> = self
+        let mut updating: Vec<_> = self
             .underlying
             .clone()
             .into_iter()
-            .map(UpdatingSequenceElement::from_original)
+            .map(|i| (i.0, UpdatingSequenceElement::from_original(i.1)))
             .collect();
         let mut changes = StateTreeChange::empty();
         for edit in edits.iter() {
@@ -211,10 +213,19 @@ where
                     )?;
                     if (*index as usize) == updating.len() {
                         old_conflicts.push(None);
-                        updating.push(UpdatingSequenceElement::new(node.value));
+                        updating.push((
+                            node.value.default_opid(),
+                            UpdatingSequenceElement::new(node.value),
+                        ));
                     } else {
                         old_conflicts.insert(*index as usize, None);
-                        updating.insert(*index as usize, UpdatingSequenceElement::new(node.value));
+                        updating.insert(
+                            *index as usize,
+                            (
+                                node.value.default_opid(),
+                                UpdatingSequenceElement::new(node.value),
+                            ),
+                        );
                     };
                     changes.update_with(node.change);
                 }
@@ -243,7 +254,13 @@ where
                             },
                         )?;
                         changes.update_with(mv.change);
-                        updating.insert(i, UpdatingSequenceElement::New(mv.value));
+                        updating.insert(
+                            i,
+                            (
+                                mv.value.default_opid(),
+                                UpdatingSequenceElement::New(mv.value),
+                            ),
+                        );
                     }
                 }
                 amp::DiffEdit::Update {
@@ -251,7 +268,7 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some(elem) = updating.get_mut(*index as usize) {
+                    if let Some((_id, elem)) = updating.get_mut(*index as usize) {
                         let change = elem.apply_diff(
                             op_id,
                             DiffToApply {
@@ -272,13 +289,13 @@ where
             };
         }
         let new_sequence = DiffableSequence {
-            underlying: Box::new(updating.into_iter().map(|e| e.finish()).collect()),
+            underlying: Box::new(updating.into_iter().map(|e| (e.0, e.1.finish())).collect()),
         };
         Ok(DiffApplicationResult::pure(new_sequence).with_changes(changes))
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
-        self.underlying.remove(index)
+        self.underlying.remove(index).1
     }
 
     pub(super) fn len(&self) -> usize {
@@ -286,17 +303,22 @@ where
     }
 
     pub(super) fn update(&self, index: usize, value: T) -> Self {
+        let elem_id = if let Some(existing) = self.underlying.get(index) {
+            existing.0.clone()
+        } else {
+            value.default_opid()
+        };
         DiffableSequence {
-            underlying: Box::new(self.underlying.update(index, value)),
+            underlying: Box::new(self.underlying.update(index, (elem_id, value))),
         }
     }
 
-    pub(super) fn get(&self, index: usize) -> Option<&T> {
+    pub(super) fn get(&self, index: usize) -> Option<&(OpId, T)> {
         self.underlying.get(index)
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
-        self.underlying.insert(index, value)
+        self.underlying.insert(index, (value.default_opid(), value))
     }
 
     pub(super) fn mutate<F>(&mut self, index: usize, f: F)
@@ -304,13 +326,13 @@ where
         F: FnOnce(&T) -> T,
     {
         if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = f(&entry);
+            *entry = (entry.0.clone(), f(&entry.1));
         }
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter()
+        self.underlying.iter().map(|i| &i.1)
     }
 }
 
