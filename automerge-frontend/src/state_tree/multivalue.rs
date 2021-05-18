@@ -1,7 +1,6 @@
 use std::{cmp::Ordering, iter::Iterator};
 
 use automerge_protocol as amp;
-use base64;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
