@@ -37,9 +37,25 @@ intptr_t automerge_decode_change(Backend *backend, uintptr_t len, const uint8_t 
 
 /**
  * # Safety
+ * `encoded_state_[ptr|len]` must be the address & length of a byte array
+ * Returns an opaque pointer to a SyncState
+ * panics (segfault?) if the buffer was invalid
+ */
+SyncState *automerge_decode_sync_state(const uint8_t *encoded_state_ptr, uintptr_t encoded_state_len);
+
+/**
+ * # Safety
  * This must me called with a valid pointer a json string of a change
  */
 intptr_t automerge_encode_change(Backend *backend, const char *change);
+
+/**
+ * Must be called with a valid backend pointer
+ * sync_state must be a valid pointer to a SyncState
+ * Returns an `isize` indicating the length of the binary message
+ * (-1 if there was an error)
+ */
+intptr_t automerge_encode_sync_state(Backend *backend, SyncState *sync_state);
 
 /**
  * # Safety

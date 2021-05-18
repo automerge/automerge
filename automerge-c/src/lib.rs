@@ -451,6 +451,7 @@ pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *m
     }
 }
 
+#[derive(Debug)]
 pub struct SyncState {
     handle: automerge_backend::SyncState,
 }
@@ -513,6 +514,41 @@ pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
     let state = SyncState {
         handle: automerge_backend::SyncState::default(),
     };
+    state.into()
+}
+
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// Returns an `isize` indicating the length of the binary message
+/// (-1 if there was an error)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_encode_sync_state(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+) -> isize {
+    let enc = sync_state.handle.encode();
+    (*backend).handle_binary(
+        sync_state
+            .handle
+            .encode()
+            .or(Err(AutomergeError::EncodeFailed)),
+    )
+}
+
+/// # Safety
+/// `encoded_state_[ptr|len]` must be the address & length of a byte array
+/// Returns an opaque pointer to a SyncState
+/// panics (segfault?) if the buffer was invalid
+#[no_mangle]
+pub unsafe extern "C" fn automerge_decode_sync_state(
+    encoded_state_ptr: *const u8,
+    encoded_state_len: usize,
+) -> *mut SyncState {
+    let slice = std::slice::from_raw_parts(encoded_state_ptr, encoded_state_len);
+    let decoded_state = automerge_backend::SyncState::decode(slice);
+    // TODO: Is there a way to avoid `unwrap` here?
+    let state = decoded_state.unwrap();
+    let state = SyncState { handle: state };
     state.into()
 }
 

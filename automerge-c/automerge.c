@@ -6,8 +6,8 @@
 
 #define BUFSIZE 4096
 
-void test_sync() {
-  printf("begin sync test\n");
+void test_sync_basic() {
+  printf("begin sync test - basic\n");
   int len;
 
   // In a real application you would need to check to make sure your buffer is large enough for any given read
@@ -26,6 +26,44 @@ void test_sync() {
   len = automerge_generate_sync_message(dbB, ssB);
   // No more sync messages were generated
   assert(len == 0);
+}
+
+void test_sync_encode_decode() {
+  //printf("begin sync test - encode/decode\n");
+  //int len;
+
+  //char buff[BUFSIZE];
+  //char sync_state_buff[BUFSIZE];
+
+  //Backend * dbA = automerge_init();
+  //Backend * dbB = automerge_init();
+
+  //SyncState * ssA = automerge_sync_state_init();
+  //SyncState * ssB = automerge_sync_state_init();
+
+  //len = automerge_generate_sync_message(dbA, ssA);
+  //int len2 = automerge_read_binary(dbA, buff);
+  //automerge_receive_sync_message(dbB, ssB, buff, len);
+
+  //len = automerge_generate_sync_message(dbB, ssB);
+  //printf("LEN2: %i\n", len);
+
+  //// Save the sync state to `sync_state_buff`
+  //int encoded_len = automerge_encode_sync_state(dbB, ssB);
+  //automerge_read_binary(dbB, sync_state_buff);
+
+  //// Read it back
+  //ssB = automerge_decode_sync_state(sync_state_buff, encoded_len);
+
+  //len = automerge_generate_sync_message(dbB, ssB);
+  //printf("LEN: %i\n", len);
+  //assert(len == 0);
+}
+
+void test_sync() {
+    printf("begin sync test");
+    test_sync_basic();
+    test_sync_encode_decode();
 }
 
 int main() {
