@@ -502,7 +502,7 @@ pub unsafe extern "C" fn automerge_generate_sync_message(
 ) -> isize {
     let msg = (*backend).generate_sync_message(&mut sync_state.handle);
     if let Some(msg) = msg {
-        (*backend).handle_binary(msg.encode())
+        (*backend).handle_binary(msg.encode().or(Err(AutomergeError::EncodeFailed)))
     } else {
         0
     }
