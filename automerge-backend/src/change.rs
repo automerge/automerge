@@ -33,7 +33,6 @@ use crate::{
     expanded_op::ExpandedOpIterator,
     internal::InternalOpType,
 };
-use serde::{Serialize, Deserialize};
 
 const HASH_BYTES: usize = 32;
 const BLOCK_TYPE_DOC: u8 = 0;
@@ -196,7 +195,7 @@ fn encode_chunk(
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone)]
 enum ChangeBytes {
     Compressed {
         compressed: Vec<u8>,
@@ -221,7 +220,7 @@ impl ChangeBytes {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Debug, Clone)]
 pub struct Change {
     bytes: ChangeBytes,
     pub hash: amp::ChangeHash,
