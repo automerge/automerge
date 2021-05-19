@@ -1,9 +1,9 @@
+use automerge_protocol as amp;
+
 use crate::{
     internal::{Key, ObjectId, OpId},
     object_store::ObjState,
 };
-
-use automerge_protocol as amp;
 
 /// An abstraction over the information `PendingDiffs` needs access to in order
 /// to generate a `Patch`. In practice the implementation will always be an

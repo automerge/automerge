@@ -1,6 +1,5 @@
 //use crate::columnar;
 use core::fmt::Debug;
-use nonzero_ext::nonzero;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -17,6 +16,7 @@ use flate2::{
     Compression,
 };
 use itertools::Itertools;
+use nonzero_ext::nonzero;
 use sha2::{Digest, Sha256};
 use tracing::instrument;
 

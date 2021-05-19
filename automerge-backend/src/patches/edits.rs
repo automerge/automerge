@@ -1,6 +1,6 @@
-use automerge_protocol as amp;
-
 use std::mem;
+
+use automerge_protocol as amp;
 
 #[derive(Debug)]
 pub(crate) struct Edits(Vec<amp::DiffEdit>);

@@ -1,7 +1,7 @@
-use crate::op_handle::OpHandle;
+use automerge_protocol as amp;
 
 use super::PatchWorkshop;
-use automerge_protocol as amp;
+use crate::op_handle::OpHandle;
 
 pub(super) fn gen_value_diff(
     op: &OpHandle,

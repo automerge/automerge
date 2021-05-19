@@ -1,5 +1,4 @@
 use automerge_protocol as amp;
-
 use nonzero_ext::nonzero;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
