@@ -255,7 +255,7 @@ where
                         )?;
                         changes.update_with(mv.change);
                         updating.insert(
-                            i,
+                            index + i,
                             (
                                 mv.value.default_opid(),
                                 UpdatingSequenceElement::New(mv.value),
