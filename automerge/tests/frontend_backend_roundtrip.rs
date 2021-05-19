@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use automerge::{
-    InvalidChangeRequest, LocalChange, MapType, ObjType, Path, Primitive, ScalarValue,
+    Backend, InvalidChangeRequest, LocalChange, MapType, ObjType, Path, Primitive, ScalarValue,
     SequenceType, Value,
 };
 use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType, UncompressedChange};
@@ -159,4 +159,75 @@ fn test_multi_insert_expands_to_correct_indices() {
     let (patch, _) = b.apply_local_change(c).unwrap();
     doc.apply_patch(patch).unwrap();
     assert_eq!(doc.get_value(&Path::root()).unwrap(), val);
+}
+
+#[test]
+fn test_frontend_doesnt_wait_for_empty_changes() {
+    let vals = vec![
+        Value::Map(hashmap! {}, MapType::Map),
+        Value::Map(
+            hashmap! {
+                "0".to_owned() => Value::Map(
+                    hashmap! {},
+                    MapType::Map,
+                ),
+                "a".to_owned() => Value::Map(
+                    hashmap!{
+                        "b".to_owned() => Value::Map(
+                            hashmap!{},
+                            MapType::Map,
+                        ),
+                    },
+                    MapType::Map,
+                ),
+            },
+            MapType::Map,
+        ),
+        Value::Map(hashmap! {}, MapType::Map),
+    ];
+
+    let changes = vec![
+        vec![],
+        vec![
+            LocalChange::set(
+                Path::root().key("0"),
+                Value::Map(HashMap::new(), MapType::Map),
+            ),
+            LocalChange::set(
+                Path::root().key("a"),
+                Value::Map(
+                    hashmap! {"b".to_owned() => Value::Map(HashMap::new(), MapType::Map)},
+                    MapType::Map,
+                ),
+            ),
+        ],
+        vec![
+            LocalChange::delete(Path::root().key("a")),
+            LocalChange::delete(Path::root().key("0")),
+        ],
+    ];
+
+    let mut doc = automerge::Frontend::new();
+
+    let mut backend = Backend::new();
+
+    for (val, changes) in vals.iter().zip(changes.into_iter()) {
+        let ((), c) = doc
+            .change::<_, _, InvalidChangeRequest>(None, |old| {
+                for change in changes {
+                    old.add_change(change).unwrap()
+                }
+                Ok(())
+            })
+            .unwrap();
+        if let Some(c) = c {
+            assert_eq!(doc.get_value(&Path::root()).unwrap(), *val);
+
+            let (patch, _) = backend.apply_local_change(c).unwrap();
+            dbg!(&patch);
+            doc.apply_patch(patch).unwrap();
+
+            assert_eq!(doc.get_value(&Path::root()).unwrap(), *val);
+        }
+    }
 }
