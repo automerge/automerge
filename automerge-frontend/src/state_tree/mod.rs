@@ -35,7 +35,7 @@ impl LocalOperationResult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
     objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     cursors: Cursors,
@@ -317,13 +317,13 @@ impl StateTree {
 
 /// A node in the state tree is either a leaf node containing a scalarvalue,
 /// or an internal composite type (e.g a Map or a List)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum StateTreeValue {
     Leaf(Primitive),
     Link(amp::ObjectId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum StateTreeComposite {
     Map(StateTreeMap),
     Table(StateTreeTable),
@@ -572,7 +572,7 @@ impl StateTreeValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeMap {
     object_id: amp::ObjectId,
     props: im_rc::HashMap<String, MultiValue>,
@@ -694,7 +694,7 @@ impl StateTreeMap {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeTable {
     object_id: amp::ObjectId,
     props: im_rc::HashMap<String, MultiValue>,
@@ -797,7 +797,7 @@ impl StateTreeTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeText {
     object_id: amp::ObjectId,
     graphemes: DiffableSequence<MultiGrapheme>,
@@ -916,7 +916,7 @@ impl StateTreeText {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeList {
     object_id: amp::ObjectId,
     elements: DiffableSequence<MultiValue>,

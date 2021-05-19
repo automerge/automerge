@@ -129,11 +129,12 @@ impl DiffableValue for MultiValue {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct DiffableSequence<T>
 where
     T: DiffableValue,
     T: Clone,
+    T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
     underlying: Box<im_rc::Vector<(OpId, T)>>,
@@ -143,6 +144,7 @@ impl<T> DiffableSequence<T>
 where
     T: Clone,
     T: DiffableValue,
+    T: PartialEq,
 {
     pub fn new() -> DiffableSequence<T> {
         DiffableSequence {
