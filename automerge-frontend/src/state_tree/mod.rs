@@ -1021,7 +1021,6 @@ impl StateTreeList {
         &self,
         index: usize,
     ) -> Result<&(amp::OpId, MultiValue), error::MissingIndexError> {
-        dbg!(index);
         self.elements
             .get(index)
             .ok_or_else(|| error::MissingIndexError {
