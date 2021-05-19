@@ -167,9 +167,14 @@ impl FrontendState {
                 );
                 let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
-                in_flight_requests.push(seq);
+                let ops = mutation_tracker.ops();
+                if ops.is_some() {
+                    // we actually have made a change so expect it to be sent to the backend
+                    in_flight_requests.push(seq);
+                }
+
                 Ok(OptimisticChangeResult {
-                    ops: mutation_tracker.ops(),
+                    ops,
                     new_state: FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
@@ -190,14 +195,27 @@ impl FrontendState {
                 let result = change_closure(&mut mutation_tracker)?;
                 let new_root_state = mutation_tracker.state.clone();
                 let in_flight_requests = vec![seq];
-                Ok(OptimisticChangeResult {
-                    ops: mutation_tracker.ops(),
-                    new_state: FrontendState::WaitingForInFlightRequests {
+                let ops = mutation_tracker.ops();
+                let new_state = if ops.is_some() {
+                    FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
                         reconciled_root_state: root_state,
                         max_op: mutation_tracker.max_op,
-                    },
+                    }
+                } else {
+                    // the old and new states should be equal since we have no operations
+                    debug_assert_eq!(new_root_state, root_state);
+                    // we can remain in the reconciled frontend state since we didn't make a change
+                    FrontendState::Reconciled {
+                        root_state: new_root_state,
+                        max_op: mutation_tracker.max_op,
+                        deps_of_last_received_patch: deps_of_last_received_patch.clone(),
+                    }
+                };
+                Ok(OptimisticChangeResult {
+                    ops,
+                    new_state,
                     deps: deps_of_last_received_patch,
                     closure_result: result,
                 })
