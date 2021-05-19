@@ -144,7 +144,7 @@ impl IncrementalPatch {
             };
         }
 
-        let mut objs: Vec<_> = self.changed_object_ids().cloned().collect();
+        let mut objs: Vec<_> = self.changed_object_ids().copied().collect();
         while let Some(obj_id) = objs.pop() {
             let obj = workshop
                 .get_obj(&obj_id)
