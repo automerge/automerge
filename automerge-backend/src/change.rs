@@ -399,6 +399,9 @@ fn decode_hashes(
     for _ in 0..num_hashes {
         let hash = cursor.start..(cursor.start + HASH_BYTES);
         *cursor = hash.end..cursor.end;
+        if bytes.len() < hash.end {
+            return Err(decoding::Error::NotEnoughBytes);
+        }
         hashes.push(bytes[hash].try_into().map_err(InvalidChangeError::from)?);
     }
     Ok(hashes)
