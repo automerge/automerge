@@ -10,6 +10,3 @@ members = [
     "automerge-protocol",
     "fuzz",
 ]
-
-[profile.release]
-lto = true

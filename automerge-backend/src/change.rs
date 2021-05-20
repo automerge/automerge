@@ -185,6 +185,7 @@ fn encode_chunk(
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 enum ChangeBytes {
     Compressed {
         compressed: Vec<u8>,
@@ -210,6 +211,7 @@ impl ChangeBytes {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Change {
     bytes: ChangeBytes,
     pub hash: amp::ChangeHash,

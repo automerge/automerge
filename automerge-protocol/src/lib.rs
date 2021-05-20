@@ -44,6 +44,7 @@ impl ActorId {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
     Map(MapType),
@@ -77,6 +78,7 @@ pub enum MapType {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
 pub enum SequenceType {
     List,
@@ -105,6 +107,7 @@ pub enum ObjectId {
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ElementId {
     Head,
     Id(OpId),
@@ -131,6 +134,7 @@ impl ElementId {
 }
 
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Key {
     Map(String),
@@ -184,6 +188,7 @@ impl DataType {
 }
 
 #[derive(Serialize, PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum ScalarValue {
     Str(String),
@@ -269,6 +274,7 @@ impl ScalarValue {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum OpType {
     Make(ObjType),
     Del,
@@ -277,6 +283,7 @@ pub enum OpType {
 }
 
 #[derive(PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Op {
     pub action: OpType,
     pub obj: ObjectId,
@@ -307,6 +314,7 @@ impl Op {
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ChangeHash(pub [u8; 32]);
 
 impl fmt::Debug for ChangeHash {
@@ -418,6 +426,7 @@ pub struct Patch {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct UncompressedChange {
     #[serde(rename = "ops")]
     pub operations: Vec<Op>,

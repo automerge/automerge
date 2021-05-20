@@ -11,10 +11,29 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-automerge-backend = { path = "../automerge-backend" }
+automerge-backend = { path = "../automerge-backend", features = ["derive-arbitrary"] }
+automerge-protocol = { path = "../automerge-protocol", features = ["derive-arbitrary"] }
 
 [[bin]]
 name = "backend_load"
 path = "src/backend_load.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "backend_load_changes"
+path = "src/backend_load_changes.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "backend_apply_local_change"
+path = "src/backend_apply_local_change.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "backend_apply_changes"
+path = "src/backend_apply_changes.rs"
 test = false
 doc = false
