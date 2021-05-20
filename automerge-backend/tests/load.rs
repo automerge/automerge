@@ -33,3 +33,13 @@ fn test_load_overflowing_add() {
     ];
     let _ = Backend::load(bytes);
 }
+
+#[test]
+fn test_load_overflowing_sub() {
+    // these are just random bytes
+    let bytes = vec![
+        133, 111, 74, 131, 68, 193, 221, 243, 2, 16, 35, 80, 80, 10, 131, 0, 255, 28, 10, 0, 0, 65,
+        8, 0, 133, 0,
+    ];
+    let _ = Backend::load(bytes);
+}
