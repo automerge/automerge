@@ -399,10 +399,13 @@ fn decode_hashes(
     for _ in 0..num_hashes {
         let hash = cursor.start..(cursor.start + HASH_BYTES);
         *cursor = hash.end..cursor.end;
-        if bytes.len() < hash.end {
-            return Err(decoding::Error::NotEnoughBytes);
-        }
-        hashes.push(bytes[hash].try_into().map_err(InvalidChangeError::from)?);
+        hashes.push(
+            bytes
+                .get(hash)
+                .ok_or(decoding::Error::NotEnoughBytes)?
+                .try_into()
+                .map_err(InvalidChangeError::from)?,
+        );
     }
     Ok(hashes)
 }
@@ -698,11 +701,11 @@ fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
         // not reporting error here - file got corrupted?
         return Ok(None);
     }
-    if bytes.len() < HEADER_BYTES {
-        // TODO: actually return an error here
-        return Ok(None);
-    }
-    let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..])?;
+    let (val, len) = read_leb128(
+        &mut bytes
+            .get(HEADER_BYTES..)
+            .ok_or(decoding::Error::NotEnoughBytes)?,
+    )?;
     let end = HEADER_BYTES + len + val;
     if end > bytes.len() {
         // not reporting error here - file got truncated?
