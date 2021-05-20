@@ -194,7 +194,10 @@ impl Backend {
 
         op_set.max_op = max(
             op_set.max_op,
-            (start_op + (ops.len() as u64)).saturating_sub(1),
+            (start_op
+                .checked_add(ops.len() as u64)
+                .ok_or(AutomergeError::Overflow)?)
+            .saturating_sub(1),
         );
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;

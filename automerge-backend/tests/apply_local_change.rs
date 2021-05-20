@@ -8,6 +8,7 @@ use automerge_protocol::{
     OpType, Patch, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use protocol::{Key, ScalarValue};
 
 #[test]
 fn test_apply_local_change() {
@@ -609,4 +610,27 @@ fn assert_changes_equal(mut change1: UncompressedChange, change2: UncompressedCh
     );
     change1.deps = change2.deps;
     assert_eq!(change1, change2_clone)
+}
+
+#[test]
+fn test_random_change_start_op_overflow() {
+    let change = UncompressedChange {
+        operations: vec![Op {
+            action: OpType::Set(ScalarValue::Int(-2512681860335064791)),
+            obj: ObjectId::Root,
+            key: Key::Map("".to_owned()),
+            pred: vec![],
+            insert: false,
+        }],
+        actor_id: ActorId::random(),
+        hash: None,
+        seq: 1,
+        start_op: 18446744073709551615,
+        time: 10766414268858367,
+        message: None,
+        deps: vec![],
+        extra_bytes: vec![65, 41, 1, 67, 0, 0, 0, 0, 0, 7, 210, 214, 194, 2, 0],
+    };
+    let mut b = Backend::new();
+    let _ = b.apply_local_change(change);
 }

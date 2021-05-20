@@ -60,6 +60,8 @@ pub enum AutomergeError {
     InvalidCursor { opid: amp::OpId },
     #[error("A compressed chunk could not be decompressed")]
     BadCompressedChunk,
+    #[error("Overflow would have ocurred")]
+    Overflow,
 }
 
 #[derive(Error, Debug)]
