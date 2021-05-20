@@ -254,7 +254,7 @@ impl ScalarValue {
             (DataType::Bytes, ScalarValue::Bytes(bytes)) => Ok(ScalarValue::Bytes(bytes.clone())),
             (DataType::Bytes, v) => Err(error::InvalidScalarValue {
                 raw_value: self.clone(),
-                expected: "a base64 encoded string of bytes".to_string(),
+                expected: "a vector of bytes".to_string(),
                 unexpected: v.to_string(),
                 datatype,
             }),
