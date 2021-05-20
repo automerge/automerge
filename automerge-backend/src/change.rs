@@ -695,6 +695,10 @@ fn pop_block(bytes: &[u8]) -> Option<Range<usize>> {
         // not reporting error here - file got corrupted?
         return None;
     }
+    if bytes.len() < HEADER_BYTES {
+        // TODO: actually return an error here
+        return None;
+    }
     let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..]).unwrap();
     let end = HEADER_BYTES + len + val;
     if end > bytes.len() {
