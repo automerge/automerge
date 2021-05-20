@@ -706,7 +706,10 @@ fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
             .get(HEADER_BYTES..)
             .ok_or(decoding::Error::NotEnoughBytes)?,
     )?;
-    let end = HEADER_BYTES + len + val;
+    // val is arbitrary so it could overflow
+    let end = (HEADER_BYTES + len)
+        .checked_add(val)
+        .ok_or(decoding::Error::Overflow)?;
     if end > bytes.len() {
         // not reporting error here - file got truncated?
         return Ok(None);

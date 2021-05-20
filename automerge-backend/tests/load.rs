@@ -23,3 +23,13 @@ fn test_load_leb_failed_to_read_whole_buffer() {
     let bytes = vec![133, 111, 74, 131, 46, 46, 46, 46, 46];
     let _ = Backend::load(bytes);
 }
+
+#[test]
+fn test_load_overflowing_add() {
+    // these are just random bytes
+    let bytes = vec![
+        133, 111, 74, 131, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1,
+        16,
+    ];
+    let _ = Backend::load(bytes);
+}
