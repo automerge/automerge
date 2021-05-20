@@ -421,7 +421,11 @@ fn decode_actors(
         actors.push(actor)
     }
     for _ in 0..num_actors {
-        actors.push(amp::ActorId::from(&bytes[slice_bytes(bytes, cursor)?]));
+        actors.push(amp::ActorId::from(
+            bytes
+                .get(slice_bytes(bytes, cursor)?)
+                .ok_or(decoding::Error::NotEnoughBytes)?,
+        ));
     }
     Ok(actors)
 }
