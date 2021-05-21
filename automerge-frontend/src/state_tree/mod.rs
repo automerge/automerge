@@ -63,10 +63,10 @@ impl StateTree {
     }
 
     fn apply_map_diff(&mut self, diff: amp::MapDiff) -> Result<(), error::InvalidPatch> {
-        let object = self.objects.get(&diff.object_id).cloned();
+        let object = self.objects.get_mut(&diff.object_id).cloned();
         match object {
             Some(StateTreeComposite::Map(mut m)) => {
-                let diffapp = m.apply_diff(
+                m.apply_diff(
                     DiffToApply {
                         parent_key: &"",
                         parent_object_id: &amp::ObjectId::Root,
@@ -74,9 +74,6 @@ impl StateTree {
                     },
                     &mut self.objects,
                 )?;
-                for (id, composite) in diffapp.change.objects() {
-                    self.objects.insert(id, composite);
-                }
                 Ok(())
             }
             Some(o) => Err(error::InvalidPatch::MismatchingObjectType {
@@ -89,7 +86,7 @@ impl StateTree {
                     object_id: diff.object_id,
                     props: im_rc::HashMap::new(),
                 };
-                let diffapp = map.apply_diff(
+                map.apply_diff(
                     DiffToApply {
                         parent_key: &"",
                         parent_object_id: &amp::ObjectId::Root,
@@ -97,9 +94,7 @@ impl StateTree {
                     },
                     &mut self.objects,
                 )?;
-                for (id, composite) in diffapp.change.objects() {
-                    self.objects.insert(id, composite);
-                }
+
                 Ok(())
             }
         }
@@ -334,7 +329,7 @@ impl StateTreeComposite {
         &mut self,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeComposite>, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -366,7 +361,6 @@ impl StateTreeComposite {
                             },
                             current_objects,
                         )
-                        .map(|d| d.map(StateTreeComposite::Map))
                     }
                 }
                 StateTreeComposite::Table(table) => {
@@ -377,16 +371,14 @@ impl StateTreeComposite {
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
-                        table
-                            .apply_diff(
-                                DiffToApply {
-                                    parent_object_id: diff.parent_object_id,
-                                    parent_key: diff.parent_key,
-                                    diff: prop_diffs,
-                                },
-                                current_objects,
-                            )
-                            .map(|d| d.map(StateTreeComposite::Table))
+                        table.apply_diff(
+                            DiffToApply {
+                                parent_object_id: diff.parent_object_id,
+                                parent_key: diff.parent_key,
+                                diff: prop_diffs,
+                            },
+                            current_objects,
+                        )
                     }
                 }
                 _ => Err(error::InvalidPatch::MismatchingObjectType {
@@ -413,7 +405,6 @@ impl StateTreeComposite {
                         })
                     } else {
                         list.apply_diff(edits, current_objects)
-                            .map(|d| d.map(StateTreeComposite::List))
                     }
                 }
                 StateTreeComposite::Text(text) => {
@@ -425,7 +416,6 @@ impl StateTreeComposite {
                         })
                     } else {
                         text.apply_diff(edits, current_objects)
-                            .map(|d| d.map(StateTreeComposite::Text))
                     }
                 }
                 _ => Err(error::InvalidPatch::MismatchingObjectType {
@@ -541,34 +531,41 @@ impl StateTreeValue {
                 ref object_id,
                 obj_type,
                 ..
-            }) => match obj_type {
-                amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
-                    object_id: object_id.clone(),
-                    props: im_rc::HashMap::new(),
-                }),
-                amp::MapType::Table => StateTreeComposite::Table(StateTreeTable {
-                    object_id: object_id.clone(),
-                    props: im_rc::HashMap::new(),
-                }),
+            }) => {
+                let object_id = object_id.clone();
+                match obj_type {
+                    amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
+                        object_id: object_id.clone(),
+                        props: im_rc::HashMap::new(),
+                    }),
+                    amp::MapType::Table => StateTreeComposite::Table(StateTreeTable {
+                        object_id: object_id.clone(),
+                        props: im_rc::HashMap::new(),
+                    }),
+                }
+                .apply_diff(diff, current_objects)?;
+                DiffApplicationResult::pure(StateTreeValue::Link(object_id))
             }
-            .apply_diff(diff, current_objects)?
-            .map(|c| StateTreeValue::Link(c.object_id())),
             amp::Diff::Seq(amp::SeqDiff {
                 ref object_id,
                 obj_type,
                 ..
-            }) => match obj_type {
-                amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
-                    object_id: object_id.clone(),
-                    graphemes: DiffableSequence::new(),
-                }),
-                amp::SequenceType::List => StateTreeComposite::List(StateTreeList {
-                    object_id: object_id.clone(),
-                    elements: DiffableSequence::new(),
-                }),
+            }) => {
+                let object_id = object_id.clone();
+                match obj_type {
+                    amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
+                        object_id: object_id.clone(),
+                        graphemes: DiffableSequence::new(),
+                    }),
+                    amp::SequenceType::List => StateTreeComposite::List(StateTreeList {
+                        object_id: object_id.clone(),
+                        elements: DiffableSequence::new(),
+                    }),
+                }
+                .apply_diff(diff, current_objects)?;
+
+                DiffApplicationResult::pure(StateTreeValue::Link(object_id))
             }
-            .apply_diff(diff, current_objects)?
-            .map(|c| StateTreeValue::Link(c.object_id())),
             amp::Diff::Cursor(ref c) => DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())),
         };
         Ok(diff_app)
@@ -608,7 +605,7 @@ impl StateTreeMap {
         &mut self,
         prop_diffs: DiffToApply<K, HashMap<String, HashMap<amp::OpId, amp::Diff>>>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeMap>, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -680,12 +677,12 @@ impl StateTreeMap {
             }
         }
 
-        Ok(
-            DiffApplicationResult::pure(self.clone()).with_changes(StateTreeChange::single(
-                self.object_id.clone(),
-                StateTreeComposite::Map(self.clone()),
-            )),
-        )
+        current_objects.insert(
+            self.object_id.clone(),
+            StateTreeComposite::Map(self.clone()),
+        );
+
+        Ok(())
     }
 
     pub fn pred_for_key(&self, key: &str) -> Vec<amp::OpId> {
@@ -728,21 +725,22 @@ impl StateTreeTable {
     }
 
     fn apply_diff<K>(
-        &self,
+        &mut self,
         prop_diffs: DiffToApply<K, HashMap<String, HashMap<amp::OpId, amp::Diff>>>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeTable>, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        let mut new_props = self.props.clone();
         let mut changes = StateTreeChange::empty();
         for (prop, prop_diff) in prop_diffs.diff {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
-                None => new_props = new_props.without(&prop),
+                None => {
+                    self.props.remove(&prop);
+                }
                 Some((opid, diff)) => {
-                    let mut node_diffapp = match new_props.get_mut(&prop) {
+                    let mut node_diffapp = match self.props.get_mut(&prop) {
                         Some(n) => n.apply_diff(
                             &opid,
                             DiffToApply {
@@ -778,20 +776,17 @@ impl StateTreeTable {
                         )
                     })?;
                     changes.update_with(node_diffapp.change);
-                    new_props.insert(prop.to_string(), node_diffapp.value);
+                    self.props.insert(prop.to_string(), node_diffapp.value);
                 }
             }
         }
-        let new_table = StateTreeTable {
-            object_id: self.object_id.clone(),
-            props: new_props,
-        };
-        Ok(
-            DiffApplicationResult::pure(new_table.clone()).with_changes(StateTreeChange::single(
-                self.object_id.clone(),
-                StateTreeComposite::Table(new_table),
-            )),
-        )
+
+        current_objects.insert(
+            self.object_id.clone(),
+            StateTreeComposite::Table(self.clone()),
+        );
+
+        Ok(())
     }
 
     pub fn pred_for_key(&self, key: &str) -> Vec<amp::OpId> {
@@ -902,20 +897,23 @@ impl StateTreeText {
         &mut self,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeText>, error::InvalidPatch> {
+    ) -> Result<(), error::InvalidPatch> {
         let new_graphemes = self
             .graphemes
             .apply_diff(&self.object_id, edits, current_objects)?;
-        Ok(new_graphemes.and_then(|new_graphemes| {
-            let text = StateTreeText {
-                object_id: self.object_id.clone(),
-                graphemes: new_graphemes,
-            };
-            DiffApplicationResult::pure(text.clone()).with_changes(StateTreeChange::single(
-                self.object_id.clone(),
-                StateTreeComposite::Text(text),
-            ))
-        }))
+
+        for (k, v) in new_graphemes.change.objects() {
+            current_objects.insert(k, v);
+        }
+
+        let new_list = StateTreeText {
+            object_id: self.object_id.clone(),
+            graphemes: new_graphemes.value,
+        };
+
+        current_objects.insert(self.object_id.clone(), StateTreeComposite::Text(new_list));
+
+        Ok(())
     }
 
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
@@ -1005,20 +1003,23 @@ impl StateTreeList {
         &mut self,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch> {
+    ) -> Result<(), error::InvalidPatch> {
         let new_elements = self
             .elements
             .apply_diff(&self.object_id, edits, current_objects)?;
-        Ok(new_elements.and_then(|new_elements| {
-            let new_list = StateTreeList {
-                object_id: self.object_id.clone(),
-                elements: new_elements,
-            };
-            DiffApplicationResult::pure(new_list.clone()).with_changes(StateTreeChange::single(
-                self.object_id.clone(),
-                StateTreeComposite::List(new_list),
-            ))
-        }))
+
+        for (k, v) in new_elements.change.objects() {
+            current_objects.insert(k, v);
+        }
+
+        let new_list = StateTreeList {
+            object_id: self.object_id.clone(),
+            elements: new_elements.value,
+        };
+
+        current_objects.insert(self.object_id.clone(), StateTreeComposite::List(new_list));
+
+        Ok(())
     }
 
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {

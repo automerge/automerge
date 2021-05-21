@@ -117,12 +117,16 @@ impl MultiValue {
                     StateTreeValue::Leaf(_) => {
                         StateTreeValue::new_from_diff(subdiff, current_objects)
                     }
-                    StateTreeValue::Link(obj_id) => current_objects
-                        .get(obj_id)
-                        .cloned()
-                        .expect("link to nonexistent object")
-                        .apply_diff(subdiff, current_objects)
-                        .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
+                    StateTreeValue::Link(obj_id) => {
+                        current_objects
+                            .get(obj_id)
+                            .cloned()
+                            .expect("link to nonexistent object")
+                            .apply_diff(subdiff, current_objects)?;
+                        Ok(DiffApplicationResult::pure(StateTreeValue::Link(
+                            obj_id.clone(),
+                        )))
+                    }
                 }
             } else {
                 StateTreeValue::new_from_diff(subdiff, current_objects)
