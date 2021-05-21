@@ -188,7 +188,6 @@ where
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
             std::collections::HashSet::new();
         let mut old_conflicts: Vec<Option<T>> = vec![None; self.underlying.len()];
-        let mut updating = self.underlying.clone();
         let mut changes = StateTreeChange::empty();
 
         for edit in edits {
@@ -196,20 +195,20 @@ where
                 amp::DiffEdit::Remove { index, count } => {
                     let index = index as usize;
                     let count = count as usize;
-                    if index >= updating.len() {
+                    if index >= self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
                             index,
                         });
                     }
-                    if index + count > updating.len() {
+                    if index + count > self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
-                            index: updating.len(),
+                            index: self.underlying.len(),
                         });
                     }
                     for i in index..(index + count) {
-                        updating.remove(i);
+                        self.underlying.remove(i);
                     }
                 }
                 amp::DiffEdit::SingleElementInsert {
@@ -228,15 +227,15 @@ where
                         },
                         current_objects,
                     )?;
-                    if (index as usize) == updating.len() {
+                    if (index as usize) == self.underlying.len() {
                         old_conflicts.push(None);
-                        updating
-                            .push_back((value.default_opid(), UpdatingSequenceElement::new(value)));
+                        self.underlying
+                            .push_back((value.default_opid(), UpdatingSequenceElement::New(value)));
                     } else {
                         old_conflicts.insert(index as usize, None);
-                        updating.insert(
+                        self.underlying.insert(
                             index as usize,
-                            (value.default_opid(), UpdatingSequenceElement::new(value)),
+                            (value.default_opid(), UpdatingSequenceElement::New(value)),
                         );
                     };
                 }
@@ -246,7 +245,7 @@ where
                     index,
                 } => {
                     let index = index as usize;
-                    if index > updating.len() {
+                    if index > self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             index,
                             object_id: object_id.clone(),
@@ -263,7 +262,7 @@ where
                             },
                             current_objects,
                         )?;
-                        updating.insert(
+                        self.underlying.insert(
                             index + i,
                             (value.default_opid(), UpdatingSequenceElement::New(value)),
                         );
@@ -274,7 +273,7 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((_id, elem)) = updating.get_mut(index as usize) {
+                    if let Some((_id, elem)) = self.underlying.get_mut(index as usize) {
                         let change = elem.apply_diff(
                             &op_id,
                             DiffToApply {
@@ -295,15 +294,11 @@ where
             };
         }
 
-        let new_sequence = DiffableSequence {
-            underlying: updating,
-        };
-
         for (k, v) in changes.objects() {
             current_objects.insert(k, v);
         }
 
-        Ok(DiffApplicationResult::pure(new_sequence))
+        Ok(DiffApplicationResult::pure(self.clone()))
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -377,14 +372,6 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    fn from_original(value: T) -> UpdatingSequenceElement<T> {
-        UpdatingSequenceElement::Original(value)
-    }
-
-    fn new(value: T) -> UpdatingSequenceElement<T> {
-        UpdatingSequenceElement::New(value)
-    }
-
     fn finish(self) -> T {
         match self {
             UpdatingSequenceElement::Original(v) => v,
