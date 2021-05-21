@@ -172,15 +172,10 @@ where
 
     pub fn apply_diff(
         &self,
-        current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
         object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
-        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpId, amp::Diff>>>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
             std::collections::HashSet::new();
         let mut old_conflicts: Vec<Option<T>> = vec![None; self.underlying.len()];
@@ -192,10 +187,7 @@ where
             .collect();
         let mut changes = StateTreeChange::empty();
 
-        let mut new_underlying = self.underlying.clone();
-
         for edit in edits.iter() {
-            let current_objects = changes.objects().union(current_objects.clone());
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
                     let index = *index as usize;
@@ -224,11 +216,11 @@ where
                     let node = T::construct(
                         &op_id,
                         DiffToApply {
-                            current_objects,
                             parent_object_id: object_id,
                             parent_key: &op_id,
                             diff: value,
                         },
+                        current_objects,
                     )?;
                     if (*index as usize) == updating.len() {
                         old_conflicts.push(None);
@@ -262,15 +254,14 @@ where
                     }
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        let current_objects = changes.objects().union(current_objects.clone());
                         let mv = T::construct(
                             &opid,
                             DiffToApply {
-                                current_objects,
                                 parent_object_id: object_id,
                                 parent_key: &opid,
                                 diff: &amp::Diff::Value(value.clone()),
                             },
+                            current_objects,
                         )?;
                         changes.update_with(mv.change);
                         updating.insert(
@@ -291,11 +282,11 @@ where
                         let change = elem.apply_diff(
                             op_id,
                             DiffToApply {
-                                current_objects,
                                 parent_object_id: object_id,
                                 parent_key: &op_id,
                                 diff: value,
                             },
+                            current_objects,
                         )?;
                         changes.update_with(change);
                     } else {
@@ -304,67 +295,6 @@ where
                             object_id: object_id.clone(),
                         });
                     }
-                }
-            };
-        }
-
-        let mut changes = StateTreeChange::empty();
-        for (index, prop_diff) in new_props.diff.iter() {
-            let mut diff_iter = prop_diff.iter();
-            match diff_iter.next() {
-                None => {
-                    new_underlying.remove(*index);
-                }
-                Some((opid, diff)) => {
-                    for (id, composite) in changes.objects() {
-                        current_objects.insert(id, composite);
-                    }
-                    let entry = new_underlying.get_mut(*index);
-                    match entry {
-                        Some(e) => {
-                            let mut updated_node = match &e.1 {
-                                Some(n) => n.apply_diff(
-                                    opid,
-                                    DiffToApply {
-                                        parent_object_id: object_id,
-                                        parent_key: opid,
-                                        diff,
-                                    },
-                                    current_objects,
-                                )?,
-                                None => T::construct(
-                                    opid,
-                                    DiffToApply {
-                                        parent_object_id: object_id,
-                                        parent_key: opid,
-                                        diff,
-                                    },
-                                    current_objects,
-                                )?,
-                            };
-                            let mut diffiter2 = diff_iter.map(|(oid, diff)| {
-                                (
-                                    oid,
-                                    DiffToApply {
-                                        parent_object_id: object_id,
-                                        parent_key: oid,
-                                        diff,
-                                    },
-                                )
-                            });
-                            updated_node = updated_node.try_and_then(|n| {
-                                n.apply_diff_iter(&mut diffiter2, current_objects)
-                            })?;
-                            changes += updated_node.change;
-                            e.1 = Some(updated_node.value);
-                        }
-                        None => {
-                            return Err(InvalidPatch::InvalidIndex {
-                                object_id: object_id.clone(),
-                                index: *index,
-                            })
-                        }
-                    };
                 }
             };
         }
@@ -464,6 +394,7 @@ where
         &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, &amp::Diff>,
+        current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<StateTreeChange, InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -471,9 +402,9 @@ where
         match self {
             UpdatingSequenceElement::Original(v) => {
                 let updated = if let Some(existing) = v.only_for_opid(opid) {
-                    existing.apply_diff(opid, diff)?
+                    existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff)?
+                    T::construct(opid, diff, current_objects)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
@@ -484,9 +415,9 @@ where
             }
             UpdatingSequenceElement::New(v) => {
                 let updated = if let Some(existing) = v.only_for_opid(opid) {
-                    existing.apply_diff(opid, diff)?
+                    existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff)?
+                    T::construct(opid, diff, current_objects)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
@@ -504,13 +435,13 @@ where
                 let updated = if let Some(update) =
                     remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
                 {
-                    update.apply_diff(opid, diff)?
+                    update.apply_diff(opid, diff, current_objects)?
                 } else if let Some(initial) = initial_update.only_for_opid(opid) {
-                    initial.apply_diff(opid, diff)?
+                    initial.apply_diff(opid, diff, current_objects)?
                 } else if let Some(original) = original.only_for_opid(opid) {
-                    original.apply_diff(opid, diff)?
+                    original.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff)?
+                    T::construct(opid, diff, current_objects)?
                 };
                 remaining_updates.push(updated.value);
                 Ok(updated.change)

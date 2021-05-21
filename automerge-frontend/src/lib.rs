@@ -225,27 +225,27 @@ impl FrontendState {
                 let (new_root_state, ops) = mutation_tracker.finalise();
 
                 let in_flight_requests = vec![seq];
+                let deps = deps_of_last_received_patch.clone();
                 if ops.is_some() {
                     *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
-                        reconciled_root_state: root_state,
-                        max_op: mutation_tracker.max_op,
+                        reconciled_root_state: std::mem::replace(root_state, StateTree::new()),
+                        max_op,
                     }
                 } else {
                     // the old and new states should be equal since we have no operations
-                    debug_assert_eq!(new_root_state, root_state);
+                    debug_assert_eq!(&new_root_state, root_state);
                     // we can remain in the reconciled frontend state since we didn't make a change
                     *self = FrontendState::Reconciled {
                         root_state: new_root_state,
-                        max_op: mutation_tracker.max_op,
+                        max_op,
                         deps_of_last_received_patch: deps_of_last_received_patch.clone(),
                     }
                 };
-                let deps = std::mem::take(deps_of_last_received_patch);
                 Ok(OptimisticChangeResult {
                     ops,
-                    deps: deps_of_last_received_patch,
+                    deps,
                     closure_result: result,
                 })
             }
@@ -462,12 +462,6 @@ impl Frontend {
                 self.seq = seq;
             }
         }
-        let new_state = self
-            .state
-            .take()
-            .unwrap()
-            .apply_remote_patch(&self.actor_id, patch)?;
-        self.state = Some(new_state);
         Ok(())
     }
 
