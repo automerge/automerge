@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use amp::OpId;
 use automerge_protocol as amp;
 
@@ -10,7 +12,7 @@ use crate::error::InvalidPatch;
 pub(super) trait DiffableValue: Sized {
     fn construct<K>(
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -18,19 +20,19 @@ pub(super) trait DiffableValue: Sized {
     fn apply_diff<K>(
         &self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>;
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
+    fn apply_diff_iter<'a, 'b, 'c, I, K: 'c>(
         &'a self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>;
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>;
     fn default_opid(&self) -> amp::OpId;
 
     fn only_for_opid(&self, opid: &amp::OpId) -> Option<Self>;
@@ -41,7 +43,7 @@ pub(super) trait DiffableValue: Sized {
 impl DiffableValue for MultiGrapheme {
     fn construct<K>(
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -54,7 +56,7 @@ impl DiffableValue for MultiGrapheme {
     fn apply_diff<K>(
         &self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -70,7 +72,7 @@ impl DiffableValue for MultiGrapheme {
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
     {
         self.apply_diff_iter(diff)
         //MultiGrapheme::apply_diff_iter(self, diff)
@@ -92,7 +94,7 @@ impl DiffableValue for MultiGrapheme {
 impl DiffableValue for MultiValue {
     fn construct<K>(
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -104,7 +106,7 @@ impl DiffableValue for MultiValue {
     fn apply_diff<K>(
         &self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
@@ -113,16 +115,19 @@ impl DiffableValue for MultiValue {
         self.apply_diff(opid, diff, current_objects)
     }
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
+    fn apply_diff_iter<'a, 'b, 'c, I, K: 'c>(
         &'a self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
     {
-        self.apply_diff_iter(diff, current_objects)
+        self.apply_diff_iter(
+            &mut diff.map(|(o, d)| (Cow::Borrowed(o), d)),
+            current_objects,
+        )
     }
 
     fn default_opid(&self) -> amp::OpId {
@@ -173,7 +178,7 @@ where
     pub fn apply_diff(
         &self,
         object_id: &amp::ObjectId,
-        edits: &[amp::DiffEdit],
+        edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
@@ -187,11 +192,11 @@ where
             .collect();
         let mut changes = StateTreeChange::empty();
 
-        for edit in edits.iter() {
+        for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
-                    let index = *index as usize;
-                    let count = *count as usize;
+                    let index = index as usize;
+                    let count = count as usize;
                     if index >= updating.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
@@ -222,16 +227,16 @@ where
                         },
                         current_objects,
                     )?;
-                    if (*index as usize) == updating.len() {
+                    if (index as usize) == updating.len() {
                         old_conflicts.push(None);
                         updating.push((
                             node.value.default_opid(),
                             UpdatingSequenceElement::new(node.value),
                         ));
                     } else {
-                        old_conflicts.insert(*index as usize, None);
+                        old_conflicts.insert(index as usize, None);
                         updating.insert(
-                            *index as usize,
+                            index as usize,
                             (
                                 node.value.default_opid(),
                                 UpdatingSequenceElement::new(node.value),
@@ -245,7 +250,7 @@ where
                     values,
                     index,
                 } => {
-                    let index = *index as usize;
+                    let index = index as usize;
                     if index > updating.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             index,
@@ -259,7 +264,7 @@ where
                             DiffToApply {
                                 parent_object_id: object_id,
                                 parent_key: &opid,
-                                diff: &amp::Diff::Value(value.clone()),
+                                diff: amp::Diff::Value(value.clone()),
                             },
                             current_objects,
                         )?;
@@ -278,9 +283,9 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((_id, elem)) = updating.get_mut(*index as usize) {
+                    if let Some((_id, elem)) = updating.get_mut(index as usize) {
                         let change = elem.apply_diff(
-                            op_id,
+                            &op_id,
                             DiffToApply {
                                 parent_object_id: object_id,
                                 parent_key: &op_id,
@@ -291,7 +296,7 @@ where
                         changes.update_with(change);
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
-                            index: *index as usize,
+                            index: index as usize,
                             object_id: object_id.clone(),
                         });
                     }
@@ -393,7 +398,7 @@ where
     fn apply_diff<K>(
         &mut self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<StateTreeChange, InvalidPatch>
     where

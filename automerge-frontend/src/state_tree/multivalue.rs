@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, iter::Iterator};
+use std::{borrow::Cow, cmp::Ordering, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
@@ -32,7 +32,7 @@ pub(super) struct MultiValue {
 impl MultiValue {
     pub fn new_from_diff<K>(
         opid: amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
@@ -88,13 +88,16 @@ impl MultiValue {
     pub(super) fn apply_diff<K>(
         &self,
         opid: &amp::OpId,
-        subdiff: DiffToApply<K, &amp::Diff>,
+        subdiff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        self.apply_diff_iter(&mut std::iter::once((opid, subdiff)), current_objects)
+        self.apply_diff_iter(
+            &mut std::iter::once((Cow::Borrowed(opid), subdiff)),
+            current_objects,
+        )
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
@@ -104,12 +107,12 @@ impl MultiValue {
     ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (Cow<'b, amp::OpId>, DiffToApply<'c, K, amp::Diff>)>,
     {
         let mut changes = StateTreeChange::empty();
         let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let u = if let Some(existing_value) = updated.get(opid) {
+            let u = if let Some(existing_value) = updated.get(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
                         StateTreeValue::new_from_diff(subdiff, current_objects)
@@ -118,14 +121,14 @@ impl MultiValue {
                         .get(obj_id)
                         .cloned()
                         .expect("link to nonexistent object")
-                        .apply_diff(&subdiff, current_objects)
+                        .apply_diff(subdiff, current_objects)
                         .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
                 }
             } else {
                 StateTreeValue::new_from_diff(subdiff, current_objects)
             }?;
             changes.update_with(u.change);
-            updated = updated.update(opid, &u.value)
+            updated = updated.update(&opid, &u.value)
         }
         Ok(DiffApplicationResult::pure(updated.result()).with_changes(changes))
     }
@@ -297,7 +300,7 @@ impl MultiGrapheme {
 
     pub(super) fn new_from_diff<K>(
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
     ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -307,10 +310,10 @@ impl MultiGrapheme {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: diff.parent_object_id.clone(),
-                        diff: diff.diff.clone(),
+                        diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
                     });
                 } else {
-                    s.clone()
+                    s
                 }
             }
             _ => {
@@ -329,7 +332,7 @@ impl MultiGrapheme {
     pub(super) fn apply_diff<K>(
         &self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
+        diff: DiffToApply<K, amp::Diff>,
     ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
         K: Into<amp::Key>,
@@ -344,7 +347,7 @@ impl MultiGrapheme {
     ) -> Result<DiffApplicationResult<MultiGrapheme>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
     {
         let mut updated = self.values();
         for (opid, subdiff) in diff {
@@ -353,7 +356,7 @@ impl MultiGrapheme {
                     if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
                             object_id: subdiff.parent_object_id.clone(),
-                            diff: subdiff.diff.clone(),
+                            diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
                         });
                     } else {
                         updated = updated.update(opid, s.clone());
@@ -362,7 +365,7 @@ impl MultiGrapheme {
                 _ => {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: subdiff.parent_object_id.clone(),
-                        diff: subdiff.diff.clone(),
+                        diff: subdiff.diff,
                     })
                 }
             }
