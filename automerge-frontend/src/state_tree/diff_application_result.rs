@@ -43,10 +43,10 @@ impl<T> DiffApplicationResult<T> {
     where
         F: FnOnce(T) -> DiffApplicationResult<U>,
     {
-        let result = f(self.value);
+        let mut result = f(self.value);
         DiffApplicationResult {
             value: result.value,
-            change: result.change.union(self.change),
+            change: result.change.union(self.change).clone(),
         }
     }
 
@@ -54,10 +54,10 @@ impl<T> DiffApplicationResult<T> {
     where
         F: FnOnce(T) -> Result<DiffApplicationResult<U>, E>,
     {
-        let result = f(self.value)?;
+        let mut result = f(self.value)?;
         Ok(DiffApplicationResult {
             value: result.value,
-            change: result.change.union(self.change),
+            change: result.change.union(self.change).clone(),
         })
     }
 }

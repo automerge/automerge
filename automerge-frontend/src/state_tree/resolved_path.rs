@@ -240,13 +240,14 @@ impl ResolvedRoot {
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
         let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()])
             .unwrap_or_else(Vec::new);
+        self.root.remove(key);
         LocalOperationResult {
-            new_state: self.root.remove(key),
+            new_state: self.root.clone(),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: amp::ObjectId::Root,
@@ -307,7 +308,7 @@ impl ResolvedMap {
             pred: self.value.pred_for_key(key),
         });
         let diffapp = newvalue.diff_app_result().and_then(|v| {
-            self.value.update(key.to_string(), v);
+            self.value.insert(key.to_string(), v);
             let new_composite = StateTreeComposite::Map(self.value.clone());
             let new_mv = self
                 .multivalue
@@ -324,8 +325,8 @@ impl ResolvedMap {
     }
 
     pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
-        let new_value = self.value.without(key);
-        let new_composite = StateTreeComposite::Map(new_value);
+        self.value.remove(key);
+        let new_composite = StateTreeComposite::Map(self.value.clone());
         let new_mv = self
             .multivalue
             .update_default(StateTreeValue::Link(new_composite.object_id()));

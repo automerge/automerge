@@ -65,7 +65,7 @@ impl StateTree {
     fn apply_map_diff(&mut self, diff: amp::MapDiff) -> Result<(), error::InvalidPatch> {
         let object = self.objects.get(&diff.object_id).cloned();
         match object {
-            Some(StateTreeComposite::Map(m)) => {
+            Some(StateTreeComposite::Map(mut m)) => {
                 let diffapp = m.apply_diff(
                     &DiffToApply {
                         parent_key: &"",
@@ -85,7 +85,7 @@ impl StateTree {
                 patch_expected_type: Some(amp::ObjType::map()),
             }),
             None => {
-                let map = StateTreeMap {
+                let mut map = StateTreeMap {
                     object_id: diff.object_id,
                     props: im_rc::HashMap::new(),
                 };
@@ -111,7 +111,7 @@ impl StateTree {
         }
         self.cursors = diffapp.change.new_cursors().union(self.cursors.clone());
         match self.objects.get_mut(&amp::ObjectId::Root) {
-            Some(StateTreeComposite::Map(root_map)) => root_map.update(k, diffapp.value),
+            Some(StateTreeComposite::Map(root_map)) => root_map.insert(k, diffapp.value),
             _ => panic!("Root map did not exist or was wrong type"),
         };
         self.update_cursors();
@@ -141,17 +141,15 @@ impl StateTree {
         }
     }
 
-    fn remove(&self, k: &str) -> StateTree {
-        let new_objects = match self.objects.get(&amp::ObjectId::Root) {
-            Some(StateTreeComposite::Map(root_map)) => self.objects.update(
-                amp::ObjectId::Root,
-                StateTreeComposite::Map(root_map.without(k)),
-            ),
+    fn remove(&mut self, k: &str) {
+        match self.objects.get_mut(&amp::ObjectId::Root) {
+            Some(StateTreeComposite::Map(root_map)) => {
+                root_map.remove(k);
+                let root = root_map.clone();
+                self.objects
+                    .insert(amp::ObjectId::Root, StateTreeComposite::Map(root));
+            }
             _ => panic!("Root map did not exist or was wrong type"),
-        };
-        StateTree {
-            objects: new_objects,
-            cursors: Cursors::new(),
         }
     }
 
@@ -333,7 +331,7 @@ enum StateTreeComposite {
 
 impl StateTreeComposite {
     fn apply_diff<K>(
-        &self,
+        &mut self,
         diff: &DiffToApply<K, &amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeComposite>, error::InvalidPatch>
@@ -585,15 +583,12 @@ struct StateTreeMap {
 }
 
 impl StateTreeMap {
-    fn update(&mut self, key: String, value: MultiValue) {
+    fn insert(&mut self, key: String, value: MultiValue) {
         self.props.insert(key, value);
     }
 
-    fn without(&self, key: &str) -> StateTreeMap {
-        StateTreeMap {
-            object_id: self.object_id.clone(),
-            props: self.props.without(key),
-        }
+    fn remove(&mut self, key: &str) {
+        self.props.remove(key);
     }
 
     fn get<S: AsRef<str>>(&self, key: S) -> Option<&MultiValue> {
@@ -601,26 +596,25 @@ impl StateTreeMap {
     }
 
     fn apply_diff<K>(
-        &self,
+        &mut self,
         prop_diffs: &DiffToApply<K, &HashMap<String, HashMap<amp::OpId, amp::Diff>>>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeMap>, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        let mut new_props = self.props.clone();
         let mut change = StateTreeChange::empty();
         for (prop, prop_diff) in prop_diffs.diff.iter() {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
                 None => {
-                    new_props.remove(prop);
+                    self.props.remove(prop);
                 }
                 Some((opid, diff)) => {
                     for (id, composite) in change.objects() {
                         current_objects.insert(id, composite);
                     }
-                    let node = match new_props.get(prop) {
+                    let node = match self.props.get(prop) {
                         Some(n) => {
                             let diff_result = n.apply_diff(
                                 opid,
@@ -633,7 +627,7 @@ impl StateTreeMap {
                             )?;
 
                             change.update_with(diff_result.change);
-                            new_props = new_props.update(prop.clone(), diff_result.value.clone());
+                            self.props.insert(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
                         None => {
@@ -647,7 +641,7 @@ impl StateTreeMap {
                                 current_objects,
                             )?;
                             change.update_with(diff_result.change);
-                            new_props = new_props.update(prop.clone(), diff_result.value.clone());
+                            self.props.insert(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
                     };
@@ -665,17 +659,18 @@ impl StateTreeMap {
                         current_objects,
                     )?;
                     change.update_with(other_changes.change);
-                    new_props = new_props.update(prop.clone(), other_changes.value);
+                    self.props.insert(prop.clone(), other_changes.value);
                 }
             }
         }
-        let map = StateTreeMap {
-            object_id: self.object_id.clone(),
-            props: new_props,
-        };
-        Ok(DiffApplicationResult::pure(map.clone()).with_changes(
-            StateTreeChange::single(self.object_id.clone(), StateTreeComposite::Map(map))
-                .union(change),
+
+        Ok(DiffApplicationResult::pure(self.clone()).with_changes(
+            StateTreeChange::single(
+                self.object_id.clone(),
+                StateTreeComposite::Map(self.clone()),
+            )
+            .union(change)
+            .clone(),
         ))
     }
 

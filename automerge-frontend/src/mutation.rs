@@ -350,7 +350,7 @@ impl MutableDocument for MutationTracker {
                                     path: change.path,
                                 })
                             }
-                            Target::Root(r) => match name {
+                            Target::Root(mut r) => match name {
                                 PathElement::Key(k) => r.delete_key(k),
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
