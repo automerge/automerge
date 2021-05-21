@@ -41,6 +41,15 @@ pub(crate) struct StateTree {
     cursors: Cursors,
 }
 
+impl Default for StateTree {
+    fn default() -> Self {
+        Self {
+            objects: im_rc::HashMap::new(),
+            cursors: Cursors::new(),
+        }
+    }
+}
+
 impl StateTree {
     pub fn new() -> StateTree {
         StateTree {

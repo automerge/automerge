@@ -239,7 +239,7 @@ impl FrontendState {
                     *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
-                        reconciled_root_state: std::mem::replace(root_state, StateTree::new()),
+                        reconciled_root_state: std::mem::take(root_state),
                         max_op,
                     }
                 };
