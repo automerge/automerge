@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cmp::Ordering, iter::Iterator};
+use std::{borrow::Cow, cmp::Ordering, collections::HashMap, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
@@ -26,7 +26,7 @@ pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MultiValue {
     winning_value: (amp::OpId, StateTreeValue),
-    conflicts: im_rc::HashMap<amp::OpId, StateTreeValue>,
+    conflicts: HashMap<amp::OpId, StateTreeValue>,
 }
 
 impl MultiValue {
@@ -41,7 +41,7 @@ impl MultiValue {
         Ok(
             StateTreeValue::new_from_diff(diff, current_objects)?.map(move |value| MultiValue {
                 winning_value: (opid, value),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             }),
         )
     }
@@ -49,7 +49,7 @@ impl MultiValue {
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
         MultiValue {
             winning_value: (opid, statetree_val),
-            conflicts: im_rc::HashMap::new(),
+            conflicts: HashMap::new(),
         }
     }
 
@@ -187,12 +187,12 @@ impl MultiValue {
         if *opid == self.winning_value.0 {
             Some(MultiValue {
                 winning_value: self.winning_value.clone(),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         } else {
             self.conflicts.get(opid).map(|value| MultiValue {
                 winning_value: (opid.clone(), value.clone()),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         }
     }
