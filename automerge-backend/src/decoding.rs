@@ -3,6 +3,7 @@ use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
 use automerge_protocol as amp;
 
+/// The error type for decoding operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(
