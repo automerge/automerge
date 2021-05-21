@@ -200,7 +200,7 @@ impl FrontendState {
                 *max_op = mutation_tracker.max_op;
                 let (new_root_state, ops) = mutation_tracker.finalise();
 
-                if ops.is_some() {
+                if !ops.is_empty() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
                 }
@@ -226,14 +226,7 @@ impl FrontendState {
 
                 let in_flight_requests = vec![seq];
                 let deps = deps_of_last_received_patch.clone();
-                if ops.is_some() {
-                    *self = FrontendState::WaitingForInFlightRequests {
-                        in_flight_requests,
-                        optimistically_updated_root_state: new_root_state,
-                        reconciled_root_state: std::mem::replace(root_state, StateTree::new()),
-                        max_op,
-                    }
-                } else {
+                if ops.is_empty() {
                     // the old and new states should be equal since we have no operations
                     debug_assert_eq!(&new_root_state, root_state);
                     // we can remain in the reconciled frontend state since we didn't make a change
@@ -241,6 +234,13 @@ impl FrontendState {
                         root_state: new_root_state,
                         max_op,
                         deps_of_last_received_patch: deps_of_last_received_patch.clone(),
+                    }
+                } else {
+                    *self = FrontendState::WaitingForInFlightRequests {
+                        in_flight_requests,
+                        optimistically_updated_root_state: new_root_state,
+                        reconciled_root_state: std::mem::replace(root_state, StateTree::new()),
+                        max_op,
                     }
                 };
                 Ok(OptimisticChangeResult {
@@ -434,7 +434,7 @@ impl Frontend {
             self.state
                 .optimistically_apply_change(&self.actor_id, change_closure, self.seq + 1)?;
         self.cached_value = None;
-        if let Some(ops) = change_result.ops {
+        if !change_result.ops.is_empty() {
             self.seq += 1;
             let change = UncompressedChange {
                 start_op,
@@ -444,7 +444,7 @@ impl Frontend {
                 message,
                 hash: None,
                 deps: change_result.deps,
-                operations: ops,
+                operations: change_result.ops,
                 extra_bytes: Vec::new(),
             };
             Ok((change_result.closure_result, Some(change)))
@@ -490,7 +490,7 @@ impl Frontend {
 }
 
 struct OptimisticChangeResult<O> {
-    ops: Option<Vec<Op>>,
+    ops: Vec<Op>,
     deps: Vec<ChangeHash>,
     closure_result: O,
 }

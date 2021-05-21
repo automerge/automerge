@@ -200,13 +200,8 @@ impl MutationTracker {
         }
     }
 
-    pub(crate) fn finalise(self) -> (StateTree, Option<Vec<amp::Op>>) {
-        let ops = if !self.ops.is_empty() {
-            Some(self.ops)
-        } else {
-            None
-        };
-        (self.state, ops)
+    pub(crate) fn finalise(self) -> (StateTree, Vec<amp::Op>) {
+        (self.state, self.ops)
     }
 }
 
