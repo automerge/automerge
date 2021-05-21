@@ -18,7 +18,7 @@ pub(super) trait DiffableValue: Sized {
     where
         K: Into<amp::Key>;
     fn apply_diff<K>(
-        &self,
+        &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
@@ -54,7 +54,7 @@ impl DiffableValue for MultiGrapheme {
     }
 
     fn apply_diff<K>(
-        &self,
+        &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
@@ -104,7 +104,7 @@ impl DiffableValue for MultiValue {
     }
 
     fn apply_diff<K>(
-        &self,
+        &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
@@ -404,7 +404,7 @@ where
     {
         match self {
             UpdatingSequenceElement::Original(v) => {
-                let updated = if let Some(existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
                     T::construct(opid, diff, current_objects)?
@@ -417,7 +417,7 @@ where
                 Ok(updated.change)
             }
             UpdatingSequenceElement::New(v) => {
-                let updated = if let Some(existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
                     T::construct(opid, diff, current_objects)?
@@ -435,13 +435,13 @@ where
                 remaining_updates,
             } => {
                 println!("UPdating already updated value");
-                let updated = if let Some(update) =
+                let updated = if let Some(mut update) =
                     remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
                 {
                     update.apply_diff(opid, diff, current_objects)?
-                } else if let Some(initial) = initial_update.only_for_opid(opid) {
+                } else if let Some(mut initial) = initial_update.only_for_opid(opid) {
                     initial.apply_diff(opid, diff, current_objects)?
-                } else if let Some(original) = original.only_for_opid(opid) {
+                } else if let Some(mut original) = original.only_for_opid(opid) {
                     original.apply_diff(opid, diff, current_objects)?
                 } else {
                     T::construct(opid, diff, current_objects)?

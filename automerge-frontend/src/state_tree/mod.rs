@@ -619,7 +619,7 @@ impl StateTreeMap {
                     self.props.remove(&prop);
                 }
                 Some((opid, diff)) => {
-                    let node = match self.props.get(&prop) {
+                    let node = match self.props.get_mut(&prop) {
                         Some(n) => {
                             let diff_result = n.apply_diff(
                                 &opid,
@@ -742,7 +742,7 @@ impl StateTreeTable {
             match diff_iter.next() {
                 None => new_props = new_props.without(&prop),
                 Some((opid, diff)) => {
-                    let mut node_diffapp = match new_props.get(&prop) {
+                    let mut node_diffapp = match new_props.get_mut(&prop) {
                         Some(n) => n.apply_diff(
                             &opid,
                             DiffToApply {

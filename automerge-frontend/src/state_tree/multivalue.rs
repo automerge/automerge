@@ -86,7 +86,7 @@ impl MultiValue {
     }
 
     pub(super) fn apply_diff<K>(
-        &self,
+        &mut self,
         opid: &amp::OpId,
         subdiff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
