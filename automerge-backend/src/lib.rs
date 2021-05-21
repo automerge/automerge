@@ -41,6 +41,8 @@ mod sync;
 
 pub use backend::Backend;
 pub use change::Change;
+pub use decoding::Error as DecodingError;
+pub use encoding::Error as EncodingError;
 pub use error::AutomergeError;
 pub use event_handlers::{ChangeEventHandler, EventHandler, EventHandlerId};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};

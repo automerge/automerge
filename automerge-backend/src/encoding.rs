@@ -12,6 +12,7 @@ use crate::columnar::COLUMN_TYPE_DEFLATE;
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
 
+/// The error type for encoding operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
