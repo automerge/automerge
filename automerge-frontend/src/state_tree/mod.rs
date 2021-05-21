@@ -613,7 +613,6 @@ impl StateTreeMap {
     where
         K: Into<amp::Key>,
     {
-        let mut change = StateTreeChange::empty();
         for (prop, prop_diff) in prop_diffs.diff {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -621,9 +620,6 @@ impl StateTreeMap {
                     self.props.remove(&prop);
                 }
                 Some((opid, diff)) => {
-                    for (id, composite) in change.objects() {
-                        current_objects.insert(id, composite);
-                    }
                     let node = match self.props.get(&prop) {
                         Some(n) => {
                             let diff_result = n.apply_diff(
@@ -636,7 +632,10 @@ impl StateTreeMap {
                                 current_objects,
                             )?;
 
-                            change.update_with(diff_result.change);
+                            for (id, composite) in diff_result.change.objects() {
+                                current_objects.insert(id, composite);
+                            }
+
                             self.props.insert(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
@@ -650,7 +649,11 @@ impl StateTreeMap {
                                 },
                                 current_objects,
                             )?;
-                            change.update_with(diff_result.change);
+
+                            for (id, composite) in diff_result.change.objects() {
+                                current_objects.insert(id, composite);
+                            }
+
                             self.props.insert(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
@@ -668,20 +671,22 @@ impl StateTreeMap {
                         }),
                         current_objects,
                     )?;
-                    change.update_with(other_changes.change);
+
+                    for (id, composite) in other_changes.change.objects() {
+                        current_objects.insert(id, composite);
+                    }
+
                     self.props.insert(prop.clone(), other_changes.value);
                 }
             }
         }
 
-        Ok(DiffApplicationResult::pure(self.clone()).with_changes(
-            StateTreeChange::single(
+        Ok(
+            DiffApplicationResult::pure(self.clone()).with_changes(StateTreeChange::single(
                 self.object_id.clone(),
                 StateTreeComposite::Map(self.clone()),
-            )
-            .union(change)
-            .clone(),
-        ))
+            )),
+        )
     }
 
     pub fn pred_for_key(&self, key: &str) -> Vec<amp::OpId> {
