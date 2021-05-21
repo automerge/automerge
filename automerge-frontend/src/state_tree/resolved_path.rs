@@ -90,7 +90,7 @@ impl<'a> ResolvedPath<'a> {
     pub(super) fn new_text(
         tree: &StateTree,
         mv: MultiValue,
-        update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
+        update: Box<dyn FnMut(DiffApplicationResult<MultiValue>) -> StateTree>,
         text: StateTreeText,
     ) -> ResolvedPath {
         ResolvedPath {
@@ -213,7 +213,7 @@ pub struct ResolvedRoot {
 
 impl ResolvedRoot {
     pub(crate) fn set_key(
-        &self,
+        &mut self,
         key: &str,
         payload: SetOrInsertPayload<&Value>,
     ) -> LocalOperationResult {
@@ -232,7 +232,8 @@ impl ResolvedRoot {
         });
         let new_state = self
             .root
-            .update(key.to_string(), newvalue.diff_app_result());
+            .update(key.to_string(), newvalue.diff_app_result())
+            .clone();
         LocalOperationResult {
             new_state,
             new_ops: newvalue.ops(),
@@ -266,7 +267,7 @@ pub struct ResolvedCounter {
 }
 
 impl ResolvedCounter {
-    pub(crate) fn increment(&self, by: i64) -> LocalOperationResult {
+    pub(crate) fn increment(&mut self, by: i64) -> LocalOperationResult {
         let diffapp = DiffApplicationResult::pure(self.multivalue.update_default(
             StateTreeValue::Leaf(Primitive::Counter(self.current_value + by)),
         ));
@@ -292,7 +293,7 @@ pub struct ResolvedMap {
 
 impl ResolvedMap {
     pub(crate) fn set_key(
-        &self,
+        &mut self,
         key: &str,
         payload: SetOrInsertPayload<&Value>,
     ) -> LocalOperationResult {
@@ -306,8 +307,8 @@ impl ResolvedMap {
             pred: self.value.pred_for_key(key),
         });
         let diffapp = newvalue.diff_app_result().and_then(|v| {
-            let new_value = self.value.update(key.to_string(), v);
-            let new_composite = StateTreeComposite::Map(new_value);
+            self.value.update(key.to_string(), v);
+            let new_composite = StateTreeComposite::Map(self.value.clone());
             let new_mv = self
                 .multivalue
                 .update_default(StateTreeValue::Link(new_composite.object_id()));
@@ -322,7 +323,7 @@ impl ResolvedMap {
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
         let new_value = self.value.without(key);
         let new_composite = StateTreeComposite::Map(new_value);
         let new_mv = self
@@ -353,7 +354,7 @@ pub struct ResolvedTable {
 
 impl ResolvedTable {
     pub(crate) fn set_key(
-        &self,
+        &mut self,
         key: &str,
         payload: SetOrInsertPayload<&Value>,
     ) -> LocalOperationResult {
@@ -383,7 +384,7 @@ impl ResolvedTable {
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
         let new_value = self.value.without(key);
         let new_composite = StateTreeComposite::Table(new_value);
         let new_mv = self
@@ -409,13 +410,13 @@ impl ResolvedTable {
 pub struct ResolvedText {
     pub(super) value: StateTreeText,
     pub(super) multivalue: MultiValue,
-    pub(super) update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
+    pub(super) update: Box<dyn FnMut(DiffApplicationResult<MultiValue>) -> StateTree>,
 }
 
 impl ResolvedText {
     #[allow(dead_code)]
     pub(crate) fn insert(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
@@ -447,7 +448,7 @@ impl ResolvedText {
     }
 
     pub(crate) fn insert_many<I>(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
@@ -492,7 +493,7 @@ impl ResolvedText {
     }
 
     pub(crate) fn set(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
@@ -522,7 +523,7 @@ impl ResolvedText {
     }
 
     pub(crate) fn remove(
-        &self,
+        &mut self,
         index: u32,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
@@ -565,7 +566,7 @@ pub struct ResolvedList {
 
 impl ResolvedList {
     pub(crate) fn set(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<&Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
@@ -600,7 +601,7 @@ impl ResolvedList {
 
     #[allow(dead_code)]
     pub(crate) fn insert(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<&Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
@@ -642,7 +643,7 @@ impl ResolvedList {
     }
 
     pub(crate) fn insert_many<'a, 'b, I>(
-        &'a self,
+        &'a mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
@@ -701,7 +702,7 @@ impl ResolvedList {
     }
 
     pub(crate) fn remove(
-        &self,
+        &mut self,
         index: u32,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;

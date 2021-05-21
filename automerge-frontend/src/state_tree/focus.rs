@@ -7,9 +7,9 @@ use super::{
 pub(crate) struct Focus(FocusInner);
 
 impl Focus {
-    pub(super) fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
-        match &self.0 {
-            FocusInner::Root(root) => root.update(diffapp),
+    pub(super) fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+        match &mut self.0 {
+            FocusInner::Root(root) => root.update(diffapp).clone(),
             FocusInner::Map(mapfocus) => mapfocus.update(diffapp),
             FocusInner::Table(tablefocus) => tablefocus.update(diffapp),
             FocusInner::List(listfocus) => listfocus.update(diffapp),
@@ -81,7 +81,7 @@ struct RootFocus {
 }
 
 impl RootFocus {
-    fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> &mut StateTree {
         self.root.update(self.key.clone(), diffapp)
     }
 }
@@ -95,7 +95,7 @@ struct MapFocus {
 }
 
 impl MapFocus {
-    fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         let new_diffapp = diffapp.and_then(|v| {
             let updated = StateTreeComposite::Map(StateTreeMap {
                 object_id: self.map.object_id.clone(),
@@ -120,7 +120,7 @@ struct TableFocus {
 }
 
 impl TableFocus {
-    fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         let new_diffapp = diffapp.and_then(|v| {
             let updated = StateTreeComposite::Table(StateTreeTable {
                 object_id: self.table.object_id.clone(),
@@ -148,7 +148,7 @@ struct ListFocus {
 }
 
 impl ListFocus {
-    fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         let new_diffapp = diffapp.and_then(|v| {
             let updated = StateTreeComposite::List(StateTreeList {
                 object_id: self.list.object_id.clone(),

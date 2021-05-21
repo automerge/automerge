@@ -105,22 +105,17 @@ impl StateTree {
         }
     }
 
-    fn update(&self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
-        let mut new_objects = diffapp.change.objects().union(self.objects.clone());
-        let new_cursors = diffapp.change.new_cursors().union(self.cursors.clone());
-        let root = match new_objects.get(&amp::ObjectId::Root) {
-            Some(StateTreeComposite::Map(root_map)) => {
-                StateTreeComposite::Map(root_map.update(k, diffapp.value))
-            }
+    fn update(&mut self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> &mut StateTree {
+        for (k, v) in diffapp.change.objects() {
+            self.objects.insert(k, v);
+        }
+        self.cursors = diffapp.change.new_cursors().union(self.cursors.clone());
+        match self.objects.get_mut(&amp::ObjectId::Root) {
+            Some(StateTreeComposite::Map(root_map)) => root_map.update(k, diffapp.value),
             _ => panic!("Root map did not exist or was wrong type"),
         };
-        new_objects = new_objects.update(amp::ObjectId::Root, root);
-        let mut new_tree = StateTree {
-            objects: new_objects,
-            cursors: new_cursors,
-        };
-        new_tree.update_cursors();
-        new_tree
+        self.update_cursors();
+        self
     }
 
     fn update_cursors(&mut self) {
@@ -167,7 +162,7 @@ impl StateTree {
         }
     }
 
-    fn apply(&self, change: StateTreeChange) -> StateTree {
+    fn apply(&mut self, change: StateTreeChange) -> StateTree {
         let cursors = change.new_cursors().union(self.cursors.clone());
         let objects = change.objects().union(self.objects.clone());
         let mut new_tree = StateTree { objects, cursors };
@@ -590,11 +585,8 @@ struct StateTreeMap {
 }
 
 impl StateTreeMap {
-    fn update(&self, key: String, value: MultiValue) -> StateTreeMap {
-        StateTreeMap {
-            object_id: self.object_id.clone(),
-            props: self.props.update(key, value),
-        }
+    fn update(&mut self, key: String, value: MultiValue) {
+        self.props.insert(key, value);
     }
 
     fn without(&self, key: &str) -> StateTreeMap {
