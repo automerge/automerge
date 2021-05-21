@@ -34,16 +34,15 @@ impl MultiValue {
         opid: amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
+    ) -> Result<MultiValue, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        Ok(
-            StateTreeValue::new_from_diff(diff, current_objects)?.map(move |value| MultiValue {
-                winning_value: (opid, value),
-                conflicts: HashMap::new(),
-            }),
-        )
+        let value = StateTreeValue::new_from_diff(diff, current_objects)?;
+        Ok(MultiValue {
+            winning_value: (opid, value),
+            conflicts: HashMap::new(),
+        })
     }
 
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
@@ -109,10 +108,9 @@ impl MultiValue {
         K: Into<amp::Key>,
         I: Iterator<Item = (Cow<'b, amp::OpId>, DiffToApply<'c, K, amp::Diff>)>,
     {
-        let mut changes = StateTreeChange::empty();
         let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let u = if let Some(existing_value) = updated.get(&opid) {
+            let value = if let Some(existing_value) = updated.get(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
                         StateTreeValue::new_from_diff(subdiff, current_objects)
@@ -123,18 +121,15 @@ impl MultiValue {
                             .cloned()
                             .expect("link to nonexistent object")
                             .apply_diff(subdiff, current_objects)?;
-                        Ok(DiffApplicationResult::pure(StateTreeValue::Link(
-                            obj_id.clone(),
-                        )))
+                        Ok(StateTreeValue::Link(obj_id.clone()))
                     }
                 }
             } else {
                 StateTreeValue::new_from_diff(subdiff, current_objects)
             }?;
-            changes.update_with(u.change);
-            updated = updated.update(&opid, &u.value)
+            updated = updated.update(&opid, &value)
         }
-        Ok(DiffApplicationResult::pure(updated.result()).with_changes(changes))
+        Ok(DiffApplicationResult::pure(updated.result()))
     }
 
     pub(super) fn default_statetree_value(&self) -> StateTreeValue {

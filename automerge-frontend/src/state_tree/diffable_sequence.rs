@@ -14,7 +14,7 @@ pub(super) trait DiffableValue: Sized {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>;
     fn apply_diff<K>(
@@ -45,12 +45,12 @@ impl DiffableValue for MultiGrapheme {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
     {
         let c = MultiGrapheme::new_from_diff(opid, diff)?;
-        Ok(DiffApplicationResult::pure(c))
+        Ok(c)
     }
 
     fn apply_diff<K>(
@@ -96,7 +96,7 @@ impl DiffableValue for MultiValue {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -218,7 +218,7 @@ where
                     value,
                 } => {
                     opids_in_this_diff.insert(op_id.clone());
-                    let node = T::construct(
+                    let value = T::construct(
                         &op_id,
                         DiffToApply {
                             parent_object_id: object_id,
@@ -229,21 +229,14 @@ where
                     )?;
                     if (index as usize) == updating.len() {
                         old_conflicts.push(None);
-                        updating.push((
-                            node.value.default_opid(),
-                            UpdatingSequenceElement::new(node.value),
-                        ));
+                        updating.push((value.default_opid(), UpdatingSequenceElement::new(value)));
                     } else {
                         old_conflicts.insert(index as usize, None);
                         updating.insert(
                             index as usize,
-                            (
-                                node.value.default_opid(),
-                                UpdatingSequenceElement::new(node.value),
-                            ),
+                            (value.default_opid(), UpdatingSequenceElement::new(value)),
                         );
                     };
-                    changes.update_with(node.change);
                 }
                 amp::DiffEdit::MultiElementInsert {
                     elem_id,
@@ -259,7 +252,7 @@ where
                     }
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        let mv = T::construct(
+                        let value = T::construct(
                             &opid,
                             DiffToApply {
                                 parent_object_id: object_id,
@@ -268,13 +261,9 @@ where
                             },
                             current_objects,
                         )?;
-                        changes.update_with(mv.change);
                         updating.insert(
                             index + i,
-                            (
-                                mv.value.default_opid(),
-                                UpdatingSequenceElement::New(mv.value),
-                            ),
+                            (value.default_opid(), UpdatingSequenceElement::New(value)),
                         );
                     }
                 }
@@ -307,7 +296,12 @@ where
         let new_sequence = DiffableSequence {
             underlying: Box::new(updating.into_iter().map(|e| (e.0, e.1.finish())).collect()),
         };
-        Ok(DiffApplicationResult::pure(new_sequence).with_changes(changes))
+
+        for (k, v) in changes.objects() {
+            current_objects.insert(k, v);
+        }
+
+        Ok(DiffApplicationResult::pure(new_sequence))
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -407,7 +401,7 @@ where
                 let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff, current_objects)?
+                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
@@ -420,7 +414,7 @@ where
                 let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff, current_objects)?
+                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
@@ -444,7 +438,7 @@ where
                 } else if let Some(mut original) = original.only_for_opid(opid) {
                     original.apply_diff(opid, diff, current_objects)?
                 } else {
-                    T::construct(opid, diff, current_objects)?
+                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
                 };
                 remaining_updates.push(updated.value);
                 Ok(updated.change)

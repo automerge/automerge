@@ -505,11 +505,11 @@ impl StateTreeValue {
     fn new_from_diff<K>(
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<StateTreeValue>, error::InvalidPatch>
+    ) -> Result<StateTreeValue, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        let diff_app = match diff.diff {
+        let value = match diff.diff {
             amp::Diff::Value(v) => {
                 let value = match v {
                     amp::ScalarValue::Str(s) => Primitive::Str(s),
@@ -525,7 +525,7 @@ impl StateTreeValue {
                         return Err(error::InvalidPatch::ValueDiffContainedCursor)
                     }
                 };
-                DiffApplicationResult::pure(StateTreeValue::Leaf(value))
+                StateTreeValue::Leaf(value)
             }
             amp::Diff::Map(amp::MapDiff {
                 ref object_id,
@@ -544,7 +544,7 @@ impl StateTreeValue {
                     }),
                 }
                 .apply_diff(diff, current_objects)?;
-                DiffApplicationResult::pure(StateTreeValue::Link(object_id))
+                StateTreeValue::Link(object_id)
             }
             amp::Diff::Seq(amp::SeqDiff {
                 ref object_id,
@@ -564,11 +564,11 @@ impl StateTreeValue {
                 }
                 .apply_diff(diff, current_objects)?;
 
-                DiffApplicationResult::pure(StateTreeValue::Link(object_id))
+                StateTreeValue::Link(object_id)
             }
-            amp::Diff::Cursor(ref c) => DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())),
+            amp::Diff::Cursor(ref c) => StateTreeValue::Leaf(c.into()),
         };
-        Ok(diff_app)
+        Ok(value)
     }
 
     fn realise_value(&self, objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>) -> Value {
@@ -635,7 +635,7 @@ impl StateTreeMap {
                             self.props.insert(prop.clone(), diff_result.value);
                         }
                         None => {
-                            let diff_result = MultiValue::new_from_diff(
+                            let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 DiffToApply {
                                     parent_key: &prop,
@@ -645,11 +645,7 @@ impl StateTreeMap {
                                 current_objects,
                             )?;
 
-                            for (id, composite) in diff_result.change.objects() {
-                                current_objects.insert(id, composite);
-                            }
-
-                            self.props.insert(prop.clone(), diff_result.value);
+                            self.props.insert(prop.clone(), value);
                         }
                     };
                     let other_changes = self.props.get(&prop).unwrap().apply_diff_iter(
@@ -748,7 +744,7 @@ impl StateTreeTable {
                             },
                             current_objects,
                         )?,
-                        None => MultiValue::new_from_diff(
+                        None => DiffApplicationResult::pure(MultiValue::new_from_diff(
                             opid.clone(),
                             DiffToApply {
                                 parent_object_id: &self.object_id,
@@ -756,7 +752,7 @@ impl StateTreeTable {
                                 diff,
                             },
                             current_objects,
-                        )?,
+                        )?),
                     };
                     node_diffapp = node_diffapp.try_and_then(|n| {
                         n.apply_diff_iter(
