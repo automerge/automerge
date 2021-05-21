@@ -28,17 +28,6 @@ impl<T> DiffApplicationResult<T> {
         }
     }
 
-    pub(crate) fn try_map<F, U, E>(self, f: F) -> Result<DiffApplicationResult<U>, E>
-    where
-        F: FnOnce(T) -> Result<U, E>,
-    {
-        let value = f(self.value)?;
-        Ok(DiffApplicationResult {
-            value,
-            change: self.change,
-        })
-    }
-
     pub(crate) fn and_then<F, U>(self, f: F) -> DiffApplicationResult<U>
     where
         F: FnOnce(T) -> DiffApplicationResult<U>,

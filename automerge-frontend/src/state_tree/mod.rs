@@ -519,7 +519,7 @@ impl StateTreeValue {
     where
         K: Into<amp::Key>,
     {
-        match diff.diff {
+        let diff_app = match diff.diff {
             amp::Diff::Value(v) => {
                 let value = match v {
                     amp::ScalarValue::Str(s) => Primitive::Str(s),
@@ -535,7 +535,7 @@ impl StateTreeValue {
                         return Err(error::InvalidPatch::ValueDiffContainedCursor)
                     }
                 };
-                Ok(DiffApplicationResult::pure(StateTreeValue::Leaf(value)))
+                DiffApplicationResult::pure(StateTreeValue::Leaf(value))
             }
             amp::Diff::Map(amp::MapDiff {
                 ref object_id,
@@ -551,8 +551,8 @@ impl StateTreeValue {
                     props: im_rc::HashMap::new(),
                 }),
             }
-            .apply_diff(diff, current_objects)
-            .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
+            .apply_diff(diff, current_objects)?
+            .map(|c| StateTreeValue::Link(c.object_id())),
             amp::Diff::Seq(amp::SeqDiff {
                 ref object_id,
                 obj_type,
@@ -567,12 +567,11 @@ impl StateTreeValue {
                     elements: DiffableSequence::new(),
                 }),
             }
-            .apply_diff(diff, current_objects)
-            .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
-            amp::Diff::Cursor(ref c) => {
-                Ok(DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())))
-            }
-        }
+            .apply_diff(diff, current_objects)?
+            .map(|c| StateTreeValue::Link(c.object_id())),
+            amp::Diff::Cursor(ref c) => DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())),
+        };
+        Ok(diff_app)
     }
 
     fn realise_value(&self, objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>) -> Value {

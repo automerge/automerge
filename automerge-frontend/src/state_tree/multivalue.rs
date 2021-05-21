@@ -38,12 +38,12 @@ impl MultiValue {
     where
         K: Into<amp::Key>,
     {
-        StateTreeValue::new_from_diff(diff, current_objects)?.try_map(move |value| {
-            Ok(MultiValue {
+        Ok(
+            StateTreeValue::new_from_diff(diff, current_objects)?.map(move |value| MultiValue {
                 winning_value: (opid, value),
                 conflicts: im_rc::HashMap::new(),
-            })
-        })
+            }),
+        )
     }
 
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
