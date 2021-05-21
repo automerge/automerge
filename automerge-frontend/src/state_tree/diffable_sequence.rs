@@ -176,7 +176,7 @@ where
     }
 
     pub fn apply_diff(
-        &self,
+        &mut self,
         object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
@@ -318,15 +318,13 @@ where
         self.underlying.len()
     }
 
-    pub(super) fn update(&self, index: usize, value: T) -> Self {
+    pub(super) fn update(&mut self, index: usize, value: T) {
         let elem_id = if let Some(existing) = self.underlying.get(index) {
             existing.0.clone()
         } else {
             value.default_opid()
         };
-        DiffableSequence {
-            underlying: Box::new(self.underlying.update(index, (elem_id, value))),
-        }
+        self.underlying.set(index, (elem_id, value));
     }
 
     pub(super) fn get(&self, index: usize) -> Option<&(OpId, T)> {

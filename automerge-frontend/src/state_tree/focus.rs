@@ -150,10 +150,8 @@ struct ListFocus {
 impl ListFocus {
     fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         let new_diffapp = diffapp.and_then(|v| {
-            let updated = StateTreeComposite::List(StateTreeList {
-                object_id: self.list.object_id.clone(),
-                elements: self.list.elements.update(self.index, v),
-            });
+            self.list.elements.update(self.index, v);
+            let updated = StateTreeComposite::List(self.list.clone());
             DiffApplicationResult::pure(
                 self.multivalue
                     .update_default(StateTreeValue::Link(updated.object_id())),

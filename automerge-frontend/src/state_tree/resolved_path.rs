@@ -499,7 +499,7 @@ impl ResolvedText {
         payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let index: usize = index.try_into().unwrap();
-        let (current_elemid, _) = self.value.elem_at(index)?;
+        let current_elemid = self.value.elem_at(index)?.0.clone();
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
         let updated = StateTreeComposite::Text(self.value.set(index, c)?);

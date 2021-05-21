@@ -837,15 +837,14 @@ impl StateTreeText {
     }
 
     fn set(
-        &self,
+        &mut self,
         index: usize,
         value: MultiGrapheme,
     ) -> Result<StateTreeText, error::MissingIndexError> {
         if self.graphemes.len() > index {
-            Ok(StateTreeText {
-                object_id: self.object_id.clone(),
-                graphemes: self.graphemes.update(index, value),
-            })
+            self.graphemes.update(index, value);
+
+            Ok(self.clone())
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -901,7 +900,7 @@ impl StateTreeText {
     }
 
     fn apply_diff(
-        &self,
+        &mut self,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeText>, error::InvalidPatch> {
@@ -956,15 +955,13 @@ impl StateTreeList {
     }
 
     fn set(
-        &self,
+        &mut self,
         index: usize,
         value: MultiValue,
     ) -> Result<StateTreeList, error::MissingIndexError> {
         if self.elements.len() > index {
-            Ok(StateTreeList {
-                object_id: self.object_id.clone(),
-                elements: self.elements.update(index, value),
-            })
+            self.elements.update(index, value);
+            Ok(self.clone())
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -974,7 +971,7 @@ impl StateTreeList {
     }
 
     fn insert(
-        &self,
+        &mut self,
         index: usize,
         value: MultiValue,
     ) -> Result<StateTreeList, error::MissingIndexError> {
@@ -982,14 +979,13 @@ impl StateTreeList {
     }
 
     fn insert_many<I>(
-        &self,
+        &mut self,
         index: usize,
         values: I,
     ) -> Result<StateTreeList, error::MissingIndexError>
     where
         I: IntoIterator<Item = MultiValue>,
     {
-        let mut new_elems = self.elements.clone();
         if index > self.elements.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -997,17 +993,17 @@ impl StateTreeList {
             })
         } else {
             for (i, value) in values.into_iter().enumerate() {
-                new_elems.insert(index + i, value);
+                self.elements.insert(index + i, value);
             }
             Ok(StateTreeList {
                 object_id: self.object_id.clone(),
-                elements: new_elems,
+                elements: self.elements.clone(),
             })
         }
     }
 
     fn apply_diff(
-        &self,
+        &mut self,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch> {
