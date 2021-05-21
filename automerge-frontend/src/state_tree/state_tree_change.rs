@@ -47,7 +47,9 @@ impl StateTreeChange {
 
     /// Include changes from `other` in this change
     pub(super) fn update_with(&mut self, other: StateTreeChange) {
-        self.objects = other.objects.union(self.objects.clone());
+        for (k, v) in other.objects {
+            self.objects.insert(k, v);
+        }
         self.new_cursors = other.new_cursors.union(self.new_cursors.clone());
     }
 
