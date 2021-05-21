@@ -616,7 +616,7 @@ impl StateTreeMap {
                     self.props.remove(&prop);
                 }
                 Some((opid, diff)) => {
-                    let node = match self.props.get_mut(&prop) {
+                    match self.props.get_mut(&prop) {
                         Some(n) => {
                             let diff_result = n.apply_diff(
                                 &opid,
@@ -632,8 +632,7 @@ impl StateTreeMap {
                                 current_objects.insert(id, composite);
                             }
 
-                            self.props.insert(prop.clone(), diff_result.value.clone());
-                            diff_result.value
+                            self.props.insert(prop.clone(), diff_result.value);
                         }
                         None => {
                             let diff_result = MultiValue::new_from_diff(
@@ -650,11 +649,10 @@ impl StateTreeMap {
                                 current_objects.insert(id, composite);
                             }
 
-                            self.props.insert(prop.clone(), diff_result.value.clone());
-                            diff_result.value
+                            self.props.insert(prop.clone(), diff_result.value);
                         }
                     };
-                    let other_changes = node.apply_diff_iter(
+                    let other_changes = self.props.get(&prop).unwrap().apply_diff_iter(
                         &mut diff_iter.map(|(oid, diff)| {
                             (
                                 Cow::Owned(oid),
