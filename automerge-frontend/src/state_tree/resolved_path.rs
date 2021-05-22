@@ -215,7 +215,7 @@ impl ResolvedRoot {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -294,7 +294,7 @@ impl ResolvedMap {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -355,7 +355,7 @@ impl ResolvedTable {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -567,7 +567,7 @@ impl ResolvedList {
     pub(crate) fn set(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
@@ -602,7 +602,7 @@ impl ResolvedList {
     pub(crate) fn insert(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let current_elemid = match index {
             0 => amp::ElementId::Head,
@@ -641,13 +641,13 @@ impl ResolvedList {
         })
     }
 
-    pub(crate) fn insert_many<'a, 'b, I>(
-        &'a mut self,
+    pub(crate) fn insert_many<I>(
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
     where
-        I: ExactSizeIterator<Item = &'b Value>,
+        I: ExactSizeIterator<Item = Value>,
     {
         let mut last_elemid = match index {
             0 => amp::ElementId::Head,
@@ -665,7 +665,7 @@ impl ResolvedList {
             let newvalue = MultiValue::new_from_value_2(NewValueRequest {
                 actor: payload.actor,
                 start_op: op_num,
-                value: &value,
+                value,
                 parent_obj: &self.value.object_id,
                 key: &last_elemid.clone().into(),
                 insert: true,

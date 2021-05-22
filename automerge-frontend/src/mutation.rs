@@ -111,7 +111,7 @@ impl MutationTracker {
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
     /// the root object
-    fn wrap_root_assignment(&mut self, value: &Value) -> Result<(), InvalidChangeRequest> {
+    fn wrap_root_assignment(&mut self, value: Value) -> Result<(), InvalidChangeRequest> {
         match value {
             Value::Map(kvs, amp::MapType::Map) => {
                 for (k, v) in kvs.iter() {
@@ -131,13 +131,9 @@ impl MutationTracker {
         self.ops.extend(change.new_ops);
     }
 
-    fn insert_helper<'a, 'b, 'c, I>(
-        &'a mut self,
-        path: &'b Path,
-        values: I,
-    ) -> Result<(), InvalidChangeRequest>
+    fn insert_helper<I>(&mut self, path: &Path, values: I) -> Result<(), InvalidChangeRequest>
     where
-        I: ExactSizeIterator<Item = &'c Value>,
+        I: ExactSizeIterator<Item = Value>,
     {
         if let Some(name) = path.name() {
             let index = match name {
@@ -169,7 +165,7 @@ impl MutationTracker {
                                         return Err(
                                             InvalidChangeRequest::InsertNonTextInTextObject {
                                                 path: path.clone(),
-                                                object: value.clone(),
+                                                object: Value::Primitive(Primitive::Str(s)),
                                             },
                                         );
                                     }
@@ -227,7 +223,7 @@ impl MutableDocument for MutationTracker {
     }
 
     fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest> {
-        match &change.operation {
+        match change.operation {
             LocalOperation::Set(value) => {
                 //TODO double resolving is ugly here
                 if let Some(Target::Counter(_)) =
@@ -240,7 +236,7 @@ impl MutableDocument for MutationTracker {
                         let payload = SetOrInsertPayload {
                             start_op: self.max_op + 1,
                             actor: &self.actor_id.clone(),
-                            value,
+                            value: value.clone(),
                         };
                         match (name, parent.target) {
                             (PathElement::Key(ref k), Target::Root(ref mut root_target)) => {
@@ -270,14 +266,14 @@ impl MutableDocument for MutationTracker {
                                         let payload = SetOrInsertPayload {
                                             start_op: self.max_op + 1,
                                             actor: &self.actor_id.clone(),
-                                            value: s.clone(),
+                                            value: s,
                                         };
                                         self.apply_state_change(text.set(*i, payload)?);
                                         Ok(())
                                     } else {
                                         Err(InvalidChangeRequest::InsertNonTextInTextObject {
                                             path: change.path.clone(),
-                                            object: value.clone(),
+                                            object: Value::Primitive(Primitive::Str(s)),
                                         })
                                     }
                                 }
@@ -373,7 +369,7 @@ impl MutableDocument for MutationTracker {
                     if let Some(pr) = self.state.resolve_path(&change.path) {
                         match pr.target {
                             Target::Counter(mut counter_target) => {
-                                self.apply_state_change(counter_target.increment(*by));
+                                self.apply_state_change(counter_target.increment(by));
                                 Ok(())
                             }
                             _ => Err(InvalidChangeRequest::IncrementForNonCounterObject {
@@ -455,7 +451,9 @@ impl MutableDocument for MutationTracker {
             LocalOperation::Insert(value) => {
                 self.insert_helper(&change.path, std::iter::once(value))
             }
-            LocalOperation::InsertMany(values) => self.insert_helper(&change.path, values.iter()),
+            LocalOperation::InsertMany(values) => {
+                self.insert_helper(&change.path, values.into_iter())
+            }
         }
     }
 }
