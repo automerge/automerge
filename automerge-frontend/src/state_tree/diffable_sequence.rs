@@ -241,6 +241,7 @@ where
                             object_id: object_id.clone(),
                         });
                     }
+                    let mut to_insert = im_rc::Vector::new();
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let value = T::construct(
@@ -252,11 +253,13 @@ where
                             },
                             current_objects,
                         )?;
-                        self.underlying.insert(
-                            index + i,
-                            (value.default_opid(), UpdatingSequenceElement::New(value)),
-                        );
+                        to_insert
+                            .push_back((value.default_opid(), UpdatingSequenceElement::New(value)));
                     }
+                    let (mut left, right) = self.underlying.clone().split_at(index);
+                    left.append(to_insert);
+                    left.append(right);
+                    self.underlying = Box::new(left);
                 }
                 amp::DiffEdit::Update {
                     index,
