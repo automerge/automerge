@@ -542,7 +542,7 @@ impl StateTreeValue {
                 ..
             }) => {
                 let object_id = object_id.clone();
-                match obj_type {
+                let mut value = match obj_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
                         props: im_rc::HashMap::new(),
@@ -551,8 +551,9 @@ impl StateTreeValue {
                         object_id: object_id.clone(),
                         props: im_rc::HashMap::new(),
                     }),
-                }
-                .apply_diff(diff, current_objects)?;
+                };
+                value.apply_diff(diff, current_objects)?;
+                current_objects.insert(object_id.clone(), value);
                 StateTreeValue::Link(object_id)
             }
             amp::Diff::Seq(amp::SeqDiff {
@@ -561,7 +562,7 @@ impl StateTreeValue {
                 ..
             }) => {
                 let object_id = object_id.clone();
-                match obj_type {
+                let mut value = match obj_type {
                     amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                         object_id: object_id.clone(),
                         graphemes: DiffableSequence::new(),
@@ -570,9 +571,9 @@ impl StateTreeValue {
                         object_id: object_id.clone(),
                         elements: DiffableSequence::new(),
                     }),
-                }
-                .apply_diff(diff, current_objects)?;
-
+                };
+                value.apply_diff(diff, current_objects)?;
+                current_objects.insert(object_id.clone(), value);
                 StateTreeValue::Link(object_id)
             }
             amp::Diff::Cursor(ref c) => StateTreeValue::Leaf(c.into()),
