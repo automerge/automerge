@@ -889,16 +889,13 @@ impl StateTreeText {
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<(), error::InvalidPatch> {
-        let new_graphemes = self
-            .graphemes
+        self.graphemes
             .apply_diff(&self.object_id, edits, current_objects)?;
 
-        let new_list = StateTreeText {
-            object_id: self.object_id.clone(),
-            graphemes: new_graphemes,
-        };
-
-        current_objects.insert(self.object_id.clone(), StateTreeComposite::Text(new_list));
+        current_objects.insert(
+            self.object_id.clone(),
+            StateTreeComposite::Text(self.clone()),
+        );
 
         Ok(())
     }
@@ -991,16 +988,13 @@ impl StateTreeList {
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<(), error::InvalidPatch> {
-        let new_elements = self
-            .elements
+        self.elements
             .apply_diff(&self.object_id, edits, current_objects)?;
 
-        let new_list = StateTreeList {
-            object_id: self.object_id.clone(),
-            elements: new_elements,
-        };
-
-        current_objects.insert(self.object_id.clone(), StateTreeComposite::List(new_list));
+        current_objects.insert(
+            self.object_id.clone(),
+            StateTreeComposite::List(self.clone()),
+        );
 
         Ok(())
     }

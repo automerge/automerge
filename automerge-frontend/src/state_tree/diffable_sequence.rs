@@ -182,7 +182,7 @@ where
         object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffableSequence<T>, InvalidPatch> {
+    ) -> Result<(), InvalidPatch> {
         for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -283,7 +283,7 @@ where
             };
         }
 
-        Ok(self.clone())
+        Ok(())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
