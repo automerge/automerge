@@ -113,7 +113,9 @@ impl StateTree {
         for (k, v) in diffapp.change.objects() {
             self.objects.insert(k, v);
         }
-        self.cursors = diffapp.change.new_cursors().union(self.cursors.clone());
+        let mut cursors = diffapp.change.new_cursors();
+        cursors.union(self.cursors.clone());
+        self.cursors = cursors;
         match self.objects.get_mut(&amp::ObjectId::Root) {
             Some(StateTreeComposite::Map(root_map)) => root_map.insert(k, diffapp.value),
             _ => panic!("Root map did not exist or was wrong type"),
@@ -165,7 +167,8 @@ impl StateTree {
     }
 
     fn apply(&mut self, change: StateTreeChange) -> StateTree {
-        let cursors = change.new_cursors().union(self.cursors.clone());
+        let mut cursors = change.new_cursors();
+        cursors.union(self.cursors.clone());
         let objects = change.objects().union(self.objects.clone());
         let mut new_tree = StateTree { objects, cursors };
         new_tree.update_cursors();
@@ -1081,24 +1084,27 @@ struct CursorState {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-struct Cursors(im_rc::HashMap<amp::ObjectId, Vec<CursorState>>);
+struct Cursors(HashMap<amp::ObjectId, Vec<CursorState>>);
 
 impl Cursors {
     fn new() -> Cursors {
-        Cursors(im_rc::HashMap::new())
+        Cursors(HashMap::new())
     }
 
     fn new_from(cursor: CursorState) -> Cursors {
-        Cursors(im_rc::hashmap! {
+        Cursors(maplit::hashmap! {
             cursor.referred_object_id.clone() => vec![cursor],
         })
     }
 
-    fn union(&self, other: Cursors) -> Cursors {
-        Cursors(self.0.clone().union_with(other.0, |mut c1, c2| {
-            c1.extend(c2);
-            c1
-        }))
+    fn union(&mut self, other: Cursors) {
+        for (k, v) in other.0 {
+            if let Some(ov) = self.0.get_mut(&k) {
+                ov.extend(v);
+            } else {
+                self.0.insert(k, v);
+            }
+        }
     }
 
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut CursorState> {

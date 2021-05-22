@@ -547,9 +547,10 @@ where
                 pred: Vec::new(),
                 insert: false,
             };
-            let next_value = context.create(value);
+            let mut next_value = context.create(value);
             current_max_op = next_value.max_op;
-            cursors = next_value.new_cursors.clone().union(cursors);
+            next_value.new_cursors.union(cursors);
+            cursors = next_value.new_cursors;
             for (k, v) in next_value.new_objects {
                 objects.insert(k, v);
             }
@@ -607,11 +608,12 @@ where
                 parent_obj: make_list_opid.clone(),
             };
             last_elemid = elem_opid.clone().into();
-            let next_value = context.create(value);
+            let mut next_value = context.create(value);
             current_max_op = next_value.max_op;
             result_elems.push(next_value.multivalue());
             objects = next_value.new_objects.union(objects.clone());
-            cursors = next_value.new_cursors.union(cursors);
+            next_value.new_cursors.union(cursors);
+            cursors = next_value.new_cursors;
             ops.extend(next_value.ops);
         }
         let list = StateTreeComposite::List(StateTreeList {

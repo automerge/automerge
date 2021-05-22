@@ -32,8 +32,9 @@ impl StateTreeChange {
         }
     }
 
-    pub(super) fn with_cursors(mut self, cursors: Cursors) -> StateTreeChange {
-        self.new_cursors = cursors.union(self.new_cursors);
+    pub(super) fn with_cursors(mut self, mut cursors: Cursors) -> StateTreeChange {
+        cursors.union(self.new_cursors);
+        self.new_cursors = cursors;
         self
     }
 
@@ -50,7 +51,9 @@ impl StateTreeChange {
         for (k, v) in other.objects {
             self.objects.insert(k, v);
         }
-        self.new_cursors = self.new_cursors.clone().union(other.new_cursors);
+        let mut cursors = self.new_cursors.clone();
+        cursors.union(other.new_cursors);
+        self.new_cursors = cursors;
         self
     }
 }
