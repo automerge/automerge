@@ -183,9 +183,6 @@ where
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<DiffableSequence<T>, InvalidPatch> {
-        let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
-            std::collections::HashSet::new();
-
         for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -213,7 +210,6 @@ where
                     op_id,
                     value,
                 } => {
-                    opids_in_this_diff.insert(op_id.clone());
                     let value = T::construct(
                         &op_id,
                         DiffToApply {
