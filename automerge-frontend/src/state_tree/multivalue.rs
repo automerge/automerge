@@ -118,8 +118,8 @@ impl MultiValue {
                     StateTreeValue::Link(obj_id) => {
                         current_objects
                             .get(obj_id)
-                            .cloned()
                             .expect("link to nonexistent object")
+                            .clone()
                             .apply_diff(subdiff, current_objects)?;
                         Ok(StateTreeValue::Link(obj_id.clone()))
                     }
