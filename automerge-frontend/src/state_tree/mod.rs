@@ -627,7 +627,7 @@ impl StateTreeMap {
                 Some((opid, diff)) => {
                     match self.props.get_mut(&prop) {
                         Some(n) => {
-                            let value = n.apply_diff(
+                            n.apply_diff(
                                 &opid,
                                 DiffToApply {
                                     parent_key: &prop,
@@ -636,8 +636,6 @@ impl StateTreeMap {
                                 },
                                 current_objects,
                             )?;
-
-                            self.props.insert(prop.clone(), value);
                         }
                         None => {
                             let value = MultiValue::new_from_diff(
@@ -653,21 +651,20 @@ impl StateTreeMap {
                             self.props.insert(prop.clone(), value);
                         }
                     };
-                    let other_changes = self.props.get(&prop).unwrap().apply_diff_iter(
+                    let object_id = self.object_id.clone();
+                    self.props.get_mut(&prop).unwrap().apply_diff_iter(
                         &mut diff_iter.map(|(oid, diff)| {
                             (
                                 Cow::Owned(oid),
                                 DiffToApply {
                                     parent_key: &prop,
-                                    parent_object_id: &self.object_id,
+                                    parent_object_id: &object_id,
                                     diff,
                                 },
                             )
                         }),
                         current_objects,
                     )?;
-
-                    self.props.insert(prop.clone(), other_changes);
                 }
             }
         }
@@ -735,15 +732,18 @@ impl StateTreeTable {
                 }
                 Some((opid, diff)) => {
                     let mut node_value = match self.props.get_mut(&prop) {
-                        Some(n) => n.apply_diff(
-                            &opid,
-                            DiffToApply {
-                                parent_object_id: &self.object_id,
-                                parent_key: &prop,
-                                diff,
-                            },
-                            current_objects,
-                        )?,
+                        Some(n) => {
+                            n.apply_diff(
+                                &opid,
+                                DiffToApply {
+                                    parent_object_id: &self.object_id,
+                                    parent_key: &prop,
+                                    diff,
+                                },
+                                current_objects,
+                            )?;
+                            n.clone()
+                        }
                         None => MultiValue::new_from_diff(
                             opid.clone(),
                             DiffToApply {
@@ -754,7 +754,7 @@ impl StateTreeTable {
                             current_objects,
                         )?,
                     };
-                    node_value = node_value.apply_diff_iter(
+                    node_value.apply_diff_iter(
                         &mut diff_iter.map(|(oid, diff)| {
                             (
                                 Cow::Owned(oid),

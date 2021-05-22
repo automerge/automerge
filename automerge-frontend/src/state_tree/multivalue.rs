@@ -89,7 +89,7 @@ impl MultiValue {
         opid: &amp::OpId,
         subdiff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<MultiValue, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -100,17 +100,16 @@ impl MultiValue {
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+        &'a mut self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<MultiValue, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (Cow<'b, amp::OpId>, DiffToApply<'c, K, amp::Diff>)>,
     {
-        let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let value = if let Some(existing_value) = updated.get(&opid) {
+            let value = if let Some(existing_value) = self.get(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
                         StateTreeValue::new_from_diff(subdiff, current_objects)
@@ -127,9 +126,9 @@ impl MultiValue {
             } else {
                 StateTreeValue::new_from_diff(subdiff, current_objects)
             }?;
-            updated = updated.update(&opid, &value)
+            self.update(opid.into_owned(), value)
         }
-        Ok(updated.result())
+        Ok(())
     }
 
     pub(super) fn default_statetree_value(&self) -> StateTreeValue {
@@ -154,18 +153,11 @@ impl MultiValue {
         }
     }
 
-    fn tree_values(&self) -> MultiValueTreeValues {
-        MultiValueTreeValues {
-            current: self.clone(),
-        }
-    }
-
     pub(super) fn realise_values(
         &self,
         objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> std::collections::HashMap<amp::OpId, Value> {
-        self.tree_values()
-            .iter()
+        self.iter()
             .map(|(opid, v)| (opid.clone(), v.realise_value(objects)))
             .collect()
     }
@@ -193,7 +185,7 @@ impl MultiValue {
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiValue) {
-        for (opid, value) in other.tree_values().iter() {
+        for (opid, value) in other.iter() {
             match opid.cmp(&self.winning_value.0) {
                 Ordering::Greater => {
                     let mut temp = (opid.clone(), value.clone());
@@ -207,45 +199,28 @@ impl MultiValue {
             }
         }
     }
-}
 
-#[derive(Clone)]
-struct MultiValueTreeValues {
-    current: MultiValue,
-}
-
-impl MultiValueTreeValues {
     fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
-        if opid == &self.current.winning_value.0 {
-            Some(&self.current.winning_value.1)
+        if opid == &self.winning_value.0 {
+            Some(&self.winning_value.1)
         } else {
-            self.current.conflicts.get(opid)
+            self.conflicts.get(opid)
+        }
+    }
+
+    fn update(&mut self, key: amp::OpId, value: StateTreeValue) {
+        if key >= self.winning_value.0 {
+            let old_key = std::mem::replace(&mut self.winning_value.0, key);
+            let old_value = std::mem::replace(&mut self.winning_value.1, value);
+            self.conflicts.insert(old_key, old_value);
+        } else {
+            self.conflicts.insert(key, value);
         }
     }
 
     fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
-        std::iter::once((
-            &(self.current.winning_value).0,
-            &(self.current.winning_value.1),
-        ))
-        .chain(self.current.conflicts.iter())
-    }
-
-    fn update(mut self, key: &amp::OpId, value: &StateTreeValue) -> MultiValueTreeValues {
-        if *key >= self.current.winning_value.0 {
-            self.current
-                .conflicts
-                .insert(self.current.winning_value.0, self.current.winning_value.1);
-            self.current.winning_value.0 = key.clone();
-            self.current.winning_value.1 = value.clone();
-        } else {
-            self.current.conflicts.insert(key.clone(), value.clone());
-        }
-        self
-    }
-
-    fn result(self) -> MultiValue {
-        self.current
+        std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
+            .chain(self.conflicts.iter())
     }
 }
 
@@ -332,7 +307,7 @@ impl MultiGrapheme {
         &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -342,7 +317,7 @@ impl MultiGrapheme {
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a mut self,
         diff: &mut I,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
@@ -368,7 +343,8 @@ impl MultiGrapheme {
                 }
             }
         }
-        Ok(updated.result())
+        *self = updated.result();
+        Ok(())
     }
 
     pub(super) fn default_grapheme(&self) -> String {
