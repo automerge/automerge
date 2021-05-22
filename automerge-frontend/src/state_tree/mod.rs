@@ -150,9 +150,6 @@ impl StateTree {
         match self.objects.get_mut(&amp::ObjectId::Root) {
             Some(StateTreeComposite::Map(root_map)) => {
                 root_map.remove(k);
-                let root = root_map.clone();
-                self.objects
-                    .insert(amp::ObjectId::Root, StateTreeComposite::Map(root));
             }
             _ => panic!("Root map did not exist or was wrong type"),
         }
