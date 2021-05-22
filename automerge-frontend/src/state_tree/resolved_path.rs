@@ -230,10 +230,8 @@ impl ResolvedRoot {
                 .map(|mv| vec![mv.default_opid()])
                 .unwrap_or_else(Vec::new),
         });
-        let new_state = self
-            .root
-            .update(key.to_string(), newvalue.diff_app_result())
-            .clone();
+        self.root
+            .update(key.to_string(), newvalue.diff_app_result());
         LocalOperationResult {
             new_state: self.root.clone(),
             new_ops: newvalue.ops(),
