@@ -23,7 +23,7 @@ pub(super) trait DiffableValue: Sized {
     where
         K: Into<amp::Key>;
     fn apply_diff_iter<'a, 'b, 'c, I, K: 'c>(
-        &'a self,
+        &'a mut self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<Self, InvalidPatch>
@@ -63,7 +63,7 @@ impl DiffableValue for MultiGrapheme {
     }
 
     fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+        &'a mut self,
         diff: &mut I,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<Self, InvalidPatch>
@@ -113,7 +113,7 @@ impl DiffableValue for MultiValue {
     }
 
     fn apply_diff_iter<'a, 'b, 'c, I, K: 'c>(
-        &'a self,
+        &'a mut self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     ) -> Result<Self, InvalidPatch>
@@ -121,7 +121,8 @@ impl DiffableValue for MultiValue {
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
     {
-        self.apply_diff_iter(
+        Self::apply_diff_iter(
+            self,
             &mut diff.map(|(o, d)| (Cow::Borrowed(o), d)),
             current_objects,
         )

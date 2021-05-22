@@ -329,7 +329,7 @@ impl MultiGrapheme {
     }
 
     pub(super) fn apply_diff<K>(
-        &self,
+        &mut self,
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
     ) -> Result<MultiGrapheme, error::InvalidPatch>
@@ -340,7 +340,7 @@ impl MultiGrapheme {
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+        &'a mut self,
         diff: &mut I,
     ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
