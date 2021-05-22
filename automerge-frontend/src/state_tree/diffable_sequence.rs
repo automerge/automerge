@@ -187,7 +187,6 @@ where
     ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
             std::collections::HashSet::new();
-        let mut old_conflicts: Vec<Option<T>> = vec![None; self.underlying.len()];
         let mut changes = StateTreeChange::empty();
 
         for edit in edits {
@@ -228,11 +227,9 @@ where
                         current_objects,
                     )?;
                     if (index as usize) == self.underlying.len() {
-                        old_conflicts.push(None);
                         self.underlying
                             .push_back((value.default_opid(), UpdatingSequenceElement::New(value)));
                     } else {
-                        old_conflicts.insert(index as usize, None);
                         self.underlying.insert(
                             index as usize,
                             (value.default_opid(), UpdatingSequenceElement::New(value)),
