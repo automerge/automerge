@@ -627,7 +627,7 @@ impl StateTreeMap {
                 Some((opid, diff)) => {
                     match self.props.get_mut(&prop) {
                         Some(n) => {
-                            let diff_result = n.apply_diff(
+                            let value = n.apply_diff(
                                 &opid,
                                 DiffToApply {
                                     parent_key: &prop,
@@ -637,11 +637,7 @@ impl StateTreeMap {
                                 current_objects,
                             )?;
 
-                            for (id, composite) in diff_result.change.objects() {
-                                current_objects.insert(id, composite);
-                            }
-
-                            self.props.insert(prop.clone(), diff_result.value);
+                            self.props.insert(prop.clone(), value);
                         }
                         None => {
                             let value = MultiValue::new_from_diff(
@@ -671,11 +667,7 @@ impl StateTreeMap {
                         current_objects,
                     )?;
 
-                    for (id, composite) in other_changes.change.objects() {
-                        current_objects.insert(id, composite);
-                    }
-
-                    self.props.insert(prop.clone(), other_changes.value);
+                    self.props.insert(prop.clone(), other_changes);
                 }
             }
         }
@@ -735,7 +727,6 @@ impl StateTreeTable {
     where
         K: Into<amp::Key>,
     {
-        let mut changes = StateTreeChange::empty();
         for (prop, prop_diff) in prop_diffs.diff {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -743,7 +734,7 @@ impl StateTreeTable {
                     self.props.remove(&prop);
                 }
                 Some((opid, diff)) => {
-                    let mut node_diffapp = match self.props.get_mut(&prop) {
+                    let mut node_value = match self.props.get_mut(&prop) {
                         Some(n) => n.apply_diff(
                             &opid,
                             DiffToApply {
@@ -753,7 +744,7 @@ impl StateTreeTable {
                             },
                             current_objects,
                         )?,
-                        None => DiffApplicationResult::pure(MultiValue::new_from_diff(
+                        None => MultiValue::new_from_diff(
                             opid.clone(),
                             DiffToApply {
                                 parent_object_id: &self.object_id,
@@ -761,25 +752,22 @@ impl StateTreeTable {
                                 diff,
                             },
                             current_objects,
-                        )?),
+                        )?,
                     };
-                    node_diffapp = node_diffapp.try_and_then(|n| {
-                        n.apply_diff_iter(
-                            &mut diff_iter.map(|(oid, diff)| {
-                                (
-                                    Cow::Owned(oid),
-                                    DiffToApply {
-                                        parent_object_id: &self.object_id,
-                                        parent_key: &prop,
-                                        diff,
-                                    },
-                                )
-                            }),
-                            current_objects,
-                        )
-                    })?;
-                    changes.update_with(node_diffapp.change);
-                    self.props.insert(prop.to_string(), node_diffapp.value);
+                    node_value = node_value.apply_diff_iter(
+                        &mut diff_iter.map(|(oid, diff)| {
+                            (
+                                Cow::Owned(oid),
+                                DiffToApply {
+                                    parent_object_id: &self.object_id,
+                                    parent_key: &prop,
+                                    diff,
+                                },
+                            )
+                        }),
+                        current_objects,
+                    )?;
+                    self.props.insert(prop.to_string(), node_value);
                 }
             }
         }
@@ -905,13 +893,9 @@ impl StateTreeText {
             .graphemes
             .apply_diff(&self.object_id, edits, current_objects)?;
 
-        for (k, v) in new_graphemes.change.objects() {
-            current_objects.insert(k, v);
-        }
-
         let new_list = StateTreeText {
             object_id: self.object_id.clone(),
-            graphemes: new_graphemes.value,
+            graphemes: new_graphemes,
         };
 
         current_objects.insert(self.object_id.clone(), StateTreeComposite::Text(new_list));
@@ -1011,13 +995,9 @@ impl StateTreeList {
             .elements
             .apply_diff(&self.object_id, edits, current_objects)?;
 
-        for (k, v) in new_elements.change.objects() {
-            current_objects.insert(k, v);
-        }
-
         let new_list = StateTreeList {
             object_id: self.object_id.clone(),
-            elements: new_elements.value,
+            elements: new_elements,
         };
 
         current_objects.insert(self.object_id.clone(), StateTreeComposite::List(new_list));

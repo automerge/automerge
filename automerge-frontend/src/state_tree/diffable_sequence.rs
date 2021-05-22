@@ -3,10 +3,7 @@ use std::borrow::Cow;
 use amp::OpId;
 use automerge_protocol as amp;
 
-use super::{
-    DiffApplicationResult, DiffToApply, MultiGrapheme, MultiValue, StateTreeChange,
-    StateTreeComposite,
-};
+use super::{DiffToApply, MultiGrapheme, MultiValue, StateTreeComposite};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized {
@@ -22,14 +19,14 @@ pub(super) trait DiffableValue: Sized {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>;
     fn apply_diff_iter<'a, 'b, 'c, I, K: 'c>(
         &'a self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>;
@@ -58,18 +55,18 @@ impl DiffableValue for MultiGrapheme {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
     {
-        MultiGrapheme::apply_diff(self, opid, diff).map(DiffApplicationResult::pure)
+        MultiGrapheme::apply_diff(self, opid, diff)
     }
 
     fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a self,
         diff: &mut I,
         _current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
@@ -108,7 +105,7 @@ impl DiffableValue for MultiValue {
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -119,7 +116,7 @@ impl DiffableValue for MultiValue {
         &'a self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    ) -> Result<Self, InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
@@ -184,10 +181,9 @@ where
         object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
+    ) -> Result<DiffableSequence<T>, InvalidPatch> {
         let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
             std::collections::HashSet::new();
-        let mut changes = StateTreeChange::empty();
 
         for edit in edits {
             match edit {
@@ -271,7 +267,7 @@ where
                     op_id,
                 } => {
                     if let Some((_id, elem)) = self.underlying.get_mut(index as usize) {
-                        let change = elem.apply_diff(
+                        elem.apply_diff(
                             &op_id,
                             DiffToApply {
                                 parent_object_id: object_id,
@@ -280,7 +276,6 @@ where
                             },
                             current_objects,
                         )?;
-                        changes.update_with(change);
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
                             index: index as usize,
@@ -291,11 +286,7 @@ where
             };
         }
 
-        for (k, v) in changes.objects() {
-            current_objects.insert(k, v);
-        }
-
-        Ok(DiffApplicationResult::pure(self.clone()))
+        Ok(self.clone())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -391,36 +382,34 @@ where
         opid: &amp::OpId,
         diff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<StateTreeChange, InvalidPatch>
+    ) -> Result<(), InvalidPatch>
     where
         K: Into<amp::Key>,
     {
         match self {
             UpdatingSequenceElement::Original(v) => {
-                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
+                let value = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
+                    T::construct(opid, diff, current_objects)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
-                    initial_update: updated.value,
+                    initial_update: value,
                     remaining_updates: Vec::new(),
                 };
-                Ok(updated.change)
             }
             UpdatingSequenceElement::New(v) => {
-                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
+                let value = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff, current_objects)?
                 } else {
-                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
+                    T::construct(opid, diff, current_objects)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
                     initial_update: v.clone(),
-                    remaining_updates: vec![updated.value],
+                    remaining_updates: vec![value],
                 };
-                Ok(updated.change)
             }
             UpdatingSequenceElement::Updated {
                 original,
@@ -428,7 +417,7 @@ where
                 remaining_updates,
             } => {
                 println!("UPdating already updated value");
-                let updated = if let Some(mut update) =
+                let value = if let Some(mut update) =
                     remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
                 {
                     update.apply_diff(opid, diff, current_objects)?
@@ -437,11 +426,11 @@ where
                 } else if let Some(mut original) = original.only_for_opid(opid) {
                     original.apply_diff(opid, diff, current_objects)?
                 } else {
-                    DiffApplicationResult::pure(T::construct(opid, diff, current_objects)?)
+                    T::construct(opid, diff, current_objects)?
                 };
-                remaining_updates.push(updated.value);
-                Ok(updated.change)
+                remaining_updates.push(value);
             }
         }
+        Ok(())
     }
 }

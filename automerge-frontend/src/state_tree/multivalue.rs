@@ -89,7 +89,7 @@ impl MultiValue {
         opid: &amp::OpId,
         subdiff: DiffToApply<K, amp::Diff>,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
+    ) -> Result<MultiValue, error::InvalidPatch>
     where
         K: Into<amp::Key>,
     {
@@ -103,7 +103,7 @@ impl MultiValue {
         &'a self,
         diff: &mut I,
         current_objects: &mut im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
+    ) -> Result<MultiValue, error::InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (Cow<'b, amp::OpId>, DiffToApply<'c, K, amp::Diff>)>,
@@ -129,7 +129,7 @@ impl MultiValue {
             }?;
             updated = updated.update(&opid, &value)
         }
-        Ok(DiffApplicationResult::pure(updated.result()))
+        Ok(updated.result())
     }
 
     pub(super) fn default_statetree_value(&self) -> StateTreeValue {
@@ -337,13 +337,12 @@ impl MultiGrapheme {
         K: Into<amp::Key>,
     {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
-            .map(|d| d.value)
     }
 
     pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
         &'a self,
         diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiGrapheme>, error::InvalidPatch>
+    ) -> Result<MultiGrapheme, error::InvalidPatch>
     where
         K: Into<amp::Key>,
         I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, amp::Diff>)>,
@@ -369,7 +368,7 @@ impl MultiGrapheme {
                 }
             }
         }
-        Ok(DiffApplicationResult::pure(updated.result()))
+        Ok(updated.result())
     }
 
     pub(super) fn default_grapheme(&self) -> String {
