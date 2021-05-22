@@ -235,7 +235,7 @@ impl ResolvedRoot {
             .update(key.to_string(), newvalue.diff_app_result())
             .clone();
         LocalOperationResult {
-            new_state,
+            new_state: self.root.clone(),
             new_ops: newvalue.ops(),
         }
     }

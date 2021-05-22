@@ -109,7 +109,7 @@ impl StateTree {
         }
     }
 
-    fn update(&mut self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> &mut StateTree {
+    fn update(&mut self, k: String, diffapp: DiffApplicationResult<MultiValue>) {
         for (k, v) in diffapp.change.objects() {
             self.objects.insert(k, v);
         }
@@ -121,7 +121,6 @@ impl StateTree {
             _ => panic!("Root map did not exist or was wrong type"),
         };
         self.update_cursors();
-        self
     }
 
     fn update_cursors(&mut self) {
@@ -166,13 +165,14 @@ impl StateTree {
         }
     }
 
-    fn apply(&mut self, change: StateTreeChange) -> StateTree {
+    fn apply(&mut self, change: StateTreeChange) {
         let mut cursors = change.new_cursors();
         cursors.union(self.cursors.clone());
-        let objects = change.objects().union(self.objects.clone());
-        let mut new_tree = StateTree { objects, cursors };
-        new_tree.update_cursors();
-        new_tree
+        self.cursors = cursors;
+        for (k, v) in change.objects() {
+            self.objects.insert(k, v);
+        }
+        self.update_cursors();
     }
 
     pub(crate) fn resolve_path(&self, path: &Path) -> Option<resolved_path::ResolvedPath> {

@@ -9,7 +9,10 @@ pub(crate) struct Focus(FocusInner);
 impl Focus {
     pub(super) fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         match &mut self.0 {
-            FocusInner::Root(root) => root.update(diffapp).clone(),
+            FocusInner::Root(root) => {
+                root.update(diffapp);
+                root.root.clone()
+            }
             FocusInner::Map(mapfocus) => mapfocus.update(diffapp),
             FocusInner::Table(tablefocus) => tablefocus.update(diffapp),
             FocusInner::List(listfocus) => listfocus.update(diffapp),
@@ -81,7 +84,7 @@ struct RootFocus {
 }
 
 impl RootFocus {
-    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> &mut StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) {
         self.root.update(self.key.clone(), diffapp)
     }
 }
@@ -107,7 +110,8 @@ impl MapFocus {
             )
             .with_changes(StateTreeChange::single(self.map.object_id.clone(), updated))
         });
-        self.state_tree.apply(new_diffapp.change)
+        self.state_tree.apply(new_diffapp.change);
+        self.state_tree.clone()
     }
 }
 
@@ -135,7 +139,8 @@ impl TableFocus {
                 updated,
             ))
         });
-        self.state_tree.apply(new_diffapp.change)
+        self.state_tree.apply(new_diffapp.change);
+        self.state_tree.clone()
     }
 }
 
@@ -161,6 +166,7 @@ impl ListFocus {
                 updated,
             ))
         });
-        self.state_tree.apply(new_diffapp.change)
+        self.state_tree.apply(new_diffapp.change);
+        self.state_tree.clone()
     }
 }
