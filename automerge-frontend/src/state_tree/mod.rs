@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, convert::TryInto};
 
-use amp::{MapDiff, ObjectId};
+use amp::ObjectId;
 use automerge_protocol as amp;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
@@ -64,17 +64,9 @@ impl StateTree {
     }
 
     pub fn apply_root_diff(&mut self, diff: amp::RootDiff) -> Result<(), error::InvalidPatch> {
-        self.apply_map_diff(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: amp::MapType::Map,
-            props: diff.props,
-        })
-    }
-
-    fn apply_map_diff(&mut self, diff: amp::MapDiff) -> Result<(), error::InvalidPatch> {
-        let object = self.objects.get_mut(&diff.object_id).cloned();
+        let mut object = self.objects.remove(&ObjectId::Root).unwrap();
         match object {
-            Some(StateTreeComposite::Map(mut m)) => {
+            StateTreeComposite::Map(ref mut m) => {
                 m.apply_diff(
                     DiffToApply {
                         parent_key: &"",
@@ -83,30 +75,11 @@ impl StateTree {
                     },
                     &mut self.objects,
                 )?;
-                Ok(())
             }
-            Some(o) => Err(error::InvalidPatch::MismatchingObjectType {
-                object_id: diff.object_id,
-                actual_type: Some(o.obj_type()),
-                patch_expected_type: Some(amp::ObjType::map()),
-            }),
-            None => {
-                let mut map = StateTreeMap {
-                    object_id: diff.object_id,
-                    props: im_rc::HashMap::new(),
-                };
-                map.apply_diff(
-                    DiffToApply {
-                        parent_key: &"",
-                        parent_object_id: &amp::ObjectId::Root,
-                        diff: diff.props,
-                    },
-                    &mut self.objects,
-                )?;
-
-                Ok(())
-            }
+            _ => panic!("found non map for root object"),
         }
+        self.objects.insert(ObjectId::Root, object);
+        Ok(())
     }
 
     fn update(&mut self, k: String, diffapp: DiffApplicationResult<MultiValue>) {
@@ -542,7 +515,7 @@ impl StateTreeValue {
                 ..
             }) => {
                 let object_id = object_id.clone();
-                let mut value = match obj_type {
+                match obj_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
                         props: im_rc::HashMap::new(),
@@ -551,9 +524,8 @@ impl StateTreeValue {
                         object_id: object_id.clone(),
                         props: im_rc::HashMap::new(),
                     }),
-                };
-                value.apply_diff(diff, current_objects)?;
-                current_objects.insert(object_id.clone(), value);
+                }
+                .apply_diff(diff, current_objects)?;
                 StateTreeValue::Link(object_id)
             }
             amp::Diff::Seq(amp::SeqDiff {
@@ -562,7 +534,7 @@ impl StateTreeValue {
                 ..
             }) => {
                 let object_id = object_id.clone();
-                let mut value = match obj_type {
+                match obj_type {
                     amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                         object_id: object_id.clone(),
                         graphemes: DiffableSequence::new(),
@@ -571,9 +543,9 @@ impl StateTreeValue {
                         object_id: object_id.clone(),
                         elements: DiffableSequence::new(),
                     }),
-                };
-                value.apply_diff(diff, current_objects)?;
-                current_objects.insert(object_id.clone(), value);
+                }
+                .apply_diff(diff, current_objects)?;
+
                 StateTreeValue::Link(object_id)
             }
             amp::Diff::Cursor(ref c) => StateTreeValue::Leaf(c.into()),
