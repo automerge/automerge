@@ -7,13 +7,15 @@ use core::fmt::Debug;
 use std::{
     convert::TryInto,
     ffi::{CStr, CString},
+    mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     os::raw::c_char,
     ptr,
+    borrow::Cow,
 };
 
 use automerge_backend::{AutomergeError, AutomergeErrorDiscriminants, Change};
-use automerge_protocol::{ChangeHash, UncompressedChange};
+use automerge_protocol::{ChangeHash, UncompressedChange, ActorId, error::InvalidActorId};
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 use thiserror::Error;
@@ -21,35 +23,48 @@ use thiserror::Error;
 /// All possible errors that a C caller could face
 #[derive(Error, Debug)]
 pub enum CError {
-    // TODO: The `NullBackend` error is not attached to anything
+    // TODO: The `NullBackend` and error is not attached to anything
     // (since normally we attach errors to a specific backend)
     // We could solve this by using a technique like this:
     // https://michael-f-bryan.github.io/rust-ffi-guide/errors/return_types.html
     // to create a `get_last_error_message` function, but the benefit seems very low
     // b/c the NullBackend error message is always the same
-    #[error("Invalid pointer to backend")]
+    #[error("Invalid pointer to Backend")]
     NullBackend,
+    #[error("Invalid pointer to Buffers")]
+    NullBuffers,
+    #[error("Invalid pointer to CBuffers")]
+    NullCBuffers,
     #[error(transparent)]
     Json(#[from] serde_json::error::Error),
     #[error(transparent)]
     FromUtf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
+    #[error(transparent)]
+    InvalidActorid(#[from] InvalidActorId),
 }
 
 impl CError {
     fn error_code(&self) -> isize {
         // 0 is reserved for "success"
+        // TODO: This -1 code might be useless since we wipe the *actual* error code
+        // and replace it with an uninformative`-1` that only tells us we couldn't
+        // format the error message.
         // -1 is reserved for "we had an error & we could't convert it to a CString"
         const BASE: isize = 2;
         let code = match self {
             CError::NullBackend => BASE,
-            CError::Json(_) => BASE + 1,
-            CError::FromUtf8(_) => BASE + 2,
+            CError::NullBuffers => BASE + 1,
+            CError::NullCBuffers => BASE + 2,
+            CError::Json(_) => BASE + 3,
+            CError::FromUtf8(_) => BASE + 4,
+            CError::InvalidActorid(_) => BASE + 5,
             CError::Automerge(e) => {
-                let kind = AutomergeErrorDiscriminants::from(e);
-                (BASE + 3) + (kind as isize)
-            }
+                //let kind = AutomergeErrorDiscriminants::from(e);
+                //(BASE + 6) + (kind as isize)
+                BASE + 6
+            },
         };
         -code
     }
@@ -67,49 +82,45 @@ pub struct Backend {
 
 struct BinaryResults(Result<Vec<Vec<u8>>, AutomergeError>);
 
-/// A byte buffer
-#[repr(C)]
-pub struct Buffer {
-    /// A pointer to the bytes
-    data: *mut u8,
-    /// The number of bytes
-    data_len: usize,
-}
-
 /// A sequence of byte buffers that are contiguous in memory
+/// The C caller allocates one of these with `create_buffs`
+/// and passes it into each API call. This prevents allocating memory
+/// on each call. The struct fields are just the constituent fields in a Vec
+/// This is used for returning data to C.
 //  This struct is accidentally an SoA layout, so it should be more performant!
 #[repr(C)]
 pub struct Buffers {
     /// A pointer to the bytes
     data: *mut u8,
     /// The total number of bytes across all buffers
+    // TODO: This might not be needed b/c it can be calculated from `lens`
     data_len: usize,
+    /// The total allocated memory `data` points to
+    /// This is needed so Rust can free `data`
+    data_cap: usize,
     /// The length (in bytes) of each buffer
-    buf_lens: *mut usize,
+    lens: *mut usize,
     /// The number of buffers
-    bufs: usize,
+    lens_len: usize,
+    /// The total allocated memory `buf_lens` points to
+    /// This is needed so Rust can free `buf_lens`
+    lens_cap: usize,
 }
 
-impl Deref for Backend {
-    type Target = automerge_backend::Backend;
-
-    fn deref(&self) -> &Self::Target {
-        &self.handle
-    }
-}
-
-unsafe fn from_buf_raw<T>(ptr: *const T, elts: usize) -> Vec<T> {
-    let mut dst = Vec::with_capacity(elts);
-    dst.set_len(elts);
-    ptr::copy(ptr, dst.as_mut_ptr(), elts);
-    dst
-}
-
-fn err<T, V: Debug>(result: Result<T, V>) -> Result<T, String> {
-    match result {
-        Ok(val) => Ok(val),
-        Err(err) => Err(format!("{:?}", err)),
-    }
+/// Similar to `Buffers`, except this struct
+/// should be allocated / freed by C.
+/// Used to pass an the C-equivalent of `Vec<Vec<u8>>` to Rust
+// We don't need the `*_cap` fields b/c the Rust code
+// doesn't need to free the referenced memory
+#[repr(C)]
+pub struct CBuffers {
+    data: *mut u8,
+    // TODO: This field isn't strictly needed since it can
+    // just be calculated from `lens`. But it seems useful to
+    // include since it will probably be known by the caller anyways?
+    data_len: usize,
+    lens: *mut usize,
+    lens_len: usize,
 }
 
 impl Backend {
@@ -124,45 +135,10 @@ impl Backend {
         }
     }
 
-    //fn handle_result(&mut self, result: Result<isize, String>) -> isize {
-    //    match result {
-    //        Ok(len) => {
-    //            self.error = None;
-    //            len
-    //        }
-    //        Err(err) => self.handle_error(err),
-    //    }
-    //}
-
-    //fn generate_json<T: Serialize>(&mut self, val: Result<T, AutomergeError>) -> isize {
-    //    let result = err(val)
-    //        .and_then(|val| err(serde_json::to_string(&val)))
-    //        .map(|text| {
-    //            let len = (text.len() + 1) as isize;
-    //            self.text = Some(text);
-    //            len
-    //        });
-    //    self.handle_result(result)
-    //}
-
-    //fn handle_binary(&mut self, b: Result<Vec<u8>, AutomergeError>) -> isize {
-    //    let result = err(b).map(|bin| {
-    //        let len = bin.len();
-    //        self.binary = vec![bin];
-    //        len as isize
-    //    });
-    //    self.handle_result(result)
-    //}
-
-    //fn handle_ok(&mut self) -> isize {
-    //    self.error = None;
-    //    0
-    //}
-
     fn handle_error(&mut self, err: CError) -> isize {
         let c_error = match CString::new(format!("{:?}", err)) {
             Ok(e) => e,
-            Err(e) => {
+            Err(_) => {
                 return -1;
             }
         };
@@ -170,20 +146,24 @@ impl Backend {
         err.error_code()
     }
 
-    //fn handle_binaries(&mut self, b: BinaryResults) -> isize {
-    //    let result = err(b.0).map(|bin| {
-    //        self.error = None;
-    //        if !bin.is_empty() {
-    //            let len = bin[0].len();
-    //            self.binary = bin;
-    //            self.binary.reverse();
-    //            len as isize
-    //        } else {
-    //            0
-    //        }
-    //    });
-    //    self.handle_result(result)
-    //}
+    unsafe fn write_json<T: serde::ser::Serialize>(&mut self, val: &T, buffers: &mut Buffers) -> isize {
+        let bytes = match serde_json::to_vec(val) {
+            Ok(v) => v,
+            Err(e) => {
+                return self.handle_error(CError::Json(e));
+            }
+        };
+        write_to_buffs(vec![&bytes], buffers);
+        0
+    }
+}
+
+impl Deref for Backend {
+    type Target = automerge_backend::Backend;
+
+    fn deref(&self) -> &Self::Target {
+        &self.handle
+    }
 }
 
 impl DerefMut for Backend {
@@ -197,39 +177,6 @@ impl From<Backend> for *mut Backend {
         Box::into_raw(Box::new(b))
     }
 }
-
-impl From<Vec<&Change>> for BinaryResults {
-    fn from(changes: Vec<&Change>) -> Self {
-        BinaryResults(Ok(changes.iter().map(|b| b.raw_bytes().into()).collect()))
-    }
-}
-
-impl From<Result<Vec<&Change>, AutomergeError>> for BinaryResults {
-    fn from(result: Result<Vec<&Change>, AutomergeError>) -> Self {
-        BinaryResults(result.map(|changes| changes.iter().map(|b| b.raw_bytes().into()).collect()))
-    }
-}
-
-impl From<Vec<ChangeHash>> for BinaryResults {
-    fn from(heads: Vec<ChangeHash>) -> Self {
-        BinaryResults(Ok(heads.iter().map(|head| head.0.to_vec()).collect()))
-    }
-}
-
-/*
-  init => automerge_init
-  clone => automerge_clone
-  free => automerge_free
-  save => automerge_save
-  load => automerge_load
-  applyLocalChange => automerge_apply_local_change
-  getPatch => automerge_get_patch
-  applyChanges => automerge_apply_changes
-  loadChanges => automerge_load_changes
-  getChangesForActor => automerge_get_changes_for_actor
-  getChanges => automerge_get_changes
-  getMissingDeps => automerge_get_missing_deps
-*/
 
 #[no_mangle]
 pub extern "C" fn automerge_init() -> *mut Backend {
@@ -260,7 +207,30 @@ macro_rules! get_backend_mut {
     }};
 }
 
+/// Turn a `*mut Buffers` into a `&mut Buffers`
+macro_rules! get_buffs_mut {
+    ($buffs:expr) => {{
+        let buffs = $buffs.as_mut();
+        match buffs {
+            Some(b) => b,
+            None => return CError::NullBuffers.error_code(),
+        }
+    }};
+}
+
+/// Turn a `*const CBuffers` into a `&CBuffers`
+macro_rules! get_cbuffs {
+    ($backend:expr, $buffs:expr) => {{
+        let buffs = $buffs.as_ref();
+        match buffs {
+            Some(b) => b,
+            None => return $backend.handle_error(CError::NullCBuffers),
+        }
+    }};
+}
+
 /// Try to turn a ptr + len into a utf-8 String,
+/// and deserialize it
 /// return an error code if failure
 macro_rules! from_json {
     ($backend:expr, $ptr:expr, $len:expr) => {{
@@ -268,11 +238,24 @@ macro_rules! from_json {
         let s = String::from_utf8(slice.to_vec());
         let s = match s {
             Ok(s) => s,
-            Err(e) => return $backend.handle_error(e.into()),
+            Err(e) => return $backend.handle_error(CError::FromUtf8(e)),
         };
         match serde_json::from_str(&s) {
             Ok(v) => v,
-            Err(e) => return $backend.handle_error(e.into()),
+            Err(e) => return $backend.handle_error(CError::Json(e)),
+        }
+    }};
+}
+
+/// Try to turn a ptr + len into a utf-8 String,
+/// and deserialize it
+/// return an error code if failure
+macro_rules! from_json_2 {
+    ($backend:expr, $cstr:expr) => {{
+        let s = from_cstr($cstr);
+        match serde_json::from_str(&s) {
+            Ok(v) => v,
+            Err(e) => return $backend.handle_error(CError::Json(e)),
         }
     }};
 }
@@ -283,212 +266,261 @@ macro_rules! call_automerge {
     ($backend:expr, $expr:expr) => {
         match $expr {
             Ok(x) => x,
-            Err(e) => return $backend.handle_error(e.into()),
+            // We have to do `AutomergeError::from` to convert a `DecodeError` to a
+            // `AutomergeError`
+            Err(e) => return $backend.handle_error(CError::Automerge(AutomergeError::from(e))),
         }
     };
 }
 
-/// Allocate a buffer struct on the heap
-unsafe fn create_buf(buf: *mut *mut Buffer, bytes: &mut Box<[u8]>) {
-    // https://users.rust-lang.org/t/understanding-rust-memory-allocation-api/60061
-    let buffer = Box::new(Buffer {
-        data_len: bytes.len(),
-        data: bytes.as_mut_ptr(),
-    });
-    // TODO: Is this forget necessary if we do `into_raw`?
-    // (My guess is, yes, the `Buffer` is managed by the box, the data the `Buffer`
-    // points to is not so we have to manually forget it)
-    std::mem::forget(bytes);
-    let ptr = Box::into_raw(buffer);
-    // By now, we are now responsible for freeing `Buffer` (& the memory it points to)
-    *buf = ptr;
+/// Get a `Vec<Change>` from a `*const CBuffers`
+/// Using a macro instead of a method so we can return if there is an error
+macro_rules! get_changes {
+    ($backend:expr, $cbuffs:expr) => {{
+        let cbuffs = get_cbuffs!($backend, $cbuffs);
+        let lens = std::slice::from_raw_parts(cbuffs.lens, cbuffs.lens_len);
+        let data = std::slice::from_raw_parts(cbuffs.data, cbuffs.data_len);
+        let mut changes = vec![];
+        let mut cur_pos = 0;
+        for len in lens {
+            let buff = data[cur_pos..cur_pos + len].to_vec();
+            let change = call_automerge!($backend, Change::from_bytes(buff));
+            changes.push(change);
+            cur_pos += len;
+        }
+        changes
+    }};
 }
 
-/// Free a buffer struct (which is on the heap)
-/// and the memory it points to (which is also on the heap)
-unsafe fn free_buf(buf: *mut Buffer) {
-    // TODO: null ptr check?
-    let slice = std::slice::from_raw_parts_mut((*buf).data, (*buf).data_len);
-    let mut ptr = slice.as_mut_ptr();
-    // The Boxes are dropped at the end of this function,
-    // so the underlying memory is also dropped
-    Box::from_raw(ptr);
-    Box::from_raw(buf);
+macro_rules! get_data_vec {
+    ($buffs:expr) => {{
+        let v: Vec<u8> = Vec::from_raw_parts($buffs.data, $buffs.data_len, $buffs.data_cap);
+        v
+    }};
+}
+
+macro_rules! get_buff_lens_vec {
+    ($buffs:expr) => {{
+        let v: Vec<usize> = Vec::from_raw_parts($buffs.lens, $buffs.lens_len, $buffs.lens_cap);
+        v
+    }};
+}
+
+/// Create a `Buffers` struct to store return values
+#[no_mangle]
+pub unsafe extern "C" fn automerge_create_buffs() -> Buffers {
+    // Don't drop the vectors so their underlying buffers aren't de-allocated
+    let mut data = ManuallyDrop::new(Vec::new());
+    let mut lens = ManuallyDrop::new(Vec::new());
+    let buffers = Buffers {
+        data: data.as_mut_ptr(),
+        data_len: data.len(),
+        data_cap: data.capacity(),
+        lens: lens.as_mut_ptr(),
+        lens_len: lens.len(),
+        lens_cap: lens.capacity(),
+    };
+    buffers
+}
+
+/// Free the memory a `Buffers` struct points to
+#[no_mangle]
+pub unsafe extern "C" fn automerge_free_buffs(buffs: *mut Buffers) -> isize {
+    let buffs = get_buffs_mut!(buffs);
+    // We construct the vecs & drop them at the end of this function
+    get_data_vec!(buffs);
+    get_buff_lens_vec!(buffs);
+    0
 }
 
 /// # Safety
-/// This should be called with a valid backend pointer
-/// and valid out pointers
+/// This function should not fail insofar the fields of `buffs` are valid
+/// Write the contents of a `Vec<&[u8]>` to the `data` field of a `Buffers` struct
+/// Write the lengths of each `&[u8]` to the `lens` field of a `Buffers` struct
+/// Re-allocate the the buffers `data` and `lens` point to if they aren't large enough
+/// and update the `*_cap` fields as appropriate. Always update the `*_len` fields.
+unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
+    // This could probably be a bit faster if we used low-level operations
+    // like `copy_nonoverlapping` but let's not write pseudo-C!
+
+    let total_buffs: usize = bytes.len();
+    let mut buf_lens: ManuallyDrop<Vec<usize>> = ManuallyDrop::new(if total_buffs > buffs.lens_cap {
+        // Drop the old `Vec` so its underlying memory is freed
+        get_buff_lens_vec!(buffs);
+        // Create a new vec that can store `total_buffs` worth of usizes
+        let mut v = Vec::with_capacity(total_buffs);
+        buffs.lens_cap = total_buffs;
+        buffs.lens = v.as_mut_ptr();
+        v
+    } else {
+        get_buff_lens_vec!(buffs)
+    });
+
+    let total_bytes: usize = bytes.iter().map(|b| b.len()).sum();
+    let mut data: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(if total_bytes > buffs.data_cap {
+        // Drop the old `Vec` so its underlying memory is freed
+        get_data_vec!(buffs);
+        // Create a new vec that can store `total_bytes` worth of bytes
+        let mut v = Vec::with_capacity(total_bytes);
+        buffs.data_cap = total_bytes;
+        buffs.data = v.as_mut_ptr();
+        v
+    } else {
+        get_data_vec!(buffs)
+    });
+
+    let mut start = 0;
+    // Write `bytes` to `data` & update `buf_lens`
+    for (idx, buff) in bytes.iter().enumerate() {
+        data[start..start + buff.len()].copy_from_slice(buff);
+        buf_lens[idx] = buff.len();
+        start += buff.len();
+    }
+
+    buffs.data_len = total_bytes;
+    buffs.lens_len = total_buffs;
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+/// and a valid pointer to a `Buffers``
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_local_change(
     backend: *mut Backend,
-    // More efficient if caller passes in length
-    // (no need to call `strlen`)
     request: *const u8,
     len: usize,
-
-    // Out params
-    change_buf: *mut *mut Buffer,
-    json_buf: *mut *mut Buffer,
+    buffs: *mut Buffers,
 ) -> isize {
     let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
     let request: UncompressedChange = from_json!(backend, request, len);
     let (patch, mut change) = call_automerge!(backend, backend.apply_local_change(request));
-
-    let bytes = change.raw_bytes();
-    let mut buf: Vec<u8> = Vec::with_capacity(bytes.len());
-    buf.extend(bytes);
-    println!("{:?}", buf);
-    //let ptr = bytes.as_mut_ptr();
-
-    0
-    //let v = vec![];
-    //v.into_boxed_slice();
-    //let x = Box::new(change.raw_bytes());
-    //create_buf(change_buf, change.raw_bytes())
+    write_to_buffs(vec![change.raw_bytes()], buffs);
+    return 0;
 }
 
-///// # Safety
-///// This must me called with a valid backend pointer
-///// request must be a valid pointer pointing to a cstring
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_apply_local_change(
-//    backend: *mut Backend,
-//    // More efficient if caller passes in length
-//    // (no need to call `strlen`)
-//    request: *const u8,
-//    len: usize,
-//
-//    // Out params
-//    change_buf: *mut *mut Buffer,
-//    json_buf: *mut *mut Buffer,
-//) -> isize {
-//    let backend = get_backend_mut!(backend);
-//    let request: UncompressedChange = from_json!(backend, request, len);
-//    let (patch, change) = call_automerge!(backend, backend.apply_local_change(request));
-//
-//    let change_bytes = change.raw_bytes();
-//
-//    match request {
-//        Ok(request) => {
-//            let result = (*backend).apply_local_change(request);
-//            match result {
-//                Ok((patch, change)) => {
-//                    (*backend).last_local_change = Some(change);
-//                    (*backend).generate_json(Ok(patch))
-//                }
-//                Err(err) => (*backend).handle_error(err),
-//            }
-//        }
-//        Err(err) => (*backend).handle_error(err),
-//    }
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-///// change must point to a valid memory location with at least len bytes
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_write_change(
-//    backend: *mut Backend,
-//    len: usize,
-//    change: *const u8,
-//) {
-//    let bytes = from_buf_raw(change, len);
-//    if let Some(ref mut queue) = (*backend).queue {
-//        queue.push(bytes)
-//    } else {
-//        (*backend).queue = Some(vec![bytes])
-//    }
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize {
-//    match (*backend).queue.take() {
-//        Some(changes) => {
-//            let changes = changes
-//                .iter()
-//                .map(|c| Change::from_bytes(c.to_vec()).unwrap())
-//                .collect();
-//            let patch = (*backend).apply_changes(changes);
-//            (*backend).generate_json(patch)
-//        }
-//        None => (*backend).handle_error("no changes queued"),
-//    }
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend) -> isize {
-//    let patch = (*backend).get_patch();
-//    (*backend).generate_json(patch)
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize {
-//    if let Some(changes) = (*backend).queue.take() {
-//        let changes = changes
-//            .iter()
-//            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
-//            .collect();
-//        if (*backend).load_changes(changes).is_ok() {
-//            return (*backend).handle_ok();
-//        }
-//    }
-//    (*backend).handle_error("no changes queued")
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_clone(backend: *mut Backend) -> *mut Backend {
-//    (*backend).clone().into()
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_save(backend: *mut Backend) -> isize {
-//    let data = (*backend).save();
-//    (*backend).handle_binary(data)
-//}
-//
-///// # Safety
-///// data pointer must be a valid pointer to len bytes
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_load(len: usize, data: *const u8) -> *mut Backend {
-//    let bytes = from_buf_raw(data, len);
-//    let result = automerge_backend::Backend::load(bytes);
-//    if let Ok(backend) = result {
-//        Backend::init(backend).into()
-//    } else {
-//        set_errno(Errno(1));
-//        ptr::null_mut()
-//    }
-//}
-//
-///// # Safety
-///// This must me called with a valid backend pointer
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_get_changes_for_actor(
-//    backend: *mut Backend,
-//    actor: *const c_char,
-//) -> isize {
-//    let actor: &CStr = CStr::from_ptr(actor);
-//    let actor = actor.to_string_lossy();
-//    match actor.as_ref().try_into() {
-//        Ok(actor) => {
-//            let changes = (*backend).get_changes_for_actor_id(&actor);
-//            (*backend).handle_binaries(changes.into())
-//        }
-//        Err(err) => (*backend).handle_error(err),
-//    }
-//}
-//
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+/// `CBuffers` should be non-null & have valid fields.
+#[no_mangle]
+pub unsafe extern "C" fn automerge_apply_changes(
+    backend: *mut Backend,
+    buffs: *mut Buffers,
+    cbuffs: *const CBuffers,
+) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let changes = get_changes!(backend, cbuffs);
+    let patch = call_automerge!(backend, backend.apply_changes(changes));
+    backend.write_json(&patch, buffs)
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+/// and a valid pointer to a `Buffers``
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend, buffs: *mut Buffers) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let patch = call_automerge!(backend, backend.get_patch());
+    backend.write_json(&patch, buffs)
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+/// and a valid pointers to a `Buffers` & `CBuffers`
+#[no_mangle]
+pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend, cbuffs: *const CBuffers, buffs: *mut Buffers) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let changes = get_changes!(backend, cbuffs);
+    call_automerge!(backend, backend.load_changes(changes));
+    0
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+#[no_mangle]
+pub unsafe extern "C" fn automerge_save(backend: *mut Backend, buffs: *mut Buffers) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let bin = call_automerge!(backend, backend.save());
+    write_to_buffs(vec![&bin], buffs);
+    0
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `Backend`
+pub unsafe extern "C" fn automerge_clone(backend: *mut Backend, new: *mut *mut Backend) -> isize {
+    let backend = get_backend_mut!(backend);
+    (*new) = backend.clone().into();
+    0
+}
+
+/// # Safety
+/// This must be called with a valid pointer to len bytes
+#[no_mangle]
+pub unsafe extern "C" fn automerge_load(data: *const u8, len: usize) -> *mut Backend {
+    let bytes = std::slice::from_raw_parts(data, len);
+    let result = automerge_backend::Backend::load(bytes.to_vec());
+    match result {
+        Ok(b) => {
+            Backend::init(b).into()
+        },
+        Err(e) => {
+            set_errno(Errno(1));
+            ptr::null_mut()
+        }
+    }
+}
+
+/// # Safety
+/// Lossily converts a C String into a Cow<...>
+// TODO: Should we do UTF-8 check?
+unsafe fn from_cstr<'a>(s: *const c_char) -> Cow<'a, str> {
+    let s: & 'a CStr = CStr::from_ptr(s);
+    s.to_string_lossy()
+}
+
+/// # Safety
+/// This must be called with a valid pointer to a `Backend`
+/// and a valid C String
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_changes_for_actor(backend: *mut Backend, actor: *const c_char, buffs: *mut Buffers) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let actor = from_cstr(actor);
+    let actor_id: ActorId = match actor.as_ref().try_into() {
+        Ok(id) => id,
+        Err(e) => return backend.handle_error(CError::InvalidActorid(e)),
+    };
+    let changes = call_automerge!(backend, backend.get_changes_for_actor_id(&actor_id));
+    let bytes: Vec<_> = changes.into_iter().map(|c| c.raw_bytes()).collect();
+    write_to_buffs(bytes, buffs);
+    0
+}
+
+/// # Safety
+/// This must me called with a valid pointer to a change and the correct len
+#[no_mangle]
+pub unsafe extern "C" fn automerge_decode_change(backend: *mut Backend, buffs: *mut Buffers, change: *const u8, len: usize) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buffs = get_buffs_mut!(buffs);
+    let bytes = std::slice::from_raw_parts(change, len);
+    let change = call_automerge!(backend, Change::from_bytes(bytes.to_vec()));
+    backend.write_json(&change.decode(), buffs);
+    0
+}
+
+/// # Safety
+/// This must me called with a valid pointer to a JSON string of a change
+#[no_mangle]
+pub unsafe extern "C" fn automerge_encode_change(backend: *mut Backend, change: *const c_char) -> isize {
+    let backend = get_backend_mut!(backend);
+    let change: UncompressedChange = from_json_2!(backend, change);
+    0
+}
+
 ///// # Safety
 ///// This must me called with a valid pointer to a change and the correct len
 //#[no_mangle]
@@ -592,43 +624,6 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 //        .unwrap_or_else(|| ptr::null_mut())
 //}
 //
-///// # Safety
-///// This must me called with a valid backend pointer
-///// and buffer must be a valid pointer of at least the number of bytes returned by the previous
-///// call that generated a json result
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_read_json(backend: *mut Backend, buffer: *mut c_char) -> isize {
-//    if let Some(text) = &(*backend).text {
-//        let len = text.len();
-//        buffer.copy_from(text.as_ptr().cast(), len);
-//        (*buffer.add(len)) = 0; // null terminate
-//        (*backend).text = None;
-//        0
-//    } else {
-//        (*buffer) = 0;
-//        (*backend).handle_error("no json to be read")
-//    }
-//}
-//
-///// # Safety
-/////
-///// This must me called with a valid backend pointer
-///// the buffer must be a valid pointer pointing to at least as much space as was
-///// required by the previous binary result call
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *mut u8) -> isize {
-//    if let Some(bin) = (*backend).binary.pop() {
-//        let len = bin.len();
-//        buffer.copy_from(bin.as_ptr(), len);
-//        if let Some(next) = (*backend).binary.last() {
-//            next.len() as isize
-//        } else {
-//            0
-//        }
-//    } else {
-//        (*backend).handle_error("no binary to be read")
-//    }
-//}
 //
 //#[derive(Debug)]
 //pub struct SyncState {
