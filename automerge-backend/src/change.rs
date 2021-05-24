@@ -419,7 +419,13 @@ fn decode_hashes(
     for _ in 0..num_hashes {
         let hash = cursor.start..(cursor.start + HASH_BYTES);
         *cursor = hash.end..cursor.end;
-        hashes.push(bytes[hash].try_into().map_err(InvalidChangeError::from)?);
+        hashes.push(
+            bytes
+                .get(hash)
+                .ok_or(decoding::Error::NotEnoughBytes)?
+                .try_into()
+                .map_err(InvalidChangeError::from)?,
+        );
     }
     Ok(hashes)
 }
@@ -435,7 +441,11 @@ fn decode_actors(
         actors.push(actor)
     }
     for _ in 0..num_actors {
-        actors.push(amp::ActorId::from(&bytes[slice_bytes(bytes, cursor)?]));
+        actors.push(amp::ActorId::from(
+            bytes
+                .get(slice_bytes(bytes, cursor)?)
+                .ok_or(decoding::Error::NotEnoughBytes)?,
+        ));
     }
     Ok(actors)
 }
@@ -690,38 +700,45 @@ fn doc_changes_to_uncompressed_changes(
 
 fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
     let mut changes = Vec::new();
-    for slice in split_blocks(bytes) {
+    for slice in split_blocks(bytes)? {
         decode_block(slice, &mut changes)?;
     }
     Ok(changes)
 }
 
-fn split_blocks(bytes: &[u8]) -> Vec<&[u8]> {
+fn split_blocks(bytes: &[u8]) -> Result<Vec<&[u8]>, decoding::Error> {
     // split off all valid blocks - ignore the rest if its corrupted or truncated
     let mut blocks = Vec::new();
     let mut cursor = bytes;
-    while let Some(block) = pop_block(cursor) {
+    while let Some(block) = pop_block(cursor)? {
         blocks.push(&cursor[block.clone()]);
         if cursor.len() <= block.end {
             break;
         }
         cursor = &cursor[block.end..];
     }
-    blocks
+    Ok(blocks)
 }
 
-fn pop_block(bytes: &[u8]) -> Option<Range<usize>> {
+fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
     if bytes.len() < 4 || bytes[0..4] != MAGIC_BYTES {
         // not reporting error here - file got corrupted?
-        return None;
+        return Ok(None);
     }
-    let (val, len) = read_leb128(&mut &bytes[HEADER_BYTES..]).unwrap();
-    let end = HEADER_BYTES + len + val;
+    let (val, len) = read_leb128(
+        &mut bytes
+            .get(HEADER_BYTES..)
+            .ok_or(decoding::Error::NotEnoughBytes)?,
+    )?;
+    // val is arbitrary so it could overflow
+    let end = (HEADER_BYTES + len)
+        .checked_add(val)
+        .ok_or(decoding::Error::Overflow)?;
     if end > bytes.len() {
         // not reporting error here - file got truncated?
-        return None;
+        return Ok(None);
     }
-    Some(0..end)
+    Ok(Some(0..end))
 }
 
 fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {

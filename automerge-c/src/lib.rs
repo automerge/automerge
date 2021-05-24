@@ -450,3 +450,112 @@ pub unsafe extern "C" fn automerge_read_binary(backend: *mut Backend, buffer: *m
         (*backend).handle_error("no binary to be read")
     }
 }
+
+#[derive(Debug)]
+pub struct SyncState {
+    handle: automerge_backend::SyncState,
+}
+
+impl From<SyncState> for *mut SyncState {
+    fn from(s: SyncState) -> Self {
+        Box::into_raw(Box::new(s))
+    }
+}
+
+/// # Safety
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// `encoded_msg_[ptr|len]` must be the address & length of a byte array
+// Returns an `isize` indicating the length of the patch as a JSON string
+// (-1 if there was an error, 0 if there is no patch)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_receive_sync_message(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+    encoded_msg_ptr: *const u8,
+    encoded_msg_len: usize,
+) -> isize {
+    let slice = std::slice::from_raw_parts(encoded_msg_ptr, encoded_msg_len);
+    let decoded = automerge_backend::SyncMessage::decode(slice);
+    let msg = match decoded {
+        Ok(msg) => msg,
+        Err(e) => {
+            return (*backend).handle_error(e);
+        }
+    };
+    let patch = (*backend).receive_sync_message(&mut sync_state.handle, msg);
+    if let Ok(None) = patch {
+        0
+    } else {
+        (*backend).generate_json(patch)
+    }
+}
+
+/// # Safety
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// Returns an `isize` indicating the length of the binary message
+/// (-1 if there was an error, 0 if there is no message)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_generate_sync_message(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+) -> isize {
+    let msg = (*backend).generate_sync_message(&mut sync_state.handle);
+    if let Some(msg) = msg {
+        (*backend).handle_binary(msg.encode().or(Err(AutomergeError::EncodeFailed)))
+    } else {
+        0
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn automerge_sync_state_init() -> *mut SyncState {
+    let state = SyncState {
+        handle: automerge_backend::SyncState::default(),
+    };
+    state.into()
+}
+
+/// # Safety
+/// Must be called with a valid backend pointer
+/// sync_state must be a valid pointer to a SyncState
+/// Returns an `isize` indicating the length of the binary message
+/// (-1 if there was an error)
+#[no_mangle]
+pub unsafe extern "C" fn automerge_encode_sync_state(
+    backend: *mut Backend,
+    sync_state: &mut SyncState,
+) -> isize {
+    (*backend).handle_binary(
+        sync_state
+            .handle
+            .encode()
+            .or(Err(AutomergeError::EncodeFailed)),
+    )
+}
+
+/// # Safety
+/// `encoded_state_[ptr|len]` must be the address & length of a byte array
+/// Returns an opaque pointer to a SyncState
+/// panics (segfault?) if the buffer was invalid
+#[no_mangle]
+pub unsafe extern "C" fn automerge_decode_sync_state(
+    encoded_state_ptr: *const u8,
+    encoded_state_len: usize,
+) -> *mut SyncState {
+    let slice = std::slice::from_raw_parts(encoded_state_ptr, encoded_state_len);
+    let decoded_state = automerge_backend::SyncState::decode(slice);
+    // TODO: Is there a way to avoid `unwrap` here?
+    let state = decoded_state.unwrap();
+    let state = SyncState { handle: state };
+    state.into()
+}
+
+/// # Safety
+/// sync_state must be a valid pointer to a SyncState
+#[no_mangle]
+pub unsafe extern "C" fn automerge_sync_state_free(sync_state: *mut SyncState) {
+    let sync_state: SyncState = *Box::from_raw(sync_state);
+    drop(sync_state);
+}

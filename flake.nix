@@ -86,6 +86,7 @@
                 cargo-edit
                 cargo-watch
                 cargo-criterion
+                cargo-fuzz
                 crate2nix
                 wasm-pack
                 pkgconfig

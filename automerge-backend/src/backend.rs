@@ -188,7 +188,10 @@ impl Backend {
 
         let ops = OpHandle::extract(change, &mut self.actors);
 
-        op_set.max_op = max(op_set.max_op, start_op + (ops.len() as u64) - 1);
+        op_set.max_op = max(
+            op_set.max_op,
+            (start_op + (ops.len() as u64)).saturating_sub(1),
+        );
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;
 

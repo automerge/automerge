@@ -3,6 +3,7 @@ use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
 use automerge_protocol as amp;
 
+/// The error type for decoding operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(
@@ -37,6 +38,8 @@ pub enum Error {
     ChangeDecompressFailed(String),
     #[error("No doc changes found")]
     NoDocChanges,
+    #[error("An overflow would have occurred, the data may be corrupt")]
+    Overflow,
     #[error("Failed to read leb128 number {0}")]
     Leb128(#[from] leb128::read::Error),
     #[error(transparent)]
