@@ -199,12 +199,12 @@ impl OpSet {
 
     fn unlink(&mut self, op: &OpHandle, overwritten: &[OpHandle]) -> Result<(), AutomergeError> {
         if let Some(child) = op.child() {
-            self.get_obj_mut(&child)?.inbound.insert(op.clone());
+            self.get_obj_mut(&child)?.inbound = Some(op.clone());
         }
 
         for old in overwritten.iter() {
             if let Some(child) = old.child() {
-                self.get_obj_mut(&child)?.inbound.remove(old);
+                self.get_obj_mut(&child)?.inbound = None;
             }
         }
         Ok(())

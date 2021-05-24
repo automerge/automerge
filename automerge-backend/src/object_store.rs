@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
@@ -21,7 +21,7 @@ use crate::{
 pub(crate) struct ObjState {
     pub props: HashMap<Key, ConcurrentOperations>,
     pub obj_type: amp::ObjType,
-    pub inbound: HashSet<OpHandle, FxBuildHasher>,
+    pub inbound: Option<OpHandle>,
     pub following: HashMap<ElementId, Vec<ElementId>, FxBuildHasher>,
     pub insertions: HashMap<ElementId, OpHandle, FxBuildHasher>,
     pub seq: SkipList<OpId>,
@@ -36,7 +36,7 @@ impl ObjState {
             following,
             insertions: HashMap::default(),
             obj_type,
-            inbound: HashSet::default(),
+            inbound: None,
             seq: SkipList::new(),
         }
     }
@@ -51,6 +51,10 @@ impl ObjState {
 
     fn insertions_after(&self, parent: &ElementId) -> Vec<ElementId> {
         self.following.get(parent).cloned().unwrap_or_default()
+    }
+
+    pub fn conflicts(&self, key: &Key) -> Vec<&OpHandle> {
+        self.props.get(&key).iter().flat_map(|i| i.iter()).collect()
     }
 
     #[tracing::instrument(skip(self))]

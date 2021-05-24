@@ -138,28 +138,21 @@ impl IncrementalPatch {
 
     pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::RootDiff {
         if self.0.is_empty() {
-            // No pending diffs so return root diff with no changes in props.
-            return amp::RootDiff {
-                props: HashMap::new(),
-            };
+            return Default::default();
         }
 
         let mut objs: Vec<_> = self.changed_object_ids().copied().collect();
         while let Some(obj_id) = objs.pop() {
-            let obj = workshop
+            workshop
                 .get_obj(&obj_id)
-                .expect("missing object when finalizing diffs");
-            // TODO if the object is a list, somehow find the index of any
-            // objects within it which we update, and emit updates for all
-            // ops at that index
-            if let Some(inbound) = obj.inbound.iter().next() {
-                if let Some(diffs) = self.0.get_mut(&inbound.obj) {
-                    diffs.push(PendingDiff::Set(inbound.clone()))
-                } else {
-                    objs.push(inbound.obj);
-                    self.append_diffs(&inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
-                }
-            }
+                .and_then(|obj| obj.inbound.as_ref())
+                .map(|inbound| {
+                    if !self.0.contains_key(&inbound.obj) {
+                        // our parent was not changed - walk up the tree and try them too
+                        objs.push(inbound.obj);
+                    }
+                    self.append_diff(&inbound.obj, PendingDiff::Set(inbound.clone()));
+                });
         }
 
         if let Some(root) = self.0.remove(&ObjectId::Root) {
@@ -170,13 +163,10 @@ impl IncrementalPatch {
             for key in &keys {
                 let key_string = workshop.key_to_string(key);
                 let mut opid_to_value = HashMap::new();
-                for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
+                for op in obj.conflicts(key).iter() {
                     let link = match op.action {
                         InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                        InternalOpType::Make(_) => {
-                            // FIXME
-                            self.gen_obj_diff(&op.id.into(), workshop)
-                        }
+                        InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                         _ => panic!("del or inc found in field_operations"),
                     };
                     opid_to_value.insert(workshop.make_external_opid(&op.id), link);
@@ -278,18 +268,24 @@ impl IncrementalPatch {
                     })
                 }
                 PendingDiff::Set(op) => {
-                    if !seen_op_ids.contains(&op.id) {
-                        seen_op_ids.insert(op.id);
-                        let value = match op.action {
-                            InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                            InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
-                            _ => panic!("del or inc found in field operations"),
-                        };
-                        edits.append_edit(amp::DiffEdit::Update {
-                            index: obj.index_of(op.id).unwrap_or(0) as u64,
-                            op_id: workshop.make_external_opid(&op.id),
-                            value,
-                        })
+                    for op in obj.conflicts(&op.operation_key()).iter() {
+                        if !seen_op_ids.contains(&op.id) {
+                            seen_op_ids.insert(op.id);
+                            let value = match op.action {
+                                InternalOpType::Set(ref value) => {
+                                    gen_value_diff(op, value, workshop)
+                                }
+                                InternalOpType::Make(_) => {
+                                    self.gen_obj_diff(&op.id.into(), workshop)
+                                }
+                                _ => panic!("del or inc found in field operations"),
+                            };
+                            edits.append_edit(amp::DiffEdit::Update {
+                                index: obj.index_of(op.id).unwrap_or(0) as u64,
+                                op_id: workshop.make_external_opid(&op.id),
+                                value,
+                            })
+                        }
                     }
                 }
                 PendingDiff::CursorChange(_) => {
@@ -318,13 +314,10 @@ impl IncrementalPatch {
         for key in &keys {
             let key_string = workshop.key_to_string(key);
             let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
+            for op in obj.conflicts(key).iter() {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                    InternalOpType::Make(_) => {
-                        // FIXME
-                        self.gen_obj_diff(&op.id.into(), workshop)
-                    }
+                    InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                     _ => panic!("del or inc found in field_operations"),
                 };
                 opid_to_value.insert(workshop.make_external_opid(&op.id), link);
