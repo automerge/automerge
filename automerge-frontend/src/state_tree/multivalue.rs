@@ -1,4 +1,4 @@
-use std::iter::Iterator;
+use std::{cmp::Ordering, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
@@ -23,7 +23,7 @@ pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct MultiValue {
     winning_value: (amp::OpId, StateTreeValue),
     conflicts: im_rc::HashMap<amp::OpId, StateTreeValue>,
@@ -112,14 +112,14 @@ impl MultiValue {
                     StateTreeValue::Link(obj_id) => subdiff
                         .current_objects
                         .get(obj_id)
-                        .expect("link to nonexistent object")
+                        .unwrap_or_else(|| panic!("link to nonexistent object: {:?}", obj_id))
                         .apply_diff(&subdiff)
                         .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
                 }
             } else {
                 StateTreeValue::new_from_diff(subdiff)
             }?;
-            changes += u.change;
+            changes.update_with(u.change);
             updated = updated.update(opid, &u.value)
         }
         Ok(DiffApplicationResult::pure(updated.result()).with_changes(changes))
@@ -169,6 +169,36 @@ impl MultiValue {
 
     pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
         self.opids().any(|o| o == opid)
+    }
+
+    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiValue> {
+        if *opid == self.winning_value.0 {
+            Some(MultiValue {
+                winning_value: self.winning_value.clone(),
+                conflicts: im_rc::HashMap::new(),
+            })
+        } else {
+            self.conflicts.get(opid).map(|value| MultiValue {
+                winning_value: (opid.clone(), value.clone()),
+                conflicts: im_rc::HashMap::new(),
+            })
+        }
+    }
+
+    pub(super) fn add_values_from(&mut self, other: MultiValue) {
+        for (opid, value) in other.tree_values().iter() {
+            match opid.cmp(&self.winning_value.0) {
+                Ordering::Greater => {
+                    let mut temp = (opid.clone(), value.clone());
+                    std::mem::swap(&mut temp, &mut self.winning_value);
+                    self.conflicts.insert(temp.0, temp.1);
+                }
+                Ordering::Less => {
+                    self.conflicts.insert(opid.clone(), value.clone());
+                }
+                Ordering::Equal => {}
+            }
+        }
     }
 }
 
@@ -227,6 +257,10 @@ impl NewValue {
         self.ops
     }
 
+    pub(super) fn max_op(&self) -> u64 {
+        self.max_op
+    }
+
     fn multivalue(&self) -> MultiValue {
         MultiValue::from_statetree_value(self.value.clone(), self.opid.clone())
     }
@@ -241,7 +275,7 @@ impl NewValue {
 
 /// This struct exists to constrain the values of a text type to just containing
 /// sequences of grapheme clusters
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct MultiGrapheme {
     winning_value: (amp::OpId, String),
     conflicts: Option<im_rc::HashMap<amp::OpId, String>>,
@@ -353,6 +387,47 @@ impl MultiGrapheme {
             self.winning_value.0 == *opid
         }
     }
+
+    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiGrapheme> {
+        if *opid == self.winning_value.0 {
+            Some(MultiGrapheme {
+                winning_value: self.winning_value.clone(),
+                conflicts: None,
+            })
+        } else {
+            self.conflicts
+                .as_ref()
+                .and_then(|c| c.get(opid))
+                .map(|value| MultiGrapheme {
+                    winning_value: (opid.clone(), value.clone()),
+                    conflicts: None,
+                })
+        }
+    }
+
+    pub(super) fn add_values_from(&mut self, other: MultiGrapheme) {
+        let mut new_conflicts = match (&self.conflicts, &other.conflicts) {
+            (Some(sc), Some(oc)) => sc.clone().union(oc.clone()),
+            (Some(sc), None) => sc.clone(),
+            (None, Some(oc)) => oc.clone(),
+            (None, None) => im_rc::HashMap::new(),
+        };
+        if other.winning_value.0 < self.winning_value.0 {
+            new_conflicts.insert(other.winning_value.0, other.winning_value.1);
+            self.conflicts = Some(new_conflicts);
+        } else {
+            for (opid, value) in other.values().iter() {
+                if opid > &self.winning_value.0 {
+                    let mut temp = (opid.clone(), value.to_string());
+                    std::mem::swap(&mut temp, &mut self.winning_value);
+                    new_conflicts.insert(temp.0, temp.1);
+                } else {
+                    new_conflicts.insert(opid.clone(), value.to_string());
+                }
+            }
+            self.conflicts = Some(new_conflicts)
+        }
+    }
 }
 
 struct MultiGraphemeValues {
@@ -375,6 +450,39 @@ impl MultiGraphemeValues {
 
     fn result(self) -> MultiGrapheme {
         self.current
+    }
+
+    fn iter(&self) -> MultiGraphemeValuesIter {
+        MultiGraphemeValuesIter {
+            winner: &self.current.winning_value,
+            conflicts_iter: self.current.conflicts.as_ref().map(|c| c.iter()),
+            winner_iterated: false,
+        }
+    }
+}
+
+struct MultiGraphemeValuesIter<'a> {
+    winner: &'a (amp::OpId, String),
+    conflicts_iter: Option<im_rc::hashmap::Iter<'a, amp::OpId, String>>,
+    winner_iterated: bool,
+}
+
+impl<'a> std::iter::Iterator for MultiGraphemeValuesIter<'a> {
+    type Item = (&'a amp::OpId, &'a str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.winner_iterated {
+            self.winner_iterated = true;
+            Some((&self.winner.0, self.winner.1.as_str()))
+        } else if let Some(citer) = self.conflicts_iter.as_mut() {
+            if let Some((o, c)) = citer.next() {
+                Some((o, c.as_str()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -475,7 +583,7 @@ where
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut objects = im_rc::HashMap::new();
-        let mut result_elems: Vec<(amp::OpId, MultiValue)> = Vec::with_capacity(values.len());
+        let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
         let mut last_elemid = amp::ElementId::Head;
         for value in values.iter() {
             let elem_opid = self.actor.op_id_at(current_max_op + 1);
@@ -490,7 +598,7 @@ where
             last_elemid = elem_opid.clone().into();
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
-            result_elems.push((elem_opid, next_value.multivalue()));
+            result_elems.push(next_value.multivalue());
             objects = next_value.new_objects.union(objects.clone());
             cursors = next_value.new_cursors.union(cursors);
             ops.extend(next_value.ops);
@@ -522,8 +630,7 @@ where
         }];
         let mut current_max_op = self.start_op;
         let mut last_elemid = amp::ElementId::Head;
-        let mut multigraphemes: Vec<(amp::OpId, MultiGrapheme)> =
-            Vec::with_capacity(graphemes.len());
+        let mut multigraphemes: Vec<MultiGrapheme> = Vec::with_capacity(graphemes.len());
         for grapheme in graphemes.iter() {
             current_max_op += 1;
             let opid = self.actor.op_id_at(current_max_op);
@@ -534,9 +641,9 @@ where
                 insert: true,
                 pred: Vec::new(),
             };
-            multigraphemes.push((
+            multigraphemes.push(MultiGrapheme::new_from_grapheme_cluster(
                 opid.clone(),
-                MultiGrapheme::new_from_grapheme_cluster(opid.clone(), grapheme.clone()),
+                grapheme.clone(),
             ));
             ops.push(op);
             last_elemid = opid.clone().into();

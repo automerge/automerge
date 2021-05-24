@@ -1,13 +1,14 @@
 extern crate automerge_backend;
-use std::{collections::HashSet, convert::TryInto};
+use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
 
 use automerge_backend::{Backend, Change};
 use automerge_protocol as protocol;
 use automerge_protocol::{
-    ActorId, ChangeHash, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjType, ObjectId, Op,
-    OpType, Patch, SeqDiff, SequenceType, UncompressedChange,
+    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ObjType, ObjectId, Op, OpType, Patch, SeqDiff,
+    SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use protocol::RootDiff;
 
 #[test]
 fn test_apply_local_change() {
@@ -64,15 +65,13 @@ fn test_apply_local_change() {
             actor => 1,
         },
         deps: Vec::new(),
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     "1@eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap() => Diff::Value("magpie".into())
                 }
             },
-        })),
+        },
     };
     assert_eq!(patch, expected_patch);
 }
@@ -495,7 +494,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Del,
+                action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
                 pred: vec![actor.op_id_at(2)],
@@ -513,23 +512,25 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             actor.clone() => 2
         },
         deps: Vec::new(),
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
                         obj_type: SequenceType::List,
                         edits: vec![
-                            DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()},
-                            DiffEdit::Remove{index: 0},
+                            DiffEdit::SingleElementInsert{
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
+                                value: Diff::Value("magpie".into()),
+                            },
+                            DiffEdit::Remove{index: 0, count: 1},
                         ],
-                        props: hashmap!{},
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -581,7 +582,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Del,
+                action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
                 insert: false,

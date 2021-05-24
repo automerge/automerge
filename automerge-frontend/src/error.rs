@@ -48,8 +48,6 @@ impl Error for InvalidInitialStateError {}
 //easier to understand where things are going wrong
 #[derive(Error, Debug, PartialEq)]
 pub enum InvalidPatch {
-    #[error("Patch did not begin as a map with root object ID")]
-    PatchDidNotBeginAtRoot,
     #[error("Mismatched sequence number, expected: {expected} but got {actual}")]
     MismatchedSequenceNumber { expected: u64, actual: u64 },
     #[error("Received a diff inserting a non text object in a text object. Target object id was {object_id}, diff was {diff:?}")]

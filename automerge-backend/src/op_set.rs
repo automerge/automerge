@@ -6,7 +6,6 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use core::cmp::max;
 use std::collections::{HashMap, HashSet};
 
 use automerge_protocol as amp;
@@ -16,11 +15,11 @@ use tracing::instrument;
 use crate::{
     actor_map::ActorMap,
     error::AutomergeError,
-    internal::{InternalOpType, ObjectId},
+    internal::{InternalOpType, Key, ObjectId},
     object_store::ObjState,
     op_handle::OpHandle,
     ordered_set::OrderedSet,
-    pending_diff::PendingDiff,
+    patches::{IncrementalPatch, PatchWorkshop},
     Change,
 };
 
@@ -68,19 +67,14 @@ impl OpSet {
 
     pub(crate) fn apply_ops(
         &mut self,
-        mut ops: Vec<OpHandle>,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        ops: Vec<OpHandle>,
+        patch: &mut IncrementalPatch,
         actors: &mut ActorMap,
     ) -> Result<(), AutomergeError> {
-        for op in ops.drain(..) {
-            let obj_id = op.obj;
-
-            let pending_diff = self.apply_op(op, actors)?;
-
-            if let Some(diff) = pending_diff {
-                diffs.entry(obj_id).or_default().push(diff);
-            }
+        for op in ops {
+            self.apply_op(op, actors, patch)?;
         }
+        self.update_cursors(patch);
         Ok(())
     }
 
@@ -95,7 +89,8 @@ impl OpSet {
         &mut self,
         op: OpHandle,
         actors: &mut ActorMap,
-    ) -> Result<Option<PendingDiff>, AutomergeError> {
+        patch: &mut IncrementalPatch,
+    ) -> Result<(), AutomergeError> {
         if let (Some(child), Some(obj_type)) = (op.child(), op.obj_type()) {
             //let child = actors.import_obj(child);
             self.objs.insert(child, ObjState::new(obj_type));
@@ -125,10 +120,10 @@ impl OpSet {
             }
         }
 
-        let object_id = &op.obj;
-        let object = self.get_obj_mut(object_id)?;
+        let object_id = op.obj;
+        let object = self.get_obj_mut(&object_id)?;
 
-        let (diff, overwritten) = if object.is_seq() {
+        let overwritten = if object.is_seq() {
             if op.insert {
                 object.insert_after(
                     op.key.as_element_id().ok_or(AutomergeError::MapKeyInSeq)?,
@@ -139,13 +134,20 @@ impl OpSet {
 
             let ops = object.props.entry(op.operation_key()).or_default();
             let before = !ops.is_empty();
-            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
 
-            let diff = match (before, after) {
+            match (before, after) {
                 (true, true) => {
                     tracing::debug!("updating existing element");
-                    Some(PendingDiff::Set(op.clone()))
+                    let opid = op
+                        .operation_key()
+                        .to_opid()
+                        .ok_or(AutomergeError::HeadToOpId)?;
+                    let ops = ops.clone();
+                    let index = object.index_of(opid).unwrap_or(0);
+
+                    patch.record_seq_updates(&object_id, object, index, ops.iter(), actors);
                 }
                 (true, false) => {
                     let opid = op
@@ -154,7 +156,7 @@ impl OpSet {
                         .ok_or(AutomergeError::HeadToOpId)?;
                     let index = object.seq.remove_key(&opid).unwrap();
                     tracing::debug!(opid=?opid, index=%index, "deleting element");
-                    Some(PendingDiff::SeqRemove(op.clone(), index))
+                    patch.record_seq_remove(&object_id, op.clone(), index);
                 }
                 (false, true) => {
                     let id = op
@@ -164,28 +166,25 @@ impl OpSet {
                     let index = object.index_of(id).unwrap_or(0);
                     tracing::debug!(new_id=?id, index=%index, after=?op.operation_key(), "inserting new element");
                     object.seq.insert_index(index, id);
-                    Some(PendingDiff::SeqInsert(op.clone(), index, op.id))
+                    patch.record_seq_insert(&object_id, op.clone(), index, op.id);
                 }
-                (false, false) => None,
+                (false, false) => {}
             };
 
             self.unlink(&op, &overwritten_ops)?;
 
-            (diff, overwritten_ops)
+            overwritten_ops
         } else {
             let ops = object.props.entry(op.key.clone()).or_default();
             let before = !ops.is_empty();
-            let overwritten_ops = ops.incorporate_new_op(&op)?;
+            let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
-                tracing::debug!(overwritten_ops=?overwritten_ops, "setting new value");
-                (Some(PendingDiff::Set(op)), overwritten_ops)
-            } else {
-                tracing::debug!(overwritten_ops=?overwritten_ops, "deleting value");
-                (None, overwritten_ops)
+                patch.record_set(&object_id, op);
             }
+            overwritten_ops
         };
 
         for op in overwritten {
@@ -195,17 +194,17 @@ impl OpSet {
                 }
             }
         }
-        Ok(diff)
+        Ok(())
     }
 
     fn unlink(&mut self, op: &OpHandle, overwritten: &[OpHandle]) -> Result<(), AutomergeError> {
         if let Some(child) = op.child() {
-            self.get_obj_mut(&child)?.inbound.insert(op.clone());
+            self.get_obj_mut(&child)?.inbound = Some(op.clone());
         }
 
         for old in overwritten.iter() {
             if let Some(child) = old.child() {
-                self.get_obj_mut(&child)?.inbound.remove(old);
+                self.get_obj_mut(&child)?.inbound = None;
             }
         }
         Ok(())
@@ -223,111 +222,13 @@ impl OpSet {
             .ok_or(AutomergeError::MissingObjectError)
     }
 
-    pub fn construct_map(
-        &self,
-        object_id: &ObjectId,
-        object: &ObjState,
-        actors: &ActorMap,
-        map_type: amp::MapType,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let mut props = HashMap::new();
-
-        for (key, ops) in &object.props {
-            if !ops.is_empty() {
-                let mut opid_to_value = HashMap::new();
-                for op in ops.iter() {
-                    let amp_opid = actors.export_opid(&op.id);
-                    if let Some(child_id) = op.child() {
-                        opid_to_value.insert(amp_opid, self.construct_object(&child_id, actors)?);
-                    } else {
-                        opid_to_value
-                            .insert(amp_opid, self.gen_value_diff(op, &op.adjusted_value()));
-                    }
-                }
-                props.insert(actors.key_to_string(key), opid_to_value);
-            }
-        }
-        Ok(amp::MapDiff {
-            object_id: actors.export_obj(object_id),
-            obj_type: map_type,
-            props,
-        }
-        .into())
-    }
-
-    pub fn construct_list(
-        &self,
-        object_id: &ObjectId,
-        object: &ObjState,
-        actors: &ActorMap,
-        seq_type: amp::SequenceType,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let mut edits = Vec::new();
-        let mut props = HashMap::new();
-        let mut index = 0;
-        let mut max_counter = 0;
-
-        for opid in &object.seq {
-            max_counter = max(max_counter, opid.0);
-            let key = (*opid).into(); // FIXME - something is wrong here
-            let elem_id = actors.export_opid(opid).into();
-            if let Some(ops) = object.props.get(&key) {
-                if !ops.is_empty() {
-                    edits.push(amp::DiffEdit::Insert { index, elem_id });
-                    let mut opid_to_value = HashMap::new();
-                    for op in ops.iter() {
-                        let amp_opid = actors.export_opid(&op.id);
-                        if let Some(child_id) = op.child() {
-                            opid_to_value
-                                .insert(amp_opid, self.construct_object(&child_id, actors)?);
-                        } else {
-                            opid_to_value
-                                .insert(amp_opid, self.gen_value_diff(op, &op.adjusted_value()));
-                        }
-                    }
-                    props.insert(index, opid_to_value);
-                    index += 1;
-                }
-            }
-        }
-        Ok(amp::SeqDiff {
-            object_id: actors.export_obj(object_id),
-            obj_type: seq_type,
-            edits,
-            props,
-        }
-        .into())
-    }
-
-    pub fn construct_object(
-        &self,
-        object_id: &ObjectId,
-        actors: &ActorMap,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let object = self.get_obj(object_id)?;
-        match object.obj_type {
-            amp::ObjType::Map(map_type) => self.construct_map(object_id, object, actors, map_type),
-            amp::ObjType::Sequence(seq_type) => {
-                self.construct_list(object_id, object, actors, seq_type)
-            }
-        }
-    }
-
-    // this recursively walks through all the objects touched by the changes
-    // to generate a diff in a single pass
-    pub fn finalize_diffs(
-        &mut self,
-        mut pending: HashMap<ObjectId, Vec<PendingDiff>>,
-        actors: &ActorMap,
-    ) -> Result<Option<amp::Diff>, AutomergeError> {
-        if pending.is_empty() {
-            return Ok(None);
-        }
-
+    /// Update any cursors which will be affected by the changes in `pending`
+    /// and add the changed cursors to `pending`
+    fn update_cursors(&mut self, patch: &mut IncrementalPatch) {
         // For each cursor, if the cursor references an object which has been changed we generate a
         // diff for the cursor
-        let mut cursor_changes: HashMap<ObjectId, Vec<PendingDiff>> = HashMap::new();
-        for obj_id in pending.keys() {
+        let mut cursor_changes: HashMap<ObjectId, Vec<Key>> = HashMap::new();
+        for obj_id in patch.changed_object_ids() {
             if let Some(cursors) = self.cursors.get_mut(obj_id) {
                 for cursor in cursors.iter_mut() {
                     if let Some(obj) = self.objs.get(&cursor.internal_referred_object_id) {
@@ -335,110 +236,16 @@ impl OpSet {
                         cursor_changes
                             .entry(cursor.internal_referring_object_id)
                             .or_default()
-                            .push(PendingDiff::CursorChange(cursor.key.clone()))
+                            .push(cursor.key.clone())
                     }
                 }
             }
         }
-        for (obj_id, cursor_change) in cursor_changes {
-            pending.entry(obj_id).or_default().extend(cursor_change)
-        }
-
-        let mut objs: Vec<_> = pending.keys().copied().collect();
-        while let Some(obj_id) = objs.pop() {
-            let obj = self.get_obj(&obj_id)?;
-            if let Some(inbound) = obj.inbound.iter().next() {
-                if let Some(diffs) = pending.get_mut(&inbound.obj) {
-                    diffs.push(PendingDiff::Set(inbound.clone()))
-                } else {
-                    objs.push(inbound.obj);
-                    pending.insert(inbound.obj, vec![PendingDiff::Set(inbound.clone())]);
-                }
+        for (obj_id, keys) in cursor_changes {
+            for key in keys {
+                patch.record_cursor_change(&obj_id, key)
             }
         }
-
-        Ok(Some(self.gen_obj_diff(
-            &ObjectId::Root,
-            &mut pending,
-            actors,
-        )?))
-    }
-
-    fn gen_seq_diff(
-        &self,
-        obj_id: &ObjectId,
-        obj: &ObjState,
-        pending: &[PendingDiff],
-        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
-        actors: &ActorMap,
-        seq_type: amp::SequenceType,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let mut props = HashMap::new();
-        let edits = pending.iter().filter_map(|p| p.edit(actors)).collect();
-        // i may have duplicate keys - this makes sure I hit each one only once
-        let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
-        for key in &keys {
-            let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
-                let link = match op.action {
-                    InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
-                    InternalOpType::Make(_) => {
-                        self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
-                    }
-                    _ => panic!("del or inc found in field_operations"),
-                };
-                opid_to_value.insert(actors.export_opid(&op.id), link);
-            }
-            if let Some(index) = obj
-                .seq
-                .index_of(&key.to_opid().ok_or(AutomergeError::HeadToOpId)?)
-            {
-                props.insert(index, opid_to_value);
-            }
-        }
-        Ok(amp::SeqDiff {
-            object_id: actors.export_obj(obj_id),
-            obj_type: seq_type,
-            edits,
-            props,
-        }
-        .into())
-    }
-
-    fn gen_map_diff(
-        &self,
-        obj_id: &ObjectId,
-        obj: &ObjState,
-        pending: &[PendingDiff],
-        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
-        actors: &ActorMap,
-        map_type: amp::MapType,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let mut props = HashMap::new();
-        // I may have duplicate keys - I do this to make sure I visit each one only once
-        let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
-        for key in &keys {
-            let key_string = actors.key_to_string(key);
-            let mut opid_to_value = HashMap::new();
-            for op in obj.props.get(key).iter().flat_map(|i| i.iter()) {
-                let link = match op.action {
-                    InternalOpType::Set(ref value) => self.gen_value_diff(op, value),
-                    InternalOpType::Make(_) => {
-                        // FIXME
-                        self.gen_obj_diff(&op.id.into(), pending_diffs, actors)?
-                    }
-                    _ => panic!("del or inc found in field_operations"),
-                };
-                opid_to_value.insert(actors.export_opid(&op.id), link);
-            }
-            props.insert(key_string, opid_to_value);
-        }
-        Ok(amp::MapDiff {
-            object_id: actors.export_obj(obj_id),
-            obj_type: map_type,
-            props,
-        }
-        .into())
     }
 
     pub fn update_deps(&mut self, change: &Change) {
@@ -450,48 +257,10 @@ impl OpSet {
         self.deps.insert(change.hash);
     }
 
-    fn gen_obj_diff(
-        &self,
-        obj_id: &ObjectId,
-        pending_diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
-        actors: &ActorMap,
-    ) -> Result<amp::Diff, AutomergeError> {
-        let obj = self.get_obj(obj_id)?;
-        if let Some(pending) = pending_diffs.remove(obj_id) {
-            match obj.obj_type {
-                amp::ObjType::Sequence(seq_type) => {
-                    self.gen_seq_diff(obj_id, obj, &pending, pending_diffs, actors, seq_type)
-                }
-                amp::ObjType::Map(map_type) => {
-                    self.gen_map_diff(obj_id, obj, &pending, pending_diffs, actors, map_type)
-                }
-            }
-        } else {
-            Ok(amp::Diff::Unchanged(amp::ObjDiff {
-                object_id: actors.export_obj(obj_id),
-                obj_type: obj.obj_type,
-            }))
-        }
-    }
-
-    fn gen_value_diff(&self, op: &OpHandle, value: &amp::ScalarValue) -> amp::Diff {
-        match value {
-            amp::ScalarValue::Cursor(oid) => {
-                // .expect() is okay here because we check that the cursr exists at the start of
-                // `OpSet::apply_op()`
-                let cursor_state = self
-                    .cursors
-                    .values()
-                    .flatten()
-                    .find(|c| c.element_opid == *oid)
-                    .expect("missing cursor");
-                amp::Diff::Cursor(amp::CursorDiff {
-                    object_id: cursor_state.referred_object_id.clone(),
-                    index: cursor_state.index as u32,
-                    elem_id: oid.clone(),
-                })
-            }
-            _ => op.adjusted_value().into(),
+    pub(crate) fn patch_workshop<'a>(&'a self, actors: &'a ActorMap) -> impl PatchWorkshop + 'a {
+        PatchWorkshopImpl {
+            opset: self,
+            actors,
         }
     }
 }
@@ -534,4 +303,43 @@ struct CursorState {
     /// The same as the `element_opid` but as an internal::OpID,
     internal_element_opid: crate::internal::OpId,
     index: usize,
+}
+
+/// Implementation of `patches::PatchWorkshop` to pass to the various patch
+/// generation mechanisms, defined here to avoid having to make members of the
+/// OpSet public.
+struct PatchWorkshopImpl<'a> {
+    opset: &'a OpSet,
+    actors: &'a ActorMap,
+}
+
+impl<'a> PatchWorkshop for PatchWorkshopImpl<'a> {
+    fn get_obj(&self, object_id: &ObjectId) -> Option<&ObjState> {
+        self.opset.get_obj(object_id).ok()
+    }
+
+    fn find_cursor(&self, opid: &amp::OpId) -> Option<amp::CursorDiff> {
+        self.opset
+            .cursors
+            .values()
+            .flatten()
+            .find(|c| c.element_opid == *opid)
+            .map(|c| amp::CursorDiff {
+                object_id: c.referred_object_id.clone(),
+                index: c.index as u32,
+                elem_id: opid.clone(),
+            })
+    }
+
+    fn key_to_string(&self, key: &crate::internal::Key) -> String {
+        self.actors.key_to_string(key)
+    }
+
+    fn make_external_opid(&self, opid: &crate::internal::OpId) -> amp::OpId {
+        self.actors.export_opid(opid)
+    }
+
+    fn make_external_objid(&self, object_id: &ObjectId) -> amp::ObjectId {
+        self.actors.export_obj(object_id)
+    }
 }

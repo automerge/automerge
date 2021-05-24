@@ -2,15 +2,14 @@ use std::{collections::HashMap, fmt};
 
 use serde::{
     de,
-    de::{Error, MapAccess, Unexpected},
+    de::{Error, MapAccess},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
 
 use super::read_field;
 use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjDiff, ObjType, ObjectId, OpId, ScalarValue,
-    SeqDiff,
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjType, ObjectId, OpId, ScalarValue, SeqDiff,
 };
 
 impl Serialize for Diff {
@@ -21,27 +20,51 @@ impl Serialize for Diff {
         match self {
             Diff::Map(diff) => diff.serialize(serializer),
             Diff::Seq(diff) => diff.serialize(serializer),
-            Diff::Unchanged(diff) => diff.serialize(serializer),
             Diff::Value(val) => match val {
                 ScalarValue::Counter(_) => {
-                    let mut op = serializer.serialize_struct("Value", 2)?;
+                    let mut op = serializer.serialize_struct("Value", 3)?;
                     op.serialize_field("value", &val)?;
                     op.serialize_field("datatype", "counter")?;
+                    op.serialize_field("type", "value")?;
                     op.end()
                 }
                 ScalarValue::Timestamp(_) => {
-                    let mut op = serializer.serialize_struct("Value", 2)?;
+                    let mut op = serializer.serialize_struct("Value", 3)?;
                     op.serialize_field("value", &val)?;
                     op.serialize_field("datatype", "timestamp")?;
+                    op.serialize_field("type", "value")?;
                     op.end()
                 }
                 _ => {
-                    let mut op = serializer.serialize_struct("Value", 1)?;
+                    let mut op = serializer.serialize_struct("Value", 2)?;
                     op.serialize_field("value", &val)?;
+                    op.serialize_field("type", "value")?;
                     op.end()
                 }
             },
             Diff::Cursor(diff) => diff.serialize(serializer),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum RawDiffType {
+    Value,
+    Map,
+    Text,
+    List,
+    Table,
+}
+
+impl RawDiffType {
+    fn obj_type(&self) -> Option<ObjType> {
+        match self {
+            RawDiffType::Map => Some(ObjType::map()),
+            RawDiffType::Table => Some(ObjType::table()),
+            RawDiffType::List => Some(ObjType::list()),
+            RawDiffType::Text => Some(ObjType::text()),
+            RawDiffType::Value => None,
         }
     }
 }
@@ -77,7 +100,8 @@ impl<'de> Deserialize<'de> for Diff {
             {
                 let mut edits: Option<Vec<DiffEdit>> = None;
                 let mut object_id: Option<ObjectId> = None;
-                let mut obj_type: Option<ObjType> = None;
+                let mut diff_type: Option<RawDiffType> = None;
+                //let mut obj_type: Option<ObjType> = None;
                 let mut props: Option<HashMap<String, HashMap<OpId, Diff>>> = None;
                 let mut value: Option<ScalarValue> = None;
                 let mut datatype: Option<DataType> = None;
@@ -89,7 +113,7 @@ impl<'de> Deserialize<'de> for Diff {
                     match field.as_ref() {
                         "edits" => read_field("edits", &mut edits, &mut map)?,
                         "objectId" => read_field("objectId", &mut object_id, &mut map)?,
-                        "type" => read_field("type", &mut obj_type, &mut map)?,
+                        "type" => read_field("type", &mut diff_type, &mut map)?,
                         "props" => read_field("props", &mut props, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
@@ -121,37 +145,56 @@ impl<'de> Deserialize<'de> for Diff {
                     }
                 } else {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
-                    let obj_type = obj_type.ok_or_else(|| Error::missing_field("type"))?;
-                    if let Some(mut props) = props {
-                        match obj_type {
+                    let diff_type = diff_type.ok_or_else(|| Error::missing_field("type"))?;
+                    match diff_type.obj_type() {
+                        Some(obj_type) => match obj_type {
                             ObjType::Sequence(seq_type) => {
                                 let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
-                                let mut new_props = HashMap::new();
-                                for (k, v) in props.drain() {
-                                    let index = k.parse().map_err(|_| {
-                                        Error::invalid_type(Unexpected::Str(&k), &"an integer")
-                                    })?;
-                                    new_props.insert(index, v);
-                                }
                                 Ok(Diff::Seq(SeqDiff {
                                     object_id,
                                     obj_type: seq_type,
                                     edits,
-                                    props: new_props,
                                 }))
-                            }
-                            ObjType::Map(map_type) => Ok(Diff::Map(MapDiff {
-                                object_id,
-                                obj_type: map_type,
-                                props,
-                            })),
+                            },
+                            ObjType::Map(map_type) => {
+                                let props = props.ok_or_else(|| Error::missing_field("props"))?;
+                                Ok(Diff::Map(MapDiff{
+                                    object_id,
+                                    obj_type: map_type,
+                                    props,
+                                }))
+                            },
                         }
-                    } else {
-                        Ok(Diff::Unchanged(ObjDiff {
-                            object_id,
-                            obj_type,
-                        }))
+                        None => Err(Error::custom("'type' field must be one of ['list', 'text', 'table', 'map'] for an object diff"))
                     }
+
+                    //if let Some(props) = props {
+                    //match obj_type {
+                    //ObjType::Map(map_type) => Ok(Diff::Map(MapDiff {
+                    //object_id,
+                    //obj_type: map_type,
+                    //props,
+                    //})),
+                    //_ => Err(Error::invalid_value(Unexpected::Str(&obj_type.to_string()), &"'map' or 'table'"))
+                    //}
+                    //} else if let Some(edits) = edits {
+                    //match obj_type {
+                    //ObjType::Sequence(seq_type) => {
+                    //let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
+                    //Ok(Diff::Seq(SeqDiff {
+                    //object_id,
+                    //obj_type: seq_type,
+                    //edits,
+                    //}))
+                    //}
+                    //_ => Err(Error::invalid_value(Unexpected::Str(&obj_type.to_string()), &"'list' or 'text'"))
+                    //}
+                    //} else {
+                    //Ok(Diff::Unchanged(ObjDiff {
+                    //object_id,
+                    //obj_type,
+                    //}))
+                    //}
                 }
             }
         }
@@ -195,7 +238,8 @@ mod tests {
             "props": {
                 "key": {
                     "1@4a093244de2b4fd0a4203724e15dfc16": {
-                        "value": "value"
+                        "type": "value",
+                        "value": "value",
                     }
                 }
             }
@@ -219,24 +263,58 @@ mod tests {
         let json = serde_json::json!({
             "objectId": "1@6121f8757d5d46609b665218b2b3a141",
             "type": "list",
-            "edits": [],
-            "props": {
-                "0": {
-                    "1@4a093244de2b4fd0a4203724e15dfc16": {
-                        "value": "value"
-                    }
-                }
-            }
+            "edits": []
+                //{
+                    //"action": "insert",
+                    //"index": 1,
+                    //"elemId": "1@6121f8757d5d46609b665218b2b3a141",
+                    //"value": {"type": "value", "value": 1},
+                //},
+                //{
+                    //"action": "multi-insert",
+                    //"index": 1,
+                    //"opId": "1@6121f8757d5d46609b665218b2b3a141",
+                    //"values": [1, 2],
+                //},
+                //{
+                    //"action": "update",
+                    //"index": 1,
+                    //"opId": "1@6121f8757d5d46609b665218b2b3a141",
+                    //"value": {"type": "value", "value": 1},
+                //},
+                //{
+                    //"action": "remove",
+                    //"index": 1,
+                    //"count": 2,
+                //}
+            //],
         });
         let diff = Diff::Seq(SeqDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             obj_type: SequenceType::List,
-            edits: Vec::new(),
-            props: hashmap! {
-                0 => hashmap!{
-                    OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
-                }
-            },
+            edits: vec![], //DiffEdit::SingleElementInsert{
+                           //index: 1,
+                           //elem_id: ElementId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
+                           //value: Diff::Value(1.into()),
+                           //},
+                           //DiffEdit::MultiElementInsert{
+                           //index: 1,
+                           //first_opid: OpId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
+                           //values: vec![
+                           //1.into(),
+                           //2.into(),
+                           //],
+                           //},
+                           //DiffEdit::Update{
+                           //index: 1,
+                           //value: Diff::Value(1.into()),
+                           //opid: OpId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
+                           //},
+                           //DiffEdit::Remove {
+                           //index: 1,
+                           //count: 2,
+                           //}
+                           //]
         });
 
         assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());

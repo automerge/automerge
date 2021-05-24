@@ -1,13 +1,15 @@
 extern crate automerge_backend;
-use std::{convert::TryInto, str::FromStr};
+use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
 
+use amp::RootDiff;
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjDiff, ObjType, ObjectId,
-    Op, Patch, ScalarValue, SeqDiff, SequenceType, UncompressedChange,
+    ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch,
+    ScalarValue, SeqDiff, SequenceType, UncompressedChange,
 };
 use maplit::hashmap;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn test_incremental_diffs_in_a_map() {
@@ -41,14 +43,9 @@ fn test_incremental_diffs_in_a_map() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
-            }
-            .into(),
-        ),
+        diffs: RootDiff {
+            props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
+        },
     };
     assert_eq!(patch, expected_patch)
 }
@@ -103,17 +100,12 @@ fn test_increment_key_in_map() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!(
-                "counter".into() => hashmap!{
-                    actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
-                }),
-            }
-            .into(),
-        ),
+        diffs: RootDiff {
+            props: hashmap!(
+            "counter".into() => hashmap!{
+                actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
+            }),
+        },
     };
     let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
@@ -175,17 +167,14 @@ fn test_conflict_on_assignment_to_same_map_key() {
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap!( "bird".into() => hashmap!(
-                            actor_1.op_id_at(1) => "magpie".into(),
-                            actor_2.op_id_at(2) => "blackbird".into(),
-                )),
-            }
-            .into(),
-        ),
+        diffs: RootDiff {
+            props: hashmap! {
+                "bird".into() => hashmap!{
+                    actor_1.op_id_at(1) => "magpie".into(),
+                    actor_2.op_id_at(2) => "blackbird".into(),
+                }
+            },
+        },
     };
     let mut backend = Backend::new();
     let _patch1 = backend.apply_changes(vec![change1]).unwrap();
@@ -227,7 +216,7 @@ fn delete_key_from_map() {
         deps: vec![change1.hash],
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             key: "bird".into(),
             pred: vec![actor.op_id_at(1)],
             insert: false,
@@ -244,13 +233,11 @@ fn delete_key_from_map() {
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{}
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -298,9 +285,7 @@ fn create_nested_maps() {
         deps: vec![change.hash],
         seq: None,
         clock: hashmap! {actor.clone() => 1},
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
@@ -308,13 +293,13 @@ fn create_nested_maps() {
                         obj_type: MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                 actor.op_id_at(2) => Diff::Value(ScalarValue::F64(3.0))
+                                actor.op_id_at(2) => Diff::Value(ScalarValue::F64(3.0))
                             }
                         }
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -383,9 +368,7 @@ fn test_assign_to_nested_keys_in_map() {
         max_op: 3,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
@@ -399,7 +382,7 @@ fn test_assign_to_nested_keys_in_map() {
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -449,24 +432,23 @@ fn test_create_lists() {
         actor: None,
         seq: None,
         deps: vec![change.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert{ index: 0, elem_id: actor.op_id_at(2).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => Diff::Value(ScalarValue::Str("chaffinch".into()))
-                            }
-                        }
+                        edits: vec![DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
+                            value: Diff::Value(ScalarValue::Str("chaffinch".into())),
+
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -535,24 +517,21 @@ fn test_apply_updates_inside_lists() {
         max_op: 3,
         pending_changes: 0,
         seq: None,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: Vec::new(),
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(3) => Diff::Value("greenfinch".into())
-                            }
-                        }
+                        edits: vec![DiffEdit::Update{
+                            index: 0,
+                            op_id: actor.op_id_at(3),
+                            value: Diff::Value("greenfinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -602,7 +581,7 @@ fn test_delete_list_elements() {
         hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: ObjectId::from(actor.op_id_at(1)),
             key: actor.op_id_at(2).into(),
             pred: vec![actor.op_id_at(2)],
@@ -622,20 +601,17 @@ fn test_delete_list_elements() {
             actor.clone() => 2
         },
         deps: vec![change2.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id:  actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        props: hashmap!{},
-                        edits: vec![DiffEdit::Remove{index: 0}]
+                        edits: vec![DiffEdit::Remove{index: 0, count: 1}]
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -684,7 +660,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 pred: Vec::new(),
             },
             Op {
-                action: amp::OpType::Del,
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: ObjectId::from(actor.op_id_at(1)),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
@@ -705,23 +681,25 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         max_op: 3,
         pending_changes: 0,
         deps: vec![change2.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
                         edits: vec![
-                            DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()},
-                            DiffEdit::Remove{index: 0},
+                            DiffEdit::SingleElementInsert{
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
+                                value: amp::Diff::Value("chaffinch".into()),
+                            },
+                            DiffEdit::Remove{index: 0, count: 1},
                         ],
-                        props: hashmap!{}
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -804,33 +782,215 @@ fn test_handle_changes_within_conflicted_objects() {
         max_op: 2,
         pending_changes: 0,
         deps: vec![change1.hash, change3.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "conflict".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::Unchanged(ObjDiff{
-                       object_id: actor1.op_id_at(1).into(),
-                       obj_type: ObjType::Sequence(SequenceType::List),
+                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor1.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: Vec::new(),
                     }),
                     actor2.op_id_at(1) => Diff::Map(MapDiff{
-                       object_id: actor2.op_id_at(1).into(),
-                       obj_type: MapType::Map,
-                       props: hashmap!{
-                           "sparrow".into() => hashmap!{
-                             actor2.op_id_at(2) => Diff::Value(ScalarValue::F64(12.0))
-                           }
-                       }
+                        object_id: actor2.op_id_at(1).into(),
+                        obj_type: MapType::Map,
+                        props: hashmap!{
+                            "sparrow".into() => hashmap!{
+                                actor2.op_id_at(2) => Diff::Value(ScalarValue::F64(12.0))
+                            }
+                        }
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
     backend.apply_changes(vec![change1]).unwrap();
     backend.apply_changes(vec![change2]).unwrap();
     let patch = backend.apply_changes(vec![change3]).unwrap();
+    assert_eq!(patch, expected_patch)
+}
+
+#[test_env_log::test]
+fn test_handle_changes_within_conflicted_lists() {
+    let actor1: ActorId = "01234567".try_into().unwrap();
+    let actor2: ActorId = "89abcdef".try_into().unwrap();
+    let change1: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 1,
+        start_op: 1,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: Vec::new(),
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::list()),
+                obj: ObjectId::Root,
+                key: "todos".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: amp::ElementId::Head.into(),
+                insert: true,
+                pred: Vec::new(),
+            },
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let change2: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 2,
+        start_op: 3,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: vec![change1.hash],
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: actor1.op_id_at(2).into(),
+                pred: vec![actor1.op_id_at(2)],
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set("buy milk".into()),
+                obj: actor1.op_id_at(3).into(),
+                key: "title".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(false.into()),
+                obj: actor1.op_id_at(3).into(),
+                key: "done".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let change3: Change = UncompressedChange {
+        actor_id: actor2.clone(),
+        seq: 1,
+        start_op: 3,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: vec![change1.hash],
+        operations: vec![
+            Op {
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: actor1.op_id_at(1).into(),
+                key: actor1.op_id_at(2).into(),
+                pred: vec![actor1.op_id_at(2)],
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set("water plants".into()),
+                obj: actor2.op_id_at(3).into(),
+                key: "title".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+            Op {
+                action: amp::OpType::Set(false.into()),
+                obj: actor2.op_id_at(3).into(),
+                key: "done".into(),
+                pred: Vec::new(),
+                insert: false,
+            },
+        ],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let mut change4_deps = vec![change2.hash, change3.hash];
+    change4_deps.sort();
+
+    let change4: Change = UncompressedChange {
+        actor_id: actor1.clone(),
+        seq: 3,
+        start_op: 6,
+        time: 0,
+        message: None,
+        hash: None,
+        deps: change4_deps,
+        operations: vec![Op {
+            action: amp::OpType::Set(true.into()),
+            obj: actor1.op_id_at(3).into(),
+            key: "done".into(),
+            pred: vec![actor1.op_id_at(5)],
+            insert: false,
+        }],
+        extra_bytes: Vec::new(),
+    }
+    .try_into()
+    .unwrap();
+
+    let expected_patch = Patch {
+        actor: None,
+        seq: None,
+        clock: hashmap! {
+            actor2.clone() => 1,
+            actor1.clone() => 3,
+        },
+        max_op: 6,
+        pending_changes: 0,
+        deps: vec![change4.hash],
+        diffs: RootDiff {
+            props: hashmap! {
+                "todos".into() => hashmap!{
+                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
+                        object_id: actor1.op_id_at(1).into(),
+                        obj_type: SequenceType::List,
+                        edits: vec![
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor1.op_id_at(3),
+                                value: Diff::Map(MapDiff{
+                                    object_id: actor1.op_id_at(3).into(),
+                                    obj_type: MapType::Map,
+                                    props: hashmap!{
+                                        "done".to_string() => hashmap!{
+                                            actor1.op_id_at(6) => Diff::Value(true.into())
+                                        }
+                                    }
+                                })
+                            },
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor2.op_id_at(3),
+                                value: Diff::Map(MapDiff{
+                                    obj_type: MapType::Map,
+                                    object_id: actor2.op_id_at(3).into(),
+                                    props: hashmap!{},
+                                })
+                            }
+                        ]
+                    }),
+                }
+            },
+        },
+    };
+
+    let mut backend = Backend::new();
+    let patch = backend
+        .apply_changes(vec![change1, change2, change3])
+        .unwrap();
+    println!("patch {:#?}", patch);
+    let patch = backend.apply_changes(vec![change4]).unwrap();
     assert_eq!(patch, expected_patch)
 }
 
@@ -866,15 +1026,13 @@ fn test_support_date_objects_at_root() {
         seq: None,
         actor: None,
         deps: vec![change.hash],
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "now".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Value(ScalarValue::Timestamp(1_586_528_122_277))
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -923,24 +1081,22 @@ fn test_support_date_objects_in_a_list() {
         deps: vec![change.hash],
         actor: None,
         seq: None,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()}],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => Diff::Value(ScalarValue::Timestamp(1_586_528_191_421))
-                            }
-                        }
+                        edits: vec![DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
+                            value: Diff::Value(ScalarValue::Timestamp(1_586_528_191_421))
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut backend = Backend::new();
@@ -996,20 +1152,18 @@ fn test_cursor_objects() {
         deps: vec![binchange.hash],
         actor: None,
         seq: None,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(2).into()}],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => Diff::Value(ScalarValue::Str("something".into())),
-                            }
-                        }
+                        edits: vec![DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
+                            value: Diff::Value(ScalarValue::Str("something".into())),
+                        }],
                     })
                 },
                 "cursor".into() => hashmap!{
@@ -1020,7 +1174,7 @@ fn test_cursor_objects() {
                     }),
                 },
             },
-        })),
+        },
     };
     assert_eq!(patch, expected_patch);
 }
@@ -1129,20 +1283,18 @@ fn test_updating_sequences_updates_referring_cursors() {
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Insert{index: 0, elem_id: actor.op_id_at(4).into()}],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(4) => Diff::Value(ScalarValue::Str("something else".into())),
-                            }
-                        }
+                        edits: vec![DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: actor.op_id_at(4).into(),
+                            op_id: actor.op_id_at(4),
+                            value: Diff::Value(ScalarValue::Str("something else".into())),
+                        }],
                     })
                 },
                 "cursor".into() => hashmap!{
@@ -1153,7 +1305,7 @@ fn test_updating_sequences_updates_referring_cursors() {
                     }),
                 },
             },
-        })),
+        },
     };
     assert_eq!(patch, expected_patch);
 }
@@ -1211,7 +1363,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         message: None,
         hash: None,
         operations: vec![Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: actor.op_id_at(1).into(),
             key: actor.op_id_at(2).into(),
             insert: false,
@@ -1232,16 +1384,13 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         deps: vec![binchange2.hash],
         actor: None,
         seq: None,
-        diffs: Some(Diff::Map(MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: SequenceType::List,
-                        edits: vec![DiffEdit::Remove{index: 0 }],
-                        props: hashmap!{}
+                        edits: vec![DiffEdit::Remove{index: 0, count: 1}],
                     })
                 },
                 "cursor".into() => hashmap!{
@@ -1252,7 +1401,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
                     }),
                 },
             },
-        })),
+        },
     };
     assert_eq!(patch, expected_patch);
 }

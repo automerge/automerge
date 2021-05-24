@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     ser::SerializeStruct,
@@ -23,7 +25,7 @@ impl Serialize for Op {
         match &self.action {
             OpType::Set(ScalarValue::Timestamp(_)) => fields += 2,
             OpType::Set(ScalarValue::Counter(_)) => fields += 2,
-            OpType::Inc(_) | OpType::Set(_) => fields += 1,
+            OpType::Inc(_) | OpType::Set(_) | OpType::Del(_) => fields += 1,
             _ => {}
         }
 
@@ -52,7 +54,9 @@ impl Serialize for Op {
                 op.serialize_field("datatype", &DataType::Timestamp)?;
             }
             OpType::Set(value) => op.serialize_field("value", &value)?,
-            _ => {}
+            OpType::MultiSet(values) => op.serialize_field("values", &values)?,
+            OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
+            OpType::Make(..) => {}
         }
         op.serialize_field("pred", &self.pred)?;
         op.end()
@@ -97,6 +101,8 @@ impl<'de> Deserialize<'de> for Op {
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
                 let mut ref_id: Option<OpId> = None;
+                let mut values: Option<Vec<ScalarValue>> = None;
+                let mut multi_op: Option<u32> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -108,6 +114,8 @@ impl<'de> Deserialize<'de> for Op {
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
                         "ref" => read_field("ref", &mut ref_id, &mut map)?,
+                        "values" => read_field("values", &mut values, &mut map)?,
+                        "multiOp" => read_field("multiOp", &mut multi_op, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
                 }
@@ -121,32 +129,40 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
                     RawOpType::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
                     RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
-                    RawOpType::Del => OpType::Del,
+                    RawOpType::Del => OpType::Del(
+                        multi_op
+                            .map(|i| NonZeroU32::new(i).unwrap())
+                            .unwrap_or_else(|| NonZeroU32::new(1).unwrap()),
+                    ),
                     RawOpType::Set => {
-                        let value = if let Some(datatype) = datatype {
-                            match datatype {
-                                DataType::Cursor => match ref_id {
-                                    Some(opid) => ScalarValue::Cursor(opid),
-                                    None => return Err(Error::missing_field("ref")),
-                                },
-                                _ => {
-                                    let raw_value = value
-                                        .ok_or_else(|| Error::missing_field("value"))?
-                                        .unwrap_or(ScalarValue::Null);
-                                    raw_value.as_datatype(datatype).map_err(|e| {
-                                        Error::invalid_value(
-                                            Unexpected::Other(e.unexpected.as_str()),
-                                            &e.expected.as_str(),
-                                        )
-                                    })?
-                                }
-                            }
+                        if let Some(values) = values {
+                            OpType::MultiSet(values)
                         } else {
-                            value
-                                .ok_or_else(|| Error::missing_field("value"))?
-                                .unwrap_or(ScalarValue::Null)
-                        };
-                        OpType::Set(value)
+                            let value = if let Some(datatype) = datatype {
+                                match datatype {
+                                    DataType::Cursor => match ref_id {
+                                        Some(opid) => ScalarValue::Cursor(opid),
+                                        None => return Err(Error::missing_field("ref")),
+                                    },
+                                    _ => {
+                                        let raw_value = value
+                                            .ok_or_else(|| Error::missing_field("value"))?
+                                            .unwrap_or(ScalarValue::Null);
+                                        raw_value.as_datatype(datatype).map_err(|e| {
+                                            Error::invalid_value(
+                                                Unexpected::Other(e.unexpected.as_str()),
+                                                &e.expected.as_str(),
+                                            )
+                                        })?
+                                    }
+                                }
+                            } else {
+                                value
+                                    .ok_or_else(|| Error::missing_field("value"))?
+                                    .unwrap_or(ScalarValue::Null)
+                            };
+                            OpType::Set(value)
+                        }
                     }
                     RawOpType::Inc => match value.flatten() {
                         Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
@@ -449,6 +465,37 @@ mod tests {
                     &"A valid OpID",
                 )),
             },
+            Scenario {
+                name: "set with multiple values",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "pred": [],
+                    "values": ["one", "two"],
+                }),
+                expected: Ok(Op {
+                    action: OpType::MultiSet(vec!["one".into(), "two".into()]),
+                    obj: ObjectId::Root,
+                    key: "somekey".into(),
+                    insert: false,
+                    pred: Vec::new(),
+                }),
+            },
+            Scenario {
+                name: "set with multiple non scalar values",
+                json: serde_json::json!({
+                    "action": "set",
+                    "obj": "_root",
+                    "key": "somekey",
+                    "pred": [],
+                    "values": ["one",{"two": 2}],
+                }),
+                expected: Err(Error::invalid_type(
+                    Unexpected::Map,
+                    &"a number, string, bool, or null",
+                )),
+            },
         ];
 
         for scenario in scenarios.into_iter() {
@@ -583,6 +630,15 @@ mod tests {
                     .into(),
                 insert: false,
                 pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
+            },
+            Op {
+                action: OpType::MultiSet(vec!["one".into(), "two".into()]),
+                obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
+                key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
+                    .unwrap()
+                    .into(),
+                insert: true,
+                pred: Vec::new(),
             },
         ];
         for (testcase_num, testcase) in testcases.iter().enumerate() {

@@ -12,10 +12,9 @@ use crate::{
     change::encode_document,
     error::AutomergeError,
     event_handlers::{EventHandlerId, EventHandlers},
-    internal::ObjectId,
     op_handle::OpHandle,
     op_set::OpSet,
-    pending_diff::PendingDiff,
+    patches::{generate_from_scratch_diff, IncrementalPatch},
     Change, EventHandler,
 };
 
@@ -37,7 +36,7 @@ impl Backend {
 
     fn make_patch(
         &self,
-        diffs: Option<amp::Diff>,
+        diffs: amp::RootDiff,
         actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
@@ -86,14 +85,14 @@ impl Backend {
         changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut pending_diffs = HashMap::new();
+        let mut patch = IncrementalPatch::new();
 
         for change in changes {
-            self.add_change(change, actor.is_some(), &mut pending_diffs)?;
+            self.add_change(change, actor.is_some(), &mut patch)?;
         }
 
-        let op_set = &mut self.op_set;
-        let diffs = op_set.finalize_diffs(pending_diffs, &self.actors)?;
+        let workshop = self.op_set.patch_workshop(&self.actors);
+        let diffs = patch.finalize(&workshop);
         self.make_patch(diffs, actor)
     }
 
@@ -147,7 +146,7 @@ impl Backend {
         &mut self,
         change: Change,
         local: bool,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut IncrementalPatch,
     ) -> Result<(), AutomergeError> {
         if local {
             self.apply_change(change, diffs)
@@ -157,10 +156,7 @@ impl Backend {
         }
     }
 
-    fn apply_queued_ops(
-        &mut self,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
-    ) -> Result<(), AutomergeError> {
+    fn apply_queued_ops(&mut self, diffs: &mut IncrementalPatch) -> Result<(), AutomergeError> {
         while let Some(next_change) = self.pop_next_causally_ready_change() {
             self.apply_change(next_change, diffs)?;
         }
@@ -170,7 +166,7 @@ impl Backend {
     fn apply_change(
         &mut self,
         change: Change,
-        diffs: &mut HashMap<ObjectId, Vec<PendingDiff>>,
+        diffs: &mut IncrementalPatch,
     ) -> Result<(), AutomergeError> {
         if self.history_index.contains_key(&change.hash) {
             return Ok(());
@@ -235,10 +231,9 @@ impl Backend {
     }
 
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
-        let diffs = self
-            .op_set
-            .construct_object(&ObjectId::Root, &self.actors)?;
-        self.make_patch(Some(diffs), None)
+        let workshop = self.op_set.patch_workshop(&self.actors);
+        let diffs = generate_from_scratch_diff(&workshop);
+        self.make_patch(diffs, None)
     }
 
     pub fn get_changes_for_actor_id(
@@ -316,7 +311,9 @@ impl Backend {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let changes: Vec<amp::UncompressedChange> = self.history.iter().map(|r| r.into()).collect();
+        let changes: Vec<amp::UncompressedChange> =
+            self.history.iter().map(Change::decode).collect();
+        //self.history.iter().map(|change| change.decode()).collect();
         Ok(encode_document(&changes)?)
     }
 

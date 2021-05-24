@@ -11,10 +11,13 @@ use std::{
 
 use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
+use tracing::instrument;
 
 use crate::{
     decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
+    expanded_op::ExpandedOp,
+    internal::InternalOpType,
 };
 
 impl Encodable for Action {
@@ -118,8 +121,9 @@ impl<'a> OperationIterator<'a> {
 }
 
 impl<'a> Iterator for OperationIterator<'a> {
-    type Item = amp::Op;
-    fn next(&mut self) -> Option<amp::Op> {
+    type Item = ExpandedOp<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
         let action = self.action.next()??;
         let insert = self.insert.next()?;
         let obj = self.objs.next()?;
@@ -127,19 +131,19 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => amp::OpType::Set(value),
-            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
-            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
-            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
-            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
-            Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+            Action::Set => InternalOpType::Set(value),
+            Action::MakeList => InternalOpType::Make(amp::ObjType::list()),
+            Action::MakeText => InternalOpType::Make(amp::ObjType::text()),
+            Action::MakeMap => InternalOpType::Make(amp::ObjType::map()),
+            Action::MakeTable => InternalOpType::Make(amp::ObjType::table()),
+            Action::Del => InternalOpType::Del,
+            Action::Inc => InternalOpType::Inc(value.to_i64()?),
         };
-        Some(amp::Op {
+        Some(ExpandedOp {
             action,
-            obj,
-            key,
-            pred,
+            obj: Cow::Owned(obj),
+            key: Cow::Owned(key),
+            pred: Cow::Owned(pred),
             insert,
         })
     }
@@ -168,13 +172,13 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let succ = self.succ.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => amp::OpType::Set(value),
-            Action::MakeList => amp::OpType::Make(amp::ObjType::list()),
-            Action::MakeText => amp::OpType::Make(amp::ObjType::text()),
-            Action::MakeMap => amp::OpType::Make(amp::ObjType::map()),
-            Action::MakeTable => amp::OpType::Make(amp::ObjType::table()),
-            Action::Del => amp::OpType::Del,
-            Action::Inc => amp::OpType::Inc(value.to_i64()?),
+            Action::Set => InternalOpType::Set(value),
+            Action::MakeList => InternalOpType::Make(amp::ObjType::list()),
+            Action::MakeText => InternalOpType::Make(amp::ObjType::text()),
+            Action::MakeMap => InternalOpType::Make(amp::ObjType::map()),
+            Action::MakeTable => InternalOpType::Make(amp::ObjType::table()),
+            Action::Del => InternalOpType::Del,
+            Action::Inc => InternalOpType::Inc(value.to_i64()?),
         };
         Some(DocOp {
             actor,
@@ -513,7 +517,7 @@ pub(crate) struct DocChange {
 pub(crate) struct DocOp {
     pub actor: usize,
     pub ctr: u64,
-    pub action: amp::OpType,
+    pub action: InternalOpType,
     pub obj: amp::ObjectId,
     pub key: amp::Key,
     pub succ: Vec<(u64, usize)>,
@@ -781,6 +785,7 @@ pub(crate) struct ChangeEncoder {
 }
 
 impl ChangeEncoder {
+    #[instrument(skip(changes, actors))]
     pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::UncompressedChange>,
@@ -885,6 +890,7 @@ pub(crate) struct DocOpEncoder {
 // FIXME - actors should not be mut here
 
 impl DocOpEncoder {
+    #[instrument(skip(ops, actors))]
     pub(crate) fn encode_doc_ops<'a, 'b, I>(
         ops: I,
         actors: &'a mut Vec<amp::ActorId>,
@@ -922,20 +928,20 @@ impl DocOpEncoder {
             self.insert.append(op.insert);
             self.succ.append(&op.succ);
             let action = match &op.action {
-                amp::OpType::Set(value) => {
+                InternalOpType::Set(value) => {
                     self.val.append_value(value, actors);
                     Action::Set
                 }
-                amp::OpType::Inc(val) => {
+                InternalOpType::Inc(val) => {
                     self.val.append_value(&amp::ScalarValue::Int(*val), actors);
                     Action::Inc
                 }
-                amp::OpType::Del => {
+                InternalOpType::Del => {
                     // FIXME throw error
                     self.val.append_null();
                     Action::Del
                 }
-                amp::OpType::Make(kind) => {
+                InternalOpType::Make(kind) => {
                     self.val.append_null();
                     match kind {
                         amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,
@@ -983,6 +989,14 @@ impl DocOpEncoder {
 
 //pub(crate) encode_cols(a) -> (Vec<u8>, HashMap<u32, Range<usize>>) { }
 
+struct ColumnOp<'a> {
+    action: InternalOpType,
+    obj: Cow<'a, amp::ObjectId>,
+    key: Cow<'a, amp::Key>,
+    pred: Cow<'a, [amp::OpId]>,
+    insert: bool,
+}
+
 pub(crate) struct ColumnEncoder {
     obj: ObjEncoder,
     key: KeyEncoder,
@@ -998,10 +1012,17 @@ impl ColumnEncoder {
         actors: &'a mut Vec<amp::ActorId>,
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
-        I: IntoIterator<Item = &'b amp::Op>,
+        I: IntoIterator<Item = ExpandedOp<'b>>,
     {
         let mut e = Self::new();
-        e.encode(ops, actors);
+        let colops = ops.into_iter().map(|o| ColumnOp {
+            obj: o.obj,
+            key: o.key,
+            action: o.action,
+            pred: o.pred,
+            insert: o.insert,
+        });
+        e.encode(colops, actors);
         e.finish()
     }
 
@@ -1018,32 +1039,32 @@ impl ColumnEncoder {
 
     fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
     where
-        I: IntoIterator<Item = &'c amp::Op>,
+        I: IntoIterator<Item = ColumnOp<'c>>,
     {
         for op in ops {
-            self.append(op, actors)
+            self.append(&op, actors)
         }
     }
 
-    fn append(&mut self, op: &amp::Op, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: &ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
-            amp::OpType::Set(value) => {
+            InternalOpType::Set(value) => {
                 self.val.append_value(value, actors);
                 Action::Set
             }
-            amp::OpType::Inc(val) => {
+            InternalOpType::Inc(val) => {
                 self.val.append_value(&amp::ScalarValue::Int(*val), actors);
                 Action::Inc
             }
-            amp::OpType::Del => {
+            InternalOpType::Del => {
                 self.val.append_null();
                 Action::Del
             }
-            amp::OpType::Make(kind) => {
+            InternalOpType::Make(kind) => {
                 self.val.append_null();
                 match kind {
                     amp::ObjType::Sequence(amp::SequenceType::List) => Action::MakeList,

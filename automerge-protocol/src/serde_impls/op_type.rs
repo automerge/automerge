@@ -12,9 +12,10 @@ impl Serialize for OpType {
             OpType::Make(ObjType::Map(MapType::Table)) => "makeTable",
             OpType::Make(ObjType::Sequence(SequenceType::List)) => "makeList",
             OpType::Make(ObjType::Sequence(SequenceType::Text)) => "makeText",
-            OpType::Del => "del",
+            OpType::Del(_) => "del",
             OpType::Inc(_) => "inc",
             OpType::Set(_) => "set",
+            OpType::MultiSet(..) => "set",
         };
         serializer.serialize_str(s)
     }

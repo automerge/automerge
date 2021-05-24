@@ -21,16 +21,18 @@ pub(crate) struct OpHandle {
 
 impl OpHandle {
     pub fn extract(change: &Change, actors: &mut ActorMap) -> Vec<OpHandle> {
+        let mut opnum = change.start_op;
         change
             .iter_ops()
-            .enumerate()
-            .map(|(index, op)| {
-                let id = OpId(
-                    change.start_op + (index as u64),
-                    actors.import_actor(change.actor_id()),
-                );
-                let op = actors.import_op(op);
-                OpHandle { id, op, delta: 0 }
+            .map(|op| {
+                let internal_op = actors.import_op(op);
+                let id = OpId(opnum, actors.import_actor(change.actor_id()));
+                opnum += 1;
+                OpHandle {
+                    id,
+                    op: internal_op,
+                    delta: 0,
+                }
             })
             .collect()
     }
@@ -60,14 +62,16 @@ impl OpHandle {
         }
     }
 
-    pub fn maybe_increment(&mut self, inc: &OpHandle) {
+    pub fn maybe_increment(&mut self, inc: &OpHandle) -> bool {
         if let InternalOpType::Inc(amount) = inc.action {
             if inc.pred.contains(&self.id) {
                 if let InternalOpType::Set(amp::ScalarValue::Counter(_)) = self.action {
                     self.delta += amount;
+                    return true;
                 }
             }
         }
+        false
     }
 }
 

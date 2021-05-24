@@ -1,3 +1,4 @@
+use amp::RootDiff;
 use automerge_backend::Backend;
 use automerge_frontend::{
     Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Primitive, Value,
@@ -25,15 +26,13 @@ fn use_version_and_sequence_number_from_backend() {
             remote_actor2 => 41,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::F64(24.0))
                 }
             },
-        })),
+        },
         max_op: 4,
         pending_changes: 0,
     };
@@ -119,15 +118,13 @@ fn remove_pending_requests_once_handled() {
         max_op: 4,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -152,15 +149,13 @@ fn remove_pending_requests_once_handled() {
         max_op: 5,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "partridges".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -211,15 +206,13 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             remote.clone() => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "pheasants".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(2))
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -244,15 +237,13 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         max_op: 11,
         pending_changes: 0,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "blackbirds".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(24))
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -295,15 +286,13 @@ fn dont_allow_out_of_order_request_patches() {
             doc.actor_id.clone() => 2,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "partridges".to_string() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
-        })),
+        },
     });
 
     assert_eq!(
@@ -343,24 +332,22 @@ fn handle_concurrent_insertions_into_lists() {
             doc.actor_id.clone() => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".to_string() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: doc.actor_id.op_id_at(1).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                random_op_id() => amp::Diff::Value("goldfinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: doc.actor_id.op_id_at(1).into(),
+                            op_id: doc.actor_id.op_id_at(1),
+                            value: amp::Diff::Value("goldfinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -409,24 +396,22 @@ fn handle_concurrent_insertions_into_lists() {
         actor: None,
         seq: None,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id.clone(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 1, elem_id: remote.op_id_at(1).into()}],
-                        props: hashmap!{
-                            1 => hashmap!{
-                                remote.op_id_at(1) => amp::Diff::Value("bullfinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert{
+                            index: 1,
+                            elem_id: remote.op_id_at(1).into(),
+                            op_id: doc.actor_id.op_id_at(1),
+                            value: amp::Diff::Value("bullfinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     })
     .unwrap();
 
@@ -444,36 +429,37 @@ fn handle_concurrent_insertions_into_lists() {
         seq: Some(2),
         max_op: 3,
         pending_changes: 0,
-        clock: hashmap!{
+        clock: hashmap! {
             doc.actor_id.clone() => 2,
             remote => 1,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff{
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
-            props: hashmap!{
+        diffs: RootDiff {
+            props: hashmap! {
                 "birds".to_string() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: birds_id,
                         obj_type: amp::SequenceType::List,
                         edits: vec![
-                            amp::DiffEdit::Insert { index: 0, elem_id: doc.actor_id.op_id_at(2).into() },
-                            amp::DiffEdit::Insert{ index: 2, elem_id: doc.actor_id.op_id_at(3).into() },
-                        ],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                doc.actor_id.op_id_at(2) => amp::Diff::Value("chaffinch".into()),
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 0,
+                                elem_id: doc.actor_id.op_id_at(2).into(),
+                                op_id: doc.actor_id.op_id_at(2),
+                                value: amp::Diff::Value("chaffinch".into()),
                             },
-                            2 => hashmap!{
-                                doc.actor_id.op_id_at(3) => amp::Diff::Value("greenfinch".into()),
-                            }
-                        }
+                            amp::DiffEdit::SingleElementInsert{
+                                index: 2,
+                                elem_id: doc.actor_id.op_id_at(3).into(),
+                                op_id: doc.actor_id.op_id_at(3),
+                                value: amp::Diff::Value("greenfinch".into()),
+                            },
+                        ],
                     })
                 }
-            }
-        }))
-    }).unwrap();
+            },
+        },
+    })
+    .unwrap();
 
     assert!(doc.in_flight_requests().is_empty());
     assert_eq!(

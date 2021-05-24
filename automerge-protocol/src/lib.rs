@@ -1,9 +1,9 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{collections::HashMap, convert::TryFrom, fmt};
+use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 
-use serde::{ser::SerializeMap, Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -68,6 +68,17 @@ impl ObjType {
     }
 }
 
+impl fmt::Display for ObjType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjType::Map(MapType::Map) => write!(f, "map"),
+            ObjType::Map(MapType::Table) => write!(f, "table"),
+            ObjType::Sequence(SequenceType::List) => write!(f, "list"),
+            ObjType::Sequence(SequenceType::Text) => write!(f, "text"),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +105,16 @@ impl OpId {
 
     pub fn counter(&self) -> u64 {
         self.0
+    }
+
+    pub fn increment_by(&self, by: u64) -> OpId {
+        OpId(self.0 + by, self.1.clone())
+    }
+
+    /// Returns true if `other` has the same actor ID, and their counter is `delta` greater than
+    /// ours.
+    pub fn delta(&self, other: &Self, delta: u64) -> bool {
+        self.1 == other.1 && self.0 + delta == other.0
     }
 }
 
@@ -128,6 +149,13 @@ impl ElementId {
             ElementId::Id(_) => true,
         }
     }
+
+    pub fn increment_by(&self, by: u64) -> Option<Self> {
+        match self {
+            ElementId::Head => None,
+            ElementId::Id(id) => Some(ElementId::Id(id.increment_by(by))),
+        }
+    }
 }
 
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
@@ -160,6 +188,12 @@ impl Key {
         match self.as_element_id()? {
             ElementId::Id(id) => Some(id),
             ElementId::Head => None,
+        }
+    }
+    pub fn increment_by(&self, by: u64) -> Option<Self> {
+        match self {
+            Key::Map(_) => None,
+            Key::Seq(eid) => eid.increment_by(by).map(Key::Seq),
         }
     }
 }
@@ -271,9 +305,11 @@ impl ScalarValue {
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
     Make(ObjType),
-    Del,
+    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
+    Del(NonZeroU32),
     Inc(i64),
     Set(ScalarValue),
+    MultiSet(Vec<ScalarValue>),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -321,7 +357,6 @@ impl fmt::Debug for ChangeHash {
 // Diff {
 //  object_id: 123,
 //  obj_type: map,
-//  edits: None,
 //  props: {
 //      "key1": {
 //          "10@abc123":
@@ -346,7 +381,6 @@ impl fmt::Debug for ChangeHash {
 pub enum Diff {
     Map(MapDiff),
     Seq(SeqDiff),
-    Unchanged(ObjDiff),
     Value(ScalarValue),
     Cursor(CursorDiff),
 }
@@ -357,7 +391,6 @@ pub struct MapDiff {
     pub object_id: ObjectId,
     #[serde(rename = "type")]
     pub obj_type: MapType,
-    #[serde(skip_serializing_if = "HashMap::is_empty", default)]
     pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
@@ -368,7 +401,6 @@ pub struct SeqDiff {
     #[serde(rename = "type")]
     pub obj_type: SequenceType,
     pub edits: Vec<DiffEdit>,
-    pub props: HashMap<usize, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
@@ -389,14 +421,46 @@ pub struct CursorDiff {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
-    Insert {
-        index: usize,
-        #[serde(rename = "elemId")]
+    /// Describes the insertion of a single element into a list or text object.
+    /// The element can be a nested object.
+    #[serde(rename = "insert", rename_all = "camelCase")]
+    SingleElementInsert {
+        /// the list index at which to insert the new element
+        index: u64,
+        /// the unique element ID of the new list element
         elem_id: ElementId,
+        /// ID of the operation that assigned this value
+        op_id: OpId,
+        value: Diff,
     },
-    Remove {
-        index: usize,
+    /// Describes the insertion of a consecutive sequence of primitive values into
+    /// a list or text object. In the case of text, the values are strings (each
+    /// character as a separate string value). Each inserted value is given a
+    /// consecutive element ID: starting with `elemId` for the first value, the
+    /// subsequent values are given elemIds with the same actor ID and incrementing
+    /// counters. To insert non-primitive values, use SingleInsertEdit.
+    #[serde(rename = "multi-insert", rename_all = "camelCase")]
+    MultiElementInsert {
+        /// the list index at which to insert the first value
+        index: u64,
+        /// the unique ID of the first inserted element
+        elem_id: ElementId,
+        values: Vec<ScalarValue>,
     },
+    /// Describes the update of the value or nested object at a particular index
+    /// of a list or text object. In the case where there are multiple conflicted
+    /// values at the same list index, multiple UpdateEdits with the same index
+    /// (but different opIds) appear in the edits array of ListDiff.
+    #[serde(rename_all = "camelCase")]
+    Update {
+        /// the list index to update
+        index: u64,
+        /// ID of the operation that assigned this value
+        op_id: OpId,
+        value: Diff,
+    },
+    #[serde(rename_all = "camelCase")]
+    Remove { index: u64, count: u64 },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -413,8 +477,13 @@ pub struct Patch {
     //    pub can_undo: bool,
     //    pub can_redo: bool,
     //    pub version: u64,
-    #[serde(serialize_with = "Patch::top_level_serialize")]
-    pub diffs: Option<Diff>,
+    pub diffs: RootDiff,
+}
+
+/// A custom MapDiff that implicitly has the object_id Root and is a map object.
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct RootDiff {
+    pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -457,26 +526,5 @@ impl UncompressedChange {
             }
         }
         None
-    }
-}
-
-impl Patch {
-    // the default behavior is to return {} for an empty patch
-    // this patch implementation comes with ObjectID::Root baked in so this covered
-    // the top level scope where not even Root is referenced
-
-    pub(crate) fn top_level_serialize<S>(
-        maybe_diff: &Option<Diff>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        if let Some(diff) = maybe_diff {
-            diff.serialize(serializer)
-        } else {
-            let map = serializer.serialize_map(Some(0))?;
-            map.end()
-        }
     }
 }

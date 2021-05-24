@@ -1,5 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
+use amp::{MapDiff, ObjectId};
 use automerge_protocol as amp;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
@@ -34,7 +35,7 @@ impl LocalOperationResult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
     objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     cursors: Cursors,
@@ -53,28 +54,12 @@ impl StateTree {
         }
     }
 
-    pub fn apply_diff(&self, diff: &amp::Diff) -> Result<StateTree, error::InvalidPatch> {
-        match diff {
-            amp::Diff::Map(mapdiff) => {
-                let amp::MapDiff {
-                    object_id,
-                    obj_type,
-                    props: _props,
-                } = mapdiff;
-                if *object_id != amp::ObjectId::Root {
-                    Err(error::InvalidPatch::PatchDidNotBeginAtRoot)
-                } else if *obj_type != amp::MapType::Map {
-                    Err(error::InvalidPatch::MismatchingObjectType {
-                        object_id: amp::ObjectId::Root,
-                        patch_expected_type: Some(amp::ObjType::map()),
-                        actual_type: Some(amp::ObjType::Map(*obj_type)),
-                    })
-                } else {
-                    self.apply_map_diff(mapdiff)
-                }
-            }
-            _ => Err(error::InvalidPatch::PatchDidNotBeginAtRoot),
-        }
+    pub fn apply_root_diff(&self, diff: amp::RootDiff) -> Result<StateTree, error::InvalidPatch> {
+        self.apply_map_diff(&MapDiff {
+            object_id: ObjectId::Root,
+            obj_type: amp::MapType::Map,
+            props: diff.props,
+        })
     }
 
     fn apply_map_diff(&self, diff: &amp::MapDiff) -> Result<StateTree, error::InvalidPatch> {
@@ -332,13 +317,13 @@ impl StateTree {
 
 /// A node in the state tree is either a leaf node containing a scalarvalue,
 /// or an internal composite type (e.g a Map or a List)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum StateTreeValue {
     Leaf(Primitive),
     Link(amp::ObjectId),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum StateTreeComposite {
     Map(StateTreeMap),
     Table(StateTreeTable),
@@ -408,10 +393,7 @@ impl StateTreeComposite {
                 }),
             },
             amp::Diff::Seq(amp::SeqDiff {
-                edits,
-                props: new_props,
-                obj_type,
-                ..
+                edits, obj_type, ..
             }) => match self {
                 StateTreeComposite::List(list) => {
                     if *obj_type != amp::SequenceType::List {
@@ -421,16 +403,8 @@ impl StateTreeComposite {
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
-                        list.apply_diff(
-                            edits,
-                            DiffToApply {
-                                parent_object_id: diff.parent_object_id,
-                                parent_key: diff.parent_key,
-                                current_objects: diff.current_objects.clone(),
-                                diff: new_props,
-                            },
-                        )
-                        .map(|d| d.map(StateTreeComposite::List))
+                        list.apply_diff(diff.current_objects.clone(), edits)
+                            .map(|d| d.map(StateTreeComposite::List))
                     }
                 }
                 StateTreeComposite::Text(text) => {
@@ -441,16 +415,8 @@ impl StateTreeComposite {
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
-                        text.apply_diff(
-                            edits,
-                            DiffToApply {
-                                parent_object_id: diff.parent_object_id,
-                                parent_key: diff.parent_key,
-                                current_objects: diff.current_objects.clone(),
-                                diff: new_props,
-                            },
-                        )
-                        .map(|d| d.map(StateTreeComposite::Text))
+                        text.apply_diff(diff.current_objects.clone(), edits)
+                            .map(|d| d.map(StateTreeComposite::Text))
                     }
                 }
                 _ => Err(error::InvalidPatch::MismatchingObjectType {
@@ -459,7 +425,6 @@ impl StateTreeComposite {
                     actual_type: Some(self.obj_type()),
                 }),
             },
-            amp::Diff::Unchanged(..) => Ok(DiffApplicationResult::pure(self.clone())),
             amp::Diff::Value(..) => {
                 // TODO throw an error
                 panic!("SHould never be called")
@@ -590,32 +555,6 @@ impl StateTreeValue {
             }
             .apply_diff(&diff)
             .map(|d| d.map(|c| StateTreeValue::Link(c.object_id()))),
-            amp::Diff::Unchanged(amp::ObjDiff {
-                obj_type,
-                object_id,
-            }) => match obj_type {
-                amp::ObjType::Sequence(seq_type) => StateTreeValue::new_from_diff(DiffToApply {
-                    current_objects: diff.current_objects,
-                    parent_key: diff.parent_key,
-                    parent_object_id: diff.parent_object_id,
-                    diff: &amp::Diff::Seq(amp::SeqDiff {
-                        object_id: object_id.clone(),
-                        obj_type: *seq_type,
-                        edits: Vec::new(),
-                        props: HashMap::new(),
-                    }),
-                }),
-                amp::ObjType::Map(map_type) => StateTreeValue::new_from_diff(DiffToApply {
-                    current_objects: diff.current_objects,
-                    parent_key: diff.parent_key,
-                    parent_object_id: diff.parent_object_id,
-                    diff: &amp::Diff::Map(amp::MapDiff {
-                        object_id: object_id.clone(),
-                        obj_type: *map_type,
-                        props: HashMap::new(),
-                    }),
-                }),
-            },
             amp::Diff::Cursor(ref c) => {
                 Ok(DiffApplicationResult::pure(StateTreeValue::Leaf(c.into())))
             }
@@ -633,7 +572,7 @@ impl StateTreeValue {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeMap {
     object_id: amp::ObjectId,
     props: im_rc::HashMap<String, MultiValue>,
@@ -687,7 +626,7 @@ impl StateTreeMap {
                                     diff,
                                 },
                             )?;
-                            change += diff_result.change;
+                            change.update_with(diff_result.change);
                             new_props = new_props.update(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
@@ -703,7 +642,7 @@ impl StateTreeMap {
                                     diff,
                                 },
                             )?;
-                            change += diff_result.change;
+                            change.update_with(diff_result.change);
                             new_props = new_props.update(prop.clone(), diff_result.value.clone());
                             diff_result.value
                         }
@@ -722,7 +661,7 @@ impl StateTreeMap {
                                 },
                             )
                         }))?;
-                    change += other_changes.change;
+                    change.update_with(other_changes.change);
                     new_props = new_props.update(prop.clone(), other_changes.value);
                 }
             }
@@ -732,7 +671,8 @@ impl StateTreeMap {
             props: new_props,
         };
         Ok(DiffApplicationResult::pure(map.clone()).with_changes(
-            StateTreeChange::single(self.object_id.clone(), StateTreeComposite::Map(map)) + change,
+            StateTreeChange::single(self.object_id.clone(), StateTreeComposite::Map(map))
+                .union(change),
         ))
     }
 
@@ -754,7 +694,7 @@ impl StateTreeMap {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeTable {
     object_id: amp::ObjectId,
     props: im_rc::HashMap<String, MultiValue>,
@@ -822,7 +762,7 @@ impl StateTreeTable {
                             )
                         }))
                     })?;
-                    changes += node_diffapp.change;
+                    changes.update_with(node_diffapp.change);
                     new_props.insert(prop.to_string(), node_diffapp.value);
                 }
             }
@@ -857,7 +797,7 @@ impl StateTreeTable {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeText {
     object_id: amp::ObjectId,
     graphemes: DiffableSequence<MultiGrapheme>,
@@ -904,7 +844,7 @@ impl StateTreeText {
     ) -> Result<(&amp::OpId, String), error::MissingIndexError> {
         self.graphemes
             .get(index)
-            .map(|mc| (mc.default_opid(), mc.default_grapheme()))
+            .map(|mc| (&mc.0, mc.1.default_grapheme()))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.graphemes.len(),
@@ -916,6 +856,17 @@ impl StateTreeText {
         index: usize,
         value: MultiGrapheme,
     ) -> Result<StateTreeText, error::MissingIndexError> {
+        self.insert_many(index, std::iter::once(value))
+    }
+
+    fn insert_many<I>(
+        &self,
+        index: usize,
+        values: I,
+    ) -> Result<StateTreeText, error::MissingIndexError>
+    where
+        I: IntoIterator<Item = MultiGrapheme>,
+    {
         if index > self.graphemes.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -923,7 +874,9 @@ impl StateTreeText {
             })
         } else {
             let mut new_chars = self.graphemes.clone();
-            new_chars.insert(index, value);
+            for (i, grapheme) in values.into_iter().enumerate() {
+                new_chars.insert(index + i, grapheme);
+            }
             Ok(StateTreeText {
                 object_id: self.object_id.clone(),
                 graphemes: new_chars,
@@ -931,15 +884,14 @@ impl StateTreeText {
         }
     }
 
-    fn apply_diff<K>(
+    fn apply_diff(
         &self,
+        current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
         edits: &[amp::DiffEdit],
-        props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpId, amp::Diff>>>,
-    ) -> Result<DiffApplicationResult<StateTreeText>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        let new_graphemes = self.graphemes.apply_diff(&self.object_id, edits, props)?;
+    ) -> Result<DiffApplicationResult<StateTreeText>, error::InvalidPatch> {
+        let new_graphemes = self
+            .graphemes
+            .apply_diff(current_objects, &self.object_id, edits)?;
         Ok(new_graphemes.and_then(|new_graphemes| {
             let text = StateTreeText {
                 object_id: self.object_id.clone(),
@@ -955,7 +907,7 @@ impl StateTreeText {
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
         self.graphemes
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.default_opid().clone()])
+            .map(|v| vec![v.1.default_opid().clone()])
             .unwrap_or_else(Vec::new)
     }
 
@@ -964,7 +916,7 @@ impl StateTreeText {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct StateTreeList {
     object_id: amp::ObjectId,
     elements: DiffableSequence<MultiValue>,
@@ -1010,6 +962,17 @@ impl StateTreeList {
         index: usize,
         value: MultiValue,
     ) -> Result<StateTreeList, error::MissingIndexError> {
+        self.insert_many(index, std::iter::once(value))
+    }
+
+    fn insert_many<I>(
+        &self,
+        index: usize,
+        values: I,
+    ) -> Result<StateTreeList, error::MissingIndexError>
+    where
+        I: IntoIterator<Item = MultiValue>,
+    {
         let mut new_elems = self.elements.clone();
         if index > self.elements.len() {
             Err(error::MissingIndexError {
@@ -1017,7 +980,9 @@ impl StateTreeList {
                 size_of_collection: self.elements.len(),
             })
         } else {
-            new_elems.insert(index, value);
+            for (i, value) in values.into_iter().enumerate() {
+                new_elems.insert(index + i, value);
+            }
             Ok(StateTreeList {
                 object_id: self.object_id.clone(),
                 elements: new_elems,
@@ -1025,17 +990,14 @@ impl StateTreeList {
         }
     }
 
-    fn apply_diff<K>(
+    fn apply_diff(
         &self,
+        current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
         edits: &[amp::DiffEdit],
-        new_props: DiffToApply<K, &HashMap<usize, HashMap<amp::OpId, amp::Diff>>>,
-    ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    ) -> Result<DiffApplicationResult<StateTreeList>, error::InvalidPatch> {
         let new_elements = self
             .elements
-            .apply_diff(&self.object_id, edits, new_props)?;
+            .apply_diff(current_objects, &self.object_id, edits)?;
         Ok(new_elements.and_then(|new_elements| {
             let new_list = StateTreeList {
                 object_id: self.object_id.clone(),
@@ -1051,17 +1013,16 @@ impl StateTreeList {
     pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
         self.elements
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.default_opid()])
+            .map(|v| vec![v.1.default_opid()])
             .unwrap_or_else(Vec::new)
     }
 
     pub(crate) fn elem_at(
         &self,
         index: usize,
-    ) -> Result<(amp::OpId, &MultiValue), error::MissingIndexError> {
+    ) -> Result<&(amp::OpId, MultiValue), error::MissingIndexError> {
         self.elements
             .get(index)
-            .map(|mv| (mv.default_opid(), mv))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.elements.len(),
@@ -1087,7 +1048,6 @@ fn diff_object_type(diff: &amp::Diff) -> Option<amp::ObjType> {
     match diff {
         amp::Diff::Map(mapdiff) => Some(amp::ObjType::Map(mapdiff.obj_type)),
         amp::Diff::Seq(seqdiff) => Some(amp::ObjType::Sequence(seqdiff.obj_type)),
-        amp::Diff::Unchanged(udiff) => Some(udiff.obj_type),
         amp::Diff::Value(..) => None,
         amp::Diff::Cursor(..) => None,
     }
@@ -1098,7 +1058,6 @@ fn diff_object_id(diff: &amp::Diff) -> Option<amp::ObjectId> {
     match diff {
         amp::Diff::Map(mapdiff) => Some(mapdiff.object_id.clone()),
         amp::Diff::Seq(seqdiff) => Some(seqdiff.object_id.clone()),
-        amp::Diff::Unchanged(udiff) => Some(udiff.object_id.clone()),
         amp::Diff::Value(..) => None,
         amp::Diff::Cursor(amp::CursorDiff { object_id, .. }) => Some(object_id.clone()),
     }

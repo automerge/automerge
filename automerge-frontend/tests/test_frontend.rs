@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroU32};
 
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
@@ -251,7 +251,7 @@ fn delete_keys_in_a_map() {
         hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: amp::ObjectId::Root,
             key: "magpies".into(),
             insert: false,
@@ -428,7 +428,7 @@ fn delete_list_elements() {
         hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
-            action: amp::OpType::Del,
+            action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: birds_id,
             key: doc.actor_id.op_id_at(2).into(),
             insert: false,

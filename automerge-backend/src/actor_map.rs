@@ -2,7 +2,10 @@ use std::cmp::Ordering;
 
 use automerge_protocol as amp;
 
-use crate::internal::{ActorId, ElementId, InternalOp, InternalOpType, Key, ObjectId, OpId};
+use crate::{
+    expanded_op::ExpandedOp,
+    internal::{ActorId, ElementId, InternalOp, Key, ObjectId, OpId},
+};
 
 #[derive(PartialEq, Debug, Clone, Default)]
 pub(crate) struct ActorMap(Vec<amp::ActorId>);
@@ -42,26 +45,14 @@ impl ActorMap {
         }
     }
 
-    pub fn import_op(&mut self, op: amp::Op) -> InternalOp {
+    pub fn import_op(&mut self, op: ExpandedOp) -> InternalOp {
+        let pred: Vec<OpId> = op.pred.iter().map(|id| self.import_opid(id)).collect();
         InternalOp {
-            action: Self::import_optype(&op.action),
+            action: op.action,
             obj: self.import_obj(&op.obj),
             key: self.import_key(&op.key),
-            pred: op
-                .pred
-                .into_iter()
-                .map(|ref id| self.import_opid(id))
-                .collect(),
+            pred,
             insert: op.insert,
-        }
-    }
-
-    pub fn import_optype(optype: &amp::OpType) -> InternalOpType {
-        match optype {
-            amp::OpType::Make(val) => InternalOpType::Make(*val),
-            amp::OpType::Del => InternalOpType::Del,
-            amp::OpType::Inc(val) => InternalOpType::Inc(*val),
-            amp::OpType::Set(val) => InternalOpType::Set(val.clone()),
         }
     }
 

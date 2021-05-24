@@ -1,5 +1,6 @@
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
+use amp::RootDiff;
 use automerge_frontend::{Frontend, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -17,15 +18,13 @@ fn set_object_root_properties() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     actor.op_id_at(1) => "magpie".into()
                 }
             },
-        })),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch).unwrap();
@@ -59,16 +58,14 @@ fn reveal_conflicts_on_root_properties() {
             actor2.clone() => 2,
         },
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBird".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Value("robin".into()),
                     actor2.op_id_at(1) => amp::Diff::Value("wagtail".into()),
                 }
             },
-        })),
+        },
     };
     let mut doc = Frontend::new();
     doc.apply_patch(patch).unwrap();
@@ -101,9 +98,7 @@ fn create_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -117,7 +112,7 @@ fn create_nested_maps() {
                     })
                 }
             },
-        })),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch).unwrap();
@@ -139,9 +134,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -155,7 +148,7 @@ fn apply_updates_inside_nested_maps() {
                     })
                 }
             },
-        })),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch1).unwrap();
@@ -171,9 +164,7 @@ fn apply_updates_inside_nested_maps() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -187,7 +178,7 @@ fn apply_updates_inside_nested_maps() {
                     })
                 }
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -224,9 +215,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -249,7 +238,7 @@ fn apply_updates_inside_map_conflicts() {
                     })
                 }
             },
-        })),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch1).unwrap();
@@ -279,9 +268,7 @@ fn apply_updates_inside_map_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -293,13 +280,14 @@ fn apply_updates_inside_map_conflicts() {
                             }
                         },
                     }),
-                    actor2.op_id_at(1) => amp::Diff::Unchanged(amp::ObjDiff{
+                    actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor2.op_id_at(1).into(),
-                        obj_type: amp::ObjType::Map(amp::MapType::Map),
+                        obj_type: amp::MapType::Map,
+                        props: HashMap::new(),
                     })
                 }
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -333,9 +321,7 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "magpies".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Int(2))
@@ -344,7 +330,7 @@ fn delete_keys_in_maps() {
                     actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(15))
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch1).unwrap();
     assert_eq!(
@@ -363,13 +349,11 @@ fn delete_keys_in_maps() {
         clock: hashmap! {
             actor => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "magpies".into() => hashmap!{}
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -392,24 +376,22 @@ fn create_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert {
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
+                            value: amp::Diff::Value("chaffinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -432,24 +414,22 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert {
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            op_id: actor.op_id_at(2),
+                            value: amp::Diff::Value("chaffinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -462,29 +442,66 @@ fn apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value("greenfinch".into())
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::Update{
+                            index: 0,
+                            op_id: actor.op_id_at(3),
+                            value: amp::Diff::Value("greenfinch".into()),
+                        }],
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(hashmap! {"birds" => vec!["greenfinch"]})
+    )
+}
+
+#[test]
+fn apply_multi_insert_updates_inside_lists() {
+    let actor = amp::ActorId::random();
+    let mut frontend = Frontend::new();
+    let patch = amp::Patch {
+        actor: None,
+        seq: None,
+        max_op: 1,
+        deps: Vec::new(),
+        clock: hashmap! {
+            actor.clone() => 1,
+        },
+        diffs: RootDiff {
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: actor.op_id_at(1).into(),
+                        obj_type: amp::SequenceType::List,
+                        edits: vec![amp::DiffEdit::MultiElementInsert {
+                            index: 0,
+                            elem_id: actor.op_id_at(2).into(),
+                            values: vec![
+                                "greenfinch".into(),
+                                "bullfinch".into(),
+                            ]
+                        }],
+                    })
+                }
+            },
+        },
+        pending_changes: 0,
+    };
+    frontend.apply_patch(patch).unwrap();
+
+    assert_eq!(
+        frontend.state(),
+        &Into::<Value>::into(hashmap! {"birds" => vec!["greenfinch", "bullfinch"]})
     )
 }
 
@@ -505,6 +522,7 @@ fn apply_updates_inside_list_conflicts() {
 
     let other_actor = amp::ActorId::random();
 
+    // A patch to create conflicting value at index 0
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
@@ -516,18 +534,18 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 1,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: other_actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: actor1.op_id_at(2).into()}],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor1.op_id_at(2) => amp::Diff::Map(amp::MapDiff{
+                        edits: vec![
+                            amp::DiffEdit::SingleElementInsert{
+                                index: 0,
+                                elem_id: actor1.op_id_at(2).into(),
+                                op_id: actor1.op_id_at(2),
+                                value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
                                     props: hashmap!{
@@ -539,7 +557,11 @@ fn apply_updates_inside_list_conflicts() {
                                         },
                                     }
                                 }),
-                                actor2.op_id_at(2) => amp::Diff::Map(amp::MapDiff{
+                            },
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor2.op_id_at(2),
+                                value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
                                     props: hashmap!{
@@ -552,11 +574,11 @@ fn apply_updates_inside_list_conflicts() {
                                     }
                                 }),
                             },
-                        }
+                            ],
                     })
                 }
             },
-        })),
+        },
     };
 
     let mut frontend = Frontend::new();
@@ -584,6 +606,7 @@ fn apply_updates_inside_list_conflicts() {
         }
     );
 
+    // Update the conflicting values
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
@@ -594,18 +617,17 @@ fn apply_updates_inside_list_conflicts() {
             actor1.clone() => 2,
             actor2.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: other_actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: Vec::new(),
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor1.op_id_at(2) => amp::Diff::Map(amp::MapDiff{
+                        edits: vec![
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor1.op_id_at(2),
+                                value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
                                     obj_type: amp::MapType::Map,
                                     props: hashmap!{
@@ -613,17 +635,22 @@ fn apply_updates_inside_list_conflicts() {
                                             actor1.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                                         },
                                     }
-                                }),
-                                actor2.op_id_at(2) => amp::Diff::Unchanged(amp::ObjDiff{
-                                    object_id: actor2.op_id_at(2).into(),
-                                    obj_type: amp::ObjType::Map(amp::MapType::Map),
-                                }),
+                                })
                             },
-                        }
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor2.op_id_at(2),
+                                value: amp::Diff::Map(amp::MapDiff{
+                                    object_id: actor2.op_id_at(2).into(),
+                                    obj_type: amp::MapType::Map,
+                                    props: HashMap::new(),
+                                })
+                            }
+                        ],
                     })
                 }
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -650,6 +677,61 @@ fn apply_updates_inside_list_conflicts() {
             }.into(),
         }
     );
+
+    // Remove one of the conflicting values
+    let patch3 = amp::Patch {
+        actor: None,
+        seq: None,
+        max_op: 5,
+        deps: Vec::new(),
+        clock: hashmap! {
+            actor1 => 2,
+            actor2.clone() => 1,
+        },
+        diffs: RootDiff {
+            props: hashmap! {
+                "birds".into() => hashmap!{
+                    other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                        object_id: other_actor.op_id_at(1).into(),
+                        obj_type: amp::SequenceType::List,
+                        edits: vec![
+                            amp::DiffEdit::Update{
+                                index: 0,
+                                op_id: actor2.op_id_at(2),
+                                value: amp::Diff::Map(amp::MapDiff{
+                                    object_id: actor2.op_id_at(2).into(),
+                                    obj_type: amp::MapType::Map,
+                                    props: HashMap::new(),
+                                })
+                            }
+                        ],
+                    })
+                }
+            },
+        },
+        pending_changes: 0,
+    };
+
+    frontend.apply_patch(patch3).unwrap();
+
+    assert_eq!(
+        frontend.state(),
+        &Into::<Value>::into(
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
+        )
+    );
+
+    assert_eq!(
+        frontend
+            .get_conflicts(&Path::root().key("birds").index(0))
+            .unwrap(),
+        hashmap! {
+            actor2.op_id_at(2) => hashmap!{
+                "species" => Primitive::Str("lapwing".into()),
+                "numSeen" => Primitive::Int(2),
+            }.into(),
+        }
+    );
 }
 
 #[test]
@@ -665,30 +747,30 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
                         edits: vec![
-                            amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() },
-                            amp::DiffEdit::Insert { index: 1, elem_id: actor.op_id_at(3).into() },
-                        ],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value("chaffinch".into())
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
+                                value: amp::Diff::Value("chaffinch".into())
                             },
-                            1 => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value("goldfinch".into())
-                            }
-                        }
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 1,
+                                elem_id: actor.op_id_at(3).into(),
+                                op_id: actor.op_id_at(3),
+                                value: amp::Diff::Value("goldfinch".into()),
+                            },
+                        ],
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
@@ -705,20 +787,17 @@ fn delete_list_elements() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Remove{ index: 0 }],
-                        props: hashmap!{}
+                        edits: vec![amp::DiffEdit::Remove{ index: 0, count: 1 }],
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch2).unwrap();
     assert_eq!(
@@ -737,9 +816,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -756,27 +833,27 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     actor.op_id_at(3) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(3).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: vec![amp::DiffEdit::Insert{ index: 0, elem_id: actor.op_id_at(4).into() }],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(4) => amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor.op_id_at(4).into(),
-                                    obj_type: amp::MapType::Map,
-                                    props: hashmap!{
-                                        "species".into() => hashmap!{
-                                            actor.op_id_at(5) => amp::Diff::Value("magpie".into())
-                                        },
-                                        "family".into() => hashmap!{
-                                            actor.op_id_at(6) => amp::Diff::Value("Corvidae".into())
-                                        }
+                        edits: vec![amp::DiffEdit::SingleElementInsert{
+                            index: 0,
+                            elem_id: actor.op_id_at(4).into(),
+                            op_id: actor.op_id_at(4),
+                            value:  amp::Diff::Map(amp::MapDiff{
+                                object_id: actor.op_id_at(4).into(),
+                                obj_type: amp::MapType::Map,
+                                props: hashmap!{
+                                    "species".into() => hashmap!{
+                                        actor.op_id_at(5) => amp::Diff::Value("magpie".into())
+                                    },
+                                    "family".into() => hashmap!{
+                                        actor.op_id_at(6) => amp::Diff::Value("Corvidae".into())
                                     }
-                                })
-                            }
-                        }
+                                }
+                            })
+                        }],
                     })
                 },
             },
-        })),
+        },
     };
 
     let mut frontend = Frontend::new();
@@ -800,9 +877,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
@@ -819,24 +894,23 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     actor.op_id_at(3) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(3).into(),
                         obj_type: amp::SequenceType::List,
-                        edits: Vec::new(),
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(4) => amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor.op_id_at(4).into(),
-                                    obj_type: amp::MapType::Map,
-                                    props: hashmap!{
-                                        "species".into() => hashmap!{
-                                            actor.op_id_at(8) => amp::Diff::Value("Eurasian magpie".into())
-                                        },
-                                    }
-                                })
-                            }
-                        }
+                        edits: vec![amp::DiffEdit::Update{
+                            index: 0,
+                            op_id: actor.op_id_at(4),
+                            value: amp::Diff::Map(amp::MapDiff{
+                                object_id: actor.op_id_at(4).into(),
+                                obj_type: amp::MapType::Map,
+                                props: hashmap!{
+                                    "species".into() => hashmap!{
+                                        actor.op_id_at(8) => amp::Diff::Value("Eurasian magpie".into())
+                                    },
+                                }
+                            }),
+                        }],
                     })
                 },
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -866,34 +940,36 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 2,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::Text,
                         edits: vec![
-                            amp::DiffEdit::Insert { index: 0, elem_id: actor.op_id_at(2).into() },
-                            amp::DiffEdit::Insert { index: 1, elem_id: actor.op_id_at(3).into() },
-                            amp::DiffEdit::Insert { index: 2, elem_id: actor.op_id_at(4).into() },
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 0,
+                                elem_id: actor.op_id_at(2).into(),
+                                op_id: actor.op_id_at(2),
+                                value: amp::Diff::Value("b".into()),
+                            },
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 1,
+                                elem_id: actor.op_id_at(3).into(),
+                                op_id: actor.op_id_at(3),
+                                value: amp::Diff::Value("e".into()),
+                            },
+                            amp::DiffEdit::SingleElementInsert {
+                                index: 2,
+                                elem_id: actor.op_id_at(4).into(),
+                                op_id: actor.op_id_at(4),
+                                value: amp::Diff::Value("n".into()),
+                            },
                         ],
-                        props: hashmap!{
-                            0 => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value("b".into())
-                            },
-                            1 => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value("e".into())
-                            },
-                            2 => hashmap!{
-                                actor.op_id_at(4) => amp::Diff::Value("n".into())
-                            }
-                        }
                     })
                 }
             },
-        })),
+        },
     };
     frontend.apply_patch(patch).unwrap();
 
@@ -913,26 +989,24 @@ fn test_text_objects() {
         clock: hashmap! {
             actor.clone() => 3,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
                         object_id: actor.op_id_at(1).into(),
                         obj_type: amp::SequenceType::Text,
                         edits: vec![
-                            amp::DiffEdit::Remove { index: 1 },
-                        ],
-                        props: hashmap!{
-                            1 => hashmap! {
-                                actor.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Str("i".to_string()))
+                            amp::DiffEdit::Remove { index: 1, count: 1 },
+                            amp::DiffEdit::Update{
+                                index: 1,
+                                op_id: actor.op_id_at(5),
+                                value: amp::Diff::Value(amp::ScalarValue::Str("i".to_string())),
                             }
-                        }
+                        ],
                     })
                 }
             },
-        })),
+        },
     };
 
     frontend.apply_patch(patch2).unwrap();
@@ -955,18 +1029,17 @@ fn test_unchanged_diff_creates_empty_objects() {
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Unchanged(amp::ObjDiff{
+                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Seq(amp::SeqDiff{
                         object_id: "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap(),
-                        obj_type: amp::ObjType::Sequence(amp::SequenceType::Text)
+                        obj_type: amp::SequenceType::Text,
+                        edits: Vec::new(),
                     })
                 }
             },
-        })),
+        },
     };
     doc.apply_patch(patch).unwrap();
     assert_eq!(

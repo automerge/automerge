@@ -22,6 +22,14 @@ extern crate maplit;
 extern crate rand;
 extern crate web_sys;
 
+// this is needed for print debugging via WASM
+#[allow(unused_macros)]
+macro_rules! log {
+    ( $( $t:tt )* ) => {
+        web_sys::console::log_1(&format!( $( $t )* ).into());
+    }
+}
+
 mod actor_map;
 mod backend;
 mod change;
@@ -31,12 +39,13 @@ mod decoding;
 mod encoding;
 mod error;
 mod event_handlers;
+mod expanded_op;
 mod internal;
 mod object_store;
 mod op_handle;
 mod op_set;
 mod ordered_set;
-mod pending_diff;
+mod patches;
 mod sync;
 
 pub use backend::Backend;
