@@ -82,18 +82,13 @@ fn test_bytes() {
         clock: hashmap! {actor.clone() => 1},
         max_op: 1,
         pending_changes: 0,
-        diffs: Some(
-            MapDiff {
-                object_id: ObjectId::Root,
-                obj_type: MapType::Map,
-                props: hashmap! {
-                    "bird".into() => hashmap!{
-                        actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
-                    }
-                },
-            }
-            .into(),
-        ),
+        diffs: RootDiff {
+            props: hashmap! {
+                "bird".into() => hashmap!{
+                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
+                }
+            },
+        },
     };
     assert_eq!(patch, expected_patch)
 }

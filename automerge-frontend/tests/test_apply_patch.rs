@@ -46,15 +46,13 @@ fn set_bytes_value() {
         clock: hashmap! {
             actor.clone() => 1,
         },
-        diffs: Some(amp::Diff::Map(amp::MapDiff {
-            object_id: amp::ObjectId::Root,
-            obj_type: amp::MapType::Map,
+        diffs: amp::RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes(vec![1, 2, 3])),
                 }
             },
-        })),
+        },
     };
     let mut frontend = Frontend::new();
     frontend.apply_patch(patch).unwrap();

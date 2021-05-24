@@ -780,6 +780,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
 fn prim_from_op_action(action: &amp::OpType) -> Option<amp::ScalarValue> {
     match action {
         amp::OpType::Set(v) => match v {
+            amp::ScalarValue::Bytes(_) => Some(v.clone()),
             amp::ScalarValue::Str(_) => Some(v.clone()),
             amp::ScalarValue::Int(_) => Some(v.clone()),
             amp::ScalarValue::Uint(_) => Some(v.clone()),
