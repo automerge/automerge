@@ -229,28 +229,10 @@ macro_rules! get_cbuffs {
     }};
 }
 
-/// Try to turn a ptr + len into a utf-8 String,
+/// Try to turn a C string into String
 /// and deserialize it
 /// return an error code if failure
 macro_rules! from_json {
-    ($backend:expr, $ptr:expr, $len:expr) => {{
-        let mut slice = std::slice::from_raw_parts($ptr, $len);
-        let s = String::from_utf8(slice.to_vec());
-        let s = match s {
-            Ok(s) => s,
-            Err(e) => return $backend.handle_error(CError::FromUtf8(e)),
-        };
-        match serde_json::from_str(&s) {
-            Ok(v) => v,
-            Err(e) => return $backend.handle_error(CError::Json(e)),
-        }
-    }};
-}
-
-/// Try to turn a ptr + len into a utf-8 String,
-/// and deserialize it
-/// return an error code if failure
-macro_rules! from_json_2 {
     ($backend:expr, $cstr:expr) => {{
         let s = from_cstr($cstr);
         match serde_json::from_str(&s) {
@@ -387,13 +369,12 @@ unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_local_change(
     backend: *mut Backend,
-    request: *const u8,
-    len: usize,
+    request: *const c_char,
     buffs: *mut Buffers,
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
-    let request: UncompressedChange = from_json!(backend, request, len);
+    let request: UncompressedChange = from_json!(backend, request);
     let (patch, mut change) = call_automerge!(backend, backend.apply_local_change(request));
     write_to_buffs(vec![change.raw_bytes()], buffs);
     return 0;
@@ -515,52 +496,16 @@ pub unsafe extern "C" fn automerge_decode_change(backend: *mut Backend, buffs: *
 /// # Safety
 /// This must me called with a valid pointer to a JSON string of a change
 #[no_mangle]
-pub unsafe extern "C" fn automerge_encode_change(backend: *mut Backend, change: *const c_char) -> isize {
+pub unsafe extern "C" fn automerge_encode_change(backend: *mut Backend, buffs: *mut Buffers, change: *const c_char) -> isize {
     let backend = get_backend_mut!(backend);
-    let change: UncompressedChange = from_json_2!(backend, change);
+    let buffs = get_buffs_mut!(buffs);
+    let uncomp: UncompressedChange = from_json!(backend, change);
+    // This should never panic?
+    let change: Change = uncomp.try_into().unwrap();
+    write_to_buffs(vec![change.raw_bytes()], buffs);
     0
 }
 
-///// # Safety
-///// This must me called with a valid pointer to a change and the correct len
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_decode_change(
-//    backend: *mut Backend,
-//    len: usize,
-//    change: *const u8,
-//) -> isize {
-//    let bytes = from_buf_raw(change, len);
-//    let change = Change::from_bytes(bytes).unwrap();
-//    (*backend).generate_json(Ok(change.decode()))
-//}
-//
-///// # Safety
-///// This must me called with a valid pointer a json string of a change
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_encode_change(
-//    backend: *mut Backend,
-//    change: *const c_char,
-//) -> isize {
-//    let change: &CStr = CStr::from_ptr(change);
-//    let change = change.to_string_lossy();
-//    let uncomp_change: UncompressedChange = serde_json::from_str(&change).unwrap();
-//    let change: Change = uncomp_change.try_into().unwrap();
-//    (*backend).handle_binary(Ok(change.raw_bytes().into()))
-//}
-//
-///// # Safety
-///// This must me called with a valid pointer to a backend
-///// the automerge api changed to return a change and a patch
-///// this C api was not designed to returned mixed values so i borrowed the
-///// get_last_local_change call from the javascript api to solve the same problem
-//#[no_mangle]
-//pub unsafe extern "C" fn automerge_get_last_local_change(backend: *mut Backend) -> isize {
-//    match (*backend).last_local_change.as_ref() {
-//        Some(change) => (*backend).handle_binary(Ok(change.raw_bytes().into())),
-//        None => (*backend).handle_error("no last change"),
-//    }
-//}
-//
 ///// # Safety
 ///// This must me called with a valid pointer a json string of a change
 //#[no_mangle]
