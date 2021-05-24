@@ -138,21 +138,21 @@ impl IncrementalPatch {
 
     pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::RootDiff {
         if self.0.is_empty() {
-            return Default::default();
+            return amp::RootDiff::default();
         }
 
         let mut objs: Vec<_> = self.changed_object_ids().copied().collect();
         while let Some(obj_id) = objs.pop() {
-            workshop
+            if let Some(inbound) = workshop
                 .get_obj(&obj_id)
                 .and_then(|obj| obj.inbound.as_ref())
-                .map(|inbound| {
-                    if !self.0.contains_key(&inbound.obj) {
-                        // our parent was not changed - walk up the tree and try them too
-                        objs.push(inbound.obj);
-                    }
-                    self.append_diff(&inbound.obj, PendingDiff::Set(inbound.clone()));
-                });
+            {
+                if !self.0.contains_key(&inbound.obj) {
+                    // our parent was not changed - walk up the tree and try them too
+                    objs.push(inbound.obj);
+                }
+                self.append_diff(&inbound.obj, PendingDiff::Set(inbound.clone()));
+            }
         }
 
         if let Some(root) = self.0.remove(&ObjectId::Root) {
@@ -163,7 +163,7 @@ impl IncrementalPatch {
             for key in &keys {
                 let key_string = workshop.key_to_string(key);
                 let mut opid_to_value = HashMap::new();
-                for op in obj.conflicts(key).iter() {
+                for op in &obj.conflicts(key) {
                     let link = match op.action {
                         InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
@@ -268,7 +268,7 @@ impl IncrementalPatch {
                     })
                 }
                 PendingDiff::Set(op) => {
-                    for op in obj.conflicts(&op.operation_key()).iter() {
+                    for op in &obj.conflicts(&op.operation_key()) {
                         if !seen_op_ids.contains(&op.id) {
                             seen_op_ids.insert(op.id);
                             let value = match op.action {
@@ -314,7 +314,7 @@ impl IncrementalPatch {
         for key in &keys {
             let key_string = workshop.key_to_string(key);
             let mut opid_to_value = HashMap::new();
-            for op in obj.conflicts(key).iter() {
+            for op in &obj.conflicts(key) {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                     InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),

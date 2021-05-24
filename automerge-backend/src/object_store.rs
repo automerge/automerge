@@ -54,7 +54,7 @@ impl ObjState {
     }
 
     pub fn conflicts(&self, key: &Key) -> Vec<&OpHandle> {
-        self.props.get(&key).iter().flat_map(|i| i.iter()).collect()
+        self.props.get(key).iter().flat_map(|i| i.iter()).collect()
     }
 
     #[tracing::instrument(skip(self))]
