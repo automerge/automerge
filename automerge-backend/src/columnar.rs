@@ -129,6 +129,12 @@ impl<'a> Iterator for OperationIterator<'a> {
         let obj = self.objs.next()?;
         let key = self.keys.next()?;
         let pred = self.pred.next()?;
+        #[cfg(debug_assertions)]
+        {
+            let mut pred_sorted = pred.clone();
+            pred_sorted.sort();
+            debug_assert_eq!(pred, pred_sorted, "pred should be sorted");
+        }
         let value = self.value.next()?;
         let action = match action {
             Action::Set => InternalOpType::Set(value),
@@ -997,7 +1003,7 @@ struct ColumnOp<'a> {
     action: InternalOpType,
     obj: Cow<'a, amp::ObjectId>,
     key: Cow<'a, amp::Key>,
-    pred: Cow<'a, [amp::OpId]>,
+    pred: Vec<amp::OpId>,
     insert: bool,
 }
 
@@ -1023,7 +1029,7 @@ impl ColumnEncoder {
             obj: o.obj,
             key: o.key,
             action: o.action,
-            pred: o.pred,
+            pred: o.pred.into_owned(),
             insert: o.insert,
         });
         e.encode(colops, actors);
@@ -1045,15 +1051,17 @@ impl ColumnEncoder {
     where
         I: IntoIterator<Item = ColumnOp<'c>>,
     {
-        for op in ops {
-            self.append(&op, actors)
+        for mut op in ops {
+            self.append(&mut op, actors)
         }
     }
 
-    fn append<'a>(&mut self, op: &ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: &mut ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
+
+        op.pred.sort();
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
             InternalOpType::Set(value) => {
@@ -1234,6 +1242,9 @@ const DOCUMENT_COLUMNS = {
 
 #[cfg(test)]
 mod tests {
+    use amp::{ActorId, Key, ScalarValue};
+    use pretty_assertions::assert_eq;
+
     use super::*;
 
     #[test]
@@ -1323,5 +1334,40 @@ mod tests {
 
         let decoded = decoder.take(ops.len()).collect::<Vec<_>>();
         assert_eq!(decoded, ops);
+    }
+
+    #[test]
+    fn pred_sorted() {
+        let actor = ActorId::random();
+        let actor2 = ActorId::random();
+
+        let mut actors = vec![actor.clone(), actor2.clone()];
+        actors.sort();
+
+        let col_op = ColumnOp {
+            action: InternalOpType::Set(ScalarValue::Null),
+            obj: Cow::Owned(amp::ObjectId::Root),
+            key: Cow::Owned(Key::Map("r".to_owned())),
+            pred: vec![actor.op_id_at(1), actor2.op_id_at(1)],
+            insert: false,
+        };
+
+        let mut column_encoder = ColumnEncoder::new();
+        column_encoder.encode(vec![col_op], &mut actors);
+        let (bytes, _) = column_encoder.finish();
+
+        let col_op2 = ColumnOp {
+            action: InternalOpType::Set(ScalarValue::Null),
+            obj: Cow::Owned(amp::ObjectId::Root),
+            key: Cow::Owned(Key::Map("r".to_owned())),
+            pred: vec![actor2.op_id_at(1), actor.op_id_at(1)],
+            insert: false,
+        };
+
+        let mut column_encoder = ColumnEncoder::new();
+        column_encoder.encode(vec![col_op2], &mut actors);
+        let (bytes2, _) = column_encoder.finish();
+
+        assert_eq!(bytes, bytes2);
     }
 }
