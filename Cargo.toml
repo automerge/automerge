@@ -3,6 +3,7 @@
 members = [
     "automerge",
     "automerge-c",
+    "automerge-c-v2",
     "automerge-backend",
     "automerge-backend-wasm",
     "automerge-frontend",

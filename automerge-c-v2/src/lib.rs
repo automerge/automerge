@@ -128,7 +128,7 @@ impl Backend {
     }
 
     fn handle_error(&mut self, err: CError) -> isize {
-        let c_error = match CString::new(format!("{:?}", err)) {
+        let c_error = match CString::new(format!("{}", err)) {
             Ok(e) => e,
             Err(_) => {
                 return -1;
@@ -242,23 +242,25 @@ macro_rules! from_json {
 
 /// Get hashes from a binary buffer
 macro_rules! get_hashes {
-    ($backend:expr, $bin:expr, $len:expr) => {{
-        let slice = std::slice::from_raw_parts($bin, $len);
-        let iter = slice.chunks_exact(32);
-        let rem = iter.remainder().len();
-        if rem > 0 {
-            return $backend.handle_error(CError::BadHashes(format!(
-                "Byte buffer had: {} leftover bytes",
-                rem
-            )));
-        }
-        let mut hashes = vec![];
-        for chunk in iter {
-            let hash: ChangeHash = match chunk.try_into() {
-                Ok(v) => v,
-                Err(e) => return $backend.handle_error(CError::BadHashes(e.to_string())),
-            };
-            hashes.push(hash);
+    ($backend:expr, $bin:expr, $hashes:expr) => {{
+        let mut hashes: Vec<ChangeHash> = vec![];
+        if $hashes > 0 {
+            let slice = std::slice::from_raw_parts($bin, 32 * $hashes);
+            let iter = slice.chunks_exact(32);
+            let rem = iter.remainder().len();
+            if rem > 0 {
+                return $backend.handle_error(CError::BadHashes(format!(
+                    "Byte buffer had: {} leftover bytes",
+                    rem
+                )));
+            }
+            for chunk in iter {
+                let hash: ChangeHash = match chunk.try_into() {
+                    Ok(v) => v,
+                    Err(e) => return $backend.handle_error(CError::BadHashes(e.to_string())),
+                };
+                hashes.push(hash);
+            }
         }
         hashes
     }};
@@ -337,6 +339,44 @@ pub unsafe extern "C" fn automerge_free_buffs(buffs: *mut Buffers) -> isize {
     0
 }
 
+// util_* functions could be implemented in the parent language,
+// I have just written them in Rust b/c that's what I'm familiar with
+
+/// # Safety
+/// Must be called with a valid buffs pointer
+/// Copy a single buff from a Buffers to a destination.
+/// The destination must be large enough to hold all of dest
+#[no_mangle]
+pub unsafe extern "C" fn util_read_buffs(
+    buffs: *const Buffers,
+    idx: usize,
+    dest: *mut u8,
+) -> usize {
+    let data = std::slice::from_raw_parts((*buffs).data, (*buffs).data_cap);
+    let lens = std::slice::from_raw_parts((*buffs).lens, (*buffs).lens_cap);
+    if idx >= (*buffs).lens_len {
+        // This panic is ok b/c it indicates a truly unrecoverable error
+        panic!("idx: {} out of range: {}", idx, (*buffs).lens_len);
+    }
+    let start: usize = lens.iter().take(idx).sum();
+    let len = lens[idx];
+    let end = start + len;
+    let buff = &data[start..end];
+    ptr::copy_nonoverlapping(buff.as_ptr(), dest, len);
+    len
+}
+
+/// # Safety
+/// Must be called with a valid buffs pointer
+/// Copy a single buff from a Buffers to a destination & null terminate it
+/// The destination must be large enough to hold all of dest
+#[no_mangle]
+pub unsafe extern "C" fn util_read_buffs_str(buffs: *mut Buffers, idx: usize, dest: *mut u8) {
+    let len = util_read_buffs(buffs, idx, dest);
+    // null terminate
+    *dest.add(len) = 0;
+}
+
 /// # Safety
 /// This function should not fail insofar the fields of `buffs` are valid
 /// Write the contents of a `Vec<&[u8]>` to the `data` field of a `Buffers` struct
@@ -357,6 +397,7 @@ unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
         } else {
             get_buff_lens_vec!(buffs)
         });
+    buf_lens.set_len(total_buffs);
 
     let total_bytes: usize = bytes.iter().map(|b| b.len()).sum();
     let mut data: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(if total_bytes > buffs.data_cap {
@@ -370,6 +411,8 @@ unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
     } else {
         get_data_vec!(buffs)
     });
+    // Prevents out of bounds errors when writing to `data`
+    data.set_len(total_bytes);
 
     let mut start = 0;
     // Write `bytes` to `data` & update `buf_lens`
@@ -460,6 +503,7 @@ pub unsafe extern "C" fn automerge_save(backend: *mut Backend, buffs: *mut Buffe
 
 /// # Safety
 /// This should be called with a valid pointer to a `Backend`
+#[no_mangle]
 pub unsafe extern "C" fn automerge_clone(backend: *mut Backend, new: *mut *mut Backend) -> isize {
     let backend = get_backend_mut!(backend);
     (*new) = backend.clone().into();
@@ -547,6 +591,7 @@ pub unsafe extern "C" fn automerge_encode_change(
 
 /// # Safety
 /// This must be called with a valid backend pointer
+#[no_mangle]
 pub unsafe extern "C" fn automerge_get_heads(backend: *mut Backend, buffs: *mut Buffers) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
@@ -558,17 +603,17 @@ pub unsafe extern "C" fn automerge_get_heads(backend: *mut Backend, buffs: *mut 
 
 /// # Safety
 /// This must be called with a valid backend pointer,
-/// binary must be a valid pointer to len bytes
+/// binary must be a valid pointer to `hashes` hashes
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_changes(
     backend: *mut Backend,
     buffs: *mut Buffers,
     bin: *const u8,
-    len: usize,
+    hashes: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
-    let hashes = get_hashes!(backend, bin, len);
+    let hashes = get_hashes!(backend, bin, hashes);
     let changes = backend.get_changes(&hashes);
     let bytes: Vec<_> = changes.into_iter().map(|c| c.raw_bytes()).collect();
     write_to_buffs(bytes, buffs);
