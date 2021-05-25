@@ -167,9 +167,6 @@ where
         object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
     ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
-        let mut opids_in_this_diff: std::collections::HashSet<amp::OpId> =
-            std::collections::HashSet::new();
-        let mut old_conflicts: Vec<Option<T>> = vec![None; self.underlying.len()];
         let mut updating: Vec<_> = self
             .underlying
             .clone()
@@ -203,7 +200,6 @@ where
                     op_id,
                     value,
                 } => {
-                    opids_in_this_diff.insert(op_id.clone());
                     let node = T::construct(
                         &op_id,
                         DiffToApply {
@@ -214,13 +210,11 @@ where
                         },
                     )?;
                     if (*index as usize) == updating.len() {
-                        old_conflicts.push(None);
                         updating.push((
                             node.value.default_opid(),
                             UpdatingSequenceElement::new(node.value),
                         ));
                     } else {
-                        old_conflicts.insert(*index as usize, None);
                         updating.insert(
                             *index as usize,
                             (
