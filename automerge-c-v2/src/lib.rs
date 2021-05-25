@@ -17,7 +17,6 @@ use std::{
 use automerge_backend::{AutomergeError, Change};
 use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, UncompressedChange};
 use errno::{set_errno, Errno};
-use thiserror;
 
 /// All possible errors that a C caller could face
 #[derive(thiserror::Error, Debug)]
@@ -314,21 +313,22 @@ macro_rules! get_buff_lens_vec {
 
 /// Create a `Buffers` struct to store return values
 #[no_mangle]
-pub unsafe extern "C" fn automerge_create_buffs() -> Buffers {
+pub extern "C" fn automerge_create_buffs() -> Buffers {
     // Don't drop the vectors so their underlying buffers aren't de-allocated
     let mut data = ManuallyDrop::new(Vec::new());
     let mut lens = ManuallyDrop::new(Vec::new());
-    let buffers = Buffers {
+    Buffers {
         data: data.as_mut_ptr(),
         data_len: data.len(),
         data_cap: data.capacity(),
         lens: lens.as_mut_ptr(),
         lens_len: lens.len(),
         lens_cap: lens.capacity(),
-    };
-    buffers
+    }
 }
 
+/// # Safety
+/// Must point to a valid `Buffers` struct
 /// Free the memory a `Buffers` struct points to
 #[no_mangle]
 pub unsafe extern "C" fn automerge_free_buffs(buffs: *mut Buffers) -> isize {
