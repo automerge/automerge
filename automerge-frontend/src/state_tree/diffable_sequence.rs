@@ -137,7 +137,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<(OpId, T)>>,
+    underlying: Box<im_rc::Vector<(OpId, UpdatingSequenceElement<T>)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -157,7 +157,11 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().map(|i| (i.default_opid(), i)).collect()),
+            underlying: Box::new(
+                i.into_iter()
+                    .map(|i| (i.default_opid(), UpdatingSequenceElement::Original(i)))
+                    .collect(),
+            ),
         }
     }
 
@@ -167,12 +171,7 @@ where
         object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
     ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
-        let mut updating: Vec<_> = self
-            .underlying
-            .clone()
-            .into_iter()
-            .map(|i| (i.0, UpdatingSequenceElement::from_original(i.1)))
-            .collect();
+        let mut updating = self.underlying.clone();
         let mut changes = StateTreeChange::empty();
         for edit in edits.iter() {
             let current_objects = changes.objects().union(current_objects.clone());
@@ -192,7 +191,9 @@ where
                             index: updating.len(),
                         });
                     }
-                    updating.splice(index..(index + count), None);
+                    for i in index..(index + count) {
+                        updating.remove(i);
+                    }
                 }
                 amp::DiffEdit::SingleElementInsert {
                     index,
@@ -210,7 +211,7 @@ where
                         },
                     )?;
                     if (*index as usize) == updating.len() {
-                        updating.push((
+                        updating.push_back((
                             node.value.default_opid(),
                             UpdatingSequenceElement::new(node.value),
                         ));
@@ -284,14 +285,19 @@ where
                 }
             };
         }
+
+        for element in updating.iter_mut() {
+            element.1.finish()
+        }
+
         let new_sequence = DiffableSequence {
-            underlying: Box::new(updating.into_iter().map(|e| (e.0, e.1.finish())).collect()),
+            underlying: updating,
         };
         Ok(DiffApplicationResult::pure(new_sequence).with_changes(changes))
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
-        self.underlying.remove(index).1
+        self.underlying.remove(index).1.get().clone()
     }
 
     pub(super) fn len(&self) -> usize {
@@ -305,16 +311,25 @@ where
             value.default_opid()
         };
         DiffableSequence {
-            underlying: Box::new(self.underlying.update(index, (elem_id, value))),
+            underlying: Box::new(
+                self.underlying
+                    .update(index, (elem_id, UpdatingSequenceElement::Original(value))),
+            ),
         }
     }
 
-    pub(super) fn get(&self, index: usize) -> Option<&(OpId, T)> {
-        self.underlying.get(index)
+    pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
+        self.underlying.get(index).map(|(i, t)| (i, t.get()))
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
-        self.underlying.insert(index, (value.default_opid(), value))
+        self.underlying.insert(
+            index,
+            (
+                value.default_opid(),
+                UpdatingSequenceElement::Original(value),
+            ),
+        )
     }
 
     pub(super) fn mutate<F>(&mut self, index: usize, f: F)
@@ -322,16 +337,18 @@ where
         F: FnOnce(&T) -> T,
     {
         if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = (entry.0.clone(), f(&entry.1));
+            let t = entry.1.get();
+            *entry = (entry.0.clone(), UpdatingSequenceElement::Original(f(&t)));
         }
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter().map(|i| &i.1)
+        self.underlying.iter().map(|i| i.1.get())
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 enum UpdatingSequenceElement<T>
 where
     T: DiffableValue,
@@ -350,28 +367,36 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    fn from_original(value: T) -> UpdatingSequenceElement<T> {
-        UpdatingSequenceElement::Original(value)
-    }
-
     fn new(value: T) -> UpdatingSequenceElement<T> {
         UpdatingSequenceElement::New(value)
     }
 
-    fn finish(self) -> T {
+    fn finish(&mut self) {
         match self {
-            UpdatingSequenceElement::Original(v) => v,
-            UpdatingSequenceElement::New(v) => v,
+            UpdatingSequenceElement::Original(_) => { // do nothing, this is the finished state
+            }
+            UpdatingSequenceElement::New(v) => *self = UpdatingSequenceElement::Original(v.clone()),
             UpdatingSequenceElement::Updated {
                 initial_update,
                 remaining_updates,
                 ..
-            } => remaining_updates
-                .into_iter()
-                .fold(initial_update, |mut acc, elem| {
-                    acc.add_values_from(elem);
-                    acc
-                }),
+            } => {
+                let t = std::mem::take(remaining_updates).into_iter().fold(
+                    initial_update.clone(),
+                    |mut acc, elem| {
+                        acc.add_values_from(elem);
+                        acc
+                    },
+                );
+                *self = UpdatingSequenceElement::Original(t)
+            }
+        }
+    }
+
+    fn get(&self) -> &T {
+        match self {
+            UpdatingSequenceElement::Original(v) => v,
+            _ => unreachable!(),
         }
     }
 
