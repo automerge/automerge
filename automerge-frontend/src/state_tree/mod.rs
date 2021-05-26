@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use amp::{MapDiff, ObjectId};
+use amp::ObjectId;
 use automerge_protocol as amp;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
@@ -55,15 +55,7 @@ impl StateTree {
     }
 
     pub fn apply_root_diff(&self, diff: amp::RootDiff) -> Result<StateTree, error::InvalidPatch> {
-        self.apply_map_diff(&MapDiff {
-            object_id: ObjectId::Root,
-            obj_type: amp::MapType::Map,
-            props: diff.props,
-        })
-    }
-
-    fn apply_map_diff(&self, diff: &amp::MapDiff) -> Result<StateTree, error::InvalidPatch> {
-        match self.objects.get(&diff.object_id) {
+        match self.objects.get(&ObjectId::Root) {
             Some(StateTreeComposite::Map(m)) => {
                 let diffapp = m.apply_diff(&DiffToApply {
                     parent_key: &"",
@@ -77,13 +69,13 @@ impl StateTree {
                 })
             }
             Some(o) => Err(error::InvalidPatch::MismatchingObjectType {
-                object_id: diff.object_id.clone(),
+                object_id: ObjectId::Root,
                 actual_type: Some(o.obj_type()),
                 patch_expected_type: Some(amp::ObjType::map()),
             }),
             None => {
                 let map = StateTreeMap {
-                    object_id: diff.object_id.clone(),
+                    object_id: ObjectId::Root,
                     props: im_rc::HashMap::new(),
                 };
                 let diffapp = map.apply_diff(&DiffToApply {
