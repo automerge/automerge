@@ -61,6 +61,7 @@ impl<'de> Deserialize<'de> for RawDiffType {
     where
         D: Deserializer<'de>,
     {
+        const VARIANTS: &[&str] = &["value", "map", "text", "list", "table"];
         // TODO: Probably more efficient to deserialize to a `&str`
         let raw_type = String::deserialize(deserializer)?;
         let raw_type = match raw_type.as_str() {
@@ -69,8 +70,7 @@ impl<'de> Deserialize<'de> for RawDiffType {
             "text" => RawDiffType::Text,
             "list" => RawDiffType::List,
             "table" => RawDiffType::Table,
-            // TODO: Not sure how to idiomatically return an error
-            _ => panic!("unexpected variant"),
+            other => return Err(Error::unknown_variant(other, VARIANTS)),
         };
         Ok(raw_type)
     }
