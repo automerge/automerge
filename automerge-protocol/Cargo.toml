@@ -19,6 +19,8 @@ arbitrary = { version = "1", features = ["derive"], optional = true }
 maplit = "^1.0.2"
 serde_json = { version = "^1.0.61", features=["float_roundtrip"], default-features=true }
 proptest = "0.10.1"
+rmp = "0.8.10"
+rmp-serde = "0.15.4"
 
 [features]
 derive-arbitrary = ["arbitrary"]

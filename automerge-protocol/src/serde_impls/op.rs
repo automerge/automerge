@@ -63,8 +63,12 @@ impl Serialize for Op {
     }
 }
 
-#[derive(Deserialize, PartialEq, Debug, Clone, Copy)]
-#[serde(rename_all = "camelCase")]
+// We need to manually implement deserialization for `RawOpType`
+// b/c by default rmp-serde (serde msgpack integration) serializes enums as maps with a
+// - a KV pair for the variant
+// - a KV pair for the associated data
+// But we serialize `RawOpType` as a string, causing rmp-serde to choke on deserialization
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum RawOpType {
     MakeMap,
     MakeTable,
@@ -73,6 +77,46 @@ pub enum RawOpType {
     Del,
     Inc,
     Set,
+}
+
+impl Serialize for RawOpType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let s = match self {
+            RawOpType::MakeMap => "makeMap",
+            RawOpType::MakeTable => "makeTable",
+            RawOpType::MakeList => "makeList",
+            RawOpType::MakeText => "makeText",
+            RawOpType::Del => "del",
+            RawOpType::Inc => "inc",
+            RawOpType::Set => "set",
+        };
+        serializer.serialize_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for RawOpType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // TODO: Probably more efficient to deserialize to a `&str`
+        let raw_type = String::deserialize(deserializer)?;
+        let raw_type = match raw_type.as_str() {
+            "makeMap" => RawOpType::MakeMap,
+            "makeTable" => RawOpType::MakeTable,
+            "makeList" => RawOpType::MakeList,
+            "makeText" => RawOpType::MakeText,
+            "del" => RawOpType::Del,
+            "inc" => RawOpType::Inc,
+            "set" => RawOpType::Set,
+            // TODO: Not sure how to idiomatically return an error
+            _ => panic!("unexpected variant"),
+        };
+        Ok(raw_type)
+    }
 }
 
 impl<'de> Deserialize<'de> for Op {
