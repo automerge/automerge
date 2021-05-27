@@ -4,7 +4,7 @@ use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    CursorState, Cursors, DiffApplicationResult, DiffToApply, DiffableSequence, StateTreeChange,
+    CursorState, Cursors, DiffApplicationResult, DiffableSequence, StateTreeChange,
     StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
@@ -30,18 +30,14 @@ pub(super) struct MultiValue {
 }
 
 impl MultiValue {
-    pub fn new_from_diff<K>(
+    pub fn new_from_diff(
         opid: amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        StateTreeValue::new_from_diff(diff)?.try_map(move |value| {
-            Ok(MultiValue {
-                winning_value: (opid, value),
-                conflicts: im_rc::HashMap::new(),
-            })
+        diff: &amp::Diff,
+    ) -> Result<MultiValue, error::InvalidPatch> {
+        let value = StateTreeValue::new_from_diff(diff)?;
+        Ok(MultiValue {
+            winning_value: (opid, value),
+            conflicts: im_rc::HashMap::new(),
         })
     }
 
@@ -84,56 +80,47 @@ impl MultiValue {
         .create(value)
     }
 
-    pub(super) fn apply_diff<K>(
-        &self,
+    pub(super) fn apply_diff(
+        &mut self,
         opid: &amp::OpId,
-        subdiff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        self.apply_diff_iter(&mut std::iter::once((opid, subdiff)))
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+    pub(super) fn apply_diff_iter<'a, 'b, 'c, I>(
+        &'a mut self,
         diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, &'c amp::Diff)>,
     {
-        let mut changes = StateTreeChange::empty();
         let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
             let u = if let Some(existing_value) = updated.get(opid) {
                 match existing_value {
-                    StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff),
-                    StateTreeValue::Link(obj_id) => subdiff
-                        .current_objects
-                        .get(obj_id)
-                        .unwrap_or_else(|| panic!("link to nonexistent object: {:?}", obj_id))
-                        .apply_diff(&subdiff)
-                        .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
+                    StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff)?,
+                    StateTreeValue::Composite(composite) => {
+                        let comp = composite.clone();
+                        comp.apply_diff(&subdiff)?;
+                        StateTreeValue::Composite(comp)
+                    }
                 }
             } else {
-                StateTreeValue::new_from_diff(subdiff)
-            }?;
-            changes.update_with(u.change);
-            updated = updated.update(opid, &u.value)
+                StateTreeValue::new_from_diff(subdiff)?
+            };
+            updated = updated.update(opid, &u)
         }
-        Ok(DiffApplicationResult::pure(updated.result()).with_changes(changes))
+        *self = updated.result();
+        Ok(())
     }
 
     pub(super) fn default_statetree_value(&self) -> StateTreeValue {
         self.winning_value.1.clone()
     }
 
-    pub(super) fn default_value(
-        &self,
-        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Value {
-        self.winning_value.1.realise_value(objects)
+    pub(super) fn default_value(&self) -> Value {
+        self.winning_value.1.realise_value()
     }
 
     pub(super) fn default_opid(&self) -> amp::OpId {
@@ -153,13 +140,10 @@ impl MultiValue {
         }
     }
 
-    pub(super) fn realise_values(
-        &self,
-        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> std::collections::HashMap<amp::OpId, Value> {
+    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
         self.tree_values()
             .iter()
-            .map(|(opid, v)| (opid.clone(), v.realise_value(objects)))
+            .map(|(opid, v)| (opid.clone(), v.realise_value()))
             .collect()
     }
 
@@ -261,7 +245,7 @@ impl NewValue {
         self.max_op
     }
 
-    fn multivalue(&self) -> MultiValue {
+    pub(super) fn multivalue(&self) -> MultiValue {
         MultiValue::from_statetree_value(self.value.clone(), self.opid.clone())
     }
 
@@ -290,19 +274,16 @@ impl MultiGrapheme {
         }
     }
 
-    pub(super) fn new_from_diff<K>(
+    pub(super) fn new_from_diff(
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        let winning_value = match diff.diff {
+        diff: &amp::Diff,
+    ) -> Result<MultiGrapheme, error::InvalidPatch> {
+        let winning_value = match diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: diff.parent_object_id.clone(),
-                        diff: diff.diff.clone(),
+                        diff: diff.clone(),
                     });
                 } else {
                     s.clone()
@@ -311,7 +292,7 @@ impl MultiGrapheme {
             _ => {
                 return Err(error::InvalidPatch::InsertNonTextInTextObject {
                     object_id: diff.parent_object_id.clone(),
-                    diff: diff.diff.clone(),
+                    diff: diff.clone(),
                 });
             }
         };
@@ -321,34 +302,29 @@ impl MultiGrapheme {
         })
     }
 
-    pub(super) fn apply_diff<K>(
-        &self,
+    pub(super) fn apply_diff(
+        &mut self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
-            .map(|d| d.value)
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I>(
+        &'a mut self,
         diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiGrapheme>, error::InvalidPatch>
+    ) -> Result<(), error::InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
     {
         let mut updated = self.values();
         for (opid, subdiff) in diff {
-            match subdiff.diff {
+            match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
                             object_id: subdiff.parent_object_id.clone(),
-                            diff: subdiff.diff.clone(),
+                            diff: subdiff.clone(),
                         });
                     } else {
                         updated = updated.update(opid, s.clone());
@@ -357,12 +333,13 @@ impl MultiGrapheme {
                 _ => {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         object_id: subdiff.parent_object_id.clone(),
-                        diff: subdiff.diff.clone(),
+                        diff: subdiff.clone(),
                     })
                 }
             }
         }
-        Ok(DiffApplicationResult::pure(updated.result()))
+        *self = updated.result();
+        Ok(())
     }
 
     pub(super) fn default_grapheme(&self) -> String {
@@ -558,7 +535,7 @@ where
                 props: result_props,
             }),
         };
-        let value = StateTreeValue::Link(make_op_id.clone().into());
+        let value = StateTreeValue::Composite(map);
         objects = objects.update(make_op_id.clone().into(), map);
         NewValue {
             value,
@@ -608,7 +585,7 @@ where
             elements: DiffableSequence::new_from(result_elems),
         });
         objects = objects.update(make_list_opid.clone().into(), list);
-        let value = StateTreeValue::Link(make_list_opid.clone().into());
+        let value = StateTreeValue::Composite(list);
         NewValue {
             value,
             opid: make_list_opid,
@@ -653,7 +630,7 @@ where
             object_id: make_text_opid.clone().into(),
             graphemes: seq,
         });
-        let value = StateTreeValue::Link(make_text_opid.clone().into());
+        let value = StateTreeValue::Composite(text);
         NewValue {
             value,
             opid: make_text_opid.clone(),

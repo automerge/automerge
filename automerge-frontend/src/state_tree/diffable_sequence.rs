@@ -1,33 +1,18 @@
 use amp::OpId;
 use automerge_protocol as amp;
 
-use super::{
-    DiffApplicationResult, DiffToApply, MultiGrapheme, MultiValue, StateTreeChange,
-    StateTreeComposite,
-};
+use super::{MultiGrapheme, MultiValue, StateTreeChange};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized {
-    fn construct<K>(
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch>;
+
+    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
+
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        K: Into<amp::Key>;
-    fn apply_diff<K>(
-        &self,
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>;
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
-        diff: &mut I,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>;
+        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>;
+
     fn default_opid(&self) -> amp::OpId;
 
     fn only_for_opid(&self, opid: &amp::OpId) -> Option<Self>;
@@ -36,35 +21,18 @@ pub(super) trait DiffableValue: Sized {
 }
 
 impl DiffableValue for MultiGrapheme {
-    fn construct<K>(
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch> {
         let c = MultiGrapheme::new_from_diff(opid, diff)?;
-        Ok(DiffApplicationResult::pure(c))
+        Ok(c)
     }
 
-    fn apply_diff<K>(
-        &self,
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        MultiGrapheme::apply_diff(self, opid, diff).map(DiffApplicationResult::pure)
+    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        MultiGrapheme::apply_diff(self, opid, diff)
     }
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
-        diff: &mut I,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
     {
         self.apply_diff_iter(diff)
         //MultiGrapheme::apply_diff_iter(self, diff)
@@ -84,34 +52,17 @@ impl DiffableValue for MultiGrapheme {
 }
 
 impl DiffableValue for MultiValue {
-    fn construct<K>(
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch> {
         MultiValue::new_from_diff(opid.clone(), diff)
     }
 
-    fn apply_diff<K>(
-        &self,
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         self.apply_diff(opid, diff)
     }
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
-        diff: &mut I,
-    ) -> Result<DiffApplicationResult<Self>, InvalidPatch>
+    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
     {
         self.apply_diff_iter(diff)
     }
@@ -166,33 +117,30 @@ where
     }
 
     pub fn apply_diff(
-        &self,
-        current_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
+        &mut self,
         object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
-    ) -> Result<DiffApplicationResult<DiffableSequence<T>>, InvalidPatch> {
-        let mut updating = self.underlying.clone();
+    ) -> Result<(), InvalidPatch> {
         let mut changes = StateTreeChange::empty();
         for edit in edits.iter() {
-            let current_objects = changes.objects().union(current_objects.clone());
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
                     let index = *index as usize;
                     let count = *count as usize;
-                    if index >= updating.len() {
+                    if index >= self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
                             index,
                         });
                     }
-                    if index + count > updating.len() {
+                    if index + count > self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
-                            index: updating.len(),
+                            index: self.underlying.len(),
                         });
                     }
                     for i in index..(index + count) {
-                        updating.remove(i);
+                        self.underlying.remove(i);
                     }
                 }
                 amp::DiffEdit::SingleElementInsert {
@@ -201,30 +149,16 @@ where
                     op_id,
                     value,
                 } => {
-                    let node = T::construct(
-                        &op_id,
-                        DiffToApply {
-                            current_objects,
-                            parent_object_id: object_id,
-                            parent_key: &op_id,
-                            diff: value,
-                        },
-                    )?;
-                    if (*index as usize) == updating.len() {
-                        updating.push_back((
-                            node.value.default_opid(),
-                            UpdatingSequenceElement::new(node.value),
-                        ));
+                    let node = T::construct(&op_id, value)?;
+                    if (*index as usize) == self.underlying.len() {
+                        self.underlying
+                            .push_back((node.default_opid(), UpdatingSequenceElement::new(node)));
                     } else {
-                        updating.insert(
+                        self.underlying.insert(
                             *index as usize,
-                            (
-                                node.value.default_opid(),
-                                UpdatingSequenceElement::new(node.value),
-                            ),
+                            (node.default_opid(), UpdatingSequenceElement::new(node)),
                         );
                     };
-                    changes.update_with(node.change);
                 }
                 amp::DiffEdit::MultiElementInsert {
                     elem_id,
@@ -232,7 +166,7 @@ where
                     index,
                 } => {
                     let index = *index as usize;
-                    if index > updating.len() {
+                    if index > self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             index,
                             object_id: object_id.clone(),
@@ -240,23 +174,10 @@ where
                     }
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        let current_objects = changes.objects().union(current_objects.clone());
-                        let mv = T::construct(
-                            &opid,
-                            DiffToApply {
-                                current_objects,
-                                parent_object_id: object_id,
-                                parent_key: &opid,
-                                diff: &amp::Diff::Value(value.clone()),
-                            },
-                        )?;
-                        changes.update_with(mv.change);
-                        updating.insert(
+                        let mv = T::construct(&opid, &amp::Diff::Value(value.clone()))?;
+                        self.underlying.insert(
                             index + i,
-                            (
-                                mv.value.default_opid(),
-                                UpdatingSequenceElement::New(mv.value),
-                            ),
+                            (mv.default_opid(), UpdatingSequenceElement::New(mv)),
                         );
                     }
                 }
@@ -265,17 +186,8 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((_id, elem)) = updating.get_mut(*index as usize) {
-                        let change = elem.apply_diff(
-                            op_id,
-                            DiffToApply {
-                                current_objects,
-                                parent_object_id: object_id,
-                                parent_key: &op_id,
-                                diff: value,
-                            },
-                        )?;
-                        changes.update_with(change);
+                    if let Some((_id, elem)) = self.underlying.get_mut(*index as usize) {
+                        elem.apply_diff(op_id, value)?;
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
                             index: *index as usize,
@@ -286,14 +198,11 @@ where
             };
         }
 
-        for element in updating.iter_mut() {
+        for element in self.underlying.iter_mut() {
             element.1.finish()
         }
 
-        let new_sequence = DiffableSequence {
-            underlying: updating,
-        };
-        Ok(DiffApplicationResult::pure(new_sequence).with_changes(changes))
+        Ok(())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -400,60 +309,58 @@ where
         }
     }
 
-    fn apply_diff<K>(
-        &mut self,
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<StateTreeChange, InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
+    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         match self {
             UpdatingSequenceElement::Original(v) => {
                 let updated = if let Some(existing) = v.only_for_opid(opid) {
-                    existing.apply_diff(opid, diff)?
+                    existing.apply_diff(opid, diff)?;
+                    existing
                 } else {
                     T::construct(opid, diff)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
-                    initial_update: updated.value,
+                    initial_update: updated,
                     remaining_updates: Vec::new(),
                 };
-                Ok(updated.change)
+                Ok(())
             }
             UpdatingSequenceElement::New(v) => {
                 let updated = if let Some(existing) = v.only_for_opid(opid) {
-                    existing.apply_diff(opid, diff)?
+                    existing.apply_diff(opid, diff)?;
+                    existing
                 } else {
                     T::construct(opid, diff)?
                 };
                 *self = UpdatingSequenceElement::Updated {
                     original: v.clone(),
                     initial_update: v.clone(),
-                    remaining_updates: vec![updated.value],
+                    remaining_updates: vec![updated],
                 };
-                Ok(updated.change)
+                Ok(())
             }
             UpdatingSequenceElement::Updated {
                 original,
                 initial_update,
                 remaining_updates,
             } => {
-                println!("UPdating already updated value");
+                println!("Updating already updated value");
                 let updated = if let Some(update) =
                     remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
                 {
-                    update.apply_diff(opid, diff)?
+                    update.apply_diff(opid, diff)?;
+                    update
                 } else if let Some(initial) = initial_update.only_for_opid(opid) {
-                    initial.apply_diff(opid, diff)?
+                    initial.apply_diff(opid, diff)?;
+                    initial
                 } else if let Some(original) = original.only_for_opid(opid) {
-                    original.apply_diff(opid, diff)?
+                    original.apply_diff(opid, diff)?;
+                    original
                 } else {
                     T::construct(opid, diff)?
                 };
-                remaining_updates.push(updated.value);
-                Ok(updated.change)
+                remaining_updates.push(updated);
+                Ok(())
             }
         }
     }

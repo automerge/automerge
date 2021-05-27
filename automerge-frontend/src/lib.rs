@@ -93,26 +93,29 @@ impl FrontendState {
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
-                let new_reconciled_root_state =
-                    reconciled_root_state.apply_root_diff(patch.diffs)?;
+                // cloning in the case of failure so we don't update the old value
+                let reconciled_root_state = reconciled_root_state.clone();
+                reconciled_root_state.apply_root_diff(patch.diffs)?;
                 Ok(match new_in_flight_requests[..] {
                     [] => FrontendState::Reconciled {
-                        root_state: new_reconciled_root_state,
+                        root_state: reconciled_root_state,
                         max_op: patch.max_op,
                         deps_of_last_received_patch: patch.deps,
                     },
                     _ => FrontendState::WaitingForInFlightRequests {
                         in_flight_requests: new_in_flight_requests,
-                        reconciled_root_state: new_reconciled_root_state,
+                        reconciled_root_state,
                         optimistically_updated_root_state,
                         max_op,
                     },
                 })
             }
             FrontendState::Reconciled { root_state, .. } => {
-                let new_root_state = root_state.apply_root_diff(patch.diffs)?;
+                // cloning in the case of failure so we don't update the old value
+                let root_state = root_state.clone();
+                root_state.apply_root_diff(patch.diffs)?;
                 Ok(FrontendState::Reconciled {
-                    root_state: new_root_state,
+                    root_state,
                     max_op: patch.max_op,
                     deps_of_last_received_patch: patch.deps,
                 })
