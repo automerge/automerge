@@ -70,7 +70,7 @@ intptr_t automerge_apply_changes(Backend *backend, Buffers *buffs, const CBuffer
  * This should be called with a valid pointer to a `Backend`
  * and a valid pointer to a `Buffers``
  */
-intptr_t automerge_apply_local_change(Backend *backend, Buffers *buffs, const char *request);
+intptr_t automerge_apply_local_change(Backend *backend, Buffers *buffs, const uint8_t *request, uintptr_t len);
 
 /**
  * # Safety
@@ -102,7 +102,7 @@ intptr_t automerge_decode_sync_state(Backend *backend,
  * # Safety
  * This must me called with a valid pointer to a JSON string of a change
  */
-intptr_t automerge_encode_change(Backend *backend, Buffers *buffs, const char *change);
+intptr_t automerge_encode_change(Backend *backend, Buffers *buffs, const uint8_t *change, uintptr_t len);
 
 /**
  * # Safety
@@ -123,6 +123,8 @@ const char *automerge_error(Backend *backend);
 void automerge_free(Backend *backend);
 
 /**
+ * # Safety
+ * Must point to a valid `Buffers` struct
  * Free the memory a `Buffers` struct points to
  */
 intptr_t automerge_free_buffs(Buffers *buffs);
@@ -210,6 +212,36 @@ intptr_t automerge_save(Backend *backend, Buffers *buffs);
 void automerge_sync_state_free(SyncState *sync_state);
 
 SyncState *automerge_sync_state_init(void);
+
+/**
+ * # Safety
+ * This must be called with a valid ptr & len
+ */
+intptr_t debug_free_msgpack(uint8_t *msgpack, uintptr_t cap);
+
+/**
+ * # Safety
+ * This must be called with a valid C-string
+ */
+intptr_t debug_json_change_to_msgpack(const char *change, uint8_t **out_msgpack, uintptr_t *out_len);
+
+/**
+ * # Safety
+ * This must be called with a valid pointer to len bytes
+ */
+intptr_t debug_msgpack_change_to_json(const uint8_t *msgpack, uintptr_t len, uint8_t *out_json);
+
+/**
+ * # Safety
+ * This must be called with a valid pointer to len bytes
+ */
+intptr_t debug_msgpack_patch_to_json(const uint8_t *msgpack, uintptr_t len, uint8_t *out_json);
+
+/**
+ * # Safety
+ * This must be called with a valid ptr & len
+ */
+void debug_save(uint8_t *msgpack, uintptr_t len, const char *name);
 
 /**
  * # Safety

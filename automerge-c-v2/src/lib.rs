@@ -15,8 +15,147 @@ use std::{
 };
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, UncompressedChange};
+use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, UncompressedChange, Patch};
 use errno::{set_errno, Errno};
+use rmp_serde;
+
+// I dislike using macros but it saves me a bunch of typing
+// This is especially true b/c the V2 backend returns a bunch more errors
+// And we need to return an `isize` (not a Result), so we can't use the `?` operator
+
+/// Try to turn a `*mut Backend` into a &mut Backend,
+/// return an error code if failure
+macro_rules! get_backend_mut {
+    ($backend:expr) => {{
+        let backend = $backend.as_mut();
+        match backend {
+            Some(b) => b,
+            // Don't call `handle_error` b/c there is no valid backend!
+            None => return CError::NullBackend.error_code(),
+        }
+    }};
+}
+
+/// Turn a `*mut Buffers` into a `&mut Buffers`
+macro_rules! get_buffs_mut {
+    ($buffs:expr) => {{
+        let buffs = $buffs.as_mut();
+        match buffs {
+            Some(b) => b,
+            None => return CError::NullBuffers.error_code(),
+        }
+    }};
+}
+
+/// Turn a `*const CBuffers` into a `&CBuffers`
+macro_rules! get_cbuffs {
+    ($backend:expr, $buffs:expr) => {{
+        let buffs = $buffs.as_ref();
+        match buffs {
+            Some(b) => b,
+            None => return $backend.handle_error(CError::NullCBuffers),
+        }
+    }};
+}
+
+/// Try to deserialize some bytes into a value using MessagePack
+/// return an error code if failure
+macro_rules! from_msgpack {
+    ($backend:expr, $ptr:expr, $len:expr) => {{
+        // Null pointer check?
+        if $ptr.as_ref().is_none() {
+            return $backend.handle_error(CError::NullChange);
+        }
+        let slice = std::slice::from_raw_parts($ptr, $len);
+        match rmp_serde::from_read_ref(slice) {
+            Ok(v) => v,
+            Err(e) => return $backend.handle_error(CError::FromMessagePack(e)),
+        }
+    }};
+}
+
+/// Try to serialize a value to bytes using msgpack
+/// return an error code if failure
+macro_rules! to_msgpack {
+    ($backend:expr,$val:expr) => {{
+        match rmp_serde::to_vec_named($val) {
+            Ok(v) => v,
+            Err(e) => return $backend.handle_error(CError::ToMessagePack(e)),
+        }
+    }};
+}
+
+/// Get hashes from a binary buffer
+macro_rules! get_hashes {
+    ($backend:expr, $bin:expr, $hashes:expr) => {{
+        let mut hashes: Vec<ChangeHash> = vec![];
+        if $hashes > 0 {
+            let slice = std::slice::from_raw_parts($bin, 32 * $hashes);
+            let iter = slice.chunks_exact(32);
+            let rem = iter.remainder().len();
+            if rem > 0 {
+                return $backend.handle_error(CError::InvalidHashes(format!(
+                    "Byte buffer had: {} leftover bytes",
+                    rem
+                )));
+            }
+            for chunk in iter {
+                let hash: ChangeHash = match chunk.try_into() {
+                    Ok(v) => v,
+                    Err(e) => return $backend.handle_error(CError::InvalidHashes(e.to_string())),
+                };
+                hashes.push(hash);
+            }
+        }
+        hashes
+    }};
+}
+
+/// Try to call an Automerge method,
+/// return an error code if failure
+macro_rules! call_automerge {
+    ($backend:expr, $expr:expr) => {
+        match $expr {
+            Ok(x) => x,
+            // We have to do `AutomergeError::from` to convert a `DecodeError` to a
+            // `AutomergeError`
+            Err(e) => return $backend.handle_error(CError::Automerge(AutomergeError::from(e))),
+        }
+    };
+}
+
+/// Get a `Vec<Change>` from a `*const CBuffers`
+/// Using a macro instead of a method so we can return if there is an error
+macro_rules! get_changes {
+    ($backend:expr, $cbuffs:expr) => {{
+        let cbuffs = get_cbuffs!($backend, $cbuffs);
+        let lens = std::slice::from_raw_parts(cbuffs.lens, cbuffs.lens_len);
+        let data = std::slice::from_raw_parts(cbuffs.data, cbuffs.data_len);
+        let mut changes = vec![];
+        let mut cur_pos = 0;
+        for len in lens {
+            let buff = data[cur_pos..cur_pos + len].to_vec();
+            let change = call_automerge!($backend, Change::from_bytes(buff));
+            changes.push(change);
+            cur_pos += len;
+        }
+        changes
+    }};
+}
+
+macro_rules! get_data_vec {
+    ($buffs:expr) => {{
+        let v: Vec<u8> = Vec::from_raw_parts($buffs.data, $buffs.data_len, $buffs.data_cap);
+        v
+    }};
+}
+
+macro_rules! get_buff_lens_vec {
+    ($buffs:expr) => {{
+        let v: Vec<usize> = Vec::from_raw_parts($buffs.lens, $buffs.lens_len, $buffs.lens_cap);
+        v
+    }};
+}
 
 /// All possible errors that a C caller could face
 #[derive(thiserror::Error, Debug)]
@@ -33,10 +172,14 @@ pub enum CError {
     NullBuffers,
     #[error("Invalid pointer to CBuffers")]
     NullCBuffers,
+    #[error("Invalid pointer to change")]
+    NullChange,
     #[error("Invalid byte buffer of hashes: `{0}`")]
-    BadHashes(String),
+    InvalidHashes(String),
     #[error(transparent)]
-    Json(#[from] serde_json::error::Error),
+    ToMessagePack(#[from] rmp_serde::encode::Error),
+    #[error(transparent)]
+    FromMessagePack(#[from] rmp_serde::decode::Error),
     #[error(transparent)]
     FromUtf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)]
@@ -57,15 +200,13 @@ impl CError {
             CError::NullBackend => BASE,
             CError::NullBuffers => BASE + 1,
             CError::NullCBuffers => BASE + 2,
-            CError::BadHashes(_) => BASE + 3,
-            CError::Json(_) => BASE + 4,
-            CError::FromUtf8(_) => BASE + 5,
-            CError::InvalidActorid(_) => BASE + 6,
-            CError::Automerge(_) => {
-                //let kind = AutomergeErrorDiscriminants::from(e);
-                //(BASE + 7) + (kind as isize)
-                BASE + 7
-            }
+            CError::NullChange => BASE + 3,
+            CError::InvalidHashes(_) => BASE + 4,
+            CError::ToMessagePack(_) => BASE + 5,
+            CError::FromMessagePack(_) => BASE + 6,
+            CError::FromUtf8(_) => BASE + 7,
+            CError::InvalidActorid(_) => BASE + 8,
+            CError::Automerge(_) => BASE + 9,
         };
         -code
     }
@@ -137,17 +278,12 @@ impl Backend {
         err.error_code()
     }
 
-    unsafe fn write_json<T: serde::ser::Serialize>(
+    unsafe fn write_msgpack<T: serde::ser::Serialize>(
         &mut self,
         val: &T,
         buffers: &mut Buffers,
     ) -> isize {
-        let bytes = match serde_json::to_vec(val) {
-            Ok(v) => v,
-            Err(e) => {
-                return self.handle_error(CError::Json(e));
-            }
-        };
+        let bytes = to_msgpack!(self, val);
         write_to_buffs(vec![&bytes], buffers);
         0
     }
@@ -185,130 +321,6 @@ pub unsafe extern "C" fn automerge_free(backend: *mut Backend) {
     // TODO: Can we do a null pointer check here by using `get_backend_mut`
     let backend: Backend = *Box::from_raw(backend);
     drop(backend)
-}
-
-// I dislike using macros but it saves me a bunch of typing
-// This is especially true b/c the V2 backend returns a bunch more errors
-// And we need to return an `isize` (not a Result), so we can't use the `?` operator
-
-/// Try to turn a `*mut Backend` into a &mut Backend,
-/// return an error code if failure
-macro_rules! get_backend_mut {
-    ($backend:expr) => {{
-        let backend = $backend.as_mut();
-        match backend {
-            Some(b) => b,
-            // Don't call `handle_error` b/c there is no valid backend!
-            None => return CError::NullBackend.error_code(),
-        }
-    }};
-}
-
-/// Turn a `*mut Buffers` into a `&mut Buffers`
-macro_rules! get_buffs_mut {
-    ($buffs:expr) => {{
-        let buffs = $buffs.as_mut();
-        match buffs {
-            Some(b) => b,
-            None => return CError::NullBuffers.error_code(),
-        }
-    }};
-}
-
-/// Turn a `*const CBuffers` into a `&CBuffers`
-macro_rules! get_cbuffs {
-    ($backend:expr, $buffs:expr) => {{
-        let buffs = $buffs.as_ref();
-        match buffs {
-            Some(b) => b,
-            None => return $backend.handle_error(CError::NullCBuffers),
-        }
-    }};
-}
-
-/// Try to turn a C string into String
-/// and deserialize it
-/// return an error code if failure
-macro_rules! from_json {
-    ($backend:expr, $cstr:expr) => {{
-        let s = from_cstr($cstr);
-        match serde_json::from_str(&s) {
-            Ok(v) => v,
-            Err(e) => return $backend.handle_error(CError::Json(e)),
-        }
-    }};
-}
-
-/// Get hashes from a binary buffer
-macro_rules! get_hashes {
-    ($backend:expr, $bin:expr, $hashes:expr) => {{
-        let mut hashes: Vec<ChangeHash> = vec![];
-        if $hashes > 0 {
-            let slice = std::slice::from_raw_parts($bin, 32 * $hashes);
-            let iter = slice.chunks_exact(32);
-            let rem = iter.remainder().len();
-            if rem > 0 {
-                return $backend.handle_error(CError::BadHashes(format!(
-                    "Byte buffer had: {} leftover bytes",
-                    rem
-                )));
-            }
-            for chunk in iter {
-                let hash: ChangeHash = match chunk.try_into() {
-                    Ok(v) => v,
-                    Err(e) => return $backend.handle_error(CError::BadHashes(e.to_string())),
-                };
-                hashes.push(hash);
-            }
-        }
-        hashes
-    }};
-}
-
-/// Try to call an Automerge method,
-/// return an error code if failure
-macro_rules! call_automerge {
-    ($backend:expr, $expr:expr) => {
-        match $expr {
-            Ok(x) => x,
-            // We have to do `AutomergeError::from` to convert a `DecodeError` to a
-            // `AutomergeError`
-            Err(e) => return $backend.handle_error(CError::Automerge(AutomergeError::from(e))),
-        }
-    };
-}
-
-/// Get a `Vec<Change>` from a `*const CBuffers`
-/// Using a macro instead of a method so we can return if there is an error
-macro_rules! get_changes {
-    ($backend:expr, $cbuffs:expr) => {{
-        let cbuffs = get_cbuffs!($backend, $cbuffs);
-        let lens = std::slice::from_raw_parts(cbuffs.lens, cbuffs.lens_len);
-        let data = std::slice::from_raw_parts(cbuffs.data, cbuffs.data_len);
-        let mut changes = vec![];
-        let mut cur_pos = 0;
-        for len in lens {
-            let buff = data[cur_pos..cur_pos + len].to_vec();
-            let change = call_automerge!($backend, Change::from_bytes(buff));
-            changes.push(change);
-            cur_pos += len;
-        }
-        changes
-    }};
-}
-
-macro_rules! get_data_vec {
-    ($buffs:expr) => {{
-        let v: Vec<u8> = Vec::from_raw_parts($buffs.data, $buffs.data_len, $buffs.data_cap);
-        v
-    }};
-}
-
-macro_rules! get_buff_lens_vec {
-    ($buffs:expr) => {{
-        let v: Vec<usize> = Vec::from_raw_parts($buffs.lens, $buffs.lens_len, $buffs.lens_cap);
-        v
-    }};
 }
 
 /// Create a `Buffers` struct to store return values
@@ -433,19 +445,15 @@ unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
 pub unsafe extern "C" fn automerge_apply_local_change(
     backend: *mut Backend,
     buffs: *mut Buffers,
-    request: *const c_char,
+    request: *const u8,
+    len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
-    let request: UncompressedChange = from_json!(backend, request);
+    let request: UncompressedChange = from_msgpack!(backend, request, len);
     let (patch, change) = call_automerge!(backend, backend.apply_local_change(request));
-    let bytes = match serde_json::to_vec(&patch) {
-        Ok(v) => v,
-        Err(e) => {
-            return backend.handle_error(CError::Json(e));
-        }
-    };
-    write_to_buffs(vec![change.raw_bytes(), &bytes], buffs);
+    let patch_bytes = to_msgpack!(backend, &patch);
+    write_to_buffs(vec![change.raw_bytes(), &patch_bytes], buffs);
     0
 }
 
@@ -462,7 +470,7 @@ pub unsafe extern "C" fn automerge_apply_changes(
     let buffs = get_buffs_mut!(buffs);
     let changes = get_changes!(backend, cbuffs);
     let patch = call_automerge!(backend, backend.apply_changes(changes));
-    backend.write_json(&patch, buffs)
+    backend.write_msgpack(&patch, buffs)
 }
 
 /// # Safety
@@ -473,7 +481,7 @@ pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend, buffs: *mut 
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
     let patch = call_automerge!(backend, backend.get_patch());
-    backend.write_json(&patch, buffs)
+    backend.write_msgpack(&patch, buffs)
 }
 
 /// # Safety
@@ -568,7 +576,7 @@ pub unsafe extern "C" fn automerge_decode_change(
     let buffs = get_buffs_mut!(buffs);
     let bytes = std::slice::from_raw_parts(change, len);
     let change = call_automerge!(backend, Change::from_bytes(bytes.to_vec()));
-    backend.write_json(&change.decode(), buffs);
+    backend.write_msgpack(&change.decode(), buffs);
     0
 }
 
@@ -578,11 +586,12 @@ pub unsafe extern "C" fn automerge_decode_change(
 pub unsafe extern "C" fn automerge_encode_change(
     backend: *mut Backend,
     buffs: *mut Buffers,
-    change: *const c_char,
+    change: *const u8,
+    len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buffs_mut!(buffs);
-    let uncomp: UncompressedChange = from_json!(backend, change);
+    let uncomp: UncompressedChange = from_msgpack!(backend, change, len);
     // This should never panic?
     let change: Change = uncomp.try_into().unwrap();
     write_to_buffs(vec![change.raw_bytes()], buffs);
@@ -634,7 +643,7 @@ pub unsafe extern "C" fn automerge_get_missing_deps(
     let buffs = get_buffs_mut!(buffs);
     let heads = get_hashes!(backend, bin, len);
     let missing = backend.get_missing_deps(&heads);
-    backend.write_json(&missing, buffs);
+    backend.write_msgpack(&missing, buffs);
     0
 }
 
@@ -684,7 +693,7 @@ pub unsafe extern "C" fn automerge_receive_sync_message(
     );
 
     if let Some(patch) = patch {
-        backend.write_json(&patch, buffs);
+        backend.write_msgpack(&patch, buffs);
     } else {
         // There is nothing to return, clear the buffs
         write_to_buffs(vec![], buffs);
@@ -763,4 +772,75 @@ pub unsafe extern "C" fn automerge_decode_sync_state(
     };
     (*sync_state) = state.into();
     0
+}
+
+/// # Safety
+/// This must be called with a valid C-string
+#[no_mangle]
+pub unsafe extern "C" fn debug_json_change_to_msgpack(
+    change: *const c_char,
+    out_msgpack: *mut *mut u8,
+    out_len: *mut usize,
+) -> isize {
+    let s = from_cstr(change);
+    // `unwrap` here is ok b/c this is a debug function
+    let uncomp: UncompressedChange = serde_json::from_str(&s).unwrap();
+
+    // `unwrap` here is ok b/c this is a debug function
+    let mut bytes = ManuallyDrop::new(rmp_serde::to_vec_named(&uncomp).unwrap());
+    *out_msgpack = bytes.as_mut_ptr();
+    *out_len = bytes.len();
+    0
+}
+
+/// # Safety
+/// This must be called with a valid ptr & len
+#[no_mangle]
+pub unsafe extern "C" fn debug_free_msgpack(msgpack: *mut u8, cap: usize) -> isize {
+    Vec::from_raw_parts(msgpack, cap, cap);
+    0
+}
+
+/// # Safety
+/// This must be called with a valid pointer to len bytes
+#[no_mangle]
+pub unsafe extern "C" fn debug_msgpack_change_to_json(
+    msgpack: *const u8,
+    len: usize,
+    out_json: *mut u8,
+) -> isize {
+    let slice = std::slice::from_raw_parts(msgpack, len);
+    let uncomp: UncompressedChange = rmp_serde::from_slice(slice).unwrap();
+    let json = serde_json::to_vec(&uncomp).unwrap();
+    ptr::copy_nonoverlapping(json.as_ptr(), out_json, json.len());
+    // null-terminate
+    *out_json.add(json.len()) = 0;
+    json.len() as isize
+}
+
+/// # Safety
+/// This must be called with a valid pointer to len bytes
+#[no_mangle]
+pub unsafe extern "C" fn debug_msgpack_patch_to_json(
+    msgpack: *const u8,
+    len: usize,
+    out_json: *mut u8,
+) -> isize {
+    let slice = std::slice::from_raw_parts(msgpack, len);
+    let patch: Patch = rmp_serde::from_slice(slice).unwrap();
+    let json = serde_json::to_vec(&patch).unwrap();
+    ptr::copy_nonoverlapping(json.as_ptr(), out_json, json.len());
+    // null-terminate
+    *out_json.add(json.len()) = 0;
+    json.len() as isize
+}
+
+/// # Safety
+/// This must be called with a valid ptr & len
+#[no_mangle]
+pub unsafe extern "C" fn debug_save(msgpack: *mut u8, len: usize, name: *const c_char) {
+    let slice = std::slice::from_raw_parts(msgpack, len);
+    let path = from_cstr(name);
+    let path = path.to_string();
+    std::fs::write(&path, slice).unwrap();
 }
