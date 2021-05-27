@@ -580,14 +580,14 @@ fn decompress_chunk(
 
 fn group_doc_change_and_doc_ops(
     changes: &mut [DocChange],
-    ops: &mut Vec<DocOp>,
+    mut ops: Vec<DocOp>,
     actors: &[amp::ActorId],
 ) -> Result<(), decoding::Error> {
-    let mut change_actors = HashMap::new();
-    let mut actor_max = HashMap::new();
+    let mut changes_by_actor: HashMap<usize, Vec<usize>> = HashMap::new();
 
     for (i, change) in changes.iter().enumerate() {
-        if change.seq != *actor_max.get(&change.actor).unwrap_or(&1) {
+        let actor_change_index = changes_by_actor.entry(change.actor).or_default();
+        if change.seq != (actor_change_index.len() + 1) as u64 {
             return Err(decoding::Error::ChangeDecompressFailed(
                 "Doc Seq Invalid".into(),
             ));
@@ -597,14 +597,14 @@ fn group_doc_change_and_doc_ops(
                 "Doc Actor Invalid".into(),
             ));
         }
-        change_actors.insert((change.actor, change.seq), i);
-        actor_max.insert(change.actor, change.seq + 1);
+        actor_change_index.push(i);
     }
 
     let mut op_by_id = HashMap::new();
     ops.iter().enumerate().for_each(|(i, op)| {
         op_by_id.insert((op.ctr, op.actor), i);
     });
+
     for i in 0..ops.len() {
         let op = ops[i].clone(); // this is safe - avoid borrow checker issues
                                  //let id = (op.ctr, op.actor);
@@ -634,23 +634,25 @@ fn group_doc_change_and_doc_ops(
         }
     }
 
-    'outer: for op in ops.iter() {
-        let max_seq = *actor_max.get(&op.actor).ok_or_else(|| {
-            decoding::Error::ChangeDecompressFailed("Doc Op.Actor Invalid".into())
-        })?;
-        for seq in 1..max_seq {
-            // this is safe - invalid seq would have thrown an error earlier
-            let idx: usize = *change_actors.get(&(op.actor, seq)).unwrap();
-            // this is safe since I build the array above ^^
-            let change = &mut changes[idx];
-            if op.ctr <= change.max_op {
-                change.ops.push(op.clone());
-                continue 'outer;
+    for op in ops {
+        // binary search for our change
+        let actor_change_index = changes_by_actor.entry(op.actor).or_default();
+        let mut left = 0;
+        let mut right = actor_change_index.len();
+        while left < right {
+            let seq = (left + right) / 2;
+            if changes[actor_change_index[seq]].max_op < op.ctr {
+                left = seq + 1
+            } else {
+                right = seq
             }
         }
-        return Err(decoding::Error::ChangeDecompressFailed(
-            "Doc MaxOp Invalid".into(),
-        ));
+        if left >= actor_change_index.len() {
+            return Err(decoding::Error::ChangeDecompressFailed(
+                "Doc MaxOp Invalid".into(),
+            ));
+        }
+        changes[actor_change_index[left]].ops.push(op)
     }
 
     changes
@@ -744,7 +746,7 @@ fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
 fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
     let (chunktype, _hash, mut cursor) = decode_header(bytes)?;
 
-    // TODO: document what this actually means
+    // chunktype == 0 is a document, chunktype = 1 is a change
     if chunktype > 0 {
         return Err(decoding::Error::WrongType {
             expected_one_of: vec![0],
@@ -764,9 +766,9 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
     let mut doc_changes: Vec<_> = ChangeIterator::new(bytes, &changes_data).collect();
 
     let ops_data = decode_columns(&mut cursor, &ops_info);
-    let mut doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
+    let doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
 
-    group_doc_change_and_doc_ops(&mut doc_changes, &mut doc_ops, &actors)?;
+    group_doc_change_and_doc_ops(&mut doc_changes, doc_ops, &actors)?;
 
     let mut uncompressed_changes = doc_changes_to_uncompressed_changes(&doc_changes, &actors);
 
