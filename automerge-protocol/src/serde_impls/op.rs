@@ -102,20 +102,27 @@ impl<'de> Deserialize<'de> for RawOpType {
     where
         D: Deserializer<'de>,
     {
+        const VARIANTS: &[&str] = &[
+            "makeMap",
+            "makeTable",
+            "makeList",
+            "makeText",
+            "del",
+            "inc",
+            "set",
+        ];
         // TODO: Probably more efficient to deserialize to a `&str`
         let raw_type = String::deserialize(deserializer)?;
-        let raw_type = match raw_type.as_str() {
-            "makeMap" => RawOpType::MakeMap,
-            "makeTable" => RawOpType::MakeTable,
-            "makeList" => RawOpType::MakeList,
-            "makeText" => RawOpType::MakeText,
-            "del" => RawOpType::Del,
-            "inc" => RawOpType::Inc,
-            "set" => RawOpType::Set,
-            // TODO: Not sure how to idiomatically return an error
-            _ => panic!("unexpected variant"),
-        };
-        Ok(raw_type)
+        match raw_type.as_str() {
+            "makeMap" => Ok(RawOpType::MakeMap),
+            "makeTable" => Ok(RawOpType::MakeTable),
+            "makeList" => Ok(RawOpType::MakeList),
+            "makeText" => Ok(RawOpType::MakeText),
+            "del" => Ok(RawOpType::Del),
+            "inc" => Ok(RawOpType::Inc),
+            "set" => Ok(RawOpType::Set),
+            other => Err(Error::unknown_variant(other, VARIANTS)),
+        }
     }
 }
 
