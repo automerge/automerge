@@ -53,23 +53,13 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub(super) fn new_map(
-        tree: &StateTree,
-        mv: MultiValue,
-        focus: Focus,
-        map: &'a mut StateTreeMap,
-    ) -> ResolvedPath<'a> {
+    pub(super) fn new_map(focus: Focus, map: &'a mut StateTreeMap) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Map(ResolvedMap {
-                multivalue: mv,
-                value: map,
-                focus,
-            }),
+            target: Target::Map(ResolvedMap { value: map, focus }),
         }
     }
 
     pub(super) fn new_list(
-        tree: &StateTree,
         mv: MultiValue,
         focus: Focus,
         list: &'a mut StateTreeList,
@@ -84,7 +74,6 @@ impl<'a> ResolvedPath<'a> {
     }
 
     pub(super) fn new_text(
-        tree: &StateTree,
         mv: MultiValue,
         update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
         text: &'a mut StateTreeText,
@@ -99,7 +88,6 @@ impl<'a> ResolvedPath<'a> {
     }
 
     pub(super) fn new_table(
-        tree: &StateTree,
         mv: MultiValue,
         focus: Focus,
         table: &'a mut StateTreeTable,
@@ -114,7 +102,6 @@ impl<'a> ResolvedPath<'a> {
     }
 
     pub(super) fn new_counter(
-        tree: &StateTree,
         object_id: amp::ObjectId,
         key: amp::Key,
         mv: &'a mut MultiValue,
@@ -132,13 +119,13 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub(super) fn new_primitive(tree: &StateTree, value: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_primitive(value: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
             target: Target::Primitive(ResolvedPrimitive { multivalue: value }),
         }
     }
 
-    pub(super) fn new_character(tree: &StateTree, c: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_character(c: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
             target: Target::Character(ResolvedChar { multivalue: c }),
         }
@@ -256,9 +243,7 @@ impl<'a> ResolvedCounter<'a> {
         let diffapp = DiffApplicationResult::pure(self.multivalue.update_default(
             StateTreeValue::Leaf(Primitive::Counter(self.current_value + by)),
         ));
-        let new_state = self.focus.update(diffapp);
         LocalOperationResult {
-            new_state,
             new_ops: vec![amp::Op {
                 action: amp::OpType::Inc(by),
                 obj: self.containing_object_id.clone(),
@@ -272,7 +257,6 @@ impl<'a> ResolvedCounter<'a> {
 
 pub struct ResolvedMap<'a> {
     pub(super) value: &'a mut StateTreeMap,
-    pub(super) multivalue: MultiValue,
     pub(super) focus: Focus,
 }
 
@@ -291,6 +275,9 @@ impl<'a> ResolvedMap<'a> {
             insert: false,
             pred: self.value.pred_for_key(key),
         });
+        self.value
+            .props
+            .insert(key.to_string(), newvalue.multivalue());
         let diffapp = newvalue.diff_app_result().and_then(|v| {
             let new_value = self.value.update(key.to_string(), v);
             let new_composite = StateTreeComposite::Map(new_value);
@@ -303,7 +290,6 @@ impl<'a> ResolvedMap<'a> {
             ))
         });
         LocalOperationResult {
-            new_state: self.focus.update(diffapp),
             new_ops: newvalue.ops(),
         }
     }
@@ -319,7 +305,6 @@ impl<'a> ResolvedMap<'a> {
             new_composite,
         ));
         LocalOperationResult {
-            new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
@@ -364,7 +349,6 @@ impl<'a> ResolvedTable<'a> {
             ))
         });
         LocalOperationResult {
-            new_state: self.focus.update(treechange),
             new_ops: newvalue.ops(),
         }
     }
@@ -380,7 +364,6 @@ impl<'a> ResolvedTable<'a> {
             new_composite,
         ));
         LocalOperationResult {
-            new_state: self.focus.update(diffapp),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
@@ -421,7 +404,6 @@ impl<'a> ResolvedText<'a> {
             updated,
         ));
         Ok(LocalOperationResult {
-            new_state: (self.update)(treechange),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
                 obj: self.value.object_id.clone(),
@@ -466,7 +448,6 @@ impl<'a> ResolvedText<'a> {
             _ => amp::OpType::MultiSet(chars),
         };
         Ok(LocalOperationResult {
-            new_state: (self.update)(treechange),
             new_ops: vec![amp::Op {
                 action,
                 obj: self.value.object_id.clone(),
@@ -494,9 +475,7 @@ impl<'a> ResolvedText<'a> {
             self.value.object_id.clone(),
             updated,
         ));
-        let new_state = (self.update)(diffapp);
         Ok(LocalOperationResult {
-            new_state,
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
                 obj: self.value.object_id.clone(),
@@ -520,9 +499,7 @@ impl<'a> ResolvedText<'a> {
             self.value.object_id.clone(),
             updated,
         ));
-        let new_state = (self.update)(diffapp);
         Ok(LocalOperationResult {
-            new_state,
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),
@@ -577,9 +554,7 @@ impl<'a> ResolvedList<'a> {
                 )),
             )
         })?;
-        let new_state = self.focus.update(treechange);
         Ok(LocalOperationResult {
-            new_state,
             new_ops: newvalue.ops(),
         })
     }
@@ -622,7 +597,6 @@ impl<'a> ResolvedList<'a> {
             )
         })?;
         Ok(LocalOperationResult {
-            new_state: self.focus.update(treechange),
             new_ops: newvalue.ops(),
         })
     }
@@ -681,7 +655,6 @@ impl<'a> ResolvedList<'a> {
             )
         })?;
         Ok(LocalOperationResult {
-            new_state: self.focus.update(treechange),
             new_ops: condense_insert_ops(ops),
         })
     }
@@ -700,7 +673,6 @@ impl<'a> ResolvedList<'a> {
             new_value,
         ));
         Ok(LocalOperationResult {
-            new_state: self.focus.update(treechange),
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                 obj: self.value.object_id.clone(),

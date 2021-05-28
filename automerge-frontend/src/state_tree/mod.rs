@@ -67,17 +67,18 @@ impl StateTree {
     }
 
     fn update(&self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
-        let mut new_objects = diffapp.change.objects().union(self.objects.clone());
+        // let mut new_objects = diffapp.change.objects().union(self.objects.clone());
         let new_cursors = diffapp.change.new_cursors().union(self.cursors.clone());
-        let root = match new_objects.get(&amp::ObjectId::Root) {
-            Some(StateTreeComposite::Map(root_map)) => {
-                StateTreeComposite::Map(root_map.update(k, diffapp.value))
-            }
-            _ => panic!("Root map did not exist or was wrong type"),
-        };
-        new_objects = new_objects.update(amp::ObjectId::Root, root);
+        // let root = match new_objects.get(&amp::ObjectId::Root) {
+        //     Some(StateTreeComposite::Map(root_map)) => {
+        //         StateTreeComposite::Map(root_map.update(k, diffapp.value))
+        //     }
+        //     _ => panic!("Root map did not exist or was wrong type"),
+        // };
+        // new_objects = new_objects.update(amp::ObjectId::Root, root);
         let mut new_tree = StateTree {
-            objects: new_objects,
+            // objects: new_objects,
+            root_props: self.root_props,
             cursors: new_cursors,
         };
         new_tree.update_cursors();
@@ -85,26 +86,26 @@ impl StateTree {
     }
 
     fn update_cursors(&mut self) {
-        for cursor in self.cursors.iter_mut() {
-            if let Some(referred_object) = self.objects.get(&cursor.referred_object_id) {
-                match referred_object {
-                    StateTreeComposite::List(l) => {
-                        if let Some(index) = l.index_of(&cursor.referred_opid) {
-                            cursor.index = index;
-                        }
-                    }
-                    StateTreeComposite::Text(t) => {
-                        if let Some(index) = t.index_of(&cursor.referred_opid) {
-                            cursor.index = index;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if let Some(referring_object) = self.objects.get_mut(&cursor.referring_object_id) {
-                referring_object.mutably_update_cursor(cursor);
-            }
-        }
+        // for cursor in self.cursors.iter_mut() {
+        //     if let Some(referred_object) = self.objects.get(&cursor.referred_object_id) {
+        //         match referred_object {
+        //             StateTreeComposite::List(l) => {
+        //                 if let Some(index) = l.index_of(&cursor.referred_opid) {
+        //                     cursor.index = index;
+        //                 }
+        //             }
+        //             StateTreeComposite::Text(t) => {
+        //                 if let Some(index) = t.index_of(&cursor.referred_opid) {
+        //                     cursor.index = index;
+        //                 }
+        //             }
+        //             _ => {}
+        //         }
+        //     }
+        //     if let Some(referring_object) = self.objects.get_mut(&cursor.referring_object_id) {
+        //         referring_object.mutably_update_cursor(cursor);
+        //     }
+        // }
     }
 
     fn remove(&mut self, k: &str) {
@@ -117,8 +118,11 @@ impl StateTree {
 
     fn apply(&self, change: StateTreeChange) -> StateTree {
         let cursors = change.new_cursors().union(self.cursors.clone());
-        let objects = change.objects().union(self.objects.clone());
-        let mut new_tree = StateTree { objects, cursors };
+        // let objects = change.objects().union(self.objects.clone());
+        let mut new_tree = StateTree {
+            root_props: self.root_props,
+            cursors,
+        };
         new_tree.update_cursors();
         new_tree
     }
@@ -139,117 +143,119 @@ impl StateTree {
 
             let o = self.root_props.get_mut(&k)?;
 
-            let mut focus = Focus::new_root(self, k.clone());
-            let mut current_obj: MultiValue = o.clone();
+            o.resolve_path(stack)
 
-            while let Some(next_elem) = stack.pop() {
-                match next_elem {
-                    PathElement::Key(k) => {
-                        key_in_container = k.clone().into();
-                        match current_obj.default_statetree_value() {
-                            StateTreeValue::Composite(composite) => match composite {
-                                StateTreeComposite::Map(map) => {
-                                    if let Some(target) = map.props.get(&k) {
-                                        focus = Focus::new_map(
-                                            self.clone(),
-                                            map.clone(),
-                                            k,
-                                            target.clone(),
-                                        );
-                                        parent_object_id = map.object_id.clone();
-                                        current_obj = target.clone();
-                                    } else {
-                                        return None;
-                                    }
-                                }
-                                StateTreeComposite::Table(table) => {
-                                    if let Some(target) = table.props.get(&k) {
-                                        parent_object_id = table.object_id.clone();
-                                        current_obj = target.clone();
-                                        focus = Focus::new_table(
-                                            self.clone(),
-                                            table.clone(),
-                                            k,
-                                            target.clone(),
-                                        );
-                                    } else {
-                                        return None;
-                                    }
-                                }
-                                _ => return None,
-                            },
-                            _ => return None,
-                        }
-                    }
-                    PathElement::Index(i) => match current_obj.default_statetree_value() {
-                        StateTreeValue::Composite(composite) => match composite {
-                            StateTreeComposite::List(list) => {
-                                let index = i.try_into().unwrap();
-                                if let Ok((elemid, target)) = list.elem_at(index) {
-                                    key_in_container = elemid.into();
-                                    parent_object_id = list.object_id.clone();
-                                    current_obj = target.clone();
-                                    focus = Focus::new_list(
-                                        self.clone(),
-                                        list.clone(),
-                                        i.try_into().unwrap(),
-                                        target.clone(),
-                                    );
-                                } else {
-                                    return None;
-                                }
-                            }
-                            StateTreeComposite::Text(StateTreeText { graphemes, .. }) => {
-                                if graphemes.get(i as usize).is_some() {
-                                    if stack.is_empty() {
-                                        return Some(ResolvedPath::new_character(
-                                            self,
-                                            current_obj,
-                                        ));
-                                    } else {
-                                        return None;
-                                    }
-                                } else {
-                                    return None;
-                                };
-                            }
-                            _ => return None,
-                        },
-                        _ => return None,
-                    },
-                };
-            }
-            let resolved_path = match current_obj.default_statetree_value() {
-                StateTreeValue::Leaf(v) => match v {
-                    Primitive::Counter(v) => ResolvedPath::new_counter(
-                        self,
-                        parent_object_id,
-                        key_in_container,
-                        current_obj,
-                        focus,
-                        v,
-                    ),
-                    _ => ResolvedPath::new_primitive(self, current_obj),
-                },
-                StateTreeValue::Composite(composite) => match composite {
-                    StateTreeComposite::Map(m) => {
-                        ResolvedPath::new_map(self, current_obj, focus, m.clone())
-                    }
-                    StateTreeComposite::Table(t) => {
-                        ResolvedPath::new_table(self, current_obj, focus, t.clone())
-                    }
-                    StateTreeComposite::List(l) => {
-                        ResolvedPath::new_list(self, current_obj, focus, l.clone())
-                    }
-                    StateTreeComposite::Text(t) => ResolvedPath::new_text(
-                        self,
-                        current_obj,
-                        Box::new(move |d| focus.update(d)),
-                        t,
-                    ),
-                },
-            };
-            Some(resolved_path)
+            // let mut focus = Focus::new_root(self, k.clone());
+            // let mut current_obj = o;
+
+            // while let Some(next_elem) = stack.pop() {
+            //     match next_elem {
+            //         PathElement::Key(k) => {
+            //             key_in_container = k.clone().into();
+            //             match current_obj.default_statetree_value() {
+            //                 StateTreeValue::Composite(composite) => match composite {
+            //                     StateTreeComposite::Map(map) => {
+            //                         if let Some(target) = map.props.get_mut(&k) {
+            //                             focus = Focus::new_map(
+            //                                 self.clone(),
+            //                                 map.clone(),
+            //                                 k,
+            //                                 target.clone(),
+            //                             );
+            //                             parent_object_id = map.object_id.clone();
+            //                             current_obj = target;
+            //                         } else {
+            //                             return None;
+            //                         }
+            //                     }
+            //                     StateTreeComposite::Table(table) => {
+            //                         if let Some(target) = table.props.get_mut(&k) {
+            //                             parent_object_id = table.object_id.clone();
+            //                             current_obj = target;
+            //                             focus = Focus::new_table(
+            //                                 self.clone(),
+            //                                 table.clone(),
+            //                                 k,
+            //                                 target.clone(),
+            //                             );
+            //                         } else {
+            //                             return None;
+            //                         }
+            //                     }
+            //                     _ => return None,
+            //                 },
+            //                 _ => return None,
+            //             }
+            //         }
+            //         PathElement::Index(i) => match current_obj.default_statetree_value() {
+            //             StateTreeValue::Composite(composite) => match composite {
+            //                 StateTreeComposite::List(list) => {
+            //                     let index = i.try_into().unwrap();
+            //                     if let Ok((elemid, target)) = list.elem_at(index) {
+            //                         key_in_container = elemid.into();
+            //                         parent_object_id = list.object_id.clone();
+            //                         current_obj = target;
+            //                         focus = Focus::new_list(
+            //                             self.clone(),
+            //                             list.clone(),
+            //                             i.try_into().unwrap(),
+            //                             target.clone(),
+            //                         );
+            //                     } else {
+            //                         return None;
+            //                     }
+            //                 }
+            //                 StateTreeComposite::Text(StateTreeText { graphemes, .. }) => {
+            //                     if graphemes.get(i as usize).is_some() {
+            //                         if stack.is_empty() {
+            //                             return Some(ResolvedPath::new_character(
+            //                                 self,
+            //                                 current_obj,
+            //                             ));
+            //                         } else {
+            //                             return None;
+            //                         }
+            //                     } else {
+            //                         return None;
+            //                     };
+            //                 }
+            //                 _ => return None,
+            //             },
+            //             _ => return None,
+            //         },
+            //     };
+            // }
+            // let resolved_path = match current_obj.default_statetree_value() {
+            //     StateTreeValue::Leaf(v) => match v {
+            //         Primitive::Counter(v) => ResolvedPath::new_counter(
+            //             self,
+            //             parent_object_id,
+            //             key_in_container,
+            //             current_obj,
+            //             focus,
+            //             v,
+            //         ),
+            //         _ => ResolvedPath::new_primitive(self, current_obj),
+            //     },
+            //     StateTreeValue::Composite(composite) => match composite {
+            //         StateTreeComposite::Map(m) => {
+            //             ResolvedPath::new_map(self, current_obj, focus, m.clone())
+            //         }
+            //         StateTreeComposite::Table(t) => {
+            //             ResolvedPath::new_table(self, current_obj, focus, t.clone())
+            //         }
+            //         StateTreeComposite::List(l) => {
+            //             ResolvedPath::new_list(self, current_obj, focus, l.clone())
+            //         }
+            //         StateTreeComposite::Text(t) => ResolvedPath::new_text(
+            //             self,
+            //             current_obj,
+            //             Box::new(move |d| focus.update(d)),
+            //             t,
+            //         ),
+            //     },
+            // };
+            // Some(resolved_path)
         } else {
             None
         }
@@ -494,6 +500,22 @@ impl StateTreeValue {
         match self {
             StateTreeValue::Leaf(p) => p.clone().into(),
             StateTreeValue::Composite(composite) => composite.realise_value(),
+        }
+    }
+
+    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+        match self {
+            Self::Leaf(leaf) => {
+                if path.is_empty() {
+                    match leaf {
+                        // Primitive::Counter(v) => ResolvedPath::new_counter(),
+                        _ => ResolvedPath::new_primitive(self),
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::Composite(composite) => composite.resolve_path(path),
         }
     }
 }
@@ -833,6 +855,18 @@ impl StateTreeList {
     ) -> Result<(&amp::OpId, &MultiValue), error::MissingIndexError> {
         self.elements
             .get(index)
+            .ok_or_else(|| error::MissingIndexError {
+                missing_index: index,
+                size_of_collection: self.elements.len(),
+            })
+    }
+
+    pub(crate) fn elem_at_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<(&amp::OpId, &mut MultiValue), error::MissingIndexError> {
+        self.elements
+            .get_mut(index)
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.elements.len(),

@@ -231,6 +231,12 @@ where
         self.underlying.get(index).map(|(i, t)| (i, t.get()))
     }
 
+    pub(super) fn get_mut(&mut self, index: usize) -> Option<(&OpId, &mut T)> {
+        self.underlying
+            .get_mut(index)
+            .map(|(i, t)| (&*i, t.get_mut()))
+    }
+
     pub(super) fn insert(&mut self, index: usize, value: T) {
         self.underlying.insert(
             index,
@@ -303,6 +309,13 @@ where
     }
 
     fn get(&self) -> &T {
+        match self {
+            UpdatingSequenceElement::Original(v) => v,
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut T {
         match self {
             UpdatingSequenceElement::Original(v) => v,
             _ => unreachable!(),

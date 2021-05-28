@@ -4,11 +4,12 @@ use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    CursorState, Cursors, DiffApplicationResult, DiffableSequence, StateTreeChange,
+    CursorState, Cursors, DiffApplicationResult, DiffableSequence, ResolvedPath, StateTreeChange,
     StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
     error,
+    path::PathElement,
     value::{Primitive, Value},
 };
 
@@ -115,8 +116,8 @@ impl MultiValue {
         Ok(())
     }
 
-    pub(super) fn default_statetree_value(&self) -> StateTreeValue {
-        self.winning_value.1.clone()
+    pub(super) fn default_statetree_value(&self) -> &StateTreeValue {
+        &self.winning_value.1
     }
 
     pub(super) fn default_value(&self) -> Value {
@@ -145,6 +146,27 @@ impl MultiValue {
             .iter()
             .map(|(opid, v)| (opid.clone(), v.realise_value()))
             .collect()
+    }
+
+    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+        match self.winning_value.1 {
+            StateTreeValue::Leaf(leaf) => match leaf {
+                Primitive::Counter(c) => ResolvedPath::new_counter(),
+                _ => ResolvedPath::new_primitive(self),
+            },
+            StateTreeValue::Composite(composite) => match composite {
+                StateTreeComposite::Map(m) => ResolvedPath::new_map(focus, m),
+                StateTreeComposite::Table(t) => {
+                    ResolvedPath::new_table(current_obj, focus, t.clone())
+                }
+                StateTreeComposite::List(l) => {
+                    ResolvedPath::new_list(current_obj, focus, l.clone())
+                }
+                StateTreeComposite::Text(t) => {
+                    ResolvedPath::new_text(current_obj, Box::new(move |d| focus.update(d)), t)
+                }
+            },
+        }
     }
 
     pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpId> {
@@ -282,7 +304,8 @@ impl MultiGrapheme {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        object_id: diff.parent_object_id.clone(),
+                        // object_id: diff.parent_object_id.clone(),
+                        object_id: amp::ObjectId::Root,
                         diff: diff.clone(),
                     });
                 } else {
@@ -291,7 +314,8 @@ impl MultiGrapheme {
             }
             _ => {
                 return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                    object_id: diff.parent_object_id.clone(),
+                    // object_id: diff.parent_object_id.clone(),
+                    object_id: amp::ObjectId::Root,
                     diff: diff.clone(),
                 });
             }
@@ -323,7 +347,8 @@ impl MultiGrapheme {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                            object_id: subdiff.parent_object_id.clone(),
+                            // object_id: subdiff.parent_object_id.clone(),
+                            object_id: amp::ObjectId::Root,
                             diff: subdiff.clone(),
                         });
                     } else {
@@ -332,9 +357,10 @@ impl MultiGrapheme {
                 }
                 _ => {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        object_id: subdiff.parent_object_id.clone(),
+                        // object_id: subdiff.parent_object_id.clone(),
+                        object_id: amp::ObjectId::Root,
                         diff: subdiff.clone(),
-                    })
+                    });
                 }
             }
         }
