@@ -87,10 +87,12 @@
                 cargo-watch
                 cargo-criterion
                 cargo-fuzz
+                cargo-flamegraph
                 crate2nix
                 wasm-pack
                 pkgconfig
                 openssl
+                valgrind
 
                 nodejs
                 yarn
