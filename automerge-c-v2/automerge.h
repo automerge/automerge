@@ -215,12 +215,6 @@ SyncState *automerge_sync_state_init(void);
 
 /**
  * # Safety
- * This must be called with a valid ptr & len
- */
-intptr_t debug_free_msgpack(uint8_t *msgpack, uintptr_t cap);
-
-/**
- * # Safety
  * This must be called with a valid C-string
  */
 intptr_t debug_json_change_to_msgpack(const char *change, uint8_t **out_msgpack, uintptr_t *out_len);
@@ -236,12 +230,6 @@ intptr_t debug_msgpack_change_to_json(const uint8_t *msgpack, uintptr_t len, uin
  * This must be called with a valid pointer to len bytes
  */
 intptr_t debug_msgpack_patch_to_json(const uint8_t *msgpack, uintptr_t len, uint8_t *out_json);
-
-/**
- * # Safety
- * This must be called with a valid ptr & len
- */
-void debug_save(uint8_t *msgpack, uintptr_t len, const char *name);
 
 /**
  * # Safety

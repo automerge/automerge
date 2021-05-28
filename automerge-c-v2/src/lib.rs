@@ -15,7 +15,7 @@ use std::{
 };
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, UncompressedChange, Patch};
+use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, Patch, UncompressedChange};
 use errno::{set_errno, Errno};
 use rmp_serde;
 
@@ -794,14 +794,6 @@ pub unsafe extern "C" fn debug_json_change_to_msgpack(
 }
 
 /// # Safety
-/// This must be called with a valid ptr & len
-#[no_mangle]
-pub unsafe extern "C" fn debug_free_msgpack(msgpack: *mut u8, cap: usize) -> isize {
-    Vec::from_raw_parts(msgpack, cap, cap);
-    0
-}
-
-/// # Safety
 /// This must be called with a valid pointer to len bytes
 #[no_mangle]
 pub unsafe extern "C" fn debug_msgpack_change_to_json(
@@ -833,14 +825,4 @@ pub unsafe extern "C" fn debug_msgpack_patch_to_json(
     // null-terminate
     *out_json.add(json.len()) = 0;
     json.len() as isize
-}
-
-/// # Safety
-/// This must be called with a valid ptr & len
-#[no_mangle]
-pub unsafe extern "C" fn debug_save(msgpack: *mut u8, len: usize, name: *const c_char) {
-    let slice = std::slice::from_raw_parts(msgpack, len);
-    let path = from_cstr(name);
-    let path = path.to_string();
-    std::fs::write(&path, slice).unwrap();
 }
