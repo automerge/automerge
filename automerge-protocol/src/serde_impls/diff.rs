@@ -64,14 +64,14 @@ impl<'de> Deserialize<'de> for RawDiffType {
         const VARIANTS: &[&str] = &["value", "map", "text", "list", "table"];
         // TODO: Probably more efficient to deserialize to a `&str`
         let raw_type = String::deserialize(deserializer)?;
-        Ok(match raw_type.as_str() {
-            "value" => RawDiffType::Value,
-            "map" => RawDiffType::Map,
-            "text" => RawDiffType::Text,
-            "list" => RawDiffType::List,
-            "table" => RawDiffType::Table,
-            other => return Err(Error::unknown_variant(other, VARIANTS)),
-        })
+        match raw_type.as_str() {
+            "value" => Ok(RawDiffType::Value),
+            "map" => Ok(RawDiffType::Map),
+            "text" => Ok(RawDiffType::Text),
+            "list" => Ok(RawDiffType::List),
+            "table" => Ok(RawDiffType::Table),
+            other => Err(Error::unknown_variant(other, VARIANTS)),
+        }
     }
 }
 
