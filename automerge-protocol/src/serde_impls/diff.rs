@@ -47,14 +47,32 @@ impl Serialize for Diff {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 enum RawDiffType {
     Value,
     Map,
     Text,
     List,
     Table,
+}
+
+// Same idea as RawOpType
+impl<'de> Deserialize<'de> for RawDiffType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const VARIANTS: &[&str] = &["value", "map", "text", "list", "table"];
+        // TODO: Probably more efficient to deserialize to a `&str`
+        let raw_type = String::deserialize(deserializer)?;
+        match raw_type.as_str() {
+            "value" => Ok(RawDiffType::Value),
+            "map" => Ok(RawDiffType::Map),
+            "text" => Ok(RawDiffType::Text),
+            "list" => Ok(RawDiffType::List),
+            "table" => Ok(RawDiffType::Table),
+            other => Err(Error::unknown_variant(other, VARIANTS)),
+        }
+    }
 }
 
 impl RawDiffType {
