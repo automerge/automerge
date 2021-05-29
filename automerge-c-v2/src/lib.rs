@@ -17,7 +17,6 @@ use std::{
 use automerge_backend::{AutomergeError, Change};
 use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, Patch, UncompressedChange};
 use errno::{set_errno, Errno};
-use rmp_serde;
 
 // I dislike using macros but it saves me a bunch of typing
 // This is especially true b/c the V2 backend returns a bunch more errors
