@@ -123,6 +123,8 @@ const char *automerge_error(Backend *backend);
 void automerge_free(Backend *backend);
 
 /**
+ * # Safety
+ * Must point to a valid `Buffers` struct
  * Free the memory a `Buffers` struct points to
  */
 intptr_t automerge_free_buffs(Buffers *buffs);
