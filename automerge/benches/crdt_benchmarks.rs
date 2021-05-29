@@ -158,9 +158,8 @@ pub fn b3_1(c: &mut Criterion) {
                     local_backend.apply_local_change(init_change).unwrap();
                 local_doc.apply_patch(patch).unwrap();
 
-                let other_docs: Vec<Frontend> = (1..root_n).map(|_| Frontend::new()).collect();
+                let other_docs = (1..root_n).map(|_| Frontend::new());
                 let updates: Vec<automerge_backend::Change> = other_docs
-                    .into_iter()
                     .enumerate()
                     .map(|(index, mut doc)| {
                         let mut backend = Backend::new();
