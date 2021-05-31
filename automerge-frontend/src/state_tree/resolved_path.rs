@@ -28,13 +28,19 @@ pub enum Target<'a> {
 impl<'a> std::fmt::Debug for Target<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Target::Map(maptarget) => write!(f, "MapTarget {:?}", maptarget.value.object_id),
             Target::Root(_) => write!(f, "Root"),
-            Target::Table(tabletarget) => {
-                write!(f, "Table {:?}", tabletarget.value.object_id)
+            Target::Map(maptarget) => {
+                write!(f, "Map {:?}", maptarget.multivalue.default_object_id())
             }
-            Target::List(listtarget) => write!(f, "list {:?}", listtarget.value.object_id),
-            Target::Text(texttarget) => write!(f, "text {:?}", texttarget.value.object_id),
+            Target::Table(tabletarget) => {
+                write!(f, "Table {:?}", tabletarget.multivalue.default_object_id())
+            }
+            Target::List(listtarget) => {
+                write!(f, "list {:?}", listtarget.multivalue.default_object_id())
+            }
+            Target::Text(texttarget) => {
+                write!(f, "text {:?}", texttarget.multivalue.default_object_id())
+            }
             Target::Counter(countertarget) => write!(
                 f,
                 "counter {0}:{1:?}",
@@ -47,57 +53,33 @@ impl<'a> std::fmt::Debug for Target<'a> {
 }
 
 impl<'a> ResolvedPath<'a> {
-    pub(super) fn new_root(tree: &mut StateTree) -> ResolvedPath {
+    pub(super) fn new_root(root: &mut StateTree) -> ResolvedPath {
         ResolvedPath {
-            target: Target::Root(ResolvedRoot { root: tree }),
+            target: Target::Root(ResolvedRoot { root }),
         }
     }
 
-    pub(super) fn new_map(focus: Focus, map: &'a mut StateTreeMap) -> ResolvedPath<'a> {
+    pub(super) fn new_map(value: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Map(ResolvedMap { value: map, focus }),
+            target: Target::Map(ResolvedMap { multivalue: value }),
         }
     }
 
-    pub(super) fn new_list(
-        mv: MultiValue,
-        focus: Focus,
-        list: &'a mut StateTreeList,
-    ) -> ResolvedPath<'a> {
+    pub(super) fn new_list(value: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::List(ResolvedList {
-                multivalue: mv,
-                focus,
-                value: list,
-            }),
+            target: Target::List(ResolvedList { multivalue: value }),
         }
     }
 
-    pub(super) fn new_text(
-        mv: MultiValue,
-        update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
-        text: &'a mut StateTreeText,
-    ) -> ResolvedPath<'a> {
+    pub(super) fn new_text(mv: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Text(ResolvedText {
-                multivalue: mv,
-                value: text,
-                update,
-            }),
+            target: Target::Text(ResolvedText { multivalue: mv }),
         }
     }
 
-    pub(super) fn new_table(
-        mv: MultiValue,
-        focus: Focus,
-        table: &'a mut StateTreeTable,
-    ) -> ResolvedPath<'a> {
+    pub(super) fn new_table(value: &'a mut MultiValue) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Table(ResolvedTable {
-                multivalue: mv,
-                focus,
-                value: table,
-            }),
+            target: Target::Table(ResolvedTable { multivalue: value }),
         }
     }
 
@@ -125,7 +107,7 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub(super) fn new_character(c: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_character(c: &'a mut MultiGrapheme) -> ResolvedPath<'a> {
         ResolvedPath {
             target: Target::Character(ResolvedChar { multivalue: c }),
         }
@@ -140,7 +122,9 @@ impl<'a> ResolvedPath<'a> {
             Target::Text(texttarget) => texttarget.multivalue.default_value(),
             Target::Counter(countertarget) => countertarget.multivalue.default_value(),
             Target::Primitive(p) => p.multivalue.default_value(),
-            Target::Character(ctarget) => ctarget.multivalue.default_value(),
+            Target::Character(ctarget) => {
+                Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
+            }
         }
     }
 
@@ -163,11 +147,11 @@ impl<'a> ResolvedPath<'a> {
 
     pub fn object_id(&self) -> Option<amp::ObjectId> {
         match &self.target {
-            Target::Map(maptarget) => Some(maptarget.value.object_id.clone()),
+            Target::Map(maptarget) => Some(maptarget.multivalue.default_object_id().unwrap()),
             Target::Root(_) => Some(amp::ObjectId::Root),
-            Target::Table(tabletarget) => Some(tabletarget.value.object_id.clone()),
-            Target::List(listtarget) => Some(listtarget.value.object_id.clone()),
-            Target::Text(texttarget) => Some(texttarget.value.object_id.clone()),
+            Target::Table(tabletarget) => Some(tabletarget.multivalue.default_object_id().unwrap()),
+            Target::List(listtarget) => Some(listtarget.multivalue.default_object_id().unwrap()),
+            Target::Text(texttarget) => Some(texttarget.multivalue.default_object_id().unwrap()),
             Target::Counter(_) => None,
             Target::Primitive(_) => None,
             Target::Character(_) => None,
@@ -212,7 +196,7 @@ impl<'a> ResolvedRoot<'a> {
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
         let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()])
@@ -239,7 +223,7 @@ pub struct ResolvedCounter<'a> {
 }
 
 impl<'a> ResolvedCounter<'a> {
-    pub(crate) fn increment(&self, by: i64) -> LocalOperationResult {
+    pub(crate) fn increment(&mut self, by: i64) -> LocalOperationResult {
         let diffapp = DiffApplicationResult::pure(self.multivalue.update_default(
             StateTreeValue::Leaf(Primitive::Counter(self.current_value + by)),
         ));
@@ -256,8 +240,7 @@ impl<'a> ResolvedCounter<'a> {
 }
 
 pub struct ResolvedMap<'a> {
-    pub(super) value: &'a mut StateTreeMap,
-    pub(super) focus: Focus,
+    pub(super) multivalue: &'a mut MultiValue,
 }
 
 impl<'a> ResolvedMap<'a> {
@@ -266,147 +249,124 @@ impl<'a> ResolvedMap<'a> {
         key: &str,
         payload: SetOrInsertPayload<&Value>,
     ) -> LocalOperationResult {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
-            parent_obj: &self.value.object_id,
+            // parent_obj: &self.multivalue.object_id(),
+            parent_obj: &amp::ObjectId::Root,
             key: &key.into(),
             value: payload.value,
             insert: false,
-            pred: self.value.pred_for_key(key),
+            pred: state_tree_map.pred_for_key(key),
         });
-        self.value
+        state_tree_map
             .props
             .insert(key.to_string(), newvalue.multivalue());
-        let diffapp = newvalue.diff_app_result().and_then(|v| {
-            let new_value = self.value.update(key.to_string(), v);
-            let new_composite = StateTreeComposite::Map(new_value);
-            let new_mv = self
-                .multivalue
-                .update_default(StateTreeValue::Composite(new_composite));
-            DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
-                self.value.object_id.clone(),
-                new_composite,
-            ))
-        });
         LocalOperationResult {
             new_ops: newvalue.ops(),
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
-        let new_value = self.value.without(key);
-        let new_composite = StateTreeComposite::Map(new_value);
-        let new_mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(new_composite));
-        let diffapp = DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
-            new_composite.object_id(),
-            new_composite,
-        ));
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.remove(key);
         LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_map.object_id.clone(),
                 key: key.into(),
                 insert: false,
-                pred: self.value.pred_for_key(key),
+                pred: state_tree_map.pred_for_key(key),
             }],
         }
     }
 }
 
 pub struct ResolvedTable<'a> {
-    pub(super) value: &'a mut StateTreeTable,
-    pub(super) multivalue: MultiValue,
-    pub(super) focus: Focus,
+    pub(super) multivalue: &'a mut MultiValue,
 }
 
 impl<'a> ResolvedTable<'a> {
     pub(crate) fn set_key(
-        &self,
+        &mut self,
         key: &str,
         payload: SetOrInsertPayload<&Value>,
     ) -> LocalOperationResult {
+        let state_tree_table = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
+            _ => unreachable!(),
+        };
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
-            parent_obj: &self.value.object_id,
+            parent_obj: &state_tree_table.object_id,
             key: &key.into(),
             value: payload.value,
             insert: false,
-            pred: self.value.pred_for_key(key),
+            pred: state_tree_table.pred_for_key(key),
         });
-        let treechange = newvalue.diff_app_result().and_then(|v| {
-            let new_value = self.value.update(key.to_string(), v);
-            let new_composite = StateTreeComposite::Table(new_value);
-            let new_mv = self
-                .multivalue
-                .update_default(StateTreeValue::Composite(new_composite));
-            DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
-                self.value.object_id.clone(),
-                new_composite,
-            ))
-        });
+        state_tree_table
+            .props
+            .insert(key.to_owned(), newvalue.multivalue());
         LocalOperationResult {
             new_ops: newvalue.ops(),
         }
     }
 
-    pub(crate) fn delete_key(&self, key: &str) -> LocalOperationResult {
-        let new_value = self.value.without(key);
-        let new_composite = StateTreeComposite::Table(new_value);
-        let new_mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(new_composite));
-        let diffapp = DiffApplicationResult::pure(new_mv).with_changes(StateTreeChange::single(
-            new_composite.object_id(),
-            new_composite,
-        ));
+    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
+        let state_tree_table = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_table.props.remove(key);
         LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_table.object_id.clone(),
                 key: key.into(),
                 insert: false,
-                pred: self.value.pred_for_key(key),
+                pred: state_tree_table.pred_for_key(key),
             }],
         }
     }
 }
 
 pub struct ResolvedText<'a> {
-    pub(super) value: &'a mut StateTreeText,
-    pub(super) multivalue: MultiValue,
-    pub(super) update: Box<dyn Fn(DiffApplicationResult<MultiValue>) -> StateTree>,
+    pub(super) multivalue: &'a mut MultiValue,
 }
 
 impl<'a> ResolvedText<'a> {
     #[allow(dead_code)]
     pub(crate) fn insert(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
         let current_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+            i => state_tree_text
+                .elem_at((i - 1).try_into().unwrap())?
+                .0
+                .into(),
         };
         let insert_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, payload.value.clone());
-        let new_text = self.value.insert(index.try_into().unwrap(), c)?;
-        let updated = StateTreeComposite::Text(new_text);
-        let mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(updated));
-        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-            self.value.object_id.clone(),
-            updated,
-        ));
+        state_tree_text.insert(index.try_into().unwrap(), c)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
                 pred: Vec::new(),
@@ -415,16 +375,23 @@ impl<'a> ResolvedText<'a> {
     }
 
     pub(crate) fn insert_many<I>(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
     where
         I: ExactSizeIterator<Item = String>,
     {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
         let current_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self.value.elem_at((i - 1).try_into().unwrap())?.0.into(),
+            i => state_tree_text
+                .elem_at((i - 1).try_into().unwrap())?
+                .0
+                .into(),
         };
         let mut values = Vec::with_capacity(payload.value.len());
         let mut chars: Vec<amp::ScalarValue> = Vec::with_capacity(payload.value.len());
@@ -434,15 +401,7 @@ impl<'a> ResolvedText<'a> {
             let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, c);
             values.push(c)
         }
-        let new_text = self.value.insert_many(index.try_into().unwrap(), values)?;
-        let updated = StateTreeComposite::Text(new_text);
-        let mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(updated));
-        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-            self.value.object_id.clone(),
-            updated,
-        ));
+        state_tree_text.insert_many(index.try_into().unwrap(), values)?;
         let action = match chars.len() {
             1 => amp::OpType::Set(chars[0].clone()),
             _ => amp::OpType::MultiSet(chars),
@@ -450,7 +409,7 @@ impl<'a> ResolvedText<'a> {
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action,
-                obj: self.value.object_id.clone(),
+                obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
                 pred: Vec::new(),
@@ -459,101 +418,92 @@ impl<'a> ResolvedText<'a> {
     }
 
     pub(crate) fn set(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<String>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
         let index: usize = index.try_into().unwrap();
-        let (current_elemid, _) = self.value.elem_at(index)?;
+        let (current_elemid, _) = state_tree_text.elem_at(index)?;
+        let current_elemid = current_elemid.clone();
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
-        let updated = StateTreeComposite::Text(self.value.set(index, c)?);
-        let mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(updated));
-        let diffapp = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-            self.value.object_id.clone(),
-            updated,
-        ));
+        state_tree_text.set(index, c)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
-                pred: self.value.pred_for_index(index as u32),
+                pred: state_tree_text.pred_for_index(index as u32),
                 insert: false,
             }],
         })
     }
 
     pub(crate) fn remove(
-        &self,
+        &mut self,
         index: u32,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
-        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
-        let updated = StateTreeComposite::Text(self.value.remove(index.try_into().unwrap())?);
-        let mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(updated));
-        let diffapp = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-            self.value.object_id.clone(),
-            updated,
-        ));
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        let (current_elemid, _) = state_tree_text.elem_at(index.try_into().unwrap())?;
+        let current_elemid = current_elemid.clone();
+        state_tree_text.remove(index.try_into().unwrap())?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,
-                pred: self.value.pred_for_index(index as u32),
+                pred: state_tree_text.pred_for_index(index as u32),
             }],
         })
     }
 
     pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
-        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
+        let state_tree_text = match self.multivalue.default_statetree_value() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        let (current_elemid, _) = state_tree_text.elem_at(index.try_into().unwrap())?;
         Ok(Cursor::new(
             index,
-            self.value.object_id.clone(),
+            state_tree_text.object_id.clone(),
             current_elemid.clone(),
         ))
     }
 }
 
 pub struct ResolvedList<'a> {
-    pub(super) value: &'a mut StateTreeList,
-    pub(super) multivalue: MultiValue,
-    pub(super) focus: Focus,
+    pub(super) multivalue: &'a mut MultiValue,
 }
 
 impl<'a> ResolvedList<'a> {
     pub(crate) fn set(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<&Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
-        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        let (current_elemid, _) = state_tree_list.elem_at(index.try_into().unwrap())?;
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
             value: payload.value,
-            pred: self.value.pred_for_index(index),
-            parent_obj: &self.value.object_id.clone(),
+            pred: state_tree_list.pred_for_index(index),
+            parent_obj: &state_tree_list.object_id.clone(),
             key: &current_elemid.into(),
             insert: false,
         });
-        let treechange = newvalue.diff_app_result().try_and_then(|v| {
-            let new_value = StateTreeComposite::List(self.value.set(index.try_into().unwrap(), v)?);
-            let mv = self
-                .multivalue
-                .update_default(StateTreeValue::Composite(new_value));
-            Ok(
-                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-                    self.value.object_id.clone(),
-                    new_value,
-                )),
-            )
-        })?;
+        state_tree_list.set(index as usize, newvalue.multivalue())?;
         Ok(LocalOperationResult {
             new_ops: newvalue.ops(),
         })
@@ -561,14 +511,17 @@ impl<'a> ResolvedList<'a> {
 
     #[allow(dead_code)]
     pub(crate) fn insert(
-        &self,
+        &mut self,
         index: u32,
         payload: SetOrInsertPayload<&Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
         let current_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self
-                .value
+            i => state_tree_list
                 .elem_at((i - 1).try_into().unwrap())?
                 .0
                 .clone()
@@ -578,47 +531,38 @@ impl<'a> ResolvedList<'a> {
             actor: payload.actor,
             start_op: payload.start_op,
             value: payload.value,
-            parent_obj: &self.value.object_id,
+            parent_obj: &state_tree_list.object_id,
             key: &current_elemid.into(),
             insert: true,
             pred: Vec::new(),
         });
-        let treechange = newvalue.diff_app_result().try_and_then(|v| {
-            let new_value =
-                StateTreeComposite::List(self.value.insert(index.try_into().unwrap(), v)?);
-            let mv = self
-                .multivalue
-                .update_default(StateTreeValue::Composite(new_value));
-            Ok(
-                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-                    self.value.object_id.clone(),
-                    new_value,
-                )),
-            )
-        })?;
+        state_tree_list.insert(index as usize, newvalue.multivalue())?;
         Ok(LocalOperationResult {
             new_ops: newvalue.ops(),
         })
     }
 
     pub(crate) fn insert_many<'b, I>(
-        &'a self,
+        &'a mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
     where
         I: ExactSizeIterator<Item = &'b Value>,
     {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
         let mut last_elemid = match index {
             0 => amp::ElementId::Head,
-            i => self
-                .value
+            i => state_tree_list
                 .elem_at((i - 1).try_into().unwrap())?
                 .0
                 .clone()
                 .into(),
         };
-        let mut newvalues = DiffApplicationResult::pure(Vec::with_capacity(payload.value.len()));
+        let mut newvalues = Vec::with_capacity(payload.value.len());
         let mut op_num = payload.start_op;
         let mut ops = Vec::new();
         for value in payload.value {
@@ -626,75 +570,60 @@ impl<'a> ResolvedList<'a> {
                 actor: payload.actor,
                 start_op: op_num,
                 value: &value,
-                parent_obj: &self.value.object_id,
+                parent_obj: &state_tree_list.object_id,
                 key: &last_elemid.clone().into(),
                 insert: true,
                 pred: Vec::new(),
             });
             last_elemid = amp::OpId::new(op_num, payload.actor).into();
             op_num = newvalue.max_op() + 1;
-            newvalues = newvalue.diff_app_result().and_then(|v| {
-                newvalues.map(|mut vs| {
-                    vs.push(v);
-                    vs
-                })
-            });
+            newvalues.push(newvalue.multivalue());
             ops.extend(newvalue.ops());
         }
-        let treechange = newvalues.try_and_then(|vs| {
-            let new_value =
-                StateTreeComposite::List(self.value.insert_many(index.try_into().unwrap(), vs)?);
-            let mv = self
-                .multivalue
-                .update_default(StateTreeValue::Composite(new_value));
-            Ok(
-                DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-                    self.value.object_id.clone(),
-                    new_value,
-                )),
-            )
-        })?;
+        state_tree_list.insert_many(index as usize, newvalues)?;
         Ok(LocalOperationResult {
             new_ops: condense_insert_ops(ops),
         })
     }
 
     pub(crate) fn remove(
-        &self,
+        &mut self,
         index: u32,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
-        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
-        let new_value = StateTreeComposite::List(self.value.remove(index.try_into().unwrap())?);
-        let mv = self
-            .multivalue
-            .update_default(StateTreeValue::Composite(new_value));
-        let treechange = DiffApplicationResult::pure(mv).with_changes(StateTreeChange::single(
-            self.value.object_id.clone(),
-            new_value,
-        ));
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        let (current_elemid, _) = state_tree_list.elem_at(index.try_into().unwrap())?;
+        let current_elemid = current_elemid.clone();
+        state_tree_list.remove(index as usize)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: self.value.object_id.clone(),
+                obj: state_tree_list.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,
-                pred: self.value.pred_for_index(index),
+                pred: state_tree_list.pred_for_index(index),
             }],
         })
     }
 
     pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
-        let (current_elemid, _) = self.value.elem_at(index.try_into().unwrap())?;
+        let state_tree_list = match self.multivalue.default_statetree_value() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        let (current_elemid, _) = state_tree_list.elem_at(index.try_into().unwrap())?;
         Ok(Cursor::new(
             index,
-            self.value.object_id.clone(),
+            state_tree_list.object_id.clone(),
             current_elemid.clone(),
         ))
     }
 }
 
 pub struct ResolvedChar<'a> {
-    pub(super) multivalue: &'a mut MultiValue,
+    pub(super) multivalue: &'a mut MultiGrapheme,
 }
 
 pub struct ResolvedPrimitive<'a> {

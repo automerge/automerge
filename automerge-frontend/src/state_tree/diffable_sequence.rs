@@ -1,7 +1,7 @@
 use amp::OpId;
 use automerge_protocol as amp;
 
-use super::{MultiGrapheme, MultiValue, StateTreeChange};
+use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized {
@@ -121,7 +121,6 @@ where
         object_id: &amp::ObjectId,
         edits: &[amp::DiffEdit],
     ) -> Result<(), InvalidPatch> {
-        let mut changes = StateTreeChange::empty();
         for edit in edits.iter() {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -213,18 +212,14 @@ where
         self.underlying.len()
     }
 
-    pub(super) fn update(&self, index: usize, value: T) -> Self {
+    pub(super) fn update(&mut self, index: usize, value: T) {
         let elem_id = if let Some(existing) = self.underlying.get(index) {
             existing.0.clone()
         } else {
             value.default_opid()
         };
-        DiffableSequence {
-            underlying: Box::new(
-                self.underlying
-                    .update(index, (elem_id, UpdatingSequenceElement::Original(value))),
-            ),
-        }
+        self.underlying
+            .set(index, (elem_id, UpdatingSequenceElement::Original(value)));
     }
 
     pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
@@ -325,7 +320,7 @@ where
     fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         match self {
             UpdatingSequenceElement::Original(v) => {
-                let updated = if let Some(existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
@@ -339,7 +334,7 @@ where
                 Ok(())
             }
             UpdatingSequenceElement::New(v) => {
-                let updated = if let Some(existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
@@ -358,15 +353,15 @@ where
                 remaining_updates,
             } => {
                 println!("Updating already updated value");
-                let updated = if let Some(update) =
+                let updated = if let Some(mut update) =
                     remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
                 {
                     update.apply_diff(opid, diff)?;
                     update
-                } else if let Some(initial) = initial_update.only_for_opid(opid) {
+                } else if let Some(mut initial) = initial_update.only_for_opid(opid) {
                     initial.apply_diff(opid, diff)?;
                     initial
-                } else if let Some(original) = original.only_for_opid(opid) {
+                } else if let Some(mut original) = original.only_for_opid(opid) {
                     original.apply_diff(opid, diff)?;
                     original
                 } else {

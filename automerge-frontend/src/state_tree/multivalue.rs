@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, iter::Iterator};
 
+use amp::ObjectId;
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -102,7 +103,7 @@ impl MultiValue {
                 match existing_value {
                     StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff)?,
                     StateTreeValue::Composite(composite) => {
-                        let comp = composite.clone();
+                        let mut comp = composite.clone();
                         comp.apply_diff(&subdiff)?;
                         StateTreeValue::Composite(comp)
                     }
@@ -120,12 +121,23 @@ impl MultiValue {
         &self.winning_value.1
     }
 
+    pub(super) fn default_statetree_value_mut(&mut self) -> &mut StateTreeValue {
+        &mut self.winning_value.1
+    }
+
     pub(super) fn default_value(&self) -> Value {
         self.winning_value.1.realise_value()
     }
 
     pub(super) fn default_opid(&self) -> amp::OpId {
         self.winning_value.0.clone()
+    }
+
+    pub(super) fn default_object_id(&self) -> Option<ObjectId> {
+        match &self.winning_value.1 {
+            StateTreeValue::Leaf(_) => None,
+            StateTreeValue::Composite(comp) => Some(comp.object_id()),
+        }
     }
 
     pub(super) fn update_default(&self, val: StateTreeValue) -> MultiValue {
@@ -149,24 +161,27 @@ impl MultiValue {
     }
 
     pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
-        match self.winning_value.1 {
-            StateTreeValue::Leaf(leaf) => match leaf {
-                Primitive::Counter(c) => ResolvedPath::new_counter(),
-                _ => ResolvedPath::new_primitive(self),
-            },
-            StateTreeValue::Composite(composite) => match composite {
-                StateTreeComposite::Map(m) => ResolvedPath::new_map(focus, m),
-                StateTreeComposite::Table(t) => {
-                    ResolvedPath::new_table(current_obj, focus, t.clone())
+        if path.is_empty() {
+            if let StateTreeValue::Leaf(_) = self.winning_value.1 {
+                return Some(ResolvedPath::new_primitive(self));
+            }
+
+            if let StateTreeValue::Composite(composite) = self.winning_value.1.clone() {
+                match composite {
+                    StateTreeComposite::Map(_) => return Some(ResolvedPath::new_map(self)),
+                    StateTreeComposite::Table(_) => {
+                        todo!()
+                    }
+                    StateTreeComposite::Text(_) => return Some(ResolvedPath::new_text(self)),
+                    StateTreeComposite::List(_) => return Some(ResolvedPath::new_list(self)),
                 }
-                StateTreeComposite::List(l) => {
-                    ResolvedPath::new_list(current_obj, focus, l.clone())
-                }
-                StateTreeComposite::Text(t) => {
-                    ResolvedPath::new_text(current_obj, Box::new(move |d| focus.update(d)), t)
-                }
-            },
+            }
+        } else {
+            if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
+                return composite.resolve_path(path);
+            }
         }
+        None
     }
 
     pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpId> {
@@ -382,6 +397,13 @@ impl MultiGrapheme {
         }
     }
 
+    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+        self.values()
+            .iter()
+            .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
+            .collect()
+    }
+
     pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
         if let Some(ref conflicts) = self.conflicts {
             let mut opids = std::iter::once(&self.winning_value.0).chain(conflicts.keys());
@@ -429,6 +451,14 @@ impl MultiGrapheme {
                 }
             }
             self.conflicts = Some(new_conflicts)
+        }
+    }
+
+    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if path.is_empty() {
+            Some(ResolvedPath::new_character(self))
+        } else {
+            None
         }
     }
 }
@@ -561,7 +591,7 @@ where
                 props: result_props,
             }),
         };
-        let value = StateTreeValue::Composite(map);
+        let value = StateTreeValue::Composite(map.clone());
         objects = objects.update(make_op_id.clone().into(), map);
         NewValue {
             value,
@@ -610,7 +640,7 @@ where
             object_id: make_list_opid.clone().into(),
             elements: DiffableSequence::new_from(result_elems),
         });
-        objects = objects.update(make_list_opid.clone().into(), list);
+        objects = objects.update(make_list_opid.clone().into(), list.clone());
         let value = StateTreeValue::Composite(list);
         NewValue {
             value,
@@ -656,7 +686,7 @@ where
             object_id: make_text_opid.clone().into(),
             graphemes: seq,
         });
-        let value = StateTreeValue::Composite(text);
+        let value = StateTreeValue::Composite(text.clone());
         NewValue {
             value,
             opid: make_text_opid.clone(),

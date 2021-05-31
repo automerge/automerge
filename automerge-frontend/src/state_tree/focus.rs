@@ -7,8 +7,8 @@ use super::{
 pub(crate) struct Focus(FocusInner);
 
 impl Focus {
-    pub(super) fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
-        match &self.0 {
+    pub(super) fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+        match &mut self.0 {
             FocusInner::Root(root) => root.update(diffapp),
             FocusInner::Map(mapfocus) => mapfocus.update(diffapp),
             FocusInner::Table(tablefocus) => tablefocus.update(diffapp),
@@ -81,7 +81,7 @@ struct RootFocus {
 }
 
 impl RootFocus {
-    fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         self.root.update(self.key.clone(), diffapp)
     }
 }
@@ -103,7 +103,7 @@ impl MapFocus {
             });
             DiffApplicationResult::pure(
                 self.multivalue
-                    .update_default(StateTreeValue::Composite(updated)),
+                    .update_default(StateTreeValue::Composite(updated.clone())),
             )
             .with_changes(StateTreeChange::single(self.map.object_id.clone(), updated))
         });
@@ -128,7 +128,7 @@ impl TableFocus {
             });
             DiffApplicationResult::pure(
                 self.multivalue
-                    .update_default(StateTreeValue::Composite(updated)),
+                    .update_default(StateTreeValue::Composite(updated.clone())),
             )
             .with_changes(StateTreeChange::single(
                 self.table.object_id.clone(),
@@ -150,13 +150,15 @@ struct ListFocus {
 impl ListFocus {
     fn update(&self, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         let new_diffapp = diffapp.and_then(|v| {
+            let mut elements = self.list.elements.clone();
+            elements.update(self.index, v);
             let updated = StateTreeComposite::List(StateTreeList {
                 object_id: self.list.object_id.clone(),
-                elements: self.list.elements.update(self.index, v),
+                elements,
             });
             DiffApplicationResult::pure(
                 self.multivalue
-                    .update_default(StateTreeValue::Composite(updated)),
+                    .update_default(StateTreeValue::Composite(updated.clone())),
             )
             .with_changes(StateTreeChange::single(
                 self.list.object_id.clone(),

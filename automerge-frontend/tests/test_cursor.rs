@@ -244,11 +244,10 @@ fn test_set_cursor_to_new_element_in_local_change() {
                 Path::root().key("list").index(0),
                 Value::Primitive(Primitive::Str("1".to_string())),
             ))?;
-            d.add_change(LocalChange::set(
-                Path::root().key("cursor"),
-                d.cursor_to_path(&Path::root().key("list").index(2))
-                    .unwrap(),
-            ))?;
+            let cursor = d
+                .cursor_to_path(&Path::root().key("list").index(2))
+                .unwrap();
+            d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
             d.add_change(LocalChange::insert(
                 Path::root().key("list").index(4),
                 "2".into(),

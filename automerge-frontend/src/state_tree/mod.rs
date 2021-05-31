@@ -1,5 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
+use amp::MapType;
 use automerge_protocol as amp;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
@@ -13,7 +14,6 @@ mod state_tree_change;
 
 use diff_application_result::DiffApplicationResult;
 use diffable_sequence::DiffableSequence;
-use focus::Focus;
 use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 pub(crate) use resolved_path::SetOrInsertPayload;
 pub use resolved_path::{ResolvedPath, Target};
@@ -41,7 +41,6 @@ impl StateTree {
     }
 
     pub fn apply_root_diff(&mut self, diff: amp::RootDiff) -> Result<(), error::InvalidPatch> {
-        let mut change = StateTreeChange::empty();
         for (prop, prop_diff) in diff.props.iter() {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
@@ -57,7 +56,7 @@ impl StateTree {
                         }
                     };
                     self.root_props
-                        .get(prop)
+                        .get_mut(prop)
                         .unwrap()
                         .apply_diff_iter(&mut diff_iter.map(|(oid, diff)| (oid, diff)))?;
                 }
@@ -66,7 +65,7 @@ impl StateTree {
         Ok(())
     }
 
-    fn update(&self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
+    fn update(&mut self, k: String, diffapp: DiffApplicationResult<MultiValue>) -> StateTree {
         // let mut new_objects = diffapp.change.objects().union(self.objects.clone());
         let new_cursors = diffapp.change.new_cursors().union(self.cursors.clone());
         // let root = match new_objects.get(&amp::ObjectId::Root) {
@@ -76,13 +75,14 @@ impl StateTree {
         //     _ => panic!("Root map did not exist or was wrong type"),
         // };
         // new_objects = new_objects.update(amp::ObjectId::Root, root);
-        let mut new_tree = StateTree {
-            // objects: new_objects,
-            root_props: self.root_props,
-            cursors: new_cursors,
-        };
-        new_tree.update_cursors();
-        new_tree
+        // let mut new_tree = StateTree {
+        //     // objects: new_objects,
+        //     root_props: self.root_props.clone(),
+        //     cursors: new_cursors,
+        // };
+        self.cursors = new_cursors;
+        self.update_cursors();
+        self.clone()
     }
 
     fn update_cursors(&mut self) {
@@ -120,7 +120,7 @@ impl StateTree {
         let cursors = change.new_cursors().union(self.cursors.clone());
         // let objects = change.objects().union(self.objects.clone());
         let mut new_tree = StateTree {
-            root_props: self.root_props,
+            root_props: self.root_props.clone(),
             cursors,
         };
         new_tree.update_cursors();
@@ -262,13 +262,18 @@ impl StateTree {
     }
 
     pub fn value(&self) -> Value {
-        self.realise_value(&amp::ObjectId::Root).unwrap()
+        let mut m = HashMap::new();
+        for (k, v) in &self.root_props {
+            m.insert(k.clone(), v.default_value());
+        }
+        Value::Map(m, MapType::Map)
     }
 
     fn realise_value(&self, object_id: &amp::ObjectId) -> Option<Value> {
-        self.objects
-            .get(object_id)
-            .map(|o| o.realise_value(&self.objects))
+        // self.objects
+        //     .get(object_id)
+        //     .map(|o| o.realise_value(&self.objects))
+        todo!()
     }
 }
 
@@ -432,6 +437,15 @@ impl StateTreeComposite {
             _ => {}
         }
     }
+
+    fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+        match self {
+            Self::Map(map) => map.resolve_path(path),
+            Self::Table(table) => table.resolve_path(path),
+            Self::List(list) => list.resolve_path(path),
+            Self::Text(text) => text.resolve_path(path),
+        }
+    }
 }
 
 impl StateTreeValue {
@@ -460,7 +474,7 @@ impl StateTreeValue {
                 obj_type,
                 ..
             }) => {
-                let map = match obj_type {
+                let mut map = match obj_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
                         props: im_rc::HashMap::new(),
@@ -470,7 +484,7 @@ impl StateTreeValue {
                         props: im_rc::HashMap::new(),
                     }),
                 };
-                map.apply_diff(&diff);
+                map.apply_diff(&diff)?;
                 Ok(StateTreeValue::Composite(map))
             }
             amp::Diff::Seq(amp::SeqDiff {
@@ -478,7 +492,7 @@ impl StateTreeValue {
                 obj_type,
                 ..
             }) => {
-                let seq = match obj_type {
+                let mut seq = match obj_type {
                     amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                         object_id: object_id.clone(),
                         graphemes: DiffableSequence::new(),
@@ -488,7 +502,7 @@ impl StateTreeValue {
                         elements: DiffableSequence::new(),
                     }),
                 };
-                seq.apply_diff(&diff);
+                seq.apply_diff(&diff)?;
                 Ok(StateTreeValue::Composite(seq))
             }
 
@@ -500,22 +514,6 @@ impl StateTreeValue {
         match self {
             StateTreeValue::Leaf(p) => p.clone().into(),
             StateTreeValue::Composite(composite) => composite.realise_value(),
-        }
-    }
-
-    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
-        match self {
-            Self::Leaf(leaf) => {
-                if path.is_empty() {
-                    match leaf {
-                        // Primitive::Counter(v) => ResolvedPath::new_counter(),
-                        _ => ResolvedPath::new_primitive(self),
-                    }
-                } else {
-                    None
-                }
-            }
-            Self::Composite(composite) => composite.resolve_path(path),
         }
     }
 }
@@ -549,7 +547,6 @@ impl StateTreeMap {
         &mut self,
         prop_diffs: &HashMap<String, HashMap<amp::OpId, amp::Diff>>,
     ) -> Result<(), error::InvalidPatch> {
-        let mut change = StateTreeChange::empty();
         for (prop, prop_diff) in prop_diffs.iter() {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
@@ -557,7 +554,7 @@ impl StateTreeMap {
                     self.props.remove(prop);
                 }
                 Some((opid, diff)) => {
-                    match self.props.get(prop) {
+                    match self.props.get_mut(prop) {
                         Some(n) => n.apply_diff(opid, diff)?,
                         None => {
                             let value = MultiValue::new_from_diff(opid.clone(), diff)?;
@@ -565,7 +562,7 @@ impl StateTreeMap {
                         }
                     };
                     self.props
-                        .get(prop)
+                        .get_mut(prop)
                         .unwrap()
                         .apply_diff_iter(&mut diff_iter.map(|(oid, diff)| (oid, diff)))?;
                 }
@@ -589,6 +586,22 @@ impl StateTreeMap {
         if let Some(new_mv) = new_mv {
             self.props.insert(key.to_string(), new_mv);
         }
+    }
+
+    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props.get_mut(&key)?.resolve_path(path)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn as_value(&self) -> Value {
+        let mut m = HashMap::new();
+        for (k, v) in &self.props {
+            m.insert(k.clone(), v.default_value());
+        }
+        Value::Map(m, MapType::Map)
     }
 }
 
@@ -624,7 +637,7 @@ impl StateTreeTable {
                     self.props.remove(prop);
                 }
                 Some((opid, diff)) => {
-                    match self.props.get(prop) {
+                    match self.props.get_mut(prop) {
                         Some(n) => n.apply_diff(opid, diff)?,
                         None => {
                             let value = MultiValue::new_from_diff(opid.clone(), diff)?;
@@ -632,7 +645,7 @@ impl StateTreeTable {
                         }
                     };
                     self.props
-                        .get(prop)
+                        .get_mut(prop)
                         .unwrap()
                         .apply_diff_iter(&mut diff_iter.map(|(oid, diff)| (oid, diff)))?;
                 }
@@ -657,6 +670,22 @@ impl StateTreeTable {
             self.props.insert(key.to_string(), new_mv);
         }
     }
+
+    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props.get_mut(&key)?.resolve_path(path)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn as_value(&self) -> Value {
+        let mut m = HashMap::new();
+        for (k, v) in &self.props {
+            m.insert(k.clone(), v.default_value());
+        }
+        Value::Map(m, MapType::Table)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -666,32 +695,22 @@ struct StateTreeText {
 }
 
 impl StateTreeText {
-    fn remove(&self, index: usize) -> Result<StateTreeText, error::MissingIndexError> {
+    fn remove(&mut self, index: usize) -> Result<(), error::MissingIndexError> {
         if index >= self.graphemes.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.graphemes.len(),
             })
         } else {
-            let mut new_chars = self.graphemes.clone();
-            new_chars.remove(index);
-            Ok(StateTreeText {
-                object_id: self.object_id.clone(),
-                graphemes: new_chars,
-            })
+            self.graphemes.remove(index);
+            Ok(())
         }
     }
 
-    fn set(
-        &self,
-        index: usize,
-        value: MultiGrapheme,
-    ) -> Result<StateTreeText, error::MissingIndexError> {
+    fn set(&mut self, index: usize, value: MultiGrapheme) -> Result<(), error::MissingIndexError> {
         if self.graphemes.len() > index {
-            Ok(StateTreeText {
-                object_id: self.object_id.clone(),
-                graphemes: self.graphemes.update(index, value),
-            })
+            self.graphemes.update(index, value);
+            Ok(())
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -714,18 +733,14 @@ impl StateTreeText {
     }
 
     fn insert(
-        &self,
+        &mut self,
         index: usize,
         value: MultiGrapheme,
-    ) -> Result<StateTreeText, error::MissingIndexError> {
+    ) -> Result<(), error::MissingIndexError> {
         self.insert_many(index, std::iter::once(value))
     }
 
-    fn insert_many<I>(
-        &self,
-        index: usize,
-        values: I,
-    ) -> Result<StateTreeText, error::MissingIndexError>
+    fn insert_many<I>(&mut self, index: usize, values: I) -> Result<(), error::MissingIndexError>
     where
         I: IntoIterator<Item = MultiGrapheme>,
     {
@@ -735,14 +750,10 @@ impl StateTreeText {
                 size_of_collection: self.graphemes.len(),
             })
         } else {
-            let mut new_chars = self.graphemes.clone();
             for (i, grapheme) in values.into_iter().enumerate() {
-                new_chars.insert(index + i, grapheme);
+                self.graphemes.insert(index + i, grapheme);
             }
-            Ok(StateTreeText {
-                object_id: self.object_id.clone(),
-                graphemes: new_chars,
-            })
+            Ok(())
         }
     }
 
@@ -761,6 +772,26 @@ impl StateTreeText {
     pub(crate) fn index_of(&self, opid: &amp::OpId) -> Option<usize> {
         self.graphemes.iter().position(|e| e.has_opid(opid))
     }
+
+    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if let Some(PathElement::Index(i)) = path.pop() {
+            if path.is_empty() {
+                self.graphemes.get_mut(i as usize)?.1.resolve_path(path)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn as_value(&self) -> Value {
+        let mut v = Vec::new();
+        for u in self.graphemes.iter() {
+            v.push(u.default_grapheme())
+        }
+        Value::Text(v)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -770,32 +801,22 @@ struct StateTreeList {
 }
 
 impl StateTreeList {
-    fn remove(&self, index: usize) -> Result<StateTreeList, error::MissingIndexError> {
+    fn remove(&mut self, index: usize) -> Result<(), error::MissingIndexError> {
         if index >= self.elements.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.elements.len(),
             })
         } else {
-            let mut new_elems = self.elements.clone();
-            new_elems.remove(index);
-            Ok(StateTreeList {
-                object_id: self.object_id.clone(),
-                elements: new_elems,
-            })
+            self.elements.remove(index);
+            Ok(())
         }
     }
 
-    fn set(
-        &self,
-        index: usize,
-        value: MultiValue,
-    ) -> Result<StateTreeList, error::MissingIndexError> {
+    fn set(&mut self, index: usize, value: MultiValue) -> Result<(), error::MissingIndexError> {
         if self.elements.len() > index {
-            Ok(StateTreeList {
-                object_id: self.object_id.clone(),
-                elements: self.elements.update(index, value),
-            })
+            self.elements.update(index, value);
+            Ok(())
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -804,23 +825,14 @@ impl StateTreeList {
         }
     }
 
-    fn insert(
-        &self,
-        index: usize,
-        value: MultiValue,
-    ) -> Result<StateTreeList, error::MissingIndexError> {
+    fn insert(&mut self, index: usize, value: MultiValue) -> Result<(), error::MissingIndexError> {
         self.insert_many(index, std::iter::once(value))
     }
 
-    fn insert_many<I>(
-        &self,
-        index: usize,
-        values: I,
-    ) -> Result<StateTreeList, error::MissingIndexError>
+    fn insert_many<I>(&mut self, index: usize, values: I) -> Result<(), error::MissingIndexError>
     where
         I: IntoIterator<Item = MultiValue>,
     {
-        let mut new_elems = self.elements.clone();
         if index > self.elements.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -828,12 +840,9 @@ impl StateTreeList {
             })
         } else {
             for (i, value) in values.into_iter().enumerate() {
-                new_elems.insert(index + i, value);
+                self.elements.insert(index + i, value);
             }
-            Ok(StateTreeList {
-                object_id: self.object_id.clone(),
-                elements: new_elems,
-            })
+            Ok(())
         }
     }
 
@@ -865,11 +874,12 @@ impl StateTreeList {
         &mut self,
         index: usize,
     ) -> Result<(&amp::OpId, &mut MultiValue), error::MissingIndexError> {
+        let len = self.elements.len();
         self.elements
             .get_mut(index)
-            .ok_or_else(|| error::MissingIndexError {
+            .ok_or(error::MissingIndexError {
                 missing_index: index,
-                size_of_collection: self.elements.len(),
+                size_of_collection: len,
             })
     }
 
@@ -884,6 +894,22 @@ impl StateTreeList {
                     .mutate(index, |m| m.update_default(StateTreeValue::Leaf(cursor)))
             }
         }
+    }
+
+    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if let Some(PathElement::Index(i)) = path.pop() {
+            self.elements.get_mut(i as usize)?.1.resolve_path(path)
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn as_value(&self) -> Value {
+        let mut v = Vec::new();
+        for u in self.elements.iter() {
+            v.push(u.default_value())
+        }
+        Value::Sequence(v)
     }
 }
 

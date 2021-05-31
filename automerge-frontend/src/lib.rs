@@ -94,7 +94,7 @@ impl FrontendState {
                     }
                 }
                 // cloning in the case of failure so we don't update the old value
-                let reconciled_root_state = reconciled_root_state.clone();
+                let mut reconciled_root_state = reconciled_root_state.clone();
                 reconciled_root_state.apply_root_diff(patch.diffs)?;
                 Ok(match new_in_flight_requests[..] {
                     [] => FrontendState::Reconciled {
@@ -112,7 +112,7 @@ impl FrontendState {
             }
             FrontendState::Reconciled { root_state, .. } => {
                 // cloning in the case of failure so we don't update the old value
-                let root_state = root_state.clone();
+                let mut root_state = root_state.clone();
                 root_state.apply_root_diff(patch.diffs)?;
                 Ok(FrontendState::Reconciled {
                     root_state,
@@ -123,15 +123,15 @@ impl FrontendState {
         }
     }
 
-    fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
+    fn get_object_id(&mut self, path: &Path) -> Option<ObjectId> {
         self.resolve_path(path).and_then(|r| r.object_id())
     }
 
-    fn get_value(&self, path: &Path) -> Option<Value> {
+    fn get_value(&mut self, path: &Path) -> Option<Value> {
         self.resolve_path(path).map(|r| r.default_value())
     }
 
-    fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
+    fn resolve_path(&mut self, path: &Path) -> Option<ResolvedPath> {
         let root = match self {
             FrontendState::WaitingForInFlightRequests {
                 optimistically_updated_root_state,
@@ -448,8 +448,8 @@ impl Frontend {
         Ok(())
     }
 
-    pub fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
-        self.state.as_ref().and_then(|s| s.get_object_id(path))
+    pub fn get_object_id(&mut self, path: &Path) -> Option<ObjectId> {
+        self.state.as_mut().and_then(|s| s.get_object_id(path))
     }
 
     pub fn in_flight_requests(&self) -> Vec<u64> {
@@ -461,9 +461,9 @@ impl Frontend {
 
     /// Gets the set of values for `path`, returns None if the path does not
     /// exist
-    pub fn get_conflicts(&self, path: &Path) -> Option<HashMap<OpId, Value>> {
+    pub fn get_conflicts(&mut self, path: &Path) -> Option<HashMap<OpId, Value>> {
         self.state
-            .as_ref()
+            .as_mut()
             .and_then(|s| s.resolve_path(path))
             .map(|o| o.values())
     }
