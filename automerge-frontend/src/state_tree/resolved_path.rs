@@ -596,6 +596,7 @@ impl<'a> ResolvedList<'a> {
         };
         let (current_elemid, _) = state_tree_list.elem_at(index.try_into().unwrap())?;
         let current_elemid = current_elemid.clone();
+        let pred = state_tree_list.pred_for_index(index);
         state_tree_list.remove(index as usize)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
@@ -603,7 +604,7 @@ impl<'a> ResolvedList<'a> {
                 obj: state_tree_list.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,
-                pred: state_tree_list.pred_for_index(index),
+                pred,
             }],
         })
     }
