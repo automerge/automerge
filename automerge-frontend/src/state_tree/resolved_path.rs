@@ -3,9 +3,8 @@ use std::{convert::TryInto, num::NonZeroU32};
 use automerge_protocol as amp;
 
 use super::{
-    focus::Focus, random_op_id, DiffApplicationResult, LocalOperationResult, MultiGrapheme,
-    MultiValue, NewValueRequest, StateTree, StateTreeChange, StateTreeComposite, StateTreeList,
-    StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+    random_op_id, LocalOperationResult, MultiGrapheme, MultiValue, NewValueRequest, StateTree,
+    StateTreeComposite, StateTreeValue,
 };
 use crate::{error, Cursor, Primitive, Value};
 

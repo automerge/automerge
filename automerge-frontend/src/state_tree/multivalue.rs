@@ -5,8 +5,8 @@ use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    CursorState, Cursors, DiffApplicationResult, DiffableSequence, ResolvedPath, StateTreeChange,
-    StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+    CursorState, Cursors, DiffableSequence, ResolvedPath, StateTreeComposite, StateTreeList,
+    StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
     error,
@@ -167,7 +167,7 @@ impl MultiValue {
         key: amp::Key,
     ) -> Option<ResolvedPath> {
         if path.is_empty() {
-            if let StateTreeValue::Leaf(Primitive::Counter(c)) = self.winning_value.1 {
+            if let StateTreeValue::Leaf(Primitive::Counter(_)) = self.winning_value.1 {
                 return Some(ResolvedPath::new_counter(parent_object_id, key, self));
             } else if let StateTreeValue::Leaf(_) = self.winning_value.1 {
                 return Some(ResolvedPath::new_primitive(self));
@@ -176,9 +176,7 @@ impl MultiValue {
             if let StateTreeValue::Composite(composite) = self.winning_value.1.clone() {
                 match composite {
                     StateTreeComposite::Map(_) => return Some(ResolvedPath::new_map(self)),
-                    StateTreeComposite::Table(_) => {
-                        todo!()
-                    }
+                    StateTreeComposite::Table(_) => return Some(ResolvedPath::new_table(self)),
                     StateTreeComposite::Text(_) => return Some(ResolvedPath::new_text(self)),
                     StateTreeComposite::List(_) => return Some(ResolvedPath::new_list(self)),
                 }
@@ -289,13 +287,6 @@ impl NewValue {
 
     pub(super) fn multivalue(&self) -> MultiValue {
         MultiValue::from_statetree_value(self.value.clone(), self.opid.clone())
-    }
-
-    pub(super) fn diff_app_result(&self) -> DiffApplicationResult<MultiValue> {
-        DiffApplicationResult::pure(self.multivalue()).with_changes(
-            StateTreeChange::from_updates(self.new_objects.clone())
-                .with_cursors(self.new_cursors.clone()),
-        )
     }
 }
 
