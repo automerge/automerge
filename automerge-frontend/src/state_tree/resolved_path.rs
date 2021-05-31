@@ -87,16 +87,12 @@ impl<'a> ResolvedPath<'a> {
         object_id: amp::ObjectId,
         key: amp::Key,
         mv: &'a mut MultiValue,
-        focus: Focus,
-        value: i64,
     ) -> ResolvedPath<'a> {
         ResolvedPath {
             target: Target::Counter(ResolvedCounter {
                 multivalue: mv,
                 key_in_container: key,
                 containing_object_id: object_id,
-                current_value: value,
-                focus,
             }),
         }
     }
@@ -215,18 +211,18 @@ impl<'a> ResolvedRoot<'a> {
 }
 
 pub struct ResolvedCounter<'a> {
-    pub(super) current_value: i64,
     pub(super) multivalue: &'a mut MultiValue,
     pub(super) containing_object_id: amp::ObjectId,
     pub(super) key_in_container: amp::Key,
-    pub(super) focus: Focus,
 }
 
 impl<'a> ResolvedCounter<'a> {
     pub(crate) fn increment(&mut self, by: i64) -> LocalOperationResult {
-        let diffapp = DiffApplicationResult::pure(self.multivalue.update_default(
-            StateTreeValue::Leaf(Primitive::Counter(self.current_value + by)),
-        ));
+        let counter = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Leaf(Primitive::Counter(c)) => c,
+            _ => unreachable!(),
+        };
+        *counter += by;
         LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Inc(by),

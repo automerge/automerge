@@ -160,9 +160,16 @@ impl MultiValue {
             .collect()
     }
 
-    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(
+        &mut self,
+        path: Vec<PathElement>,
+        parent_object_id: amp::ObjectId,
+        key: amp::Key,
+    ) -> Option<ResolvedPath> {
         if path.is_empty() {
-            if let StateTreeValue::Leaf(_) = self.winning_value.1 {
+            if let StateTreeValue::Leaf(Primitive::Counter(c)) = self.winning_value.1 {
+                return Some(ResolvedPath::new_counter(parent_object_id, key, self));
+            } else if let StateTreeValue::Leaf(_) = self.winning_value.1 {
                 return Some(ResolvedPath::new_primitive(self));
             }
 
@@ -176,10 +183,8 @@ impl MultiValue {
                     StateTreeComposite::List(_) => return Some(ResolvedPath::new_list(self)),
                 }
             }
-        } else {
-            if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
-                return composite.resolve_path(path);
-            }
+        } else if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
+            return composite.resolve_path(path);
         }
         None
     }

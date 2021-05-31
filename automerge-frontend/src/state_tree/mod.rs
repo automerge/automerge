@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use amp::MapType;
+use amp::{ElementId, MapType};
 use automerge_protocol as amp;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
@@ -143,7 +143,7 @@ impl StateTree {
 
             let o = self.root_props.get_mut(&k)?;
 
-            o.resolve_path(stack)
+            o.resolve_path(stack, amp::ObjectId::Root, amp::Key::Map(k))
 
             // let mut focus = Focus::new_root(self, k.clone());
             // let mut current_obj = o;
@@ -590,7 +590,9 @@ impl StateTreeMap {
 
     pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Key(key)) = path.pop() {
-            self.props.get_mut(&key)?.resolve_path(path)
+            self.props
+                .get_mut(&key)?
+                .resolve_path(path, self.object_id.clone(), amp::Key::Map(key))
         } else {
             None
         }
@@ -673,7 +675,9 @@ impl StateTreeTable {
 
     pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Key(key)) = path.pop() {
-            self.props.get_mut(&key)?.resolve_path(path)
+            self.props
+                .get_mut(&key)?
+                .resolve_path(path, self.object_id.clone(), amp::Key::Map(key))
         } else {
             None
         }
@@ -898,7 +902,16 @@ impl StateTreeList {
 
     pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Index(i)) = path.pop() {
-            self.elements.get_mut(i as usize)?.1.resolve_path(path)
+            let elem_id = self
+                .elem_at(i as usize)
+                .ok()
+                .map(|(e, _)| e.into())
+                .unwrap_or(ElementId::Head);
+            self.elements.get_mut(i as usize)?.1.resolve_path(
+                path,
+                self.object_id.clone(),
+                amp::Key::Seq(elem_id),
+            )
         } else {
             None
         }
