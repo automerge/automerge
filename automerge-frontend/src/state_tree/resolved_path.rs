@@ -256,8 +256,7 @@ impl<'a> ResolvedMap<'a> {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
-            // parent_obj: &self.multivalue.object_id(),
-            parent_obj: &amp::ObjectId::Root,
+            parent_obj: &state_tree_map.object_id,
             key: &key.into(),
             value: payload.value,
             insert: false,
@@ -431,13 +430,14 @@ impl<'a> ResolvedText<'a> {
         let current_elemid = current_elemid.clone();
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
+        let pred = state_tree_text.pred_for_index(index as u32);
         state_tree_text.set(index, c)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
                 obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
-                pred: state_tree_text.pred_for_index(index as u32),
+                pred,
                 insert: false,
             }],
         })
