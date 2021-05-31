@@ -34,7 +34,7 @@ pub(super) struct MultiValue {
 impl MultiValue {
     pub fn new_from_diff(
         opid: amp::OpId,
-        diff: &amp::Diff,
+        diff: amp::Diff,
     ) -> Result<MultiValue, error::InvalidPatch> {
         let value = StateTreeValue::new_from_diff(diff)?;
         Ok(MultiValue {
@@ -84,34 +84,31 @@ impl MultiValue {
 
     pub(super) fn apply_diff(
         &mut self,
-        opid: &amp::OpId,
-        diff: &amp::Diff,
+        opid: amp::OpId,
+        diff: amp::Diff,
     ) -> Result<(), error::InvalidPatch> {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, I>(
-        &'a mut self,
-        diff: &mut I,
-    ) -> Result<(), error::InvalidPatch>
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), error::InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpId, &'c amp::Diff)>,
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
         let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let u = if let Some(existing_value) = updated.get(opid) {
+            let u = if let Some(existing_value) = updated.get(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff)?,
                     StateTreeValue::Composite(composite) => {
                         let mut comp = composite.clone();
-                        comp.apply_diff(&subdiff)?;
+                        comp.apply_diff(subdiff)?;
                         StateTreeValue::Composite(comp)
                     }
                 }
             } else {
                 StateTreeValue::new_from_diff(subdiff)?
             };
-            updated = updated.update(opid, &u)
+            updated = updated.update(&opid, &u)
         }
         *self = updated.result();
         Ok(())
@@ -195,14 +192,14 @@ impl MultiValue {
         self.opids().any(|o| o == opid)
     }
 
-    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiValue> {
-        if *opid == self.winning_value.0 {
+    pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiValue> {
+        if opid == self.winning_value.0 {
             Some(MultiValue {
                 winning_value: self.winning_value.clone(),
                 conflicts: im_rc::HashMap::new(),
             })
         } else {
-            self.conflicts.get(opid).map(|value| MultiValue {
+            self.conflicts.get(&opid).map(|value| MultiValue {
                 winning_value: (opid.clone(), value.clone()),
                 conflicts: im_rc::HashMap::new(),
             })
@@ -308,8 +305,8 @@ impl MultiGrapheme {
     }
 
     pub(super) fn new_from_diff(
-        opid: &amp::OpId,
-        diff: &amp::Diff,
+        opid: amp::OpId,
+        diff: amp::Diff,
     ) -> Result<MultiGrapheme, error::InvalidPatch> {
         let winning_value = match diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
@@ -317,10 +314,10 @@ impl MultiGrapheme {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
                         // object_id: diff.parent_object_id.clone(),
                         object_id: amp::ObjectId::Root,
-                        diff: diff.clone(),
+                        diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
                     });
                 } else {
-                    s.clone()
+                    s
                 }
             }
             _ => {
@@ -332,25 +329,22 @@ impl MultiGrapheme {
             }
         };
         Ok(MultiGrapheme {
-            winning_value: (opid.clone(), winning_value),
+            winning_value: (opid, winning_value),
             conflicts: None,
         })
     }
 
     pub(super) fn apply_diff(
         &mut self,
-        opid: &amp::OpId,
-        diff: &amp::Diff,
+        opid: amp::OpId,
+        diff: amp::Diff,
     ) -> Result<(), error::InvalidPatch> {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I>(
-        &'a mut self,
-        diff: &mut I,
-    ) -> Result<(), error::InvalidPatch>
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), error::InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
         let mut updated = self.values();
         for (opid, subdiff) in diff {
@@ -360,10 +354,10 @@ impl MultiGrapheme {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
                             // object_id: subdiff.parent_object_id.clone(),
                             object_id: amp::ObjectId::Root,
-                            diff: subdiff.clone(),
+                            diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
                         });
                     } else {
-                        updated = updated.update(opid, s.clone());
+                        updated = updated.update(&opid, s.clone());
                     }
                 }
                 _ => {
@@ -409,8 +403,8 @@ impl MultiGrapheme {
         }
     }
 
-    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiGrapheme> {
-        if *opid == self.winning_value.0 {
+    pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiGrapheme> {
+        if opid == self.winning_value.0 {
             Some(MultiGrapheme {
                 winning_value: self.winning_value.clone(),
                 conflicts: None,
@@ -418,9 +412,9 @@ impl MultiGrapheme {
         } else {
             self.conflicts
                 .as_ref()
-                .and_then(|c| c.get(opid))
+                .and_then(|c| c.get(&opid))
                 .map(|value| MultiGrapheme {
-                    winning_value: (opid.clone(), value.clone()),
+                    winning_value: (opid, value.clone()),
                     conflicts: None,
                 })
         }

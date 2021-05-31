@@ -5,34 +5,34 @@ use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized {
-    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch>;
+    fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch>;
 
-    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch>;
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
+    fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>;
+        I: Iterator<Item = (amp::OpId, amp::Diff)>;
 
     fn default_opid(&self) -> amp::OpId;
 
-    fn only_for_opid(&self, opid: &amp::OpId) -> Option<Self>;
+    fn only_for_opid(&self, opid: amp::OpId) -> Option<Self>;
 
     fn add_values_from(&mut self, other: Self);
 }
 
 impl DiffableValue for MultiGrapheme {
-    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch> {
+    fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch> {
         let c = MultiGrapheme::new_from_diff(opid, diff)?;
         Ok(c)
     }
 
-    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
         MultiGrapheme::apply_diff(self, opid, diff)
     }
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
+    fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
         self.apply_diff_iter(diff)
         //MultiGrapheme::apply_diff_iter(self, diff)
@@ -42,7 +42,7 @@ impl DiffableValue for MultiGrapheme {
         self.default_opid().clone()
     }
 
-    fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiGrapheme> {
+    fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiGrapheme> {
         self.only_for_opid(opid)
     }
 
@@ -52,17 +52,17 @@ impl DiffableValue for MultiGrapheme {
 }
 
 impl DiffableValue for MultiValue {
-    fn construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<Self, InvalidPatch> {
-        MultiValue::new_from_diff(opid.clone(), diff)
+    fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch> {
+        MultiValue::new_from_diff(opid, diff)
     }
 
-    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
         self.apply_diff(opid, diff)
     }
 
-    fn apply_diff_iter<'a, 'b, 'c, 'd, I>(&'a mut self, diff: &mut I) -> Result<(), InvalidPatch>
+    fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), InvalidPatch>
     where
-        I: Iterator<Item = (&'b amp::OpId, &'d amp::Diff)>,
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
         self.apply_diff_iter(diff)
     }
@@ -71,7 +71,7 @@ impl DiffableValue for MultiValue {
         self.default_opid()
     }
 
-    fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiValue> {
+    fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiValue> {
         self.only_for_opid(opid)
     }
 
@@ -119,13 +119,13 @@ where
     pub fn apply_diff(
         &mut self,
         object_id: &amp::ObjectId,
-        edits: &[amp::DiffEdit],
+        edits: Vec<amp::DiffEdit>,
     ) -> Result<(), InvalidPatch> {
-        for edit in edits.iter() {
+        for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
-                    let index = *index as usize;
-                    let count = *count as usize;
+                    let index = index as usize;
+                    let count = count as usize;
                     if index >= self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
@@ -148,13 +148,13 @@ where
                     op_id,
                     value,
                 } => {
-                    let node = T::construct(&op_id, value)?;
-                    if (*index as usize) == self.underlying.len() {
+                    let node = T::construct(op_id, value)?;
+                    if (index as usize) == self.underlying.len() {
                         self.underlying
                             .push_back((node.default_opid(), UpdatingSequenceElement::new(node)));
                     } else {
                         self.underlying.insert(
-                            *index as usize,
+                            index as usize,
                             (node.default_opid(), UpdatingSequenceElement::new(node)),
                         );
                     };
@@ -164,7 +164,7 @@ where
                     values,
                     index,
                 } => {
-                    let index = *index as usize;
+                    let index = index as usize;
                     if index > self.underlying.len() {
                         return Err(InvalidPatch::InvalidIndex {
                             index,
@@ -173,7 +173,7 @@ where
                     }
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        let mv = T::construct(&opid, &amp::Diff::Value(value.clone()))?;
+                        let mv = T::construct(opid, amp::Diff::Value(value.clone()))?;
                         self.underlying.insert(
                             index + i,
                             (mv.default_opid(), UpdatingSequenceElement::New(mv)),
@@ -185,11 +185,11 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((_id, elem)) = self.underlying.get_mut(*index as usize) {
+                    if let Some((_id, elem)) = self.underlying.get_mut(index as usize) {
                         elem.apply_diff(op_id, value)?;
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
-                            index: *index as usize,
+                            index: index as usize,
                             object_id: object_id.clone(),
                         });
                     }
@@ -317,10 +317,10 @@ where
         }
     }
 
-    fn apply_diff(&mut self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
         match self {
             UpdatingSequenceElement::Original(v) => {
-                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
@@ -334,7 +334,7 @@ where
                 Ok(())
             }
             UpdatingSequenceElement::New(v) => {
-                let updated = if let Some(mut existing) = v.only_for_opid(opid) {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
@@ -353,15 +353,16 @@ where
                 remaining_updates,
             } => {
                 println!("Updating already updated value");
-                let updated = if let Some(mut update) =
-                    remaining_updates.iter().find_map(|v| v.only_for_opid(opid))
+                let updated = if let Some(mut update) = remaining_updates
+                    .iter()
+                    .find_map(|v| v.only_for_opid(opid.clone()))
                 {
                     update.apply_diff(opid, diff)?;
                     update
-                } else if let Some(mut initial) = initial_update.only_for_opid(opid) {
+                } else if let Some(mut initial) = initial_update.only_for_opid(opid.clone()) {
                     initial.apply_diff(opid, diff)?;
                     initial
-                } else if let Some(mut original) = original.only_for_opid(opid) {
+                } else if let Some(mut original) = original.only_for_opid(opid.clone()) {
                     original.apply_diff(opid, diff)?;
                     original
                 } else {
