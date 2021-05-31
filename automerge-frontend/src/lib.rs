@@ -95,7 +95,7 @@ impl FrontendState {
                 }
                 // cloning in the case of failure so we don't update the old value
                 let mut reconciled_root_state = reconciled_root_state.clone();
-                reconciled_root_state.apply_root_diff(patch.diffs)?;
+                reconciled_root_state.apply_diff(patch.diffs)?;
                 Ok(match new_in_flight_requests[..] {
                     [] => FrontendState::Reconciled {
                         root_state: reconciled_root_state,
@@ -113,7 +113,7 @@ impl FrontendState {
             FrontendState::Reconciled { root_state, .. } => {
                 // cloning in the case of failure so we don't update the old value
                 let mut root_state = root_state.clone();
-                root_state.apply_root_diff(patch.diffs)?;
+                root_state.apply_diff(patch.diffs)?;
                 Ok(FrontendState::Reconciled {
                     root_state,
                     max_op: patch.max_op,

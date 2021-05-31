@@ -35,7 +35,7 @@ impl StateTree {
         }
     }
 
-    pub fn apply_root_diff(&mut self, diff: amp::RootDiff) -> Result<(), error::InvalidPatch> {
+    pub fn apply_diff(&mut self, diff: amp::RootDiff) -> Result<(), error::InvalidPatch> {
         for (prop, prop_diff) in diff.props.iter() {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
