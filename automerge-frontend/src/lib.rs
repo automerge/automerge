@@ -169,8 +169,8 @@ impl FrontendState {
                     actor.clone(),
                 );
                 let result = change_closure(&mut mutation_tracker)?;
-                let new_root_state = mutation_tracker.state.clone();
-                let ops = mutation_tracker.ops();
+                let max_op = mutation_tracker.max_op;
+                let (new_root_state, ops) = mutation_tracker.finish();
                 if ops.is_some() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
@@ -196,15 +196,15 @@ impl FrontendState {
                 let mut mutation_tracker =
                     mutation::MutationTracker::new(root_state.clone(), max_op, actor.clone());
                 let result = change_closure(&mut mutation_tracker)?;
-                let new_root_state = mutation_tracker.state.clone();
+                let max_op = mutation_tracker.max_op;
+                let (new_root_state, ops) = mutation_tracker.finish();
                 let in_flight_requests = vec![seq];
-                let ops = mutation_tracker.ops();
                 let new_state = if ops.is_some() {
                     FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
                         reconciled_root_state: root_state,
-                        max_op: mutation_tracker.max_op,
+                        max_op,
                     }
                 } else {
                     // the old and new states should be equal since we have no operations

@@ -89,8 +89,8 @@ impl LocalChange {
 /// with. It also adds the change to a set of operations. This set of operations
 /// is used to generate a `ChangeRequest` once the closure is completed.
 pub struct MutationTracker {
-    pub(crate) state: StateTree,
-    pub(crate) ops: Vec<amp::Op>,
+    state: StateTree,
+    ops: Vec<amp::Op>,
     pub max_op: u64,
     actor_id: amp::ActorId,
 }
@@ -115,6 +115,15 @@ impl MutationTracker {
         } else {
             None
         }
+    }
+
+    pub(crate) fn finish(self) -> (StateTree, Option<Vec<amp::Op>>) {
+        let ops = if !self.ops.is_empty() {
+            Some(self.ops)
+        } else {
+            None
+        };
+        (self.state, ops)
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
