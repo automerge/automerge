@@ -94,24 +94,42 @@ impl MultiValue {
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
-        let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let u = if let Some(existing_value) = updated.get(&opid) {
+            if let Some(existing_value) = self.get_mut(&opid) {
                 match existing_value {
-                    StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff)?,
+                    StateTreeValue::Leaf(_) => {
+                        let value = StateTreeValue::new_from_diff(subdiff)?;
+                        self.update(&opid, &value)
+                    }
                     StateTreeValue::Composite(composite) => {
-                        let mut comp = composite.clone();
-                        comp.apply_diff(subdiff)?;
-                        StateTreeValue::Composite(comp)
+                        composite.apply_diff(subdiff)?;
                     }
                 }
             } else {
-                StateTreeValue::new_from_diff(subdiff)?
+                let value = StateTreeValue::new_from_diff(subdiff)?;
+                self.update(&opid, &value)
             };
-            updated = updated.update(&opid, &u)
         }
-        *self = updated.result();
         Ok(())
+    }
+
+    fn get_mut(&mut self, opid: &amp::OpId) -> Option<&mut StateTreeValue> {
+        if opid == &self.winning_value.0 {
+            Some(&mut self.winning_value.1)
+        } else {
+            self.conflicts.get_mut(opid)
+        }
+    }
+
+    fn update(&mut self, opid: &amp::OpId, value: &StateTreeValue) {
+        if *opid >= self.winning_value.0 {
+            self.conflicts
+                .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+            self.winning_value.0 = opid.clone();
+            self.winning_value.1 = value.clone();
+        } else {
+            self.conflicts.insert(opid.clone(), value.clone());
+        }
     }
 
     pub(super) fn default_statetree_value(&self) -> &StateTreeValue {
@@ -346,7 +364,6 @@ impl MultiGrapheme {
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
-        let mut updated = self.values();
         for (opid, subdiff) in diff {
             match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
@@ -357,7 +374,7 @@ impl MultiGrapheme {
                             diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
                         });
                     } else {
-                        updated = updated.update(&opid, s.clone());
+                        self.update(&opid, s);
                     }
                 }
                 _ => {
@@ -369,8 +386,28 @@ impl MultiGrapheme {
                 }
             }
         }
-        *self = updated.result();
         Ok(())
+    }
+
+    fn update(&mut self, key: &amp::OpId, value: String) {
+        if *key == self.winning_value.0 {
+            self.winning_value.1 = value;
+        } else {
+            let conflicts = match self.conflicts.as_mut() {
+                Some(c) => c,
+                None => {
+                    self.conflicts = Some(im_rc::HashMap::new());
+                    self.conflicts.as_mut().unwrap()
+                }
+            };
+            if *key > self.winning_value.0 {
+                conflicts.insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+                self.winning_value.0 = key.clone();
+                self.winning_value.1 = value;
+            } else {
+                conflicts.insert(key.clone(), value);
+            }
+        }
     }
 
     pub(super) fn default_grapheme(&self) -> String {
