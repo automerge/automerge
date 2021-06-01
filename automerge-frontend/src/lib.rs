@@ -182,7 +182,7 @@ impl FrontendState {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
                         reconciled_root_state,
-                        max_op: mutation_tracker.max_op,
+                        max_op,
                     },
                     deps: Vec::new(),
                     closure_result: result,
@@ -212,7 +212,7 @@ impl FrontendState {
                     // we can remain in the reconciled frontend state since we didn't make a change
                     FrontendState::Reconciled {
                         root_state: new_root_state,
-                        max_op: mutation_tracker.max_op,
+                        max_op,
                         deps_of_last_received_patch: deps_of_last_received_patch.clone(),
                     }
                 };

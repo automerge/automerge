@@ -121,6 +121,7 @@ where
         object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
     ) -> Result<(), InvalidPatch> {
+        let mut changed_indices = Vec::new();
         for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -139,6 +140,7 @@ where
                         });
                     }
                     for i in index..(index + count) {
+                        changed_indices.push(i);
                         self.underlying.remove(i);
                     }
                 }
@@ -149,6 +151,7 @@ where
                     value,
                 } => {
                     let node = T::construct(op_id, value)?;
+                    changed_indices.push(index as usize);
                     if (index as usize) == self.underlying.len() {
                         self.underlying
                             .push_back((node.default_opid(), UpdatingSequenceElement::new(node)));
@@ -174,6 +177,7 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()))?;
+                        changed_indices.push(index + i);
                         self.underlying.insert(
                             index + i,
                             (mv.default_opid(), UpdatingSequenceElement::New(mv)),
@@ -186,6 +190,7 @@ where
                     op_id,
                 } => {
                     if let Some((_id, elem)) = self.underlying.get_mut(index as usize) {
+                        changed_indices.push(index as usize);
                         elem.apply_diff(op_id, value)?;
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
@@ -197,8 +202,8 @@ where
             };
         }
 
-        for element in self.underlying.iter_mut() {
-            element.1.finish()
+        for i in changed_indices {
+            self.underlying.get_mut(i).unwrap().1.finish()
         }
 
         Ok(())
