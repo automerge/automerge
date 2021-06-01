@@ -124,7 +124,6 @@ proptest! {
     fn test_round_trip_serialization_msgpack(change in arb_change()) {
         let serialized = rmp_serde::to_vec_named(&change).unwrap();
         let deserialized: amp::UncompressedChange = rmp_serde::from_slice(&serialized)?;
-        //prop_assert_eq!(normalize_change(&change, Mode::MessagePack), deserialized);
         prop_assert_eq!(change, deserialized);
     }
 }

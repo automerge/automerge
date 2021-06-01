@@ -21,8 +21,14 @@ impl Serialize for Op {
         }
 
         match &self.action {
-            OpType::Set(ScalarValue::Timestamp(_)) => fields += 2,
-            OpType::Set(ScalarValue::Counter(_)) => fields += 2,
+            OpType::Set(
+                ScalarValue::Counter(_)
+                | ScalarValue::Timestamp(_)
+                | ScalarValue::Int(_)
+                | ScalarValue::Uint(_)
+                | ScalarValue::F32(_)
+                | ScalarValue::F64(_),
+            ) => fields += 2,
             OpType::Inc(_) | OpType::Set(_) | OpType::Del(_) => fields += 1,
             _ => {}
         }
@@ -79,8 +85,8 @@ impl Serialize for Op {
 
 // We need to manually implement deserialization for `RawOpType`
 // b/c by default rmp-serde (serde msgpack integration) serializes enums as maps with a
-// - a KV pair for the variant
-// - a KV pair for the associated data
+// single KV pair where the key is an integer representing the enum variant & the value
+// is the associated data
 // But we serialize `RawOpType` as a string, causing rmp-serde to choke on deserialization
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum RawOpType {
