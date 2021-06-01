@@ -533,7 +533,7 @@ impl StateTreeText {
     ) -> Result<(&amp::OpId, String), error::MissingIndexError> {
         self.graphemes
             .get(index)
-            .map(|mc| (mc.0, mc.1.default_grapheme()))
+            .map(|mc| (&mc.0, mc.1.default_grapheme()))
             .ok_or_else(|| error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.graphemes.len(),
@@ -661,7 +661,7 @@ impl StateTreeList {
     pub(crate) fn elem_at(
         &self,
         index: usize,
-    ) -> Result<(&amp::OpId, &MultiValue), error::MissingIndexError> {
+    ) -> Result<&(amp::OpId, MultiValue), error::MissingIndexError> {
         self.elements
             .get(index)
             .ok_or_else(|| error::MissingIndexError {
@@ -673,7 +673,7 @@ impl StateTreeList {
     pub(crate) fn elem_at_mut(
         &mut self,
         index: usize,
-    ) -> Result<(&amp::OpId, &mut MultiValue), error::MissingIndexError> {
+    ) -> Result<&mut (amp::OpId, MultiValue), error::MissingIndexError> {
         let len = self.elements.len();
         self.elements
             .get_mut(index)
