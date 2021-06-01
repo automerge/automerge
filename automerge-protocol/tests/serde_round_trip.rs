@@ -1,5 +1,4 @@
 extern crate automerge_protocol as amp;
-
 use maplit::hashmap;
 
 // This was not caught in the proptests
