@@ -64,7 +64,11 @@ impl FrontendState {
     /// Apply a patch received from the backend to this frontend state,
     /// returns the updated cached value (if it has changed) and a new
     /// `FrontendState` which replaces this one
-    fn apply_remote_patch(self, self_actor: &ActorId, patch: Patch) -> Result<Self, InvalidPatch> {
+    fn apply_remote_patch(
+        &mut self,
+        self_actor: &ActorId,
+        patch: Patch,
+    ) -> Result<(), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
@@ -73,7 +77,7 @@ impl FrontendState {
                 seen_non_local_patch,
                 max_op,
             } => {
-                let mut new_in_flight_requests = in_flight_requests;
+                let mut new_in_flight_requests = in_flight_requests.clone();
                 // If the actor ID and seq exist then this patch corresponds
                 // to a local change (i.e it came from Backend::apply_local_change
                 // so we don't need to apply it, we just need to remove it from
@@ -99,45 +103,41 @@ impl FrontendState {
                     }
                 }
                 // cloning in the case of failure so we don't update the old value
-                let mut reconciled_root_state = reconciled_root_state.clone();
-                reconciled_root_state.apply_diff(patch.diffs)?;
-                Ok(match new_in_flight_requests[..] {
-                    [] => {
-                        let optimistic = if seen_non_local_patch {
-                            reconciled_root_state.clone()
-                        } else {
-                            optimistically_updated_root_state
-                        };
-                        FrontendState::Reconciled {
-                            reconciled_root_state,
-                            optimistically_updated_root_state: optimistic,
-                            max_op: patch.max_op,
-                            deps_of_last_received_patch: patch.deps,
-                        }
+                let mut reconciled_root_state_clone = reconciled_root_state.clone();
+                reconciled_root_state_clone.apply_diff(patch.diffs)?;
+                if new_in_flight_requests.is_empty() {
+                    if *seen_non_local_patch {
+                        *optimistically_updated_root_state = reconciled_root_state_clone.clone();
                     }
-                    _ => FrontendState::WaitingForInFlightRequests {
-                        in_flight_requests: new_in_flight_requests,
-                        reconciled_root_state,
-                        optimistically_updated_root_state,
-                        seen_non_local_patch: seen_non_local_patch || !is_local,
-                        max_op,
-                    },
-                })
+                    *self = FrontendState::Reconciled {
+                        reconciled_root_state: reconciled_root_state_clone,
+                        optimistically_updated_root_state: std::mem::take(
+                            optimistically_updated_root_state,
+                        ),
+                        max_op: patch.max_op,
+                        deps_of_last_received_patch: patch.deps,
+                    }
+                } else {
+                    *in_flight_requests = new_in_flight_requests;
+                    *reconciled_root_state = reconciled_root_state_clone;
+                    *seen_non_local_patch = *seen_non_local_patch || !is_local;
+                    *max_op = patch.max_op;
+                }
+                Ok(())
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                optimistically_updated_root_state,
-                ..
+                optimistically_updated_root_state: _,
+                max_op,
+                deps_of_last_received_patch,
             } => {
                 // cloning in the case of failure so we don't update the old value
-                let mut reconciled_root_state = reconciled_root_state.clone();
-                reconciled_root_state.apply_diff(patch.diffs)?;
-                Ok(FrontendState::Reconciled {
-                    reconciled_root_state,
-                    optimistically_updated_root_state,
-                    max_op: patch.max_op,
-                    deps_of_last_received_patch: patch.deps,
-                })
+                let mut reconciled_root_state_clone = reconciled_root_state.clone();
+                reconciled_root_state_clone.apply_diff(patch.diffs)?;
+                *reconciled_root_state = reconciled_root_state_clone;
+                *max_op = patch.max_op;
+                *deps_of_last_received_patch = patch.deps;
+                Ok(())
             }
         }
     }
@@ -169,7 +169,7 @@ impl FrontendState {
     /// can also throw an error of type `E`. If an error is thrown in the
     /// closure no chnages are made and the error is returned.
     pub fn optimistically_apply_change<F, O, E>(
-        self,
+        &mut self,
         actor: &ActorId,
         change_closure: F,
         seq: u64,
@@ -180,34 +180,29 @@ impl FrontendState {
     {
         match self {
             FrontendState::WaitingForInFlightRequests {
-                mut in_flight_requests,
-                reconciled_root_state,
+                in_flight_requests,
+                reconciled_root_state: _,
                 optimistically_updated_root_state,
-                seen_non_local_patch,
+                seen_non_local_patch: _,
                 max_op,
             } => {
                 let mut mutation_tracker = mutation::MutationTracker::new(
                     optimistically_updated_root_state.clone(),
-                    max_op,
+                    *max_op,
                     actor.clone(),
                 );
                 let result = change_closure(&mut mutation_tracker)?;
-                let max_op = mutation_tracker.max_op;
+                *max_op = mutation_tracker.max_op;
                 let (new_root_state, ops) = mutation_tracker.finish();
                 if ops.is_some() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
                 }
 
+                *optimistically_updated_root_state = new_root_state;
+
                 Ok(OptimisticChangeResult {
                     ops,
-                    new_state: FrontendState::WaitingForInFlightRequests {
-                        in_flight_requests,
-                        optimistically_updated_root_state: new_root_state,
-                        seen_non_local_patch,
-                        reconciled_root_state,
-                        max_op,
-                    },
                     deps: Vec::new(),
                     closure_result: result,
                 })
@@ -220,36 +215,31 @@ impl FrontendState {
             } => {
                 let mut mutation_tracker = mutation::MutationTracker::new(
                     optimistically_updated_root_state.clone(),
-                    max_op,
+                    *max_op,
                     actor.clone(),
                 );
                 let result = change_closure(&mut mutation_tracker)?;
-                let max_op = mutation_tracker.max_op;
+                *max_op = mutation_tracker.max_op;
                 let (new_root_state, ops) = mutation_tracker.finish();
                 let in_flight_requests = vec![seq];
-                let new_state = if ops.is_some() {
-                    FrontendState::WaitingForInFlightRequests {
+                let deps = deps_of_last_received_patch.clone();
+                if ops.is_some() {
+                    *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: new_root_state,
                         seen_non_local_patch: false,
-                        reconciled_root_state,
-                        max_op,
+                        reconciled_root_state: std::mem::take(reconciled_root_state),
+                        max_op: *max_op,
                     }
                 } else {
                     // the old and new states should be equal since we have no operations
-                    debug_assert_eq!(new_root_state, reconciled_root_state);
+                    debug_assert_eq!(new_root_state, *reconciled_root_state);
                     // we can remain in the reconciled frontend state since we didn't make a change
-                    FrontendState::Reconciled {
-                        reconciled_root_state,
-                        optimistically_updated_root_state: new_root_state,
-                        max_op,
-                        deps_of_last_received_patch: deps_of_last_received_patch.clone(),
-                    }
+                    *optimistically_updated_root_state = new_root_state;
                 };
                 Ok(OptimisticChangeResult {
                     ops,
-                    new_state,
-                    deps: deps_of_last_received_patch,
+                    deps,
                     closure_result: result,
                 })
             }
@@ -292,7 +282,7 @@ pub struct Frontend {
     /// The current state of the frontend, see the description of
     /// `FrontendState` for details. It's an `Option` to allow consuming it
     /// using Option::take whilst behind a mutable reference.
-    state: Option<FrontendState>,
+    state: FrontendState,
     /// A cache of the value of this frontend
     cached_value: Option<Value>,
     /// A function for generating timestamps
@@ -361,12 +351,12 @@ impl Frontend {
         Frontend {
             actor_id: ActorId::from_bytes(actor_id.as_bytes()),
             seq: 0,
-            state: Some(FrontendState::Reconciled {
+            state: FrontendState::Reconciled {
                 reconciled_root_state: root_state.clone(),
                 optimistically_updated_root_state: root_state,
                 max_op: 0,
                 deps_of_last_received_patch: Vec::new(),
-            }),
+            },
             cached_value: None,
             timestamper: t,
         }
@@ -422,7 +412,7 @@ impl Frontend {
         if let Some(ref v) = self.cached_value {
             v
         } else {
-            let value = self.state.as_ref().unwrap().value();
+            let value = self.state.value();
             self.cached_value = Some(value);
             self.cached_value.as_ref().unwrap()
         }
@@ -437,15 +427,11 @@ impl Frontend {
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
-        let start_op = self.state.as_ref().unwrap().max_op() + 1;
-        // TODO this leaves the `state` as `None` if there's an error, it shouldn't
-        let change_result = self.state.take().unwrap().optimistically_apply_change(
-            &self.actor_id,
-            change_closure,
-            self.seq + 1,
-        )?;
+        let start_op = self.state.max_op() + 1;
+        let change_result =
+            self.state
+                .optimistically_apply_change(&self.actor_id, change_closure, self.seq + 1)?;
         self.cached_value = None;
-        self.state = Some(change_result.new_state);
         if let Some(ops) = change_result.ops {
             self.seq += 1;
             let change = UncompressedChange {
@@ -466,51 +452,38 @@ impl Frontend {
     }
 
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), InvalidPatch> {
-        // TODO this leaves the `state` as `None` if there's an error, it shouldn't
         self.cached_value = None;
         if let Some(seq) = patch.clock.get(&self.actor_id) {
             if *seq > self.seq {
                 self.seq = *seq;
             }
         }
-        let new_state = self
-            .state
-            .take()
-            .unwrap()
-            .apply_remote_patch(&self.actor_id, patch)?;
-        self.state = Some(new_state);
+        self.state.apply_remote_patch(&self.actor_id, patch)?;
         Ok(())
     }
 
     pub fn get_object_id(&mut self, path: &Path) -> Option<ObjectId> {
-        self.state.as_mut().and_then(|s| s.get_object_id(path))
+        self.state.get_object_id(path)
     }
 
     pub fn in_flight_requests(&self) -> Vec<u64> {
-        self.state
-            .as_ref()
-            .map(|s| s.in_flight_requests())
-            .unwrap_or_default()
+        self.state.in_flight_requests()
     }
 
     /// Gets the set of values for `path`, returns None if the path does not
     /// exist
     pub fn get_conflicts(&mut self, path: &Path) -> Option<HashMap<OpId, Value>> {
-        self.state
-            .as_mut()
-            .and_then(|s| s.resolve_path(path))
-            .map(|o| o.values())
+        self.state.resolve_path(path).map(|o| o.values())
     }
 
     /// Returns the value given by path, if it exists
-    pub fn get_value(&self, path: &Path) -> Option<Value> {
-        self.state.as_ref().and_then(|s| s.get_value(path))
+    pub fn get_value(&mut self, path: &Path) -> Option<Value> {
+        self.state.get_value(path)
     }
 }
 
 struct OptimisticChangeResult<O> {
     ops: Option<Vec<Op>>,
-    new_state: FrontendState,
     deps: Vec<ChangeHash>,
     closure_result: O,
 }
