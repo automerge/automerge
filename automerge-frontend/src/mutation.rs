@@ -88,20 +88,16 @@ impl LocalChange {
 /// a diff and immediately applies it to the `StateTree` it is constructed
 /// with. It also adds the change to a set of operations. This set of operations
 /// is used to generate a `ChangeRequest` once the closure is completed.
-pub struct MutationTracker {
-    state: StateTree,
+pub struct MutationTracker<'a> {
+    state: &'a mut StateTree,
     ops: Vec<amp::Op>,
     pub max_op: u64,
     actor_id: amp::ActorId,
 }
 
-impl MutationTracker {
-    pub(crate) fn new(
-        state_tree: StateTree,
-        max_op: u64,
-        actor_id: amp::ActorId,
-    ) -> MutationTracker {
-        MutationTracker {
+impl<'a> MutationTracker<'a> {
+    pub(crate) fn new(state_tree: &'a mut StateTree, max_op: u64, actor_id: amp::ActorId) -> Self {
+        Self {
             state: state_tree,
             ops: Vec::new(),
             max_op,
@@ -109,21 +105,8 @@ impl MutationTracker {
         }
     }
 
-    pub fn ops(&self) -> Option<Vec<amp::Op>> {
-        if !self.ops.is_empty() {
-            Some(self.ops.clone())
-        } else {
-            None
-        }
-    }
-
-    pub(crate) fn finish(self) -> (StateTree, Option<Vec<amp::Op>>) {
-        let ops = if !self.ops.is_empty() {
-            Some(self.ops)
-        } else {
-            None
-        };
-        (self.state, ops)
+    pub fn ops(self) -> Vec<amp::Op> {
+        self.ops
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
@@ -147,13 +130,13 @@ impl MutationTracker {
         self.ops.extend(change.new_ops);
     }
 
-    fn insert_helper<'a, 'b, 'c, I>(
-        &'a mut self,
-        path: &'b Path,
+    fn insert_helper<'b, 'c, 'd, I>(
+        &'b mut self,
+        path: &'c Path,
         values: I,
     ) -> Result<(), InvalidChangeRequest>
     where
-        I: ExactSizeIterator<Item = &'c Value>,
+        I: ExactSizeIterator<Item = &'d Value>,
     {
         if let Some(name) = path.name() {
             let index = match name {
@@ -219,7 +202,7 @@ impl MutationTracker {
     }
 }
 
-impl MutableDocument for MutationTracker {
+impl<'a> MutableDocument for MutationTracker<'a> {
     fn value_at_path(&mut self, path: &Path) -> Option<Value> {
         self.state.resolve_path(path).map(|r| r.default_value())
     }
