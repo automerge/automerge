@@ -134,9 +134,7 @@ where
                             index: self.underlying.len(),
                         });
                     }
-                    for i in index..(index + count) {
-                        self.underlying.remove(i);
-                    }
+                    self.underlying.slice(index..(index + count));
                 }
                 amp::DiffEdit::SingleElementInsert {
                     index,
