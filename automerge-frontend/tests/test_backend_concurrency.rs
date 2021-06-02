@@ -5,6 +5,7 @@ use automerge_frontend::{
 };
 use automerge_protocol as amp;
 use maplit::hashmap;
+use pretty_assertions::assert_eq;
 
 fn random_op_id() -> amp::OpId {
     amp::OpId::new(1, &amp::ActorId::random())

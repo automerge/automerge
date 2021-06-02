@@ -124,7 +124,7 @@ impl FrontendState {
                     *in_flight_requests = new_in_flight_requests;
                     *reconciled_root_state = reconciled_root_state_clone;
                     *seen_non_local_patch = *seen_non_local_patch || !is_local;
-                    *max_op = patch.max_op;
+                    // don't update max_op as we have progressed since then
                 }
                 Ok(())
             }
