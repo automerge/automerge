@@ -1,6 +1,5 @@
 use std::{cmp::Ordering, iter::Iterator};
 
-use amp::ObjectId;
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use amp::OpId;
 use automerge_protocol as amp;
 
@@ -88,7 +90,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<(OpId, T)>>,
+    underlying: Box<im_rc::Vector<(OpId, UpdatingSequenceElement<T>)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -108,7 +110,11 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().map(|i| (i.default_opid(), i)).collect()),
+            underlying: Box::new(
+                i.into_iter()
+                    .map(|i| (i.default_opid(), UpdatingSequenceElement::Original(i)))
+                    .collect(),
+            ),
         }
     }
 
@@ -117,6 +123,7 @@ where
         object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
     ) -> Result<(), InvalidPatch> {
+        let mut changed_indices = HashSet::new();
         for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -135,6 +142,19 @@ where
                         });
                     }
                     self.underlying.slice(index..(index + count));
+
+                    for i in changed_indices.clone().iter() {
+                        // if the index is to the right of that being removed we need to shift it
+                        if *i >= index as u64 {
+                            // we don't need to keep the old value
+                            changed_indices.remove(i);
+                            // but if the value is not in the removed range then we need to add the
+                            // updated value in again
+                            if *i >= (index + count) as u64 {
+                                changed_indices.insert(*i - count as u64);
+                            }
+                        }
+                    }
                 }
                 amp::DiffEdit::SingleElementInsert {
                     index,
@@ -144,11 +164,15 @@ where
                 } => {
                     let node = T::construct(op_id, value)?;
                     if (index as usize) == self.underlying.len() {
-                        self.underlying.push_back((node.default_opid(), node));
-                    } else {
                         self.underlying
-                            .insert(index as usize, (node.default_opid(), node));
+                            .push_back((node.default_opid(), UpdatingSequenceElement::new(node)));
+                    } else {
+                        self.underlying.insert(
+                            index as usize,
+                            (node.default_opid(), UpdatingSequenceElement::new(node)),
+                        );
                     };
+                    changed_indices.insert(index);
                 }
                 amp::DiffEdit::MultiElementInsert {
                     elem_id,
@@ -170,11 +194,15 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()))?;
-                        intermediate.push_back((mv.default_opid(), mv));
+                        intermediate
+                            .push_back((mv.default_opid(), UpdatingSequenceElement::New(mv)));
                     }
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
                     self.underlying.append(right);
+                    for i in index..(index + values.len()) {
+                        changed_indices.insert(i as u64);
+                    }
                 }
                 amp::DiffEdit::Update {
                     index,
@@ -189,15 +217,32 @@ where
                             object_id: object_id.clone(),
                         });
                     }
+                    changed_indices.insert(index);
                 }
             };
         }
+
+        for i in changed_indices {
+            if let Some(u) = self.underlying.get_mut(i as usize) {
+                u.1.finish()
+            }
+        }
+
+        debug_assert!(
+            self.underlying
+                .iter()
+                .all(|u| matches!(u.1, UpdatingSequenceElement::Original(_))),
+            "diffable sequence apply_diff_iter didn't call finish on all values"
+        );
 
         Ok(())
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
-        self.underlying.remove(index).1
+        match self.underlying.remove(index).1 {
+            UpdatingSequenceElement::Original(t) => t,
+            _ => unreachable!(),
+        }
     }
 
     pub(super) fn len(&self) -> usize {
@@ -210,19 +255,28 @@ where
         } else {
             value.default_opid()
         };
-        self.underlying.set(index, (elem_id, value));
+        self.underlying
+            .set(index, (elem_id, UpdatingSequenceElement::Original(value)));
     }
 
-    pub(super) fn get(&self, index: usize) -> Option<&(OpId, T)> {
-        self.underlying.get(index)
+    pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
+        self.underlying.get(index).map(|(o, t)| (o, t.get()))
     }
 
-    pub(super) fn get_mut(&mut self, index: usize) -> Option<&mut (OpId, T)> {
-        self.underlying.get_mut(index)
+    pub(super) fn get_mut(&mut self, index: usize) -> Option<(&mut OpId, &mut T)> {
+        self.underlying
+            .get_mut(index)
+            .map(|(o, t)| (o, t.get_mut()))
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
-        self.underlying.insert(index, (value.default_opid(), value))
+        self.underlying.insert(
+            index,
+            (
+                value.default_opid(),
+                UpdatingSequenceElement::Original(value),
+            ),
+        )
     }
 
     pub(super) fn mutate<F>(&mut self, index: usize, f: F)
@@ -230,12 +284,132 @@ where
         F: FnOnce(&T) -> T,
     {
         if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = (entry.0.clone(), f(&entry.1));
+            *entry = (
+                entry.0.clone(),
+                UpdatingSequenceElement::Original(f(entry.1.get())),
+            );
         }
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter().map(|i| &i.1)
+        self.underlying.iter().map(|i| i.1.get())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum UpdatingSequenceElement<T>
+where
+    T: DiffableValue,
+{
+    Original(T),
+    New(T),
+    Updated {
+        original: T,
+        initial_update: T,
+        remaining_updates: Vec<T>,
+    },
+}
+
+impl<T> UpdatingSequenceElement<T>
+where
+    T: DiffableValue,
+    T: Clone,
+{
+    fn new(value: T) -> UpdatingSequenceElement<T> {
+        UpdatingSequenceElement::New(value)
+    }
+
+    fn finish(&mut self) {
+        match self {
+            UpdatingSequenceElement::Original(_) => { // do nothing, this is the finished state
+            }
+            UpdatingSequenceElement::New(v) => *self = UpdatingSequenceElement::Original(v.clone()),
+            UpdatingSequenceElement::Updated {
+                initial_update,
+                remaining_updates,
+                ..
+            } => {
+                let t = std::mem::take(remaining_updates).into_iter().fold(
+                    initial_update.clone(),
+                    |mut acc, elem| {
+                        acc.add_values_from(elem);
+                        acc
+                    },
+                );
+                *self = UpdatingSequenceElement::Original(t)
+            }
+        }
+    }
+
+    fn get(&self) -> &T {
+        match self {
+            UpdatingSequenceElement::Original(v) => v,
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_mut(&mut self) -> &mut T {
+        match self {
+            UpdatingSequenceElement::Original(v) => v,
+            _ => unreachable!(),
+        }
+    }
+
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
+        match self {
+            UpdatingSequenceElement::Original(v) => {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
+                    existing.apply_diff(opid, diff)?;
+                    existing
+                } else {
+                    T::construct(opid, diff)?
+                };
+                *self = UpdatingSequenceElement::Updated {
+                    original: v.clone(),
+                    initial_update: updated,
+                    remaining_updates: Vec::new(),
+                };
+                Ok(())
+            }
+            UpdatingSequenceElement::New(v) => {
+                let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
+                    existing.apply_diff(opid, diff)?;
+                    existing
+                } else {
+                    T::construct(opid, diff)?
+                };
+                *self = UpdatingSequenceElement::Updated {
+                    original: v.clone(),
+                    initial_update: v.clone(),
+                    remaining_updates: vec![updated],
+                };
+                Ok(())
+            }
+            UpdatingSequenceElement::Updated {
+                original,
+                initial_update,
+                remaining_updates,
+            } => {
+                println!("Updating already updated value");
+                let updated = if let Some(mut update) = remaining_updates
+                    .iter()
+                    .find_map(|v| v.only_for_opid(opid.clone()))
+                {
+                    update.apply_diff(opid, diff)?;
+                    update
+                } else if let Some(mut initial) = initial_update.only_for_opid(opid.clone()) {
+                    initial.apply_diff(opid, diff)?;
+                    initial
+                } else if let Some(mut original) = original.only_for_opid(opid.clone()) {
+                    original.apply_diff(opid, diff)?;
+                    original
+                } else {
+                    T::construct(opid, diff)?
+                };
+                remaining_updates.push(updated);
+                Ok(())
+            }
+        }
     }
 }
