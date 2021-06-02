@@ -31,6 +31,13 @@ pub(super) struct MultiValue {
 }
 
 impl MultiValue {
+    pub fn check_new_from_diff(
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        StateTreeValue::check_new_from_diff(diff)
+    }
+
     pub fn new_from_diff(
         opid: amp::OpId,
         diff: amp::Diff,
@@ -81,6 +88,35 @@ impl MultiValue {
         .create(value)
     }
 
+    pub(super) fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        self.check_diff_iter(&mut std::iter::once((opid, diff)))
+    }
+
+    pub(super) fn check_diff_iter<'a, 'b, I>(&self, diff: &mut I) -> Result<(), error::InvalidPatch>
+    where
+        I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
+    {
+        for (opid, subdiff) in diff {
+            if let Some(existing_value) = self.get(opid) {
+                match existing_value {
+                    StateTreeValue::Leaf(_) => {
+                        StateTreeValue::check_new_from_diff(subdiff)?;
+                    }
+                    StateTreeValue::Composite(composite) => {
+                        composite.check_diff(subdiff)?;
+                    }
+                }
+            } else {
+                StateTreeValue::check_new_from_diff(subdiff)?;
+            };
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_diff(
         &mut self,
         opid: amp::OpId,
@@ -110,6 +146,14 @@ impl MultiValue {
             };
         }
         Ok(())
+    }
+
+    fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
+        if opid == &self.winning_value.0 {
+            Some(&self.winning_value.1)
+        } else {
+            self.conflicts.get(opid)
+        }
     }
 
     fn get_mut(&mut self, opid: &amp::OpId) -> Option<&mut StateTreeValue> {
@@ -322,6 +366,33 @@ impl MultiGrapheme {
         }
     }
 
+    pub(super) fn check_new_from_diff(
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        let winning_value = match diff {
+            amp::Diff::Value(amp::ScalarValue::Str(s)) => {
+                if s.graphemes(true).count() != 1 {
+                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                        // object_id: diff.parent_object_id.clone(),
+                        object_id: amp::ObjectId::Root,
+                        diff: diff.clone(),
+                    });
+                } else {
+                    s
+                }
+            }
+            _ => {
+                return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                    // object_id: diff.parent_object_id.clone(),
+                    object_id: amp::ObjectId::Root,
+                    diff: diff.clone(),
+                });
+            }
+        };
+        Ok(())
+    }
+
     pub(super) fn new_from_diff(
         opid: amp::OpId,
         diff: amp::Diff,
@@ -350,6 +421,41 @@ impl MultiGrapheme {
             winning_value: (opid, winning_value),
             conflicts: None,
         })
+    }
+
+    pub(super) fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        self.check_diff_iter(&mut std::iter::once((opid, diff)))
+    }
+
+    pub(super) fn check_diff_iter<'a, 'b, I>(&self, diff: &mut I) -> Result<(), error::InvalidPatch>
+    where
+        I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
+    {
+        for (opid, subdiff) in diff {
+            match subdiff {
+                amp::Diff::Value(amp::ScalarValue::Str(s)) => {
+                    if s.graphemes(true).count() != 1 {
+                        return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                            // object_id: subdiff.parent_object_id.clone(),
+                            object_id: amp::ObjectId::Root,
+                            diff: subdiff.clone(),
+                        });
+                    }
+                }
+                _ => {
+                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
+                        // object_id: subdiff.parent_object_id.clone(),
+                        object_id: amp::ObjectId::Root,
+                        diff: subdiff.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn apply_diff(

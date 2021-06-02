@@ -7,7 +7,11 @@ use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized {
+    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
+
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch>;
+
+    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch>;
 
@@ -23,9 +27,17 @@ pub(super) trait DiffableValue: Sized {
 }
 
 impl DiffableValue for MultiGrapheme {
+    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        MultiGrapheme::check_new_from_diff(opid, diff)
+    }
+
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch> {
         let c = MultiGrapheme::new_from_diff(opid, diff)?;
         Ok(c)
+    }
+
+    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        MultiGrapheme::check_diff(self, opid, diff)
     }
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
@@ -54,8 +66,16 @@ impl DiffableValue for MultiGrapheme {
 }
 
 impl DiffableValue for MultiValue {
+    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        MultiValue::check_new_from_diff(opid, diff)
+    }
+
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch> {
         MultiValue::new_from_diff(opid, diff)
+    }
+
+    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        self.check_diff(opid, diff)
     }
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
@@ -116,6 +136,98 @@ where
                     .collect(),
             ),
         }
+    }
+
+    pub fn check_diff(
+        &self,
+        object_id: &amp::ObjectId,
+        edits: &[amp::DiffEdit],
+    ) -> Result<(), InvalidPatch> {
+        let mut size = self.underlying.len();
+        for edit in edits {
+            match edit {
+                amp::DiffEdit::Remove { index, count } => {
+                    let index = *index as usize;
+                    let count = *count as usize;
+                    if index >= size {
+                        panic!("invalid index 1");
+                        return Err(InvalidPatch::InvalidIndex {
+                            object_id: object_id.clone(),
+                            index,
+                        });
+                    }
+                    if index + count > size {
+                        panic!("invalid index 2");
+                        return Err(InvalidPatch::InvalidIndex {
+                            object_id: object_id.clone(),
+                            index: size,
+                        });
+                    }
+                    size -= count;
+                }
+                amp::DiffEdit::SingleElementInsert {
+                    index,
+                    elem_id: _,
+                    op_id,
+                    value,
+                } => {
+                    T::check_construct(op_id, value)?;
+                    if *index as usize > size {
+                        panic!(
+                            "invalid index 3 {} {} {}",
+                            index,
+                            size,
+                            self.underlying.len()
+                        );
+                        return Err(InvalidPatch::InvalidIndex {
+                            object_id: object_id.clone(),
+                            index: *index as usize,
+                        });
+                    }
+                    size += 1;
+                }
+                amp::DiffEdit::MultiElementInsert {
+                    elem_id,
+                    values,
+                    index,
+                } => {
+                    let index = *index as usize;
+                    if index > size {
+                        panic!("invalid index 4");
+                        return Err(InvalidPatch::InvalidIndex {
+                            index,
+                            object_id: object_id.clone(),
+                        });
+                    }
+                    for (i, value) in values.iter().enumerate() {
+                        let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
+                        T::check_construct(&opid, &amp::Diff::Value(value.clone()))?;
+                    }
+                    size += values.len();
+                }
+                amp::DiffEdit::Update {
+                    index,
+                    value,
+                    op_id,
+                } => {
+                    // TODO: handle updates after things like inserts shifting them
+                    if *index as usize >= size {
+                        panic!("invalid index 5");
+                        return Err(InvalidPatch::InvalidIndex {
+                            index: *index as usize,
+                            object_id: object_id.clone(),
+                        });
+                    }
+
+                    // if let Some((_id, elem)) = self.underlying.get(*index as usize) {
+                    //     elem.check_diff(op_id, value)?;
+                    // } else {
+                    // }
+                }
+            };
+        }
+
+        Ok(())
     }
 
     pub fn apply_diff(
@@ -353,6 +465,46 @@ where
         match self {
             UpdatingSequenceElement::Original(v) => v,
             _ => unreachable!(),
+        }
+    }
+
+    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+        match self {
+            UpdatingSequenceElement::Original(v) => {
+                if let Some(existing) = v.only_for_opid(opid.clone()) {
+                    existing.check_diff(opid, diff)?;
+                } else {
+                    T::check_construct(opid, diff)?
+                };
+                Ok(())
+            }
+            UpdatingSequenceElement::New(v) => {
+                if let Some(existing) = v.only_for_opid(opid.clone()) {
+                    existing.check_diff(opid, diff)?;
+                } else {
+                    T::check_construct(opid, diff)?
+                };
+                Ok(())
+            }
+            UpdatingSequenceElement::Updated {
+                original,
+                initial_update,
+                remaining_updates,
+            } => {
+                if let Some(update) = remaining_updates
+                    .iter()
+                    .find_map(|v| v.only_for_opid(opid.clone()))
+                {
+                    update.check_diff(opid, diff)?;
+                } else if let Some(initial) = initial_update.only_for_opid(opid.clone()) {
+                    initial.check_diff(opid, diff)?;
+                } else if let Some(original) = original.only_for_opid(opid.clone()) {
+                    original.check_diff(opid, diff)?;
+                } else {
+                    T::check_construct(opid, diff)?
+                };
+                Ok(())
+            }
         }
     }
 

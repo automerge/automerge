@@ -102,18 +102,16 @@ impl FrontendState {
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
-                // TODO: implement a check_diff function on StateTree so that we can apply without
-                // risk of issues. Then we can remove the extra clone.
-                //
-                // cloning in the case of failure so we don't update the old value
-                let mut reconciled_root_state_clone = reconciled_root_state.clone();
-                reconciled_root_state_clone.apply_diff(patch.diffs)?;
+                reconciled_root_state.check_diff(&patch.diffs)?;
+
+                // TODO: change apply_diff to not return a result
+                reconciled_root_state.apply_diff(patch.diffs).unwrap();
                 if new_in_flight_requests.is_empty() {
                     if *seen_non_local_patch {
-                        *optimistically_updated_root_state = reconciled_root_state_clone.clone();
+                        *optimistically_updated_root_state = reconciled_root_state.clone();
                     }
                     *self = FrontendState::Reconciled {
-                        reconciled_root_state: reconciled_root_state_clone,
+                        reconciled_root_state: std::mem::take(reconciled_root_state),
                         optimistically_updated_root_state: std::mem::take(
                             optimistically_updated_root_state,
                         ),
@@ -122,7 +120,6 @@ impl FrontendState {
                     }
                 } else {
                     *in_flight_requests = new_in_flight_requests;
-                    *reconciled_root_state = reconciled_root_state_clone;
                     *seen_non_local_patch = *seen_non_local_patch || !is_local;
                     // don't update max_op as we have progressed since then
                 }
@@ -134,14 +131,11 @@ impl FrontendState {
                 max_op,
                 deps_of_last_received_patch,
             } => {
-                // TODO: implement a check_diff function on StateTree so that we can apply without
-                // risk of issues. Then we can remove the extra clone.
-                //
-                // cloning in the case of failure so we don't update the old value
-                let mut reconciled_root_state_clone = reconciled_root_state.clone();
-                reconciled_root_state_clone.apply_diff(patch.diffs)?;
-                *reconciled_root_state = reconciled_root_state_clone.clone();
-                *optimistically_updated_root_state = reconciled_root_state_clone;
+                reconciled_root_state.check_diff(&patch.diffs)?;
+
+                // TODO: change apply_diff to not return a result
+                reconciled_root_state.apply_diff(patch.diffs).unwrap();
+                *optimistically_updated_root_state = reconciled_root_state.clone();
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
