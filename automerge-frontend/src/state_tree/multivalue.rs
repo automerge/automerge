@@ -148,13 +148,6 @@ impl MultiValue {
         self.winning_value.0.clone()
     }
 
-    pub(super) fn default_object_id(&self) -> Option<ObjectId> {
-        match &self.winning_value.1 {
-            StateTreeValue::Leaf(_) => None,
-            StateTreeValue::Composite(comp) => Some(comp.object_id()),
-        }
-    }
-
     pub(super) fn update_default(&self, val: StateTreeValue) -> MultiValue {
         MultiValue {
             winning_value: (self.winning_value.0.clone(), val),
@@ -190,10 +183,18 @@ impl MultiValue {
 
             if let StateTreeValue::Composite(composite) = self.winning_value.1.clone() {
                 match composite {
-                    StateTreeComposite::Map(_) => return Some(ResolvedPath::new_map(self)),
-                    StateTreeComposite::Table(_) => return Some(ResolvedPath::new_table(self)),
-                    StateTreeComposite::Text(_) => return Some(ResolvedPath::new_text(self)),
-                    StateTreeComposite::List(_) => return Some(ResolvedPath::new_list(self)),
+                    StateTreeComposite::Map(map) => {
+                        return Some(ResolvedPath::new_map(self, map.object_id))
+                    }
+                    StateTreeComposite::Table(table) => {
+                        return Some(ResolvedPath::new_table(self, table.object_id))
+                    }
+                    StateTreeComposite::Text(text) => {
+                        return Some(ResolvedPath::new_text(self, text.object_id))
+                    }
+                    StateTreeComposite::List(list) => {
+                        return Some(ResolvedPath::new_list(self, list.object_id))
+                    }
                 }
             }
         } else if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {

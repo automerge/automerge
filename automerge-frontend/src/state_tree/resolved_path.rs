@@ -29,16 +29,16 @@ impl<'a> std::fmt::Debug for Target<'a> {
         match self {
             Target::Root(_) => write!(f, "Root"),
             Target::Map(maptarget) => {
-                write!(f, "Map {:?}", maptarget.multivalue.default_object_id())
+                write!(f, "Map {:?}", maptarget.object_id)
             }
             Target::Table(tabletarget) => {
-                write!(f, "Table {:?}", tabletarget.multivalue.default_object_id())
+                write!(f, "Table {:?}", tabletarget.object_id)
             }
             Target::List(listtarget) => {
-                write!(f, "list {:?}", listtarget.multivalue.default_object_id())
+                write!(f, "list {:?}", listtarget.object_id)
             }
             Target::Text(texttarget) => {
-                write!(f, "text {:?}", texttarget.multivalue.default_object_id())
+                write!(f, "text {:?}", texttarget.object_id)
             }
             Target::Counter(countertarget) => write!(
                 f,
@@ -58,27 +58,45 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub(super) fn new_map(value: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_map(value: &'a mut MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Map(ResolvedMap { multivalue: value }),
+            target: Target::Map(ResolvedMap {
+                multivalue: value,
+                object_id,
+            }),
         }
     }
 
-    pub(super) fn new_list(value: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_list(
+        value: &'a mut MultiValue,
+        object_id: amp::ObjectId,
+    ) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::List(ResolvedList { multivalue: value }),
+            target: Target::List(ResolvedList {
+                multivalue: value,
+                object_id,
+            }),
         }
     }
 
-    pub(super) fn new_text(mv: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_text(mv: &'a mut MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Text(ResolvedText { multivalue: mv }),
+            target: Target::Text(ResolvedText {
+                multivalue: mv,
+                object_id,
+            }),
         }
     }
 
-    pub(super) fn new_table(value: &'a mut MultiValue) -> ResolvedPath<'a> {
+    pub(super) fn new_table(
+        value: &'a mut MultiValue,
+        object_id: amp::ObjectId,
+    ) -> ResolvedPath<'a> {
         ResolvedPath {
-            target: Target::Table(ResolvedTable { multivalue: value }),
+            target: Target::Table(ResolvedTable {
+                multivalue: value,
+                object_id,
+            }),
         }
     }
 
@@ -142,14 +160,12 @@ impl<'a> ResolvedPath<'a> {
 
     pub fn object_id(&self) -> Option<amp::ObjectId> {
         match &self.target {
-            Target::Map(maptarget) => Some(maptarget.multivalue.default_object_id().unwrap()),
+            Target::Map(maptarget) => Some(maptarget.object_id.clone()),
             Target::Root(_) => Some(amp::ObjectId::Root),
-            Target::Table(tabletarget) => Some(tabletarget.multivalue.default_object_id().unwrap()),
-            Target::List(listtarget) => Some(listtarget.multivalue.default_object_id().unwrap()),
-            Target::Text(texttarget) => Some(texttarget.multivalue.default_object_id().unwrap()),
-            Target::Counter(_) => None,
-            Target::Primitive(_) => None,
-            Target::Character(_) => None,
+            Target::Table(tabletarget) => Some(tabletarget.object_id.clone()),
+            Target::List(listtarget) => Some(listtarget.object_id.clone()),
+            Target::Text(texttarget) => Some(texttarget.object_id.clone()),
+            Target::Counter(_) | Target::Primitive(_) | Target::Character(_) => None,
         }
     }
 }
@@ -235,6 +251,7 @@ impl<'a> ResolvedCounter<'a> {
 }
 
 pub struct ResolvedMap<'a> {
+    object_id: amp::ObjectId,
     pub(super) multivalue: &'a mut MultiValue,
 }
 
@@ -284,6 +301,7 @@ impl<'a> ResolvedMap<'a> {
 }
 
 pub struct ResolvedTable<'a> {
+    object_id: amp::ObjectId,
     pub(super) multivalue: &'a mut MultiValue,
 }
 
@@ -333,6 +351,7 @@ impl<'a> ResolvedTable<'a> {
 }
 
 pub struct ResolvedText<'a> {
+    object_id: amp::ObjectId,
     pub(super) multivalue: &'a mut MultiValue,
 }
 
@@ -475,6 +494,7 @@ impl<'a> ResolvedText<'a> {
 }
 
 pub struct ResolvedList<'a> {
+    object_id: amp::ObjectId,
     pub(super) multivalue: &'a mut MultiValue,
 }
 
