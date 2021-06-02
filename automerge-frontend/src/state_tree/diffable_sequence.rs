@@ -391,7 +391,6 @@ where
                 initial_update,
                 remaining_updates,
             } => {
-                println!("Updating already updated value");
                 let updated = if let Some(mut update) = remaining_updates
                     .iter()
                     .find_map(|v| v.only_for_opid(opid.clone()))
