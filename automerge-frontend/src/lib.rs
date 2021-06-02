@@ -130,7 +130,7 @@ impl FrontendState {
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                optimistically_updated_root_state: _,
+                optimistically_updated_root_state,
                 max_op,
                 deps_of_last_received_patch,
             } => {
@@ -140,7 +140,8 @@ impl FrontendState {
                 // cloning in the case of failure so we don't update the old value
                 let mut reconciled_root_state_clone = reconciled_root_state.clone();
                 reconciled_root_state_clone.apply_diff(patch.diffs)?;
-                *reconciled_root_state = reconciled_root_state_clone;
+                *reconciled_root_state = reconciled_root_state_clone.clone();
+                *optimistically_updated_root_state = reconciled_root_state_clone;
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
