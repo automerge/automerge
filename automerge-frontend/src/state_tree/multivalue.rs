@@ -13,12 +13,12 @@ use crate::{
     value::{Primitive, Value},
 };
 
-pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
+pub(crate) struct NewValueRequest<'a, 'b, 'c> {
     pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
     pub(crate) key: &'b amp::Key,
-    pub(crate) value: &'c Value,
-    pub(crate) parent_obj: &'d amp::ObjectId,
+    pub(crate) value: Value,
+    pub(crate) parent_obj: &'c amp::ObjectId,
     pub(crate) insert: bool,
     pub(crate) pred: Vec<amp::OpId>,
 }
@@ -73,7 +73,7 @@ impl MultiValue {
         start_op: u64,
         parent_id: amp::ObjectId,
         key: &amp::Key,
-        value: &Value,
+        value: Value,
         insert: bool,
         pred: Vec<amp::OpId>,
     ) -> NewValue {
@@ -567,7 +567,7 @@ where
     O: Into<amp::ObjectId>,
     O: Clone,
 {
-    fn create(self, value: &Value) -> NewValue {
+    fn create(self, value: Value) -> NewValue {
         match value {
             Value::Map(props, map_type) => self.new_map_or_table(props, map_type),
             Value::Sequence(values) => self.new_list(values),
@@ -578,27 +578,27 @@ where
 
     fn new_map_or_table(
         self,
-        props: &std::collections::HashMap<String, Value>,
-        map_type: &amp::MapType,
+        props: std::collections::HashMap<String, Value>,
+        map_type: amp::MapType,
     ) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::Map(*map_type)),
+            action: amp::OpType::Make(amp::ObjType::Map(map_type)),
             obj: self.parent_obj.clone().into(),
             key: self.key.clone(),
             insert: self.insert,
-            pred: self.pred.clone(),
+            pred: self.pred,
         };
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut result_props: HashMap<String, MultiValue> = HashMap::new();
-        for (prop, value) in props.iter() {
+        for (prop, value) in props {
             let context = NewValueContext {
                 actor: self.actor,
                 parent_obj: &make_op_id,
                 start_op: current_max_op + 1,
-                key: &prop.into(),
+                key: &prop.clone().into(),
                 pred: Vec::new(),
                 insert: false,
             };
@@ -606,7 +606,7 @@ where
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
             ops.extend_from_slice(&next_value.ops[..]);
-            result_props.insert(prop.clone(), next_value.multivalue());
+            result_props.insert(prop, next_value.multivalue());
         }
         let map = match map_type {
             amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
@@ -628,7 +628,7 @@ where
         }
     }
 
-    fn new_list(self, values: &[Value]) -> NewValue {
+    fn new_list(self, values: Vec<Value>) -> NewValue {
         let make_list_opid = amp::OpId::new(self.start_op, self.actor);
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::list()),
@@ -642,7 +642,7 @@ where
         let mut cursors = Cursors::new();
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
         let mut last_elemid = amp::ElementId::Head;
-        for value in values.iter() {
+        for value in values {
             let elem_opid = self.actor.op_id_at(current_max_op + 1);
             let context = NewValueContext {
                 start_op: current_max_op + 1,
@@ -673,7 +673,7 @@ where
         }
     }
 
-    fn new_text(self, graphemes: &[String]) -> NewValue {
+    fn new_text(self, graphemes: Vec<String>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
         let mut ops: Vec<amp::Op> = vec![amp::Op {
             action: amp::OpType::Make(amp::ObjType::text()),
@@ -717,9 +717,9 @@ where
         }
     }
 
-    fn new_primitive(self, primitive: &Primitive) -> NewValue {
+    fn new_primitive(self, primitive: Primitive) -> NewValue {
         let new_cursors = match primitive {
-            Primitive::Cursor(c) => Cursors::new_from(CursorState {
+            Primitive::Cursor(ref c) => Cursors::new_from(CursorState {
                 index: c.index as usize,
                 referring_object_id: self.parent_obj.clone().into(),
                 referring_key: self.key.clone(),
@@ -728,7 +728,7 @@ where
             }),
             _ => Cursors::new(),
         };
-        let value = match primitive {
+        let value = match &primitive {
             Primitive::Bytes(b) => amp::ScalarValue::Bytes(b.clone()),
             Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
@@ -743,7 +743,7 @@ where
         };
         let opid = self.actor.op_id_at(self.start_op);
         NewValue {
-            value: StateTreeValue::Leaf(primitive.clone()),
+            value: StateTreeValue::Leaf(primitive),
             opid,
             ops: vec![amp::Op {
                 action: amp::OpType::Set(value),

@@ -555,7 +555,7 @@ impl StateTreeMap {
         prop_diffs: &HashMap<String, HashMap<amp::OpId, amp::Diff>>,
     ) -> Result<(), error::InvalidPatch> {
         for (prop, prop_diff) in prop_diffs {
-            let mut diff_iter = prop_diff.into_iter();
+            let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
                 None => {}
                 Some((opid, diff)) => {
@@ -644,7 +644,7 @@ impl StateTreeTable {
         prop_diffs: &HashMap<String, HashMap<amp::OpId, amp::Diff>>,
     ) -> Result<(), error::InvalidPatch> {
         for (prop, prop_diff) in prop_diffs {
-            let mut diff_iter = prop_diff.into_iter();
+            let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
                 None => {}
                 Some((opid, diff)) => {

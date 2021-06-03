@@ -184,7 +184,7 @@ impl<'a> ResolvedRoot<'a> {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
@@ -259,7 +259,7 @@ impl<'a> ResolvedMap<'a> {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
@@ -309,7 +309,7 @@ impl<'a> ResolvedTable<'a> {
     pub(crate) fn set_key(
         &mut self,
         key: &str,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> LocalOperationResult {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
@@ -502,7 +502,7 @@ impl<'a> ResolvedList<'a> {
     pub(crate) fn set(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let state_tree_list = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
@@ -528,7 +528,7 @@ impl<'a> ResolvedList<'a> {
     pub(crate) fn insert(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<&Value>,
+        payload: SetOrInsertPayload<Value>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let state_tree_list = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
@@ -557,13 +557,13 @@ impl<'a> ResolvedList<'a> {
         })
     }
 
-    pub(crate) fn insert_many<'b, I>(
+    pub(crate) fn insert_many<I>(
         &'a mut self,
         index: u32,
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
     where
-        I: ExactSizeIterator<Item = &'b Value>,
+        I: ExactSizeIterator<Item = Value>,
     {
         let state_tree_list = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
@@ -584,7 +584,7 @@ impl<'a> ResolvedList<'a> {
             let newvalue = MultiValue::new_from_value_2(NewValueRequest {
                 actor: payload.actor,
                 start_op: op_num,
-                value: &value,
+                value,
                 parent_obj: &state_tree_list.object_id,
                 key: &last_elemid.clone().into(),
                 insert: true,
