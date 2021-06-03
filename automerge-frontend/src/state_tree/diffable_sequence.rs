@@ -103,6 +103,38 @@ impl DiffableValue for MultiValue {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+struct SequenceElement<T>
+where
+    T: DiffableValue,
+    T: Clone,
+    T: PartialEq,
+{
+    opid: OpId,
+    value: SequenceValue<T>,
+}
+
+impl<T> SequenceElement<T>
+where
+    T: Clone,
+    T: DiffableValue,
+    T: PartialEq,
+{
+    fn original(value: T) -> Self {
+        Self {
+            opid: value.default_opid(),
+            value: SequenceValue::Original(value),
+        }
+    }
+
+    fn new(value: T) -> Self {
+        Self {
+            opid: value.default_opid(),
+            value: SequenceValue::New(value),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct DiffableSequence<T>
 where
     T: DiffableValue,
@@ -110,7 +142,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<(OpId, SequenceElement<T>)>>,
+    underlying: Box<im_rc::Vector<SequenceElement<T>>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -130,11 +162,7 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(
-                i.into_iter()
-                    .map(|i| (i.default_opid(), SequenceElement::Original(i)))
-                    .collect(),
-            ),
+            underlying: Box::new(i.into_iter().map(SequenceElement::original).collect()),
         }
     }
 
@@ -150,14 +178,12 @@ where
                     let index = *index as usize;
                     let count = *count as usize;
                     if index >= size {
-                        panic!("invalid index 1");
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
                             index,
                         });
                     }
                     if index + count > size {
-                        panic!("invalid index 2");
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
                             index: size,
@@ -173,12 +199,6 @@ where
                 } => {
                     T::check_construct(op_id, value)?;
                     if *index as usize > size {
-                        panic!(
-                            "invalid index 3 {} {} {}",
-                            index,
-                            size,
-                            self.underlying.len()
-                        );
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
                             index: *index as usize,
@@ -193,7 +213,6 @@ where
                 } => {
                     let index = *index as usize;
                     if index > size {
-                        panic!("invalid index 4");
                         return Err(InvalidPatch::InvalidIndex {
                             index,
                             object_id: object_id.clone(),
@@ -212,7 +231,6 @@ where
                 } => {
                     // TODO: handle updates after things like inserts shifting them
                     if *index as usize >= size {
-                        panic!("invalid index 5");
                         return Err(InvalidPatch::InvalidIndex {
                             index: *index as usize,
                             object_id: object_id.clone(),
@@ -276,13 +294,10 @@ where
                 } => {
                     let node = T::construct(op_id, value)?;
                     if (index as usize) == self.underlying.len() {
-                        self.underlying
-                            .push_back((node.default_opid(), SequenceElement::New(node)));
+                        self.underlying.push_back(SequenceElement::new(node));
                     } else {
-                        self.underlying.insert(
-                            index as usize,
-                            (node.default_opid(), SequenceElement::New(node)),
-                        );
+                        self.underlying
+                            .insert(index as usize, SequenceElement::new(node));
                     };
                     changed_indices.insert(index);
                 }
@@ -306,7 +321,7 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()))?;
-                        intermediate.push_back((mv.default_opid(), SequenceElement::New(mv)));
+                        intermediate.push_back(SequenceElement::new(mv));
                     }
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
@@ -320,8 +335,8 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((_id, elem)) = self.underlying.get_mut(index as usize) {
-                        elem.apply_diff(op_id, value)?;
+                    if let Some(v) = self.underlying.get_mut(index as usize) {
+                        v.value.apply_diff(op_id, value)?;
                     } else {
                         return Err(InvalidPatch::InvalidIndex {
                             index: index as usize,
@@ -335,14 +350,14 @@ where
 
         for i in changed_indices {
             if let Some(u) = self.underlying.get_mut(i as usize) {
-                u.1.finish()
+                u.value.finish()
             }
         }
 
         debug_assert!(
             self.underlying
                 .iter()
-                .all(|u| matches!(u.1, SequenceElement::Original(_))),
+                .all(|u| matches!(u.value, SequenceValue::Original(_))),
             "diffable sequence apply_diff_iter didn't call finish on all values"
         );
 
@@ -350,8 +365,8 @@ where
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
-        match self.underlying.remove(index).1 {
-            SequenceElement::Original(t) => t,
+        match self.underlying.remove(index).value {
+            SequenceValue::Original(t) => t,
             _ => unreachable!(),
         }
     }
@@ -362,29 +377,32 @@ where
 
     pub(super) fn update(&mut self, index: usize, value: T) {
         let elem_id = if let Some(existing) = self.underlying.get(index) {
-            existing.0.clone()
+            existing.opid.clone()
         } else {
             value.default_opid()
         };
-        self.underlying
-            .set(index, (elem_id, SequenceElement::Original(value)));
+        self.underlying.set(
+            index,
+            SequenceElement {
+                opid: elem_id,
+                value: SequenceValue::Original(value),
+            },
+        );
     }
 
     pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
-        self.underlying.get(index).map(|(o, t)| (o, t.get()))
+        self.underlying.get(index).map(|e| (&e.opid, e.value.get()))
     }
 
     pub(super) fn get_mut(&mut self, index: usize) -> Option<(&mut OpId, &mut T)> {
         self.underlying
             .get_mut(index)
-            .map(|(o, t)| (o, t.get_mut()))
+            .map(|e| (&mut e.opid, e.value.get_mut()))
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
-        self.underlying.insert(
-            index,
-            (value.default_opid(), SequenceElement::Original(value)),
-        )
+        self.underlying
+            .insert(index, SequenceElement::original(value))
     }
 
     pub(super) fn mutate<F>(&mut self, index: usize, f: F)
@@ -392,18 +410,21 @@ where
         F: FnOnce(&T) -> T,
     {
         if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = (entry.0.clone(), SequenceElement::Original(f(entry.1.get())));
+            *entry = SequenceElement {
+                opid: entry.opid.clone(),
+                value: SequenceValue::Original(f(entry.value.get())),
+            };
         }
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter().map(|i| i.1.get())
+        self.underlying.iter().map(|i| i.value.get())
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum SequenceElement<T>
+enum SequenceValue<T>
 where
     T: DiffableValue,
 {
@@ -412,17 +433,17 @@ where
     Updated { original: T, updates: Vec<T> },
 }
 
-impl<T> SequenceElement<T>
+impl<T> SequenceValue<T>
 where
     T: DiffableValue,
     T: Clone,
 {
     fn finish(&mut self) {
         match self {
-            SequenceElement::Original(_) => { // do nothing, this is the finished state
+            SequenceValue::Original(_) => { // do nothing, this is the finished state
             }
-            SequenceElement::New(v) => *self = SequenceElement::Original(std::mem::take(v)),
-            SequenceElement::Updated { updates, .. } => {
+            SequenceValue::New(v) => *self = SequenceValue::Original(std::mem::take(v)),
+            SequenceValue::Updated { updates, .. } => {
                 let initial_update = updates.remove(0);
                 let t =
                     std::mem::take(updates)
@@ -431,28 +452,28 @@ where
                             acc.add_values_from(elem);
                             acc
                         });
-                *self = SequenceElement::Original(t)
+                *self = SequenceValue::Original(t)
             }
         }
     }
 
     fn get(&self) -> &T {
         match self {
-            SequenceElement::Original(v) => v,
+            SequenceValue::Original(v) => v,
             _ => unreachable!(),
         }
     }
 
     fn get_mut(&mut self) -> &mut T {
         match self {
-            SequenceElement::Original(v) => v,
+            SequenceValue::Original(v) => v,
             _ => unreachable!(),
         }
     }
 
     fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         match self {
-            SequenceElement::Original(v) | SequenceElement::New(v) => {
+            SequenceValue::Original(v) | SequenceValue::New(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
                     existing.check_diff(opid, diff)?;
                 } else {
@@ -460,7 +481,7 @@ where
                 };
                 Ok(())
             }
-            SequenceElement::Updated { original, updates } => {
+            SequenceValue::Updated { original, updates } => {
                 if let Some(update) = updates
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
@@ -482,33 +503,33 @@ where
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
         match self {
-            SequenceElement::Original(v) => {
+            SequenceValue::Original(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
                     T::construct(opid, diff)?
                 };
-                *self = SequenceElement::Updated {
+                *self = SequenceValue::Updated {
                     original: std::mem::take(v),
                     updates: vec![updated],
                 };
                 Ok(())
             }
-            SequenceElement::New(v) => {
+            SequenceValue::New(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
                     T::construct(opid, diff)?
                 };
-                *self = SequenceElement::Updated {
+                *self = SequenceValue::Updated {
                     original: v.clone(),
                     updates: vec![std::mem::take(v), updated],
                 };
                 Ok(())
             }
-            SequenceElement::Updated { original, updates } => {
+            SequenceValue::Updated { original, updates } => {
                 let updated = if let Some(mut update) = updates
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
