@@ -277,11 +277,11 @@ where
                     let node = T::construct(op_id, value)?;
                     if (index as usize) == self.underlying.len() {
                         self.underlying
-                            .push_back((node.default_opid(), SequenceElement::new(node)));
+                            .push_back((node.default_opid(), SequenceElement::New(node)));
                     } else {
                         self.underlying.insert(
                             index as usize,
-                            (node.default_opid(), SequenceElement::new(node)),
+                            (node.default_opid(), SequenceElement::New(node)),
                         );
                     };
                     changed_indices.insert(index);
@@ -421,10 +421,6 @@ where
     T: DiffableValue,
     T: Clone,
 {
-    fn new(value: T) -> SequenceElement<T> {
-        SequenceElement::New(value)
-    }
-
     fn finish(&mut self) {
         match self {
             SequenceElement::Original(_) => { // do nothing, this is the finished state
