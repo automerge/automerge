@@ -27,7 +27,7 @@ pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MultiValue {
     winning_value: (amp::OpId, StateTreeValue),
-    conflicts: im_rc::HashMap<amp::OpId, StateTreeValue>,
+    conflicts: HashMap<amp::OpId, StateTreeValue>,
 }
 
 impl MultiValue {
@@ -45,14 +45,14 @@ impl MultiValue {
         let value = StateTreeValue::new_from_diff(diff)?;
         Ok(MultiValue {
             winning_value: (opid, value),
-            conflicts: im_rc::HashMap::new(),
+            conflicts: HashMap::new(),
         })
     }
 
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
         MultiValue {
             winning_value: (opid, statetree_val),
-            conflicts: im_rc::HashMap::new(),
+            conflicts: HashMap::new(),
         }
     }
 
@@ -134,7 +134,7 @@ impl MultiValue {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
                         let value = StateTreeValue::new_from_diff(subdiff)?;
-                        self.update(&opid, &value)
+                        self.update(&opid, value)
                     }
                     StateTreeValue::Composite(composite) => {
                         composite.apply_diff(subdiff)?;
@@ -142,7 +142,7 @@ impl MultiValue {
                 }
             } else {
                 let value = StateTreeValue::new_from_diff(subdiff)?;
-                self.update(&opid, &value)
+                self.update(&opid, value)
             };
         }
         Ok(())
@@ -164,14 +164,14 @@ impl MultiValue {
         }
     }
 
-    fn update(&mut self, opid: &amp::OpId, value: &StateTreeValue) {
+    fn update(&mut self, opid: &amp::OpId, value: StateTreeValue) {
         if *opid >= self.winning_value.0 {
             self.conflicts
                 .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
             self.winning_value.0 = opid.clone();
-            self.winning_value.1 = value.clone();
+            self.winning_value.1 = value;
         } else {
-            self.conflicts.insert(opid.clone(), value.clone());
+            self.conflicts.insert(opid.clone(), value);
         }
     }
 
@@ -198,15 +198,13 @@ impl MultiValue {
         }
     }
 
-    fn tree_values(&self) -> MultiValueTreeValues {
-        MultiValueTreeValues {
-            current: self.clone(),
-        }
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
+        std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
+            .chain(self.conflicts.iter())
     }
 
     pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
-        self.tree_values()
-            .iter()
+        self.iter()
             .map(|(opid, v)| (opid.clone(), v.realise_value()))
             .collect()
     }
@@ -258,18 +256,18 @@ impl MultiValue {
         if opid == self.winning_value.0 {
             Some(MultiValue {
                 winning_value: self.winning_value.clone(),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         } else {
             self.conflicts.get(&opid).map(|value| MultiValue {
                 winning_value: (opid.clone(), value.clone()),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         }
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiValue) {
-        for (opid, value) in other.tree_values().iter() {
+        for (opid, value) in other.iter() {
             match opid.cmp(&self.winning_value.0) {
                 Ordering::Greater => {
                     let mut temp = (opid.clone(), value.clone());
@@ -282,46 +280,6 @@ impl MultiValue {
                 Ordering::Equal => {}
             }
         }
-    }
-}
-
-#[derive(Clone)]
-struct MultiValueTreeValues {
-    current: MultiValue,
-}
-
-impl MultiValueTreeValues {
-    fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
-        if opid == &self.current.winning_value.0 {
-            Some(&self.current.winning_value.1)
-        } else {
-            self.current.conflicts.get(opid)
-        }
-    }
-
-    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
-        std::iter::once((
-            &(self.current.winning_value).0,
-            &(self.current.winning_value.1),
-        ))
-        .chain(self.current.conflicts.iter())
-    }
-
-    fn update(mut self, key: &amp::OpId, value: &StateTreeValue) -> MultiValueTreeValues {
-        if *key >= self.current.winning_value.0 {
-            self.current
-                .conflicts
-                .insert(self.current.winning_value.0, self.current.winning_value.1);
-            self.current.winning_value.0 = key.clone();
-            self.current.winning_value.1 = value.clone();
-        } else {
-            self.current.conflicts.insert(key.clone(), value.clone());
-        }
-        self
-    }
-
-    fn result(self) -> MultiValue {
-        self.current
     }
 }
 
@@ -353,7 +311,7 @@ impl NewValue {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MultiGrapheme {
     winning_value: (amp::OpId, String),
-    conflicts: Option<im_rc::HashMap<amp::OpId, String>>,
+    conflicts: HashMap<amp::OpId, String>,
 }
 
 impl MultiGrapheme {
@@ -361,7 +319,7 @@ impl MultiGrapheme {
         debug_assert_eq!(s.graphemes(true).count(), 1);
         MultiGrapheme {
             winning_value: (opid, s),
-            conflicts: None,
+            conflicts: HashMap::new(),
         }
     }
 
@@ -418,7 +376,7 @@ impl MultiGrapheme {
         };
         Ok(MultiGrapheme {
             winning_value: (opid, winning_value),
-            conflicts: None,
+            conflicts: HashMap::new(),
         })
     }
 
@@ -497,21 +455,13 @@ impl MultiGrapheme {
     fn update(&mut self, key: &amp::OpId, value: String) {
         if *key == self.winning_value.0 {
             self.winning_value.1 = value;
+        } else if *key > self.winning_value.0 {
+            self.conflicts
+                .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+            self.winning_value.0 = key.clone();
+            self.winning_value.1 = value;
         } else {
-            let conflicts = match self.conflicts.as_mut() {
-                Some(c) => c,
-                None => {
-                    self.conflicts = Some(im_rc::HashMap::new());
-                    self.conflicts.as_mut().unwrap()
-                }
-            };
-            if *key > self.winning_value.0 {
-                conflicts.insert(self.winning_value.0.clone(), self.winning_value.1.clone());
-                self.winning_value.0 = key.clone();
-                self.winning_value.1 = value;
-            } else {
-                conflicts.insert(key.clone(), value);
-            }
+            self.conflicts.insert(key.clone(), value);
         }
     }
 
@@ -523,128 +473,75 @@ impl MultiGrapheme {
         &self.winning_value.0
     }
 
-    fn values(&self) -> MultiGraphemeValues {
-        MultiGraphemeValues {
-            current: self.clone(),
-        }
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &String)> {
+        std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
+            .chain(self.conflicts.iter())
     }
 
     pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
-        self.values()
-            .iter()
+        self.iter()
             .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
             .collect()
     }
 
     pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
-        if let Some(ref conflicts) = self.conflicts {
-            let mut opids = std::iter::once(&self.winning_value.0).chain(conflicts.keys());
-            opids.any(|o| o == opid)
-        } else {
-            self.winning_value.0 == *opid
-        }
+        self.winning_value.0 == *opid || self.conflicts.keys().any(|o| o == opid)
     }
 
     pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiGrapheme> {
         if opid == self.winning_value.0 {
             Some(MultiGrapheme {
                 winning_value: self.winning_value.clone(),
-                conflicts: None,
+                conflicts: HashMap::new(),
             })
         } else {
-            self.conflicts
-                .as_ref()
-                .and_then(|c| c.get(&opid))
-                .map(|value| MultiGrapheme {
-                    winning_value: (opid, value.clone()),
-                    conflicts: None,
-                })
+            self.conflicts.get(&opid).map(|value| MultiGrapheme {
+                winning_value: (opid, value.clone()),
+                conflicts: HashMap::new(),
+            })
         }
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiGrapheme) {
-        let mut new_conflicts = match (&self.conflicts, &other.conflicts) {
-            (Some(sc), Some(oc)) => sc.clone().union(oc.clone()),
-            (Some(sc), None) => sc.clone(),
-            (None, Some(oc)) => oc.clone(),
-            (None, None) => im_rc::HashMap::new(),
-        };
-        if other.winning_value.0 < self.winning_value.0 {
-            new_conflicts.insert(other.winning_value.0, other.winning_value.1);
-            self.conflicts = Some(new_conflicts);
-        } else {
-            for (opid, value) in other.values().iter() {
-                if opid > &self.winning_value.0 {
-                    let mut temp = (opid.clone(), value.to_string());
+        for (opid, value) in other.iter() {
+            match opid.cmp(&self.winning_value.0) {
+                Ordering::Greater => {
+                    let mut temp = (opid.clone(), value.to_owned());
                     std::mem::swap(&mut temp, &mut self.winning_value);
-                    new_conflicts.insert(temp.0, temp.1);
-                } else {
-                    new_conflicts.insert(opid.clone(), value.to_string());
+                    self.conflicts.insert(temp.0, temp.1);
                 }
+                Ordering::Less => {
+                    self.conflicts.insert(opid.clone(), value.to_owned());
+                }
+                Ordering::Equal => {}
             }
-            self.conflicts = Some(new_conflicts)
         }
+        // let mut new_conflicts = match (&self.conflicts, &other.conflicts) {
+        //     (Some(sc), Some(oc)) => sc.clone().union(oc.clone()),
+        //     (Some(sc), None) => sc.clone(),
+        //     (None, Some(oc)) => oc.clone(),
+        //     (None, None) => HashMap::new(),
+        // };
+        // if other.winning_value.0 < self.winning_value.0 {
+        //     new_conflicts.insert(other.winning_value.0, other.winning_value.1);
+        //     self.conflicts = Some(new_conflicts);
+        // } else {
+        //     for (opid, value) in other.values().iter() {
+        //         if opid > &self.winning_value.0 {
+        //             let mut temp = (opid.clone(), value.to_string());
+        //             std::mem::swap(&mut temp, &mut self.winning_value);
+        //             new_conflicts.insert(temp.0, temp.1);
+        //         } else {
+        //             new_conflicts.insert(opid.clone(), value.to_string());
+        //         }
+        //     }
+        //     self.conflicts = Some(new_conflicts)
+        // }
     }
 
     pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
         if path.is_empty() {
             Some(ResolvedPath::new_character(self))
-        } else {
-            None
-        }
-    }
-}
-
-struct MultiGraphemeValues {
-    current: MultiGrapheme,
-}
-
-impl MultiGraphemeValues {
-    fn update(mut self, key: &amp::OpId, value: String) -> MultiGraphemeValues {
-        let mut conflicts = self.current.conflicts.unwrap_or_else(im_rc::HashMap::new);
-        if *key >= self.current.winning_value.0 {
-            conflicts.insert(self.current.winning_value.0, self.current.winning_value.1);
-            self.current.winning_value.0 = key.clone();
-            self.current.winning_value.1 = value;
-        } else {
-            conflicts.insert(key.clone(), value);
-        }
-        self.current.conflicts = Some(conflicts);
-        self
-    }
-
-    fn result(self) -> MultiGrapheme {
-        self.current
-    }
-
-    fn iter(&self) -> MultiGraphemeValuesIter {
-        MultiGraphemeValuesIter {
-            winner: &self.current.winning_value,
-            conflicts_iter: self.current.conflicts.as_ref().map(|c| c.iter()),
-            winner_iterated: false,
-        }
-    }
-}
-
-struct MultiGraphemeValuesIter<'a> {
-    winner: &'a (amp::OpId, String),
-    conflicts_iter: Option<im_rc::hashmap::Iter<'a, amp::OpId, String>>,
-    winner_iterated: bool,
-}
-
-impl<'a> std::iter::Iterator for MultiGraphemeValuesIter<'a> {
-    type Item = (&'a amp::OpId, &'a str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.winner_iterated {
-            self.winner_iterated = true;
-            Some((&self.winner.0, self.winner.1.as_str()))
-        } else if let Some(citer) = self.conflicts_iter.as_mut() {
-            if let Some((o, c)) = citer.next() {
-                Some((o, c.as_str()))
-            } else {
-                None
-            }
         } else {
             None
         }
