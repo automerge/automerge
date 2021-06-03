@@ -322,7 +322,7 @@ impl ScalarValue {
             (DataType::F32, v) => Ok(ScalarValue::F32(v.to_f32().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
-                    expected: "a uint".to_string(),
+                    expected: "an f32".to_string(),
                     unexpected: v.to_string(),
                     datatype,
                 },
@@ -330,7 +330,7 @@ impl ScalarValue {
             (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
-                    expected: "a uint".to_string(),
+                    expected: "an f64".to_string(),
                     unexpected: v.to_string(),
                     datatype,
                 },
