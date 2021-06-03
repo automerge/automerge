@@ -35,8 +35,8 @@ macro_rules! get_backend_mut {
     }};
 }
 
-/// Turn a `*mut Buffers` into a `&mut Buffers`
-macro_rules! get_buffs_mut {
+/// Turn a `*mut Buffer` into a `&mut Buffer`
+macro_rules! get_buff_mut {
     ($buffs:expr) => {{
         let buffs = $buffs.as_mut();
         match buffs {
@@ -46,14 +46,20 @@ macro_rules! get_buffs_mut {
     }};
 }
 
+macro_rules! get_data_vec {
+    ($buff:expr) => {{
+        let data: Vec<u8> = Vec::from_raw_parts($buff.data, $buff.len, $buff.cap);
+        data
+    }};
+}
+
 /// Turn a `*const CBuffers` into a `&CBuffers`
-macro_rules! get_cbuffs {
-    ($backend:expr, $buffs:expr) => {{
-        let buffs = $buffs.as_ref();
-        match buffs {
-            Some(b) => b,
-            None => return $backend.handle_error(CError::NullCBuffers),
-        }
+macro_rules! write_to_buff_epilogue {
+    ($buff:expr, $vec:expr) => {{
+        $buff.cap = $vec.capacity();
+        $buff.len = $vec.len();
+        $buff.data = $vec.as_mut_ptr();
+        let _ = ManuallyDrop::new($vec);
     }};
 }
 
@@ -73,33 +79,14 @@ macro_rules! from_msgpack {
     }};
 }
 
-/// Try to serialize a value to bytes using msgpack
-/// return an error code if failure
-macro_rules! to_msgpack {
-    ($backend:expr,$val:expr) => {{
-        match rmp_serde::to_vec_named($val) {
-            Ok(v) => v,
-            Err(e) => return $backend.handle_error(CError::ToMessagePack(e)),
-        }
-    }};
-}
-
 /// Get hashes from a binary buffer
 macro_rules! get_hashes {
     ($backend:expr, $bin:expr, $hashes:expr) => {{
         let mut hashes: Vec<ChangeHash> = vec![];
         if $hashes > 0 {
-            let slice = std::slice::from_raw_parts($bin, 32 * $hashes);
-            let iter = slice.chunks_exact(32);
-            let rem = iter.remainder().len();
-            if rem > 0 {
-                return $backend.handle_error(CError::InvalidHashes(format!(
-                    "Byte buffer had: {} leftover bytes",
-                    rem
-                )));
-            }
-            for chunk in iter {
-                let hash: ChangeHash = match chunk.try_into() {
+            let bytes: Vec<Vec<u8>> = from_msgpack!($backend, $bin, $hashes);
+            for chunk in bytes {
+                let hash: ChangeHash = match chunk.as_slice().try_into() {
                     Ok(v) => v,
                     Err(e) => return $backend.handle_error(CError::InvalidHashes(e.to_string())),
                 };
@@ -126,33 +113,14 @@ macro_rules! call_automerge {
 /// Get a `Vec<Change>` from a `*const CBuffers`
 /// Using a macro instead of a method so we can return if there is an error
 macro_rules! get_changes {
-    ($backend:expr, $cbuffs:expr) => {{
-        let cbuffs = get_cbuffs!($backend, $cbuffs);
-        let lens = std::slice::from_raw_parts(cbuffs.lens, cbuffs.lens_len);
-        let data = std::slice::from_raw_parts(cbuffs.data, cbuffs.data_len);
+    ($backend:expr, $changes:expr, $len:expr) => {{
+        let raws: Vec<Vec<u8>> = from_msgpack!($backend, $changes, $len);
         let mut changes = vec![];
-        let mut cur_pos = 0;
-        for len in lens {
-            let buff = data[cur_pos..cur_pos + len].to_vec();
-            let change = call_automerge!($backend, Change::from_bytes(buff));
+        for raw in raws {
+            let change = call_automerge!($backend, Change::from_bytes(raw));
             changes.push(change);
-            cur_pos += len;
         }
         changes
-    }};
-}
-
-macro_rules! get_data_vec {
-    ($buffs:expr) => {{
-        let v: Vec<u8> = Vec::from_raw_parts($buffs.data, $buffs.data_len, $buffs.data_cap);
-        v
-    }};
-}
-
-macro_rules! get_buff_lens_vec {
-    ($buffs:expr) => {{
-        let v: Vec<usize> = Vec::from_raw_parts($buffs.lens, $buffs.lens_len, $buffs.lens_cap);
-        v
     }};
 }
 
@@ -181,6 +149,8 @@ pub enum CError {
     FromMessagePack(#[from] rmp_serde::decode::Error),
     #[error(transparent)]
     FromUtf8(#[from] std::string::FromUtf8Error),
+    #[error("No local change")]
+    NoLocalChange,
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
     #[error(transparent)]
@@ -205,7 +175,8 @@ impl CError {
             CError::FromMessagePack(_) => BASE + 6,
             CError::FromUtf8(_) => BASE + 7,
             CError::InvalidActorid(_) => BASE + 8,
-            CError::Automerge(_) => BASE + 9,
+            CError::NoLocalChange => BASE + 9,
+            CError::Automerge(_) => BASE + 10,
         };
         -code
     }
@@ -215,6 +186,7 @@ impl CError {
 pub struct Backend {
     handle: automerge_backend::Backend,
     error: Option<CString>,
+    last_local_change: Option<Vec<u8>>,
 }
 
 /// A sequence of byte buffers that are contiguous in memory
@@ -224,38 +196,14 @@ pub struct Backend {
 /// This is used for returning data to C.
 //  This struct is accidentally an SoA layout, so it should be more performant!
 #[repr(C)]
-pub struct Buffers {
+pub struct Buffer {
     /// A pointer to the bytes
     data: *mut u8,
-    /// The total number of bytes across all buffers
-    // TODO: This might not be needed b/c it can be calculated from `lens`
-    data_len: usize,
+    /// The amount of meaningful bytes
+    len: usize,
     /// The total allocated memory `data` points to
     /// This is needed so Rust can free `data`
-    data_cap: usize,
-    /// The length (in bytes) of each buffer
-    lens: *mut usize,
-    /// The number of buffers
-    lens_len: usize,
-    /// The total allocated memory `buf_lens` points to
-    /// This is needed so Rust can free `buf_lens`
-    lens_cap: usize,
-}
-
-/// Similar to `Buffers`, except this struct
-/// should be allocated / freed by C.
-/// Used to pass an the C-equivalent of `Vec<Vec<u8>>` to Rust
-// We don't need the `*_cap` fields b/c the Rust code
-// doesn't need to free the referenced memory
-#[repr(C)]
-pub struct CBuffers {
-    data: *mut u8,
-    // TODO: This field isn't strictly needed since it can
-    // just be calculated from `lens`. But it seems useful to
-    // include since it will probably be known by the caller anyways?
-    data_len: usize,
-    lens: *mut usize,
-    lens_len: usize,
+    cap: usize,
 }
 
 impl Backend {
@@ -263,6 +211,7 @@ impl Backend {
         Backend {
             handle,
             error: None,
+            last_local_change: None,
         }
     }
 
@@ -279,12 +228,13 @@ impl Backend {
 
     unsafe fn write_msgpack<T: serde::ser::Serialize>(
         &mut self,
-        val: &T,
-        buffers: &mut Buffers,
+        vals: &T,
+        buffers: &mut Buffer,
     ) -> isize {
-        let bytes = to_msgpack!(self, val);
-        write_to_buffs(vec![&bytes], buffers);
-        0
+        match write_msgpack_to_buff(vals, buffers) {
+            Ok(()) => 0,
+            Err(e) => self.handle_error(CError::ToMessagePack(e)),
+        }
     }
 }
 
@@ -324,17 +274,13 @@ pub unsafe extern "C" fn automerge_free(backend: *mut Backend) {
 
 /// Create a `Buffers` struct to store return values
 #[no_mangle]
-pub extern "C" fn automerge_create_buffs() -> Buffers {
+pub extern "C" fn automerge_create_buff() -> Buffer {
     // Don't drop the vectors so their underlying buffers aren't de-allocated
     let mut data = ManuallyDrop::new(Vec::new());
-    let mut lens = ManuallyDrop::new(Vec::new());
-    Buffers {
+    Buffer {
         data: data.as_mut_ptr(),
-        data_len: data.len(),
-        data_cap: data.capacity(),
-        lens: lens.as_mut_ptr(),
-        lens_len: lens.len(),
-        lens_cap: lens.capacity(),
+        len: data.len(),
+        cap: data.capacity(),
     }
 }
 
@@ -342,99 +288,35 @@ pub extern "C" fn automerge_create_buffs() -> Buffers {
 /// Must point to a valid `Buffers` struct
 /// Free the memory a `Buffers` struct points to
 #[no_mangle]
-pub unsafe extern "C" fn automerge_free_buffs(buffs: *mut Buffers) -> isize {
-    let buffs = get_buffs_mut!(buffs);
-    // We construct the vecs & drop them at the end of this function
-    get_data_vec!(buffs);
-    get_buff_lens_vec!(buffs);
+pub unsafe extern "C" fn automerge_free_buff(buffs: *mut Buffer) -> isize {
+    let buff = get_buff_mut!(buffs);
+    // We construct the vec & drop it at the end of this function
+    get_data_vec!(buff);
     0
 }
 
-// util_* functions could be implemented in the parent language,
-// I have just written them in Rust b/c that's what I'm familiar with
-
-/// # Safety
-/// Must be called with a valid buffs pointer
-/// Copy a single buff from a Buffers to a destination.
-/// The destination must be large enough to hold all of dest
-#[no_mangle]
-pub unsafe extern "C" fn util_read_buffs(
-    buffs: *const Buffers,
-    idx: usize,
-    dest: *mut u8,
-) -> usize {
-    let data = std::slice::from_raw_parts((*buffs).data, (*buffs).data_cap);
-    let lens = std::slice::from_raw_parts((*buffs).lens, (*buffs).lens_cap);
-    if idx >= (*buffs).lens_len {
-        // This panic is ok b/c it indicates a truly unrecoverable error
-        panic!("idx: {} out of range: {}", idx, (*buffs).lens_len);
-    }
-    let start: usize = lens.iter().take(idx).sum();
-    let len = lens[idx];
-    let end = start + len;
-    let buff = &data[start..end];
-    ptr::copy_nonoverlapping(buff.as_ptr(), dest, len);
-    len
+unsafe fn write_msgpack_to_buff<T: serde::ser::Serialize>(
+    vals: &T,
+    buff: &mut Buffer,
+) -> Result<(), rmp_serde::encode::Error> {
+    let mut data = get_data_vec!(buff);
+    let mut writer = std::io::Cursor::new(&mut data);
+    rmp_serde::encode::write_named(&mut writer, &vals)?;
+    write_to_buff_epilogue!(buff, data);
+    Ok(())
 }
 
-/// # Safety
-/// Must be called with a valid buffs pointer
-/// Copy a single buff from a Buffers to a destination & null terminate it
-/// The destination must be large enough to hold all of dest
-#[no_mangle]
-pub unsafe extern "C" fn util_read_buffs_str(buffs: *mut Buffers, idx: usize, dest: *mut u8) {
-    let len = util_read_buffs(buffs, idx, dest);
-    // null terminate
-    *dest.add(len) = 0;
+unsafe fn write_bin_to_buff(bin: &[u8], buff: &mut Buffer) {
+    let mut data = get_data_vec!(buff);
+    data.set_len(0);
+    data.extend(bin);
+    write_to_buff_epilogue!(buff, data);
 }
 
-/// # Safety
-/// This function should not fail insofar the fields of `buffs` are valid
-/// Write the contents of a `Vec<&[u8]>` to the `data` field of a `Buffers` struct
-/// Write the lengths of each `&[u8]` to the `lens` field of a `Buffers` struct
-/// Re-allocate the the buffers `data` and `lens` point to if they aren't large enough
-/// and update the `*_cap` fields as appropriate. Always update the `*_len` fields.
-unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
-    let total_buffs: usize = bytes.len();
-    let mut buf_lens: ManuallyDrop<Vec<usize>> =
-        ManuallyDrop::new(if total_buffs > buffs.lens_cap {
-            // Drop the old `Vec` so its underlying memory is freed
-            get_buff_lens_vec!(buffs);
-            // Create a new vec that can store `total_buffs` worth of usizes
-            let mut v = Vec::with_capacity(total_buffs);
-            buffs.lens_cap = total_buffs;
-            buffs.lens = v.as_mut_ptr();
-            v
-        } else {
-            get_buff_lens_vec!(buffs)
-        });
-    buf_lens.set_len(total_buffs);
-
-    let total_bytes: usize = bytes.iter().map(|b| b.len()).sum();
-    let mut data: ManuallyDrop<Vec<u8>> = ManuallyDrop::new(if total_bytes > buffs.data_cap {
-        // Drop the old `Vec` so its underlying memory is freed
-        get_data_vec!(buffs);
-        // Create a new vec that can store `total_bytes` worth of bytes
-        let mut v = Vec::with_capacity(total_bytes);
-        buffs.data_cap = total_bytes;
-        buffs.data = v.as_mut_ptr();
-        v
-    } else {
-        get_data_vec!(buffs)
-    });
-    // Prevents out of bounds errors when writing to `data`
-    data.set_len(total_bytes);
-
-    let mut start = 0;
-    // Write `bytes` to `data` & update `buf_lens`
-    for (idx, buff) in bytes.iter().enumerate() {
-        data[start..start + buff.len()].copy_from_slice(buff);
-        buf_lens[idx] = buff.len();
-        start += buff.len();
-    }
-
-    buffs.data_len = total_bytes;
-    buffs.lens_len = total_buffs;
+unsafe fn clear_buffs(buff: &mut Buffer) {
+    let mut data = get_data_vec!(buff);
+    data.set_len(0);
+    write_to_buff_epilogue!(buff, data);
 }
 
 /// # Safety
@@ -443,16 +325,31 @@ unsafe fn write_to_buffs(bytes: Vec<&[u8]>, buffs: &mut Buffers) {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_local_change(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     request: *const u8,
     len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let request: UncompressedChange = from_msgpack!(backend, request, len);
     let (patch, change) = call_automerge!(backend, backend.apply_local_change(request));
-    let patch_bytes = to_msgpack!(backend, &patch);
-    write_to_buffs(vec![change.raw_bytes(), &patch_bytes], buffs);
+    backend.last_local_change = Some(change.raw_bytes().to_vec());
+    backend.write_msgpack(&patch, buffs)
+}
+
+/// # Safety
+#[no_mangle]
+pub unsafe extern "C" fn automerge_get_last_local_change(
+    backend: *mut Backend,
+    buffs: *mut Buffer,
+) -> isize {
+    let backend = get_backend_mut!(backend);
+    let buff = get_buff_mut!(buffs);
+    let change = match &backend.last_local_change {
+        Some(c) => c,
+        None => return backend.handle_error(CError::NoLocalChange),
+    };
+    write_bin_to_buff(change, buff);
     0
 }
 
@@ -462,12 +359,13 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_apply_changes(
     backend: *mut Backend,
-    buffs: *mut Buffers,
-    cbuffs: *const CBuffers,
+    buffs: *mut Buffer,
+    changes: *const u8,
+    changes_len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
-    let changes = get_changes!(backend, cbuffs);
+    let buffs = get_buff_mut!(buffs);
+    let changes = get_changes!(backend, changes, changes_len);
     let patch = call_automerge!(backend, backend.apply_changes(changes));
     backend.write_msgpack(&patch, buffs)
 }
@@ -476,11 +374,11 @@ pub unsafe extern "C" fn automerge_apply_changes(
 /// This should be called with a valid pointer to a `Backend`
 /// and a valid pointer to a `Buffers``
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend, buffs: *mut Buffers) -> isize {
+pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend, buffs: *mut Buffer) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buff = get_buff_mut!(buffs);
     let patch = call_automerge!(backend, backend.get_patch());
-    backend.write_msgpack(&patch, buffs)
+    backend.write_msgpack(&patch, buff)
 }
 
 /// # Safety
@@ -489,10 +387,11 @@ pub unsafe extern "C" fn automerge_get_patch(backend: *mut Backend, buffs: *mut 
 #[no_mangle]
 pub unsafe extern "C" fn automerge_load_changes(
     backend: *mut Backend,
-    cbuffs: *const CBuffers,
+    changes: *const u8,
+    changes_len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let changes = get_changes!(backend, cbuffs);
+    let changes = get_changes!(backend, changes, changes_len);
     call_automerge!(backend, backend.load_changes(changes));
     0
 }
@@ -500,11 +399,11 @@ pub unsafe extern "C" fn automerge_load_changes(
 /// # Safety
 /// This should be called with a valid pointer to a `Backend`
 #[no_mangle]
-pub unsafe extern "C" fn automerge_save(backend: *mut Backend, buffs: *mut Buffers) -> isize {
+pub unsafe extern "C" fn automerge_save(backend: *mut Backend, buffs: *mut Buffer) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buff = get_buff_mut!(buffs);
     let bin = call_automerge!(backend, backend.save());
-    write_to_buffs(vec![&bin], buffs);
+    write_bin_to_buff(&bin, buff);
     0
 }
 
@@ -546,20 +445,22 @@ unsafe fn from_cstr<'a>(s: *const c_char) -> Cow<'a, str> {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_changes_for_actor(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     actor: *const c_char,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let actor = from_cstr(actor);
     let actor_id: ActorId = match actor.as_ref().try_into() {
         Ok(id) => id,
         Err(e) => return backend.handle_error(CError::InvalidActorid(e)),
     };
     let changes = call_automerge!(backend, backend.get_changes_for_actor_id(&actor_id));
-    let bytes: Vec<_> = changes.into_iter().map(|c| c.raw_bytes()).collect();
-    write_to_buffs(bytes, buffs);
-    0
+    let bytes: Vec<_> = changes
+        .into_iter()
+        .map(|c| c.raw_bytes().to_vec())
+        .collect();
+    backend.write_msgpack(&bytes, buffs)
 }
 
 /// # Safety
@@ -567,12 +468,12 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_decode_change(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     change: *const u8,
     len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let bytes = std::slice::from_raw_parts(change, len);
     let change = call_automerge!(backend, Change::from_bytes(bytes.to_vec()));
     backend.write_msgpack(&change.decode(), buffs);
@@ -584,29 +485,28 @@ pub unsafe extern "C" fn automerge_decode_change(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_encode_change(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     change: *const u8,
     len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buff = get_buff_mut!(buffs);
     let uncomp: UncompressedChange = from_msgpack!(backend, change, len);
     // This should never panic?
     let change: Change = uncomp.try_into().unwrap();
-    write_to_buffs(vec![change.raw_bytes()], buffs);
+    write_bin_to_buff(change.raw_bytes(), buff);
     0
 }
 
 /// # Safety
 /// This must be called with a valid backend pointer
 #[no_mangle]
-pub unsafe extern "C" fn automerge_get_heads(backend: *mut Backend, buffs: *mut Buffers) -> isize {
+pub unsafe extern "C" fn automerge_get_heads(backend: *mut Backend, buffs: *mut Buffer) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let hashes = backend.get_heads();
     let bytes: Vec<_> = hashes.iter().map(|h| h.0.as_ref()).collect();
-    write_to_buffs(bytes, buffs);
-    0
+    backend.write_msgpack(&bytes, buffs)
 }
 
 /// # Safety
@@ -615,17 +515,19 @@ pub unsafe extern "C" fn automerge_get_heads(backend: *mut Backend, buffs: *mut 
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_changes(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     bin: *const u8,
     hashes: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let hashes = get_hashes!(backend, bin, hashes);
     let changes = backend.get_changes(&hashes);
-    let bytes: Vec<_> = changes.into_iter().map(|c| c.raw_bytes()).collect();
-    write_to_buffs(bytes, buffs);
-    0
+    let bytes: Vec<_> = changes
+        .into_iter()
+        .map(|c| c.raw_bytes().to_vec())
+        .collect();
+    backend.write_msgpack(&bytes, buffs)
 }
 
 /// # Safety
@@ -634,16 +536,15 @@ pub unsafe extern "C" fn automerge_get_changes(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_get_missing_deps(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     bin: *const u8,
     len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let heads = get_hashes!(backend, bin, len);
     let missing = backend.get_missing_deps(&heads);
-    backend.write_msgpack(&missing, buffs);
-    0
+    backend.write_msgpack(&missing, buffs)
 }
 
 /// # Safety
@@ -677,27 +578,26 @@ impl From<SyncState> for *mut SyncState {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_receive_sync_message(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     sync_state: &mut SyncState,
     encoded_msg_ptr: *const u8,
     encoded_msg_len: usize,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let slice = std::slice::from_raw_parts(encoded_msg_ptr, encoded_msg_len);
     let msg = call_automerge!(backend, automerge_backend::SyncMessage::decode(slice));
     let patch = call_automerge!(
         backend,
         backend.receive_sync_message(&mut sync_state.handle, msg)
     );
-
     if let Some(patch) = patch {
-        backend.write_msgpack(&patch, buffs);
+        backend.write_msgpack(&patch, buffs)
     } else {
         // There is nothing to return, clear the buffs
-        write_to_buffs(vec![], buffs);
+        clear_buffs(buffs);
+        0
     }
-    0
 }
 
 /// # Safety
@@ -708,17 +608,17 @@ pub unsafe extern "C" fn automerge_receive_sync_message(
 #[no_mangle]
 pub unsafe extern "C" fn automerge_generate_sync_message(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     sync_state: &mut SyncState,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buff = get_buff_mut!(buffs);
     let msg = backend.generate_sync_message(&mut sync_state.handle);
     if let Some(msg) = msg {
         let bytes = call_automerge!(backend, msg.encode());
-        write_to_buffs(vec![&bytes], buffs);
+        write_bin_to_buff(&bytes, buff);
     } else {
-        write_to_buffs(vec![], buffs);
+        clear_buffs(buff);
     }
     0
 }
@@ -744,13 +644,13 @@ pub unsafe extern "C" fn automerge_sync_state_free(sync_state: *mut SyncState) {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_encode_sync_state(
     backend: *mut Backend,
-    buffs: *mut Buffers,
+    buffs: *mut Buffer,
     sync_state: &mut SyncState,
 ) -> isize {
     let backend = get_backend_mut!(backend);
-    let buffs = get_buffs_mut!(buffs);
+    let buffs = get_buff_mut!(buffs);
     let encoded = call_automerge!(backend, sync_state.handle.encode());
-    write_to_buffs(vec![&encoded], buffs);
+    write_bin_to_buff(&encoded, buffs);
     0
 }
 
@@ -793,6 +693,30 @@ pub unsafe extern "C" fn debug_json_change_to_msgpack(
 }
 
 /// # Safety
+/// `prefix` & `buff` must be valid pointers
+#[no_mangle]
+pub unsafe extern "C" fn debug_print_msgpack_patch(
+    prefix: *const c_char,
+    buff: *const u8,
+    len: usize,
+) {
+    if prefix.is_null() {
+        panic!("null ptr: prefix");
+    }
+    if buff.is_null() {
+        panic!("null ptr: buff");
+    }
+    if len == 0 {
+        panic!("invalid len: 0");
+    }
+    let prefix = from_cstr(prefix);
+    let slice = std::slice::from_raw_parts(buff, len);
+    let patch: Patch = rmp_serde::from_read_ref(slice).unwrap();
+    let as_json = serde_json::to_string(&patch).unwrap();
+    println!("{}: {}", prefix, as_json);
+}
+
+/// # Safety
 /// This must be called with a valid pointer to len bytes
 #[no_mangle]
 pub unsafe extern "C" fn debug_msgpack_change_to_json(
@@ -803,23 +727,6 @@ pub unsafe extern "C" fn debug_msgpack_change_to_json(
     let slice = std::slice::from_raw_parts(msgpack, len);
     let uncomp: UncompressedChange = rmp_serde::from_slice(slice).unwrap();
     let json = serde_json::to_vec(&uncomp).unwrap();
-    ptr::copy_nonoverlapping(json.as_ptr(), out_json, json.len());
-    // null-terminate
-    *out_json.add(json.len()) = 0;
-    json.len() as isize
-}
-
-/// # Safety
-/// This must be called with a valid pointer to len bytes
-#[no_mangle]
-pub unsafe extern "C" fn debug_msgpack_patch_to_json(
-    msgpack: *const u8,
-    len: usize,
-    out_json: *mut u8,
-) -> isize {
-    let slice = std::slice::from_raw_parts(msgpack, len);
-    let patch: Patch = rmp_serde::from_slice(slice).unwrap();
-    let json = serde_json::to_vec(&patch).unwrap();
     ptr::copy_nonoverlapping(json.as_ptr(), out_json, json.len());
     // null-terminate
     *out_json.add(json.len()) = 0;
