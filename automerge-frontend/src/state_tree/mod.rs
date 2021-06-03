@@ -161,6 +161,12 @@ enum StateTreeValue {
     Composite(StateTreeComposite),
 }
 
+impl Default for StateTreeValue {
+    fn default() -> Self {
+        Self::Leaf(Primitive::Null)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum StateTreeComposite {
     Map(StateTreeMap),

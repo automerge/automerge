@@ -6,7 +6,7 @@ use automerge_protocol as amp;
 use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
-pub(super) trait DiffableValue: Sized {
+pub(super) trait DiffableValue: Sized + Default {
     fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
 
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Result<Self, InvalidPatch>;
@@ -411,7 +411,6 @@ where
     New(T),
     Updated {
         original: T,
-        initial_update: T,
         remaining_updates: Vec<T>,
     },
 }
@@ -425,14 +424,13 @@ where
         match self {
             SequenceElement::Original(_) => { // do nothing, this is the finished state
             }
-            SequenceElement::New(v) => *self = SequenceElement::Original(v.clone()),
+            SequenceElement::New(v) => *self = SequenceElement::Original(std::mem::take(v)),
             SequenceElement::Updated {
-                initial_update,
-                remaining_updates,
-                ..
+                remaining_updates, ..
             } => {
+                let initial_update = remaining_updates.remove(0);
                 let t = std::mem::take(remaining_updates).into_iter().fold(
-                    initial_update.clone(),
+                    initial_update,
                     |mut acc, elem| {
                         acc.add_values_from(elem);
                         acc
@@ -459,15 +457,7 @@ where
 
     fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         match self {
-            SequenceElement::Original(v) => {
-                if let Some(existing) = v.only_for_opid(opid.clone()) {
-                    existing.check_diff(opid, diff)?;
-                } else {
-                    T::check_construct(opid, diff)?
-                };
-                Ok(())
-            }
-            SequenceElement::New(v) => {
+            SequenceElement::Original(v) | SequenceElement::New(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
                     existing.check_diff(opid, diff)?;
                 } else {
@@ -477,15 +467,17 @@ where
             }
             SequenceElement::Updated {
                 original,
-                initial_update,
                 remaining_updates,
             } => {
                 if let Some(update) = remaining_updates
-                    .iter()
-                    .find_map(|v| v.only_for_opid(opid.clone()))
+                    .get(1..)
+                    .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
                     update.check_diff(opid, diff)?;
-                } else if let Some(initial) = initial_update.only_for_opid(opid.clone()) {
+                } else if let Some(initial) = remaining_updates
+                    .get(0)
+                    .and_then(|u| u.only_for_opid(opid.clone()))
+                {
                     initial.check_diff(opid, diff)?;
                 } else if let Some(original) = original.only_for_opid(opid.clone()) {
                     original.check_diff(opid, diff)?;
@@ -507,9 +499,8 @@ where
                     T::construct(opid, diff)?
                 };
                 *self = SequenceElement::Updated {
-                    original: v.clone(),
-                    initial_update: updated,
-                    remaining_updates: Vec::new(),
+                    original: std::mem::take(v),
+                    remaining_updates: vec![updated],
                 };
                 Ok(())
             }
@@ -522,23 +513,24 @@ where
                 };
                 *self = SequenceElement::Updated {
                     original: v.clone(),
-                    initial_update: v.clone(),
-                    remaining_updates: vec![updated],
+                    remaining_updates: vec![std::mem::take(v), updated],
                 };
                 Ok(())
             }
             SequenceElement::Updated {
                 original,
-                initial_update,
                 remaining_updates,
             } => {
                 let updated = if let Some(mut update) = remaining_updates
-                    .iter()
-                    .find_map(|v| v.only_for_opid(opid.clone()))
+                    .get(1..)
+                    .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
                     update.apply_diff(opid, diff)?;
                     update
-                } else if let Some(mut initial) = initial_update.only_for_opid(opid.clone()) {
+                } else if let Some(mut initial) = remaining_updates
+                    .get(0)
+                    .and_then(|u| u.only_for_opid(opid.clone()))
+                {
                     initial.apply_diff(opid, diff)?;
                     initial
                 } else if let Some(mut original) = original.only_for_opid(opid.clone()) {

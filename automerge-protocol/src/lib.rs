@@ -5,7 +5,7 @@ use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(Vec<u8>);
 
@@ -94,7 +94,7 @@ pub enum SequenceType {
     Text,
 }
 
-#[derive(Eq, PartialEq, Hash, Clone)]
+#[derive(Eq, PartialEq, Hash, Clone, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OpId(pub u64, pub ActorId);
 
