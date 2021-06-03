@@ -330,7 +330,6 @@ pub(super) struct NewValue {
     value: StateTreeValue,
     opid: amp::OpId,
     ops: Vec<amp::Op>,
-    new_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     new_cursors: Cursors,
     max_op: u64,
 }
@@ -370,7 +369,7 @@ impl MultiGrapheme {
         opid: &amp::OpId,
         diff: &amp::Diff,
     ) -> Result<(), error::InvalidPatch> {
-        let winning_value = match diff {
+        match diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
@@ -696,7 +695,6 @@ where
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite> = im_rc::HashMap::new();
         let mut result_props: im_rc::HashMap<String, MultiValue> = im_rc::HashMap::new();
         for (prop, value) in props.iter() {
             let context = NewValueContext {
@@ -710,7 +708,6 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
-            objects = next_value.new_objects.clone().union(objects.clone());
             ops.extend_from_slice(&next_value.ops[..]);
             result_props = result_props.update(prop.clone(), next_value.multivalue())
         }
@@ -724,14 +721,12 @@ where
                 props: result_props,
             }),
         };
-        let value = StateTreeValue::Composite(map.clone());
-        objects = objects.update(make_op_id.clone().into(), map);
+        let value = StateTreeValue::Composite(map);
         NewValue {
             value,
             opid: make_op_id,
             max_op: current_max_op,
             new_cursors: cursors,
-            new_objects: objects,
             ops,
         }
     }
@@ -748,7 +743,6 @@ where
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut objects = im_rc::HashMap::new();
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
         let mut last_elemid = amp::ElementId::Head;
         for value in values.iter() {
@@ -765,7 +759,6 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             result_elems.push(next_value.multivalue());
-            objects = next_value.new_objects.union(objects.clone());
             cursors = next_value.new_cursors.union(cursors);
             ops.extend(next_value.ops);
         }
@@ -773,14 +766,12 @@ where
             object_id: make_list_opid.clone().into(),
             elements: DiffableSequence::new_from(result_elems),
         });
-        objects = objects.update(make_list_opid.clone().into(), list.clone());
         let value = StateTreeValue::Composite(list);
         NewValue {
             value,
             opid: make_list_opid,
             max_op: current_max_op,
             new_cursors: cursors,
-            new_objects: objects,
             ops,
         }
     }
@@ -819,12 +810,11 @@ where
             object_id: make_text_opid.clone().into(),
             graphemes: seq,
         });
-        let value = StateTreeValue::Composite(text.clone());
+        let value = StateTreeValue::Composite(text);
         NewValue {
             value,
-            opid: make_text_opid.clone(),
+            opid: make_text_opid,
             ops,
-            new_objects: im_rc::hashmap! {make_text_opid.into() => text},
             new_cursors: Cursors::new(),
             max_op: current_max_op,
         }
@@ -867,7 +857,6 @@ where
             }],
             max_op: self.start_op,
             new_cursors,
-            new_objects: im_rc::HashMap::new(),
         }
     }
 }
