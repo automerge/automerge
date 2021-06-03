@@ -38,15 +38,12 @@ impl MultiValue {
         StateTreeValue::check_new_from_diff(diff)
     }
 
-    pub fn new_from_diff(
-        opid: amp::OpId,
-        diff: amp::Diff,
-    ) -> Result<MultiValue, error::InvalidPatch> {
-        let value = StateTreeValue::new_from_diff(diff)?;
-        Ok(MultiValue {
+    pub fn new_from_diff(opid: amp::OpId, diff: amp::Diff) -> MultiValue {
+        let value = StateTreeValue::new_from_diff(diff);
+        MultiValue {
             winning_value: (opid, value),
             conflicts: HashMap::new(),
-        })
+        }
     }
 
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
@@ -117,15 +114,11 @@ impl MultiValue {
         Ok(())
     }
 
-    pub(super) fn apply_diff(
-        &mut self,
-        opid: amp::OpId,
-        diff: amp::Diff,
-    ) -> Result<(), error::InvalidPatch> {
+    pub(super) fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), error::InvalidPatch>
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
@@ -133,19 +126,18 @@ impl MultiValue {
             if let Some(existing_value) = self.get_mut(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
-                        let value = StateTreeValue::new_from_diff(subdiff)?;
+                        let value = StateTreeValue::new_from_diff(subdiff);
                         self.update(&opid, value)
                     }
                     StateTreeValue::Composite(composite) => {
-                        composite.apply_diff(subdiff)?;
+                        composite.apply_diff(subdiff);
                     }
                 }
             } else {
-                let value = StateTreeValue::new_from_diff(subdiff)?;
+                let value = StateTreeValue::new_from_diff(subdiff);
                 self.update(&opid, value)
             };
         }
-        Ok(())
     }
 
     fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
@@ -350,34 +342,15 @@ impl MultiGrapheme {
         Ok(())
     }
 
-    pub(super) fn new_from_diff(
-        opid: amp::OpId,
-        diff: amp::Diff,
-    ) -> Result<MultiGrapheme, error::InvalidPatch> {
+    pub(super) fn new_from_diff(opid: amp::OpId, diff: amp::Diff) -> MultiGrapheme {
         let winning_value = match diff {
-            amp::Diff::Value(amp::ScalarValue::Str(s)) => {
-                if s.graphemes(true).count() != 1 {
-                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        // object_id: diff.parent_object_id.clone(),
-                        object_id: amp::ObjectId::Root,
-                        diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
-                    });
-                } else {
-                    s
-                }
-            }
-            _ => {
-                return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                    // object_id: diff.parent_object_id.clone(),
-                    object_id: amp::ObjectId::Root,
-                    diff: diff.clone(),
-                });
-            }
+            amp::Diff::Value(amp::ScalarValue::Str(s)) => s,
+            _ => unreachable!("insert non text in text object"),
         };
-        Ok(MultiGrapheme {
+        MultiGrapheme {
             winning_value: (opid, winning_value),
             conflicts: HashMap::new(),
-        })
+        }
     }
 
     pub(super) fn check_diff(
@@ -415,41 +388,22 @@ impl MultiGrapheme {
         Ok(())
     }
 
-    pub(super) fn apply_diff(
-        &mut self,
-        opid: amp::OpId,
-        diff: amp::Diff,
-    ) -> Result<(), error::InvalidPatch> {
+    pub(super) fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I) -> Result<(), error::InvalidPatch>
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
         for (opid, subdiff) in diff {
             match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
-                    if s.graphemes(true).count() != 1 {
-                        return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                            // object_id: subdiff.parent_object_id.clone(),
-                            object_id: amp::ObjectId::Root,
-                            diff: amp::Diff::Value(amp::ScalarValue::Str(s)),
-                        });
-                    } else {
-                        self.update(&opid, s);
-                    }
+                    self.update(&opid, s);
                 }
-                _ => {
-                    return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        // object_id: subdiff.parent_object_id.clone(),
-                        object_id: amp::ObjectId::Root,
-                        diff: subdiff.clone(),
-                    });
-                }
+                _ => unreachable!("insert non text in text object"),
             }
         }
-        Ok(())
     }
 
     fn update(&mut self, key: &amp::OpId, value: String) {
