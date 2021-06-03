@@ -23,14 +23,14 @@ pub(crate) struct LocalOperationResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
-    root_props: im_rc::HashMap<String, MultiValue>,
+    root_props: HashMap<String, MultiValue>,
     cursors: Cursors,
 }
 
 impl Default for StateTree {
     fn default() -> Self {
         Self {
-            root_props: im_rc::HashMap::new(),
+            root_props: HashMap::new(),
             cursors: Cursors::new(),
         }
     }
@@ -39,7 +39,7 @@ impl Default for StateTree {
 impl StateTree {
     pub fn new() -> StateTree {
         StateTree {
-            root_props: im_rc::HashMap::new(),
+            root_props: HashMap::new(),
             cursors: Cursors::new(),
         }
     }
@@ -433,11 +433,11 @@ impl StateTreeValue {
                 let map = match obj_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
-                        props: im_rc::HashMap::new(),
+                        props: HashMap::new(),
                     }),
                     amp::MapType::Table => StateTreeComposite::Table(StateTreeTable {
                         object_id: object_id.clone(),
-                        props: im_rc::HashMap::new(),
+                        props: HashMap::new(),
                     }),
                 };
                 map.check_diff(diff)?;
@@ -494,11 +494,11 @@ impl StateTreeValue {
                 let mut map = match obj_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
-                        props: im_rc::HashMap::new(),
+                        props: HashMap::new(),
                     }),
                     amp::MapType::Table => StateTreeComposite::Table(StateTreeTable {
                         object_id: object_id.clone(),
-                        props: im_rc::HashMap::new(),
+                        props: HashMap::new(),
                     }),
                 };
                 map.apply_diff(amp::Diff::Map(amp::MapDiff {
@@ -546,7 +546,7 @@ impl StateTreeValue {
 #[derive(Debug, Clone, PartialEq)]
 struct StateTreeMap {
     object_id: amp::ObjectId,
-    props: im_rc::HashMap<String, MultiValue>,
+    props: HashMap<String, MultiValue>,
 }
 
 impl StateTreeMap {
@@ -635,7 +635,7 @@ impl StateTreeMap {
 #[derive(Debug, Clone, PartialEq)]
 struct StateTreeTable {
     object_id: amp::ObjectId,
-    props: im_rc::HashMap<String, MultiValue>,
+    props: HashMap<String, MultiValue>,
 }
 
 impl StateTreeTable {

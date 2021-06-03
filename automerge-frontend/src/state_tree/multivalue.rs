@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, iter::Iterator};
+use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
@@ -695,7 +695,7 @@ where
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut result_props: im_rc::HashMap<String, MultiValue> = im_rc::HashMap::new();
+        let mut result_props: HashMap<String, MultiValue> = HashMap::new();
         for (prop, value) in props.iter() {
             let context = NewValueContext {
                 actor: self.actor,
@@ -709,7 +709,7 @@ where
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
             ops.extend_from_slice(&next_value.ops[..]);
-            result_props = result_props.update(prop.clone(), next_value.multivalue())
+            result_props.insert(prop.clone(), next_value.multivalue());
         }
         let map = match map_type {
             amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
