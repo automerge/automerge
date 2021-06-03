@@ -409,10 +409,7 @@ where
 {
     Original(T),
     New(T),
-    Updated {
-        original: T,
-        remaining_updates: Vec<T>,
-    },
+    Updated { original: T, updates: Vec<T> },
 }
 
 impl<T> SequenceElement<T>
@@ -425,17 +422,15 @@ where
             SequenceElement::Original(_) => { // do nothing, this is the finished state
             }
             SequenceElement::New(v) => *self = SequenceElement::Original(std::mem::take(v)),
-            SequenceElement::Updated {
-                remaining_updates, ..
-            } => {
-                let initial_update = remaining_updates.remove(0);
-                let t = std::mem::take(remaining_updates).into_iter().fold(
-                    initial_update,
-                    |mut acc, elem| {
-                        acc.add_values_from(elem);
-                        acc
-                    },
-                );
+            SequenceElement::Updated { updates, .. } => {
+                let initial_update = updates.remove(0);
+                let t =
+                    std::mem::take(updates)
+                        .into_iter()
+                        .fold(initial_update, |mut acc, elem| {
+                            acc.add_values_from(elem);
+                            acc
+                        });
                 *self = SequenceElement::Original(t)
             }
         }
@@ -465,18 +460,14 @@ where
                 };
                 Ok(())
             }
-            SequenceElement::Updated {
-                original,
-                remaining_updates,
-            } => {
-                if let Some(update) = remaining_updates
+            SequenceElement::Updated { original, updates } => {
+                if let Some(update) = updates
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
                     update.check_diff(opid, diff)?;
-                } else if let Some(initial) = remaining_updates
-                    .get(0)
-                    .and_then(|u| u.only_for_opid(opid.clone()))
+                } else if let Some(initial) =
+                    updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
                 {
                     initial.check_diff(opid, diff)?;
                 } else if let Some(original) = original.only_for_opid(opid.clone()) {
@@ -500,7 +491,7 @@ where
                 };
                 *self = SequenceElement::Updated {
                     original: std::mem::take(v),
-                    remaining_updates: vec![updated],
+                    updates: vec![updated],
                 };
                 Ok(())
             }
@@ -513,23 +504,19 @@ where
                 };
                 *self = SequenceElement::Updated {
                     original: v.clone(),
-                    remaining_updates: vec![std::mem::take(v), updated],
+                    updates: vec![std::mem::take(v), updated],
                 };
                 Ok(())
             }
-            SequenceElement::Updated {
-                original,
-                remaining_updates,
-            } => {
-                let updated = if let Some(mut update) = remaining_updates
+            SequenceElement::Updated { original, updates } => {
+                let updated = if let Some(mut update) = updates
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
                     update.apply_diff(opid, diff)?;
                     update
-                } else if let Some(mut initial) = remaining_updates
-                    .get(0)
-                    .and_then(|u| u.only_for_opid(opid.clone()))
+                } else if let Some(mut initial) =
+                    updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
                 {
                     initial.apply_diff(opid, diff)?;
                     initial
@@ -539,7 +526,7 @@ where
                 } else {
                     T::construct(opid, diff)?
                 };
-                remaining_updates.push(updated);
+                updates.push(updated);
                 Ok(())
             }
         }
