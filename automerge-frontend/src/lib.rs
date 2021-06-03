@@ -134,8 +134,13 @@ impl FrontendState {
                 reconciled_root_state.check_diff(&patch.diffs)?;
 
                 // TODO: change apply_diff to not return a result
-                reconciled_root_state.apply_diff(patch.diffs).unwrap();
-                *optimistically_updated_root_state = reconciled_root_state.clone();
+                reconciled_root_state
+                    .apply_diff(patch.diffs.clone())
+                    .unwrap();
+                // quicker and cheaper to apply the diff again than to clone the large root state
+                optimistically_updated_root_state
+                    .apply_diff(patch.diffs)
+                    .unwrap();
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
