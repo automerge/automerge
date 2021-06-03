@@ -110,7 +110,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<(OpId, UpdatingSequenceElement<T>)>>,
+    underlying: Box<im_rc::Vector<(OpId, SequenceElement<T>)>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -132,7 +132,7 @@ where
         DiffableSequence {
             underlying: Box::new(
                 i.into_iter()
-                    .map(|i| (i.default_opid(), UpdatingSequenceElement::Original(i)))
+                    .map(|i| (i.default_opid(), SequenceElement::Original(i)))
                     .collect(),
             ),
         }
@@ -277,11 +277,11 @@ where
                     let node = T::construct(op_id, value)?;
                     if (index as usize) == self.underlying.len() {
                         self.underlying
-                            .push_back((node.default_opid(), UpdatingSequenceElement::new(node)));
+                            .push_back((node.default_opid(), SequenceElement::new(node)));
                     } else {
                         self.underlying.insert(
                             index as usize,
-                            (node.default_opid(), UpdatingSequenceElement::new(node)),
+                            (node.default_opid(), SequenceElement::new(node)),
                         );
                     };
                     changed_indices.insert(index);
@@ -306,8 +306,7 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()))?;
-                        intermediate
-                            .push_back((mv.default_opid(), UpdatingSequenceElement::New(mv)));
+                        intermediate.push_back((mv.default_opid(), SequenceElement::New(mv)));
                     }
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
@@ -343,7 +342,7 @@ where
         debug_assert!(
             self.underlying
                 .iter()
-                .all(|u| matches!(u.1, UpdatingSequenceElement::Original(_))),
+                .all(|u| matches!(u.1, SequenceElement::Original(_))),
             "diffable sequence apply_diff_iter didn't call finish on all values"
         );
 
@@ -352,7 +351,7 @@ where
 
     pub(super) fn remove(&mut self, index: usize) -> T {
         match self.underlying.remove(index).1 {
-            UpdatingSequenceElement::Original(t) => t,
+            SequenceElement::Original(t) => t,
             _ => unreachable!(),
         }
     }
@@ -368,7 +367,7 @@ where
             value.default_opid()
         };
         self.underlying
-            .set(index, (elem_id, UpdatingSequenceElement::Original(value)));
+            .set(index, (elem_id, SequenceElement::Original(value)));
     }
 
     pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
@@ -384,10 +383,7 @@ where
     pub(super) fn insert(&mut self, index: usize, value: T) {
         self.underlying.insert(
             index,
-            (
-                value.default_opid(),
-                UpdatingSequenceElement::Original(value),
-            ),
+            (value.default_opid(), SequenceElement::Original(value)),
         )
     }
 
@@ -396,10 +392,7 @@ where
         F: FnOnce(&T) -> T,
     {
         if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = (
-                entry.0.clone(),
-                UpdatingSequenceElement::Original(f(entry.1.get())),
-            );
+            *entry = (entry.0.clone(), SequenceElement::Original(f(entry.1.get())));
         }
     }
 
@@ -410,7 +403,7 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum UpdatingSequenceElement<T>
+enum SequenceElement<T>
 where
     T: DiffableValue,
 {
@@ -423,21 +416,21 @@ where
     },
 }
 
-impl<T> UpdatingSequenceElement<T>
+impl<T> SequenceElement<T>
 where
     T: DiffableValue,
     T: Clone,
 {
-    fn new(value: T) -> UpdatingSequenceElement<T> {
-        UpdatingSequenceElement::New(value)
+    fn new(value: T) -> SequenceElement<T> {
+        SequenceElement::New(value)
     }
 
     fn finish(&mut self) {
         match self {
-            UpdatingSequenceElement::Original(_) => { // do nothing, this is the finished state
+            SequenceElement::Original(_) => { // do nothing, this is the finished state
             }
-            UpdatingSequenceElement::New(v) => *self = UpdatingSequenceElement::Original(v.clone()),
-            UpdatingSequenceElement::Updated {
+            SequenceElement::New(v) => *self = SequenceElement::Original(v.clone()),
+            SequenceElement::Updated {
                 initial_update,
                 remaining_updates,
                 ..
@@ -449,28 +442,28 @@ where
                         acc
                     },
                 );
-                *self = UpdatingSequenceElement::Original(t)
+                *self = SequenceElement::Original(t)
             }
         }
     }
 
     fn get(&self) -> &T {
         match self {
-            UpdatingSequenceElement::Original(v) => v,
+            SequenceElement::Original(v) => v,
             _ => unreachable!(),
         }
     }
 
     fn get_mut(&mut self) -> &mut T {
         match self {
-            UpdatingSequenceElement::Original(v) => v,
+            SequenceElement::Original(v) => v,
             _ => unreachable!(),
         }
     }
 
     fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
         match self {
-            UpdatingSequenceElement::Original(v) => {
+            SequenceElement::Original(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
                     existing.check_diff(opid, diff)?;
                 } else {
@@ -478,7 +471,7 @@ where
                 };
                 Ok(())
             }
-            UpdatingSequenceElement::New(v) => {
+            SequenceElement::New(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
                     existing.check_diff(opid, diff)?;
                 } else {
@@ -486,7 +479,7 @@ where
                 };
                 Ok(())
             }
-            UpdatingSequenceElement::Updated {
+            SequenceElement::Updated {
                 original,
                 initial_update,
                 remaining_updates,
@@ -510,35 +503,35 @@ where
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) -> Result<(), InvalidPatch> {
         match self {
-            UpdatingSequenceElement::Original(v) => {
+            SequenceElement::Original(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
                     T::construct(opid, diff)?
                 };
-                *self = UpdatingSequenceElement::Updated {
+                *self = SequenceElement::Updated {
                     original: v.clone(),
                     initial_update: updated,
                     remaining_updates: Vec::new(),
                 };
                 Ok(())
             }
-            UpdatingSequenceElement::New(v) => {
+            SequenceElement::New(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
                     existing.apply_diff(opid, diff)?;
                     existing
                 } else {
                     T::construct(opid, diff)?
                 };
-                *self = UpdatingSequenceElement::Updated {
+                *self = SequenceElement::Updated {
                     original: v.clone(),
                     initial_update: v.clone(),
                     remaining_updates: vec![updated],
                 };
                 Ok(())
             }
-            UpdatingSequenceElement::Updated {
+            SequenceElement::Updated {
                 original,
                 initial_update,
                 remaining_updates,
