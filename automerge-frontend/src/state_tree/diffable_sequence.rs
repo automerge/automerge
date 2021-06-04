@@ -225,8 +225,8 @@ where
                 }
                 amp::DiffEdit::Update {
                     index,
-                    value,
-                    op_id,
+                    value: _,
+                    op_id: _,
                 } => {
                     // TODO: handle updates after things like inserts shifting them
                     if *index as usize >= size {
@@ -247,7 +247,7 @@ where
         Ok(())
     }
 
-    pub fn apply_diff(&mut self, object_id: &amp::ObjectId, edits: Vec<amp::DiffEdit>) {
+    pub fn apply_diff(&mut self, _object_id: &amp::ObjectId, edits: Vec<amp::DiffEdit>) {
         let mut changed_indices = HashSet::new();
         for edit in edits {
             match edit {

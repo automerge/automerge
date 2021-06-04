@@ -75,7 +75,7 @@ impl FrontendState {
                 reconciled_root_state,
                 optimistically_updated_root_state,
                 seen_non_local_patch,
-                max_op,
+                max_op: _,
             } => {
                 let mut new_in_flight_requests = in_flight_requests.clone();
                 // If the actor ID and seq exist then this patch corresponds
@@ -142,15 +142,15 @@ impl FrontendState {
         }
     }
 
-    fn get_object_id(&mut self, path: &Path) -> Option<ObjectId> {
+    fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
         self.resolve_path(path).and_then(|r| r.object_id())
     }
 
-    fn get_value(&mut self, path: &Path) -> Option<Value> {
+    fn get_value(&self, path: &Path) -> Option<Value> {
         self.resolve_path(path).map(|r| r.default_value())
     }
 
-    fn resolve_path(&mut self, path: &Path) -> Option<ResolvedPath> {
+    fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
         let root = match self {
             FrontendState::WaitingForInFlightRequests {
                 optimistically_updated_root_state,
@@ -471,7 +471,7 @@ impl Frontend {
         Ok(())
     }
 
-    pub fn get_object_id(&mut self, path: &Path) -> Option<ObjectId> {
+    pub fn get_object_id(&self, path: &Path) -> Option<ObjectId> {
         self.state.get_object_id(path)
     }
 
@@ -481,12 +481,12 @@ impl Frontend {
 
     /// Gets the set of values for `path`, returns None if the path does not
     /// exist
-    pub fn get_conflicts(&mut self, path: &Path) -> Option<HashMap<OpId, Value>> {
+    pub fn get_conflicts(&self, path: &Path) -> Option<HashMap<OpId, Value>> {
         self.state.resolve_path(path).map(|o| o.values())
     }
 
     /// Returns the value given by path, if it exists
-    pub fn get_value(&mut self, path: &Path) -> Option<Value> {
+    pub fn get_value(&self, path: &Path) -> Option<Value> {
         self.state.get_value(path)
     }
 }

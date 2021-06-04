@@ -4,8 +4,8 @@ use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    CursorState, Cursors, DiffableSequence, ResolvedPath, StateTreeComposite, StateTreeList,
-    StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+    CursorState, Cursors, DiffableSequence, ResolvedPath, ResolvedPathMut, StateTreeComposite,
+    StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
     error,
@@ -32,7 +32,7 @@ pub(super) struct MultiValue {
 
 impl MultiValue {
     pub fn check_new_from_diff(
-        opid: &amp::OpId,
+        _opid: &amp::OpId,
         diff: &amp::Diff,
     ) -> Result<(), error::InvalidPatch> {
         StateTreeValue::check_new_from_diff(diff)
@@ -202,7 +202,7 @@ impl MultiValue {
     }
 
     pub(crate) fn resolve_path(
-        &mut self,
+        &self,
         path: Vec<PathElement>,
         parent_object_id: amp::ObjectId,
         key: amp::Key,
@@ -230,8 +230,43 @@ impl MultiValue {
                     }
                 }
             }
-        } else if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
+        } else if let StateTreeValue::Composite(ref composite) = self.winning_value.1 {
             return composite.resolve_path(path);
+        }
+        None
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        path: Vec<PathElement>,
+        parent_object_id: amp::ObjectId,
+        key: amp::Key,
+    ) -> Option<ResolvedPathMut> {
+        if path.is_empty() {
+            if let StateTreeValue::Leaf(Primitive::Counter(_)) = self.winning_value.1 {
+                return Some(ResolvedPathMut::new_counter(parent_object_id, key, self));
+            } else if let StateTreeValue::Leaf(_) = self.winning_value.1 {
+                return Some(ResolvedPathMut::new_primitive(self));
+            }
+
+            if let StateTreeValue::Composite(composite) = self.winning_value.1.clone() {
+                match composite {
+                    StateTreeComposite::Map(map) => {
+                        return Some(ResolvedPathMut::new_map(self, map.object_id))
+                    }
+                    StateTreeComposite::Table(table) => {
+                        return Some(ResolvedPathMut::new_table(self, table.object_id))
+                    }
+                    StateTreeComposite::Text(text) => {
+                        return Some(ResolvedPathMut::new_text(self, text.object_id))
+                    }
+                    StateTreeComposite::List(list) => {
+                        return Some(ResolvedPathMut::new_list(self, list.object_id))
+                    }
+                }
+            }
+        } else if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
+            return composite.resolve_path_mut(path);
         }
         None
     }
@@ -316,7 +351,7 @@ impl MultiGrapheme {
     }
 
     pub(super) fn check_new_from_diff(
-        opid: &amp::OpId,
+        _opid: &amp::OpId,
         diff: &amp::Diff,
     ) -> Result<(), error::InvalidPatch> {
         match diff {
@@ -365,7 +400,7 @@ impl MultiGrapheme {
     where
         I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
     {
-        for (opid, subdiff) in diff {
+        for (_opid, subdiff) in diff {
             match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.graphemes(true).count() != 1 {
@@ -407,15 +442,19 @@ impl MultiGrapheme {
     }
 
     fn update(&mut self, key: &amp::OpId, value: String) {
-        if *key == self.winning_value.0 {
-            self.winning_value.1 = value;
-        } else if *key > self.winning_value.0 {
-            self.conflicts
-                .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
-            self.winning_value.0 = key.clone();
-            self.winning_value.1 = value;
-        } else {
-            self.conflicts.insert(key.clone(), value);
+        match key.cmp(&self.winning_value.0) {
+            Ordering::Equal => {
+                self.winning_value.1 = value;
+            }
+            Ordering::Greater => {
+                self.conflicts
+                    .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+                self.winning_value.0 = key.clone();
+                self.winning_value.1 = value;
+            }
+            Ordering::Less => {
+                self.conflicts.insert(key.clone(), value);
+            }
         }
     }
 
@@ -493,9 +532,17 @@ impl MultiGrapheme {
         // }
     }
 
-    pub(crate) fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
         if path.is_empty() {
             Some(ResolvedPath::new_character(self))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(&mut self, path: Vec<PathElement>) -> Option<ResolvedPathMut> {
+        if path.is_empty() {
+            Some(ResolvedPathMut::new_character(self))
         } else {
             None
         }

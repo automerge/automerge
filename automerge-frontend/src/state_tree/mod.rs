@@ -12,7 +12,7 @@ mod resolved_path;
 use diffable_sequence::DiffableSequence;
 use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 pub(crate) use resolved_path::SetOrInsertPayload;
-pub use resolved_path::{ResolvedPath, Target};
+pub use resolved_path::{ResolvedPath, ResolvedPathMut, TargetMut};
 
 /// Represents the result of running a local operation (i.e one that happens within the frontend
 /// before any interaction with a backend).
@@ -125,7 +125,7 @@ impl StateTree {
     }
 
     pub(crate) fn resolve_path<'a>(
-        &'a mut self,
+        &'a self,
         path: &Path,
     ) -> Option<resolved_path::ResolvedPath<'a>> {
         if path.is_root() {
@@ -135,9 +135,28 @@ impl StateTree {
         stack.reverse();
 
         if let Some(PathElement::Key(k)) = stack.pop() {
-            let o = self.root_props.get_mut(&k)?;
+            let o = self.root_props.get(&k)?;
 
             o.resolve_path(stack, amp::ObjectId::Root, amp::Key::Map(k))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut<'a>(
+        &'a mut self,
+        path: &Path,
+    ) -> Option<resolved_path::ResolvedPathMut<'a>> {
+        if path.is_root() {
+            return Some(ResolvedPathMut::new_root(self));
+        }
+        let mut stack = path.clone().elements();
+        stack.reverse();
+
+        if let Some(PathElement::Key(k)) = stack.pop() {
+            let o = self.root_props.get_mut(&k)?;
+
+            o.resolve_path_mut(stack, amp::ObjectId::Root, amp::Key::Map(k))
         } else {
             None
         }
@@ -261,7 +280,7 @@ impl StateTreeComposite {
     fn apply_diff(&mut self, diff: amp::Diff) {
         match diff {
             amp::Diff::Map(amp::MapDiff {
-                obj_type,
+                obj_type: _,
                 props: prop_diffs,
                 object_id: _,
             }) => match self {
@@ -271,7 +290,7 @@ impl StateTreeComposite {
             },
             amp::Diff::Seq(amp::SeqDiff {
                 edits,
-                obj_type,
+                obj_type: _,
                 object_id: _,
             }) => match self {
                 StateTreeComposite::List(list) => list.apply_diff(edits),
@@ -350,12 +369,21 @@ impl StateTreeComposite {
         }
     }
 
-    fn resolve_path(&mut self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+    fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
         match self {
             Self::Map(map) => map.resolve_path(path),
             Self::Table(table) => table.resolve_path(path),
             Self::List(list) => list.resolve_path(path),
             Self::Text(text) => text.resolve_path(path),
+        }
+    }
+
+    fn resolve_path_mut(&mut self, path: Vec<PathElement>) -> Option<ResolvedPathMut> {
+        match self {
+            Self::Map(map) => map.resolve_path_mut(path),
+            Self::Table(table) => table.resolve_path_mut(path),
+            Self::List(list) => list.resolve_path_mut(path),
+            Self::Text(text) => text.resolve_path_mut(path),
         }
     }
 }
@@ -568,11 +596,26 @@ impl StateTreeMap {
         }
     }
 
-    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Key(key)) = path.pop() {
             self.props
-                .get_mut(&key)?
+                .get(&key)?
                 .resolve_path(path, self.object_id.clone(), amp::Key::Map(key))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        mut path: Vec<PathElement>,
+    ) -> Option<ResolvedPathMut> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props.get_mut(&key)?.resolve_path_mut(
+                path,
+                self.object_id.clone(),
+                amp::Key::Map(key),
+            )
         } else {
             None
         }
@@ -652,11 +695,26 @@ impl StateTreeTable {
         }
     }
 
-    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Key(key)) = path.pop() {
             self.props
-                .get_mut(&key)?
+                .get(&key)?
                 .resolve_path(path, self.object_id.clone(), amp::Key::Map(key))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        mut path: Vec<PathElement>,
+    ) -> Option<ResolvedPathMut> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props.get_mut(&key)?.resolve_path_mut(
+                path,
+                self.object_id.clone(),
+                amp::Key::Map(key),
+            )
         } else {
             None
         }
@@ -752,10 +810,25 @@ impl StateTreeText {
         self.graphemes.iter().position(|e| e.has_opid(opid))
     }
 
-    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Index(i)) = path.pop() {
             if path.is_empty() {
-                self.graphemes.get_mut(i as usize)?.1.resolve_path(path)
+                self.graphemes.get(i as usize)?.1.resolve_path(path)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        mut path: Vec<PathElement>,
+    ) -> Option<ResolvedPathMut> {
+        if let Some(PathElement::Index(i)) = path.pop() {
+            if path.is_empty() {
+                self.graphemes.get_mut(i as usize)?.1.resolve_path_mut(path)
             } else {
                 None
             }
@@ -870,14 +943,34 @@ impl StateTreeList {
         }
     }
 
-    pub(crate) fn resolve_path(&mut self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+    pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Index(i)) = path.pop() {
             let elem_id = self
                 .elem_at(i as usize)
                 .ok()
                 .map(|(e, _)| e.into())
                 .unwrap_or(ElementId::Head);
-            self.elements.get_mut(i as usize)?.1.resolve_path(
+            self.elements.get(i as usize)?.1.resolve_path(
+                path,
+                self.object_id.clone(),
+                amp::Key::Seq(elem_id),
+            )
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        mut path: Vec<PathElement>,
+    ) -> Option<ResolvedPathMut> {
+        if let Some(PathElement::Index(i)) = path.pop() {
+            let elem_id = self
+                .elem_at(i as usize)
+                .ok()
+                .map(|(e, _)| e.into())
+                .unwrap_or(ElementId::Head);
+            self.elements.get_mut(i as usize)?.1.resolve_path_mut(
                 path,
                 self.object_id.clone(),
                 amp::Key::Seq(elem_id),
