@@ -35,11 +35,15 @@ serde_bytes = "0.11.5"
 version = "^0.2"
 features = ["serde-serialize"]
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 # The `web-sys` crate allows you to interact with the various browser APIs,
 # like the DOM.
 [dependencies.web-sys]
 version = "0.3.22"
 features = ["console"]
+
 
 [dev-dependencies]
 futures = "^0.1"

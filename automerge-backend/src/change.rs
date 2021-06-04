@@ -460,7 +460,7 @@ fn decode_column_info(
     let mut last_id = 0;
     for _ in 0..num_columns {
         let id: u32 = read_slice(bytes, cursor)?;
-        if id <= last_id {
+        if (id & !COLUMN_TYPE_DEFLATE) <= (last_id & !COLUMN_TYPE_DEFLATE) {
             return Err(decoding::Error::ColumnsNotInAscendingOrder {
                 last: last_id,
                 found: id,
