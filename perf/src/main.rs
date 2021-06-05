@@ -196,7 +196,9 @@ fn h() {
         let patch2 = backend2
             .apply_changes(vec![(change_to_send).clone()])
             .unwrap();
-        doc2.apply_patch(patch2).unwrap()
+        let a = Instant::now();
+        doc2.apply_patch(patch2).unwrap();
+        applys.push(a.elapsed());
     }
     println!(
         "rand x{} {:?} {:?} {:?}",
@@ -227,9 +229,14 @@ fn trace(edits: Vec<(u32, u32, Option<String>)>) {
     doc.apply_patch(patch).unwrap();
 
     let loop_start = Instant::now();
-    for (i, edits) in edits.chunks(10).enumerate() {
-        if i % 1000 == 0 {
-            println!("processed {} changes in {:?}", i, loop_start.elapsed());
+    let num_chunks = 10;
+    for (i, edits) in edits.chunks(num_chunks).enumerate() {
+        if (i * num_chunks) % 10000 == 0 {
+            println!(
+                "processed {} changes in {:?}",
+                i * num_chunks,
+                loop_start.elapsed()
+            );
         }
         let change = doc
             .change::<_, _, InvalidChangeRequest>(None, |d| {
