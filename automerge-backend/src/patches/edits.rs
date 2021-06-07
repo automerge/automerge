@@ -32,6 +32,8 @@ impl Edits {
                 ) if *index + 1 == next_index
                     && elem_id.as_opid() == Some(op_id)
                     && next_elem_id.as_opid() == Some(&next_op_id)
+                    // Ensure the values have a common type
+                    && std::mem::discriminant(value) == std::mem::discriminant(&next_value)
                     && op_id.delta(&next_op_id, 1) =>
                 {
                     *last = amp::DiffEdit::MultiElementInsert {
@@ -54,6 +56,8 @@ impl Edits {
                     },
                 ) if *index + (values.len() as u64) == next_index
                     && next_elem_id.as_opid() == Some(&op_id)
+                    // Ensure the values have a common type
+                    && std::mem::discriminant(&values[0]) == std::mem::discriminant(&value)
                     && elem_id
                         .as_opid()
                         .unwrap()
