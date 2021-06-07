@@ -7,6 +7,7 @@ mod actor_id;
 mod change_hash;
 mod cursor_diff;
 mod diff;
+mod diff_edit;
 mod element_id;
 mod key;
 mod object_id;
