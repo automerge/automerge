@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     error::InvalidChangeRequest,
-    state_tree::{LocalOperationResult, SetOrInsertPayload, StateTree, TargetMut},
+    state_tree::{LocalOperationResult, ResolvedPathMut, SetOrInsertPayload, StateTree},
     value::{Cursor, Primitive, Value},
     Path, PathElement,
 };
@@ -143,13 +143,9 @@ impl<'a> MutationTracker<'a> {
                     })
                 }
             };
-            if let Some(parent) = self
-                .state
-                .resolve_path_mut(&path.parent())
-                .map(|p| p.target)
-            {
+            if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
                 match parent {
-                    TargetMut::List(mut list_target) => {
+                    ResolvedPathMut::List(mut list_target) => {
                         let payload = SetOrInsertPayload {
                             start_op: self.max_op + 1,
                             actor: &self.actor_id.clone(),
@@ -158,7 +154,7 @@ impl<'a> MutationTracker<'a> {
                         let res = list_target.insert_many(*index, payload)?;
                         self.apply_state_change(res);
                     }
-                    TargetMut::Text(mut text_target) => {
+                    ResolvedPathMut::Text(mut text_target) => {
                         let mut chars = Vec::with_capacity(values.len());
                         for value in values {
                             match value {
@@ -210,9 +206,9 @@ impl<'a> MutableDocument for MutationTracker<'a> {
     fn cursor_to_path(&mut self, path: &Path) -> Option<Cursor> {
         if let Some(PathElement::Index(i)) = path.name() {
             if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
-                match parent.target {
-                    TargetMut::List(list_target) => list_target.get_cursor(*i).ok(),
-                    TargetMut::Text(text_target) => text_target.get_cursor(*i).ok(),
+                match parent {
+                    ResolvedPathMut::List(list_target) => list_target.get_cursor(*i).ok(),
+                    ResolvedPathMut::Text(text_target) => text_target.get_cursor(*i).ok(),
                     _ => None,
                 }
             } else {
@@ -227,15 +223,17 @@ impl<'a> MutableDocument for MutationTracker<'a> {
         match change.operation {
             LocalOperation::Set(value) => {
                 //TODO double resolving is ugly here
-                if let Some(TargetMut::Counter(_)) =
-                    self.state.resolve_path_mut(&change.path).map(|p| p.target)
+                if let Some(ResolvedPathMut::Counter(_)) = self.state.resolve_path_mut(&change.path)
                 {
                     return Err(InvalidChangeRequest::CannotOverwriteCounter { path: change.path });
                 };
                 if let Some(name) = change.path.name() {
                     if let Some(parent) = self.state.resolve_path_mut(&change.path.parent()) {
-                        match (name, parent.target) {
-                            (PathElement::Key(ref k), TargetMut::Root(ref mut root_target)) => {
+                        match (name, parent) {
+                            (
+                                PathElement::Key(ref k),
+                                ResolvedPathMut::Root(ref mut root_target),
+                            ) => {
                                 let payload = SetOrInsertPayload {
                                     start_op: self.max_op + 1,
                                     actor: &self.actor_id.clone(),
@@ -245,7 +243,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 self.apply_state_change(res);
                                 Ok(())
                             }
-                            (PathElement::Key(ref k), TargetMut::Map(ref mut maptarget)) => {
+                            (PathElement::Key(ref k), ResolvedPathMut::Map(ref mut maptarget)) => {
                                 let payload = SetOrInsertPayload {
                                     start_op: self.max_op + 1,
                                     actor: &self.actor_id.clone(),
@@ -255,7 +253,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 self.apply_state_change(res);
                                 Ok(())
                             }
-                            (PathElement::Key(ref k), TargetMut::Table(ref mut tabletarget)) => {
+                            (
+                                PathElement::Key(ref k),
+                                ResolvedPathMut::Table(ref mut tabletarget),
+                            ) => {
                                 let payload = SetOrInsertPayload {
                                     start_op: self.max_op + 1,
                                     actor: &self.actor_id.clone(),
@@ -270,7 +271,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             (PathElement::Key(_), _) => {
                                 Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                             }
-                            (PathElement::Index(i), TargetMut::List(ref mut list_target)) => {
+                            (PathElement::Index(i), ResolvedPathMut::List(ref mut list_target)) => {
                                 let payload = SetOrInsertPayload {
                                     start_op: self.max_op + 1,
                                     actor: &self.actor_id.clone(),
@@ -280,29 +281,31 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 self.apply_state_change(res);
                                 Ok(())
                             }
-                            (PathElement::Index(i), TargetMut::Text(ref mut text)) => match value {
-                                Value::Primitive(Primitive::Str(s)) => {
-                                    if s.graphemes(true).count() == 1 {
-                                        let payload = SetOrInsertPayload {
-                                            start_op: self.max_op + 1,
-                                            actor: &self.actor_id.clone(),
-                                            value: s,
-                                        };
-                                        let res = text.set(*i, payload)?;
-                                        self.apply_state_change(res);
-                                        Ok(())
-                                    } else {
-                                        Err(InvalidChangeRequest::InsertNonTextInTextObject {
-                                            path: change.path.clone(),
-                                            object: Value::Primitive(Primitive::Str(s)),
-                                        })
+                            (PathElement::Index(i), ResolvedPathMut::Text(ref mut text)) => {
+                                match value {
+                                    Value::Primitive(Primitive::Str(s)) => {
+                                        if s.graphemes(true).count() == 1 {
+                                            let payload = SetOrInsertPayload {
+                                                start_op: self.max_op + 1,
+                                                actor: &self.actor_id.clone(),
+                                                value: s,
+                                            };
+                                            let res = text.set(*i, payload)?;
+                                            self.apply_state_change(res);
+                                            Ok(())
+                                        } else {
+                                            Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                                path: change.path.clone(),
+                                                object: Value::Primitive(Primitive::Str(s)),
+                                            })
+                                        }
                                     }
+                                    _ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
+                                        path: change.path.clone(),
+                                        object: value.clone(),
+                                    }),
                                 }
-                                _ => Err(InvalidChangeRequest::InsertNonTextInTextObject {
-                                    path: change.path.clone(),
-                                    object: value.clone(),
-                                }),
-                            },
+                            }
                             (PathElement::Index(_), _) => {
                                 Err(InvalidChangeRequest::InsertWithNonSequencePath {
                                     path: change.path.clone(),
@@ -319,13 +322,13 @@ impl<'a> MutableDocument for MutationTracker<'a> {
             LocalOperation::Delete => {
                 if let Some(name) = change.path.name() {
                     if let Some(pr) = self.state.resolve_path_mut(&change.path.parent()) {
-                        let state_change = match pr.target {
-                            TargetMut::Counter(_) => {
+                        let state_change = match pr {
+                            ResolvedPathMut::Counter(_) => {
                                 return Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path,
                                 })
                             }
-                            TargetMut::List(mut l) => match name {
+                            ResolvedPathMut::List(mut l) => match name {
                                 PathElement::Index(i) => l.remove(*i)?,
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
@@ -333,7 +336,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     })
                                 }
                             },
-                            TargetMut::Text(mut t) => match name {
+                            ResolvedPathMut::Text(mut t) => match name {
                                 PathElement::Index(i) => t.remove(*i)?,
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
@@ -341,12 +344,12 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     })
                                 }
                             },
-                            TargetMut::Primitive(_) => {
+                            ResolvedPathMut::Primitive(_) => {
                                 return Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path,
                                 })
                             }
-                            TargetMut::Map(mut m) => match name {
+                            ResolvedPathMut::Map(mut m) => match name {
                                 PathElement::Key(k) => m.delete_key(k),
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
@@ -354,7 +357,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     })
                                 }
                             },
-                            TargetMut::Table(mut t) => match name {
+                            ResolvedPathMut::Table(mut t) => match name {
                                 PathElement::Key(k) => t.delete_key(k),
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
@@ -362,12 +365,12 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     })
                                 }
                             },
-                            TargetMut::Character(_) => {
+                            ResolvedPathMut::Character(_) => {
                                 return Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path,
                                 })
                             }
-                            TargetMut::Root(mut r) => match name {
+                            ResolvedPathMut::Root(mut r) => match name {
                                 PathElement::Key(k) => r.delete_key(k),
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
@@ -388,8 +391,8 @@ impl<'a> MutableDocument for MutationTracker<'a> {
             LocalOperation::Increment(by) => {
                 if change.path.name().is_some() {
                     if let Some(pr) = self.state.resolve_path_mut(&change.path) {
-                        match pr.target {
-                            TargetMut::Counter(mut counter_target) => {
+                        match pr {
+                            ResolvedPathMut::Counter(mut counter_target) => {
                                 let res = counter_target.increment(by);
                                 self.apply_state_change(res);
                                 Ok(())

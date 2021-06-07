@@ -12,7 +12,7 @@ mod resolved_path;
 use diffable_sequence::DiffableSequence;
 use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 pub(crate) use resolved_path::SetOrInsertPayload;
-pub use resolved_path::{ResolvedPath, ResolvedPathMut, TargetMut};
+pub use resolved_path::{ResolvedPath, ResolvedPathMut};
 
 /// Represents the result of running a local operation (i.e one that happens within the frontend
 /// before any interaction with a backend).

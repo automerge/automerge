@@ -8,130 +8,7 @@ use super::{
 };
 use crate::{error, Cursor, Primitive, Value};
 
-#[derive(Debug)]
-pub struct ResolvedPath<'a> {
-    pub(crate) target: Target<'a>,
-}
-
-impl<'a> ResolvedPath<'a> {
-    pub(super) fn new_root(root: &StateTree) -> ResolvedPath {
-        ResolvedPath {
-            target: Target::Root(ResolvedRoot { root }),
-        }
-    }
-
-    pub(super) fn new_map(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Map(ResolvedMap {
-                multivalue: value,
-                object_id,
-            }),
-        }
-    }
-
-    pub(super) fn new_list(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::List(ResolvedList {
-                multivalue: value,
-                object_id,
-            }),
-        }
-    }
-
-    pub(super) fn new_text(mv: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Text(ResolvedText {
-                multivalue: mv,
-                object_id,
-            }),
-        }
-    }
-
-    pub(super) fn new_table(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Table(ResolvedTable {
-                multivalue: value,
-                object_id,
-            }),
-        }
-    }
-
-    pub(super) fn new_counter(
-        object_id: amp::ObjectId,
-        key: amp::Key,
-        mv: &'a MultiValue,
-    ) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Counter(ResolvedCounter {
-                multivalue: mv,
-                key_in_container: key,
-                containing_object_id: object_id,
-            }),
-        }
-    }
-
-    pub(super) fn new_primitive(value: &'a MultiValue) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Primitive(ResolvedPrimitive { multivalue: value }),
-        }
-    }
-
-    pub(super) fn new_character(c: &'a MultiGrapheme) -> ResolvedPath<'a> {
-        ResolvedPath {
-            target: Target::Character(ResolvedChar { multivalue: c }),
-        }
-    }
-
-    pub fn default_value(&self) -> Value {
-        match &self.target {
-            Target::Map(maptarget) => maptarget.multivalue.default_value(),
-            Target::Root(root) => root.root.value(),
-            Target::Table(tabletarget) => tabletarget.multivalue.default_value(),
-            Target::List(listtarget) => listtarget.multivalue.default_value(),
-            Target::Text(texttarget) => texttarget.multivalue.default_value(),
-            Target::Counter(countertarget) => countertarget.multivalue.default_value(),
-            Target::Primitive(p) => p.multivalue.default_value(),
-            Target::Character(ctarget) => {
-                Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
-            }
-        }
-    }
-
-    pub fn values(&self) -> std::collections::HashMap<amp::OpId, Value> {
-        match &self.target {
-            Target::Map(maptarget) => maptarget.multivalue.realise_values(),
-            Target::Root(root) => {
-                let mut result = std::collections::HashMap::new();
-                result.insert(random_op_id(), root.root.value());
-                result
-            }
-            Target::Table(tabletarget) => tabletarget.multivalue.realise_values(),
-            Target::List(listtarget) => listtarget.multivalue.realise_values(),
-            Target::Text(texttarget) => texttarget.multivalue.realise_values(),
-            Target::Counter(countertarget) => countertarget.multivalue.realise_values(),
-            Target::Primitive(p) => p.multivalue.realise_values(),
-            Target::Character(ctarget) => ctarget.multivalue.realise_values(),
-        }
-    }
-
-    pub fn object_id(&self) -> Option<amp::ObjectId> {
-        match &self.target {
-            Target::Map(maptarget) => Some(maptarget.object_id.clone()),
-            Target::Root(_) => Some(amp::ObjectId::Root),
-            Target::Table(tabletarget) => Some(tabletarget.object_id.clone()),
-            Target::List(listtarget) => Some(listtarget.object_id.clone()),
-            Target::Text(texttarget) => Some(texttarget.object_id.clone()),
-            Target::Counter(_) | Target::Primitive(_) | Target::Character(_) => None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ResolvedPathMut<'a> {
-    pub(crate) target: TargetMut<'a>,
-}
-
-pub enum Target<'a> {
+pub enum ResolvedPath<'a> {
     Root(ResolvedRoot<'a>),
     Map(ResolvedMap<'a>),
     Table(ResolvedTable<'a>),
@@ -142,34 +19,133 @@ pub enum Target<'a> {
     Primitive(ResolvedPrimitive<'a>),
 }
 
-impl<'a> std::fmt::Debug for Target<'a> {
+impl<'a> std::fmt::Debug for ResolvedPath<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Target::Root(_) => write!(f, "Root"),
-            Target::Map(maptarget) => {
+            ResolvedPath::Root(_) => write!(f, "Root"),
+            ResolvedPath::Map(maptarget) => {
                 write!(f, "Map {:?}", maptarget.object_id)
             }
-            Target::Table(tabletarget) => {
+            ResolvedPath::Table(tabletarget) => {
                 write!(f, "Table {:?}", tabletarget.object_id)
             }
-            Target::List(listtarget) => {
+            ResolvedPath::List(listtarget) => {
                 write!(f, "list {:?}", listtarget.object_id)
             }
-            Target::Text(texttarget) => {
+            ResolvedPath::Text(texttarget) => {
                 write!(f, "text {:?}", texttarget.object_id)
             }
-            Target::Counter(countertarget) => write!(
+            ResolvedPath::Counter(countertarget) => write!(
                 f,
                 "counter {0}:{1:?}",
                 countertarget.containing_object_id, countertarget.key_in_container
             ),
-            Target::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
-            Target::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
+            ResolvedPath::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
+            ResolvedPath::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
         }
     }
 }
 
-pub enum TargetMut<'a> {
+impl<'a> ResolvedPath<'a> {
+    pub(super) fn new_root(root: &StateTree) -> ResolvedPath {
+        ResolvedPath::Root(ResolvedRoot { root })
+    }
+
+    pub(super) fn new_map(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
+        ResolvedPath::Map(ResolvedMap {
+            multivalue: value,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_list(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
+        ResolvedPath::List(ResolvedList {
+            multivalue: value,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_text(mv: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
+        ResolvedPath::Text(ResolvedText {
+            multivalue: mv,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_table(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
+        ResolvedPath::Table(ResolvedTable {
+            multivalue: value,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_counter(
+        object_id: amp::ObjectId,
+        key: amp::Key,
+        mv: &'a MultiValue,
+    ) -> ResolvedPath<'a> {
+        ResolvedPath::Counter(ResolvedCounter {
+            multivalue: mv,
+            key_in_container: key,
+            containing_object_id: object_id,
+        })
+    }
+
+    pub(super) fn new_primitive(value: &'a MultiValue) -> ResolvedPath<'a> {
+        ResolvedPath::Primitive(ResolvedPrimitive { multivalue: value })
+    }
+
+    pub(super) fn new_character(c: &'a MultiGrapheme) -> ResolvedPath<'a> {
+        ResolvedPath::Character(ResolvedChar { multivalue: c })
+    }
+
+    pub fn default_value(&self) -> Value {
+        match &self {
+            ResolvedPath::Map(maptarget) => maptarget.multivalue.default_value(),
+            ResolvedPath::Root(root) => root.root.value(),
+            ResolvedPath::Table(tabletarget) => tabletarget.multivalue.default_value(),
+            ResolvedPath::List(listtarget) => listtarget.multivalue.default_value(),
+            ResolvedPath::Text(texttarget) => texttarget.multivalue.default_value(),
+            ResolvedPath::Counter(countertarget) => countertarget.multivalue.default_value(),
+            ResolvedPath::Primitive(p) => p.multivalue.default_value(),
+            ResolvedPath::Character(ctarget) => {
+                Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
+            }
+        }
+    }
+
+    pub fn values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+        match &self {
+            ResolvedPath::Map(maptarget) => maptarget.multivalue.realise_values(),
+            ResolvedPath::Root(root) => {
+                let mut result = std::collections::HashMap::new();
+                result.insert(random_op_id(), root.root.value());
+                result
+            }
+            ResolvedPath::Table(tabletarget) => tabletarget.multivalue.realise_values(),
+            ResolvedPath::List(listtarget) => listtarget.multivalue.realise_values(),
+            ResolvedPath::Text(texttarget) => texttarget.multivalue.realise_values(),
+            ResolvedPath::Counter(countertarget) => countertarget.multivalue.realise_values(),
+            ResolvedPath::Primitive(p) => p.multivalue.realise_values(),
+            ResolvedPath::Character(ctarget) => ctarget.multivalue.realise_values(),
+        }
+    }
+
+    pub fn object_id(&self) -> Option<amp::ObjectId> {
+        match &self {
+            ResolvedPath::Map(maptarget) => Some(maptarget.object_id.clone()),
+            ResolvedPath::Root(_) => Some(amp::ObjectId::Root),
+            ResolvedPath::Table(tabletarget) => Some(tabletarget.object_id.clone()),
+            ResolvedPath::List(listtarget) => Some(listtarget.object_id.clone()),
+            ResolvedPath::Text(texttarget) => Some(texttarget.object_id.clone()),
+            ResolvedPath::Counter(_) | ResolvedPath::Primitive(_) | ResolvedPath::Character(_) => {
+                None
+            }
+        }
+    }
+}
+
+pub enum ResolvedPathMut<'a> {
     Root(ResolvedRootMut<'a>),
     Map(ResolvedMapMut<'a>),
     Table(ResolvedTableMut<'a>),
@@ -180,86 +156,76 @@ pub enum TargetMut<'a> {
     Primitive(ResolvedPrimitiveMut<'a>),
 }
 
-impl<'a> std::fmt::Debug for TargetMut<'a> {
+impl<'a> std::fmt::Debug for ResolvedPathMut<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            TargetMut::Root(_) => write!(f, "Root"),
-            TargetMut::Map(maptarget) => {
+            ResolvedPathMut::Root(_) => write!(f, "Root"),
+            ResolvedPathMut::Map(maptarget) => {
                 write!(f, "Map {:?}", maptarget.object_id)
             }
-            TargetMut::Table(tabletarget) => {
+            ResolvedPathMut::Table(tabletarget) => {
                 write!(f, "Table {:?}", tabletarget.object_id)
             }
-            TargetMut::List(listtarget) => {
+            ResolvedPathMut::List(listtarget) => {
                 write!(f, "list {:?}", listtarget.object_id)
             }
-            TargetMut::Text(texttarget) => {
+            ResolvedPathMut::Text(texttarget) => {
                 write!(f, "text {:?}", texttarget.object_id)
             }
-            TargetMut::Counter(countertarget) => write!(
+            ResolvedPathMut::Counter(countertarget) => write!(
                 f,
                 "counter {0}:{1:?}",
                 countertarget.containing_object_id, countertarget.key_in_container
             ),
-            TargetMut::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
-            TargetMut::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
+            ResolvedPathMut::Primitive(p) => write!(f, "primitive: {:?}", p.multivalue),
+            ResolvedPathMut::Character(ctarget) => write!(f, "character {:?}", ctarget.multivalue),
         }
     }
 }
 
 impl<'a> ResolvedPathMut<'a> {
     pub(super) fn new_root(root: &mut StateTree) -> ResolvedPathMut {
-        ResolvedPathMut {
-            target: TargetMut::Root(ResolvedRootMut { root }),
-        }
+        ResolvedPathMut::Root(ResolvedRootMut { root })
     }
 
     pub(super) fn new_map(
         value: &'a mut MultiValue,
         object_id: amp::ObjectId,
     ) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Map(ResolvedMapMut {
-                multivalue: value,
-                object_id,
-            }),
-        }
+        ResolvedPathMut::Map(ResolvedMapMut {
+            multivalue: value,
+            object_id,
+        })
     }
 
     pub(super) fn new_list(
         value: &'a mut MultiValue,
         object_id: amp::ObjectId,
     ) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::List(ResolvedListMut {
-                multivalue: value,
-                object_id,
-            }),
-        }
+        ResolvedPathMut::List(ResolvedListMut {
+            multivalue: value,
+            object_id,
+        })
     }
 
     pub(super) fn new_text(
         mv: &'a mut MultiValue,
         object_id: amp::ObjectId,
     ) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Text(ResolvedTextMut {
-                multivalue: mv,
-                object_id,
-            }),
-        }
+        ResolvedPathMut::Text(ResolvedTextMut {
+            multivalue: mv,
+            object_id,
+        })
     }
 
     pub(super) fn new_table(
         value: &'a mut MultiValue,
         object_id: amp::ObjectId,
     ) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Table(ResolvedTableMut {
-                multivalue: value,
-                object_id,
-            }),
-        }
+        ResolvedPathMut::Table(ResolvedTableMut {
+            multivalue: value,
+            object_id,
+        })
     }
 
     pub(super) fn new_counter(
@@ -267,37 +233,31 @@ impl<'a> ResolvedPathMut<'a> {
         key: amp::Key,
         mv: &'a mut MultiValue,
     ) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Counter(ResolvedCounterMut {
-                multivalue: mv,
-                key_in_container: key,
-                containing_object_id: object_id,
-            }),
-        }
+        ResolvedPathMut::Counter(ResolvedCounterMut {
+            multivalue: mv,
+            key_in_container: key,
+            containing_object_id: object_id,
+        })
     }
 
     pub(super) fn new_primitive(value: &'a mut MultiValue) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Primitive(ResolvedPrimitiveMut { multivalue: value }),
-        }
+        ResolvedPathMut::Primitive(ResolvedPrimitiveMut { multivalue: value })
     }
 
     pub(super) fn new_character(c: &'a mut MultiGrapheme) -> ResolvedPathMut<'a> {
-        ResolvedPathMut {
-            target: TargetMut::Character(ResolvedCharMut { multivalue: c }),
-        }
+        ResolvedPathMut::Character(ResolvedCharMut { multivalue: c })
     }
 
     pub fn default_value(&self) -> Value {
-        match &self.target {
-            TargetMut::Map(maptarget) => maptarget.multivalue.default_value(),
-            TargetMut::Root(root) => root.root.value(),
-            TargetMut::Table(tabletarget) => tabletarget.multivalue.default_value(),
-            TargetMut::List(listtarget) => listtarget.multivalue.default_value(),
-            TargetMut::Text(texttarget) => texttarget.multivalue.default_value(),
-            TargetMut::Counter(countertarget) => countertarget.multivalue.default_value(),
-            TargetMut::Primitive(p) => p.multivalue.default_value(),
-            TargetMut::Character(ctarget) => {
+        match &self {
+            ResolvedPathMut::Map(maptarget) => maptarget.multivalue.default_value(),
+            ResolvedPathMut::Root(root) => root.root.value(),
+            ResolvedPathMut::Table(tabletarget) => tabletarget.multivalue.default_value(),
+            ResolvedPathMut::List(listtarget) => listtarget.multivalue.default_value(),
+            ResolvedPathMut::Text(texttarget) => texttarget.multivalue.default_value(),
+            ResolvedPathMut::Counter(countertarget) => countertarget.multivalue.default_value(),
+            ResolvedPathMut::Primitive(p) => p.multivalue.default_value(),
+            ResolvedPathMut::Character(ctarget) => {
                 Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
             }
         }
