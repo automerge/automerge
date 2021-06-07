@@ -20,18 +20,28 @@ impl Serialize for Op {
             fields += 1
         }
 
-        match &self.action {
-            OpType::Set(
-                ScalarValue::Counter(_)
-                | ScalarValue::Timestamp(_)
-                | ScalarValue::Int(_)
-                | ScalarValue::Uint(_)
-                | ScalarValue::F32(_)
-                | ScalarValue::F64(_),
-            ) => fields += 2,
-            OpType::Inc(_) | OpType::Set(_) | OpType::Del(_) => fields += 1,
-            _ => {}
+        #[derive(Debug)]
+        enum SingleOrVec<'a, T> {
+            Single(&'a T),
+            Vec(&'a Vec<T>),
         }
+
+        let datatype_and_values = if let OpType::Set(value) = &self.action {
+            Some((value.as_numerical_datatype(), SingleOrVec::Single(value)))
+        } else if let OpType::MultiSet(values) = &self.action {
+            Some((values[0].as_numerical_datatype(), SingleOrVec::Vec(values)))
+        } else {
+            None
+        };
+
+        if datatype_and_values
+            .as_ref()
+            .map_or(false, |(dt, _)| dt.is_some())
+        {
+            fields += 2
+        } else if !matches!(&self.action, OpType::Make(..)) {
+            fields += 1
+        };
 
         let mut op = serializer.serialize_struct("Operation", fields)?;
         op.serialize_field("action", &self.action)?;
@@ -47,36 +57,20 @@ impl Serialize for Op {
         if self.insert {
             op.serialize_field("insert", &self.insert)?;
         }
-        match &self.action {
-            OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(ScalarValue::Counter(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Counter)?;
+        if let Some((Some(datatype), value_or_values)) = datatype_and_values {
+            match value_or_values {
+                SingleOrVec::Single(x) => op.serialize_field("value", &x)?,
+                SingleOrVec::Vec(xs) => op.serialize_field("values", &xs)?,
+            };
+            op.serialize_field("datatype", &datatype)?;
+        } else {
+            match &self.action {
+                OpType::Inc(n) => op.serialize_field("value", &n)?,
+                OpType::Set(value) => op.serialize_field("value", &value)?,
+                OpType::MultiSet(values) => op.serialize_field("values", &values)?,
+                OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
+                OpType::Make(..) => {}
             }
-            OpType::Set(ScalarValue::Timestamp(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Timestamp)?;
-            }
-            OpType::Set(ScalarValue::Int(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Int)?;
-            }
-            OpType::Set(ScalarValue::Uint(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::Uint)?;
-            }
-            OpType::Set(ScalarValue::F32(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::F32)?;
-            }
-            OpType::Set(ScalarValue::F64(value)) => {
-                op.serialize_field("value", &value)?;
-                op.serialize_field("datatype", &DataType::F64)?;
-            }
-            OpType::Set(value) => op.serialize_field("value", &value)?,
-            OpType::MultiSet(values) => op.serialize_field("values", &values)?,
-            OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
-            OpType::Make(..) => {}
         }
         op.serialize_field("pred", &self.pred)?;
         op.end()
