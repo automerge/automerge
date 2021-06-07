@@ -45,17 +45,34 @@ pub use value::{Conflicts, Cursor, Primitive, Value};
 ///    moving the `reconciled_state` into the `Reconciled` enum branch
 #[derive(Clone, Debug)]
 enum FrontendState {
+    /// The backend is processing some requests so we need to keep an optimistic version of the
+    /// state.
     WaitingForInFlightRequests {
+        /// The sequence numbers of in flight changes.
         in_flight_requests: Vec<u64>,
+        /// The root state that the backend tracks.
         reconciled_root_state: state_tree::StateTree,
+        /// The optimistic version of the root state that the user manipulates.
         optimistically_updated_root_state: state_tree::StateTree,
+        /// A flag to track whether this state has seen a patch from the backend that represented
+        /// changes from another actor.
+        ///
+        /// If this is true then our optimistic state will not equal the reconciled state so we may
+        /// need to do extra work when moving to the reconciled state.
         seen_non_local_patch: bool,
+        /// The maximum operation observed.
         max_op: u64,
     },
+    /// The backend has processed all changes and we no longer wait for anything.
     Reconciled {
+        /// The root state that the backend tracks.
         reconciled_root_state: state_tree::StateTree,
-        optimistically_updated_root_state: state_tree::StateTree,
+        /// A copy of the reconciled root state that we keep to be able to undo changes a user
+        /// makes when changing the state.
+        reconciled_root_state_copy_for_rollback: state_tree::StateTree,
+        /// The maximum operation observed.
         max_op: u64,
+        /// The dependencies of the last received patch.
         deps_of_last_received_patch: Vec<ChangeHash>,
     },
 }
@@ -111,7 +128,7 @@ impl FrontendState {
                     }
                     *self = FrontendState::Reconciled {
                         reconciled_root_state: std::mem::take(reconciled_root_state),
-                        optimistically_updated_root_state: std::mem::take(
+                        reconciled_root_state_copy_for_rollback: std::mem::take(
                             optimistically_updated_root_state,
                         ),
                         max_op: patch.max_op,
@@ -126,7 +143,7 @@ impl FrontendState {
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                optimistically_updated_root_state,
+                reconciled_root_state_copy_for_rollback,
                 max_op,
                 deps_of_last_received_patch,
             } => {
@@ -134,7 +151,7 @@ impl FrontendState {
 
                 reconciled_root_state.apply_diff(patch.diffs.clone());
                 // quicker and cheaper to apply the diff again than to clone the large root state
-                optimistically_updated_root_state.apply_diff(patch.diffs);
+                reconciled_root_state_copy_for_rollback.apply_diff(patch.diffs);
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
@@ -208,12 +225,12 @@ impl FrontendState {
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                optimistically_updated_root_state,
+                reconciled_root_state_copy_for_rollback,
                 max_op,
                 deps_of_last_received_patch,
             } => {
                 let mut mutation_tracker = mutation::MutationTracker::new(
-                    optimistically_updated_root_state,
+                    reconciled_root_state_copy_for_rollback,
                     *max_op,
                     actor.clone(),
                 );
@@ -223,7 +240,7 @@ impl FrontendState {
                         // we are in the reconciled state so reconciled_root_state should be the
                         // same as optimistically_updated_root_state. Since we now have an error we
                         // can use the former to revert back to the earlier situation.
-                        *optimistically_updated_root_state = reconciled_root_state.clone();
+                        *reconciled_root_state_copy_for_rollback = reconciled_root_state.clone();
                         return Err(e);
                     }
                 };
@@ -235,7 +252,7 @@ impl FrontendState {
                     *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistically_updated_root_state: std::mem::take(
-                            optimistically_updated_root_state,
+                            reconciled_root_state_copy_for_rollback,
                         ),
                         seen_non_local_patch: false,
                         reconciled_root_state: std::mem::take(reconciled_root_state),
@@ -243,7 +260,10 @@ impl FrontendState {
                     }
                 } else {
                     // the old and new states should be equal since we have no operations
-                    debug_assert_eq!(*optimistically_updated_root_state, *reconciled_root_state);
+                    debug_assert_eq!(
+                        *reconciled_root_state_copy_for_rollback,
+                        *reconciled_root_state
+                    );
                     // we can remain in the reconciled frontend state since we didn't make a change
                 };
                 Ok(OptimisticChangeResult {
@@ -362,7 +382,7 @@ impl Frontend {
             seq: 0,
             state: FrontendState::Reconciled {
                 reconciled_root_state: root_state.clone(),
-                optimistically_updated_root_state: root_state,
+                reconciled_root_state_copy_for_rollback: root_state,
                 max_op: 0,
                 deps_of_last_received_patch: Vec::new(),
             },
