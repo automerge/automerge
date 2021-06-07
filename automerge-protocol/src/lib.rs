@@ -569,7 +569,7 @@ pub struct CursorDiff {
     pub index: u32,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
     /// Describes the insertion of a single element into a list or text object.
