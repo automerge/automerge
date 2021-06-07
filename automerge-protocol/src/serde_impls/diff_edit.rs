@@ -5,6 +5,7 @@ use serde::{
 
 use crate::DiffEdit;
 
+// Normally, we would use `#[derive(Serialize)]`, but...
 impl Serialize for DiffEdit {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -25,6 +26,7 @@ impl Serialize for DiffEdit {
                 ss.serialize_field("value", value)?;
                 ss.end()
             }
+            // This field requires custom serialization logic since we want to add a "datatype"
             DiffEdit::MultiElementInsert {
                 index,
                 elem_id,
