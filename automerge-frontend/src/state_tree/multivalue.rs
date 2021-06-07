@@ -509,27 +509,6 @@ impl MultiGrapheme {
                 Ordering::Equal => {}
             }
         }
-        // let mut new_conflicts = match (&self.conflicts, &other.conflicts) {
-        //     (Some(sc), Some(oc)) => sc.clone().union(oc.clone()),
-        //     (Some(sc), None) => sc.clone(),
-        //     (None, Some(oc)) => oc.clone(),
-        //     (None, None) => HashMap::new(),
-        // };
-        // if other.winning_value.0 < self.winning_value.0 {
-        //     new_conflicts.insert(other.winning_value.0, other.winning_value.1);
-        //     self.conflicts = Some(new_conflicts);
-        // } else {
-        //     for (opid, value) in other.values().iter() {
-        //         if opid > &self.winning_value.0 {
-        //             let mut temp = (opid.clone(), value.to_string());
-        //             std::mem::swap(&mut temp, &mut self.winning_value);
-        //             new_conflicts.insert(temp.0, temp.1);
-        //         } else {
-        //             new_conflicts.insert(opid.clone(), value.to_string());
-        //         }
-        //     }
-        //     self.conflicts = Some(new_conflicts)
-        // }
     }
 
     pub(crate) fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
