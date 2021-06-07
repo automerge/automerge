@@ -36,9 +36,7 @@ fn test_allow_cursor_on_list_element() {
     frontend2
         .apply_patch(backend2.get_patch().unwrap())
         .unwrap();
-    let index_value = frontend2
-        .value_at_path(&Path::root().key("cursor"))
-        .unwrap();
+    let index_value = frontend2.get_value(&Path::root().key("cursor")).unwrap();
     if let Value::Primitive(Primitive::Cursor(c)) = index_value {
         assert_eq!(c.index, 1)
     } else {
@@ -77,9 +75,7 @@ fn test_allow_cursor_on_text_element() {
     frontend2
         .apply_patch(backend2.get_patch().unwrap())
         .unwrap();
-    let index_value = frontend2
-        .value_at_path(&Path::root().key("cursor"))
-        .unwrap();
+    let index_value = frontend2.get_value(&Path::root().key("cursor")).unwrap();
     if let Value::Primitive(Primitive::Cursor(c)) = index_value {
         assert_eq!(c.index, 1)
     } else {
