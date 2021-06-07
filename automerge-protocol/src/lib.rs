@@ -339,6 +339,22 @@ impl ScalarValue {
         }
     }
 
+    /// Returns an Option containing a `DataType` if
+    /// `self` represents a numerical scalar value
+    /// This is necessary b/c numerical values are not self-describing
+    /// (unlike strings / bytes / etc. )
+    pub fn as_numerical_datatype(&self) -> Option<DataType> {
+        match self {
+            ScalarValue::Counter(..) => Some(DataType::Counter),
+            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            ScalarValue::Int(..) => Some(DataType::Int),
+            ScalarValue::Uint(..) => Some(DataType::Uint),
+            ScalarValue::F32(..) => Some(DataType::F32),
+            ScalarValue::F64(..) => Some(DataType::F64),
+            _ => None,
+        }
+    }
+
     /// If this value can be coerced to an i64, return the i64 value
     pub fn to_i64(&self) -> Option<i64> {
         match self {
