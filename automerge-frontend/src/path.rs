@@ -1,7 +1,7 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum PathElement {
+pub enum PathElement {
     Key(String),
     Index(u32),
 }
@@ -39,7 +39,7 @@ impl Path {
         self.0.last()
     }
 
-    pub(crate) fn elements(self) -> Vec<PathElement> {
+    pub fn elements(self) -> Vec<PathElement> {
         self.0
     }
 
