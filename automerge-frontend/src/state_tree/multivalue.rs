@@ -735,7 +735,6 @@ where
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
             Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
             Primitive::F64(f) => amp::ScalarValue::F64(*f),
-            Primitive::F32(f) => amp::ScalarValue::F32(*f),
             Primitive::Counter(i) => amp::ScalarValue::Counter(*i),
             Primitive::Timestamp(t) => amp::ScalarValue::Timestamp(*t),
             Primitive::Boolean(b) => amp::ScalarValue::Boolean(*b),
