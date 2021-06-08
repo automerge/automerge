@@ -1,9 +1,20 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    fmt,
+    num::NonZeroU32,
+    slice::Iter,
+};
 
-use serde::{Deserialize, Serialize};
+use error::InvalidScalarValues;
+use serde::{
+    de::{Error, MapAccess, Unexpected},
+    Deserialize, Serialize,
+};
+use strum::EnumDiscriminants;
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -233,7 +244,123 @@ impl DataType {
     }
 }
 
-#[derive(Serialize, PartialEq, Debug, Clone)]
+/// We don't implement Serialize/Deserialize b/c
+/// this struct will always be serialized as 2 fields
+/// that are *part of* a larger struct. (It will never
+/// be serialized as its own struct/map)
+#[derive(PartialEq, Clone, Debug)]
+pub struct ScalarValues {
+    // For implementing Serialization in DiffEdit
+    pub(crate) vec: Vec<ScalarValue>,
+    // Can't use `std::mem::Discriminant` b/c we
+    // need to be able to `match` on the kind for `as_numerical_datatype`...
+    pub(crate) kind: ScalarValueKind,
+}
+
+impl ScalarValues {
+    pub fn from_values_and_datatype<'de, V: MapAccess<'de>>(
+        mut old_values: Vec<ScalarValue>,
+        datatype: Option<DataType>,
+    ) -> Result<Self, V::Error> {
+        // ensure the values can be cast to the correct datatype
+        if let Some(datatype) = datatype {
+            old_values = old_values
+                .iter()
+                .map(|v| {
+                    v.as_datatype(datatype).map_err(|e| {
+                        Error::invalid_value(
+                            Unexpected::Other(e.unexpected.as_str()),
+                            &e.expected.as_str(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+        old_values.try_into().map_err(|e| match e {
+            InvalidScalarValues::Empty => Error::invalid_length(0, &"more than 0"),
+            InvalidScalarValues::UnexpectedKind(exp, unexp) => {
+                let unexp = format!("{:?}", unexp);
+                let exp = format!("{:?}", exp);
+                Error::invalid_value(Unexpected::Other(&unexp), &exp.as_str())
+            }
+        })
+    }
+
+    /// Try to append a `ScalarValue` to a `ScalarValues`. If we can't
+    // returh the `ScalarValueKind` of the value we tried to add (for error reporting)
+    pub fn append(&mut self, v: ScalarValue) -> Option<ScalarValueKind> {
+        let new_kind = ScalarValueKind::from(&v);
+        if self.kind == new_kind {
+            self.vec.push(v);
+            None
+        } else {
+            Some(new_kind)
+        }
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&ScalarValue> {
+        self.vec.get(idx)
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len()
+    }
+
+    pub fn iter(&self) -> Iter<ScalarValue> {
+        self.vec.iter()
+    }
+
+    /// Returns an Option containing a `DataType` if
+    /// `self` represents a numerical scalar value
+    /// This is necessary b/c numerical values are not self-describing
+    /// (unlike strings / bytes / etc. )
+    pub fn as_numerical_datatype(&self) -> Option<DataType> {
+        match self.kind {
+            ScalarValueKind::Counter => Some(DataType::Counter),
+            ScalarValueKind::Timestamp => Some(DataType::Timestamp),
+            ScalarValueKind::Int => Some(DataType::Int),
+            ScalarValueKind::Uint => Some(DataType::Uint),
+            ScalarValueKind::F64 => Some(DataType::F64),
+            _ => None,
+        }
+    }
+}
+
+impl TryFrom<Vec<ScalarValue>> for ScalarValues {
+    type Error = InvalidScalarValues;
+    fn try_from(old_values: Vec<ScalarValue>) -> Result<Self, Self::Error> {
+        let mut values: Option<ScalarValues> = None;
+        for value in old_values.into_iter() {
+            match values {
+                Some(ref mut xs) => match xs.append(value) {
+                    Some(new_kind) => Err(InvalidScalarValues::UnexpectedKind(xs.kind, new_kind))?,
+                    None => (),
+                },
+                None => values = Some(value.into()),
+            };
+        }
+        values.ok_or(InvalidScalarValues::Empty)
+    }
+}
+
+impl From<ScalarValue> for ScalarValues {
+    fn from(value: ScalarValue) -> Self {
+        let kind = ScalarValueKind::from(&value);
+        Self {
+            vec: vec![value],
+            kind,
+        }
+    }
+}
+
+impl fmt::Display for ScalarValueKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Serialize, PartialEq, Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(name(ScalarValueKind))]
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
@@ -342,6 +469,19 @@ impl ScalarValue {
         }
     }
 
+    // TODO: Should this method be combined with as_numerical_datatype??
+    pub fn datatype(&self) -> Option<DataType> {
+        match self {
+            ScalarValue::Counter(..) => Some(DataType::Counter),
+            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            ScalarValue::Int(..) => Some(DataType::Int),
+            ScalarValue::Uint(..) => Some(DataType::Uint),
+            ScalarValue::F64(..) => Some(DataType::F64),
+            ScalarValue::Cursor(..) => Some(DataType::Cursor),
+            _ => None,
+        }
+    }
+
     /// If this value can be coerced to an i64, return the i64 value
     pub fn to_i64(&self) -> Option<i64> {
         match self {
@@ -375,18 +515,6 @@ impl ScalarValue {
             _ => None,
         }
     }
-
-    pub fn datatype(&self) -> Option<DataType> {
-        match self {
-            ScalarValue::Counter(..) => Some(DataType::Counter),
-            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
-            ScalarValue::Int(..) => Some(DataType::Int),
-            ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F64(..) => Some(DataType::F64),
-            ScalarValue::Cursor(..) => Some(DataType::Cursor),
-            _ => None,
-        }
-    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -396,7 +524,7 @@ pub enum OpType {
     Del(NonZeroU32),
     Inc(i64),
     Set(ScalarValue),
-    MultiSet(Vec<ScalarValue>),
+    MultiSet(ScalarValues),
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -541,7 +669,7 @@ pub struct CursorDiff {
     pub index: u32,
 }
 
-#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum DiffEdit {
     /// Describes the insertion of a single element into a list or text object.
@@ -562,14 +690,13 @@ pub enum DiffEdit {
     /// consecutive element ID: starting with `elemId` for the first value, the
     /// subsequent values are given elemIds with the same actor ID and incrementing
     /// counters. To insert non-primitive values, use SingleInsertEdit.
-    #[serde(rename = "multi-insert", rename_all = "camelCase")]
-    MultiElementInsert {
-        /// the list index at which to insert the first value
-        index: u64,
-        /// the unique ID of the first inserted element
-        elem_id: ElementId,
-        values: Vec<ScalarValue>,
-    },
+
+    /// We need to use a separate struct here to implement custom
+    /// serialization and deserialization logic (due to the presence
+    /// of the datatype field)
+    #[serde(rename = "multi-insert")]
+    MultiElementInsert(MultiElementInsert),
+
     /// Describes the update of the value or nested object at a particular index
     /// of a list or text object. In the case where there are multiple conflicted
     /// values at the same list index, multiple UpdateEdits with the same index
@@ -584,6 +711,15 @@ pub enum DiffEdit {
     },
     #[serde(rename_all = "camelCase")]
     Remove { index: u64, count: u64 },
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct MultiElementInsert {
+    /// the list index at which to insert the first value
+    pub index: u64,
+    /// the unique ID of the first inserted element
+    pub elem_id: ElementId,
+    pub values: ScalarValues,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
