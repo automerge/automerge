@@ -37,7 +37,6 @@ pub enum Primitive {
     Int(i64),
     Uint(u64),
     F64(f64),
-    F32(f32),
     Counter(i64),
     Timestamp(i64),
     Boolean(bool),
@@ -77,7 +76,6 @@ impl From<&Primitive> for amp::ScalarValue {
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
             Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
             Primitive::F64(f) => amp::ScalarValue::F64(*f),
-            Primitive::F32(f) => amp::ScalarValue::F32(*f),
             Primitive::Counter(i) => amp::ScalarValue::Counter(*i),
             Primitive::Timestamp(i) => amp::ScalarValue::Timestamp(*i),
             Primitive::Boolean(b) => amp::ScalarValue::Boolean(*b),
@@ -191,10 +189,6 @@ impl Value {
             Value::Primitive(v) => match v {
                 Primitive::F64(n) => serde_json::Value::Number(
                     serde_json::Number::from_f64(*n).unwrap_or_else(|| serde_json::Number::from(0)),
-                ),
-                Primitive::F32(n) => serde_json::Value::Number(
-                    serde_json::Number::from_f64(f64::from(*n))
-                        .unwrap_or_else(|| serde_json::Number::from(0)),
                 ),
                 Primitive::Uint(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
                 Primitive::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),

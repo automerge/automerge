@@ -400,15 +400,14 @@ impl StateTreeValue {
         match diff {
             amp::Diff::Value(v) => {
                 let value = match v {
-                    amp::ScalarValue::Bytes(b) => Primitive::Bytes(b),
-                    amp::ScalarValue::Str(s) => Primitive::Str(s),
-                    amp::ScalarValue::Int(i) => Primitive::Int(i),
-                    amp::ScalarValue::Uint(u) => Primitive::Uint(u),
-                    amp::ScalarValue::F64(f) => Primitive::F64(f),
-                    amp::ScalarValue::F32(f) => Primitive::F32(f),
-                    amp::ScalarValue::Counter(i) => Primitive::Counter(i),
-                    amp::ScalarValue::Timestamp(i) => Primitive::Timestamp(i),
-                    amp::ScalarValue::Boolean(b) => Primitive::Boolean(b),
+                    amp::ScalarValue::Bytes(b) => Primitive::Bytes(b.clone()),
+                    amp::ScalarValue::Str(s) => Primitive::Str(s.clone()),
+                    amp::ScalarValue::Int(i) => Primitive::Int(*i),
+                    amp::ScalarValue::Uint(u) => Primitive::Uint(*u),
+                    amp::ScalarValue::F64(f) => Primitive::F64(*f),
+                    amp::ScalarValue::Counter(i) => Primitive::Counter(*i),
+                    amp::ScalarValue::Timestamp(i) => Primitive::Timestamp(*i),
+                    amp::ScalarValue::Boolean(b) => Primitive::Boolean(*b),
                     amp::ScalarValue::Null => Primitive::Null,
                     amp::ScalarValue::Cursor(..) => {
                         unreachable!("value diff contained a cursor")

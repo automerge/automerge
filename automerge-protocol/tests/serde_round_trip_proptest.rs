@@ -20,7 +20,6 @@ fn arb_scalar_value() -> impl Strategy<Value = amp::ScalarValue> {
         //any::<i64>().prop_map(|i| amp::ScalarValue::Uint(i as u64)),
         any::<u64>().prop_map(amp::ScalarValue::Uint),
         any::<f64>().prop_map(amp::ScalarValue::F64),
-        any::<f32>().prop_map(amp::ScalarValue::F32),
         any::<i64>().prop_map(amp::ScalarValue::Counter),
         any::<i64>().prop_map(amp::ScalarValue::Timestamp),
         any::<bool>().prop_map(amp::ScalarValue::Boolean),

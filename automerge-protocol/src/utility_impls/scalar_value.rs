@@ -45,7 +45,6 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Str(s) => write!(f, "\"{}\"", s),
             ScalarValue::Int(i) => write!(f, "{}", i),
             ScalarValue::Uint(i) => write!(f, "{}", i),
-            ScalarValue::F32(n) => write!(f, "{:.32}", n),
             ScalarValue::F64(n) => write!(f, "{:.324}", n),
             ScalarValue::Counter(c) => write!(f, "Counter: {}", c),
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),

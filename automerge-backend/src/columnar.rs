@@ -450,11 +450,7 @@ impl<'a> Iterator for ValueIterator<'a> {
             }
             v if v % 16 == VALUE_TYPE_IEEE754 => {
                 let len = v >> 4;
-                if len == 4 {
-                    // confirm only 4 bytes read
-                    let num: f32 = self.val_raw.read().ok()?;
-                    Some(amp::ScalarValue::F32(num))
-                } else if len == 8 {
+                if len == 8 {
                     // confirm only 8 bytes read
                     let num = self.val_raw.read().ok()?;
                     Some(amp::ScalarValue::F64(num))
@@ -605,10 +601,6 @@ impl ValEncoder {
             amp::ScalarValue::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
-            }
-            amp::ScalarValue::F32(n) => {
-                let len = (*n).encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
             }
             amp::ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();

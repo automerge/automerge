@@ -233,7 +233,6 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
                         Some(ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::F32(n)) => Ok(OpType::Inc(n as i64)),
                         Some(ScalarValue::Counter(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Bytes(s)) => {
@@ -312,24 +311,6 @@ mod tests {
                 }),
                 expected: Ok(Op {
                     action: OpType::Set(ScalarValue::Int(-123)),
-                    obj: ObjectId::Root,
-                    key: "somekey".into(),
-                    insert: false,
-                    pred: Vec::new(),
-                }),
-            },
-            Scenario {
-                name: "Set with F32",
-                json: serde_json::json!({
-                    "action": "set",
-                    "obj": "_root",
-                    "key": "somekey",
-                    "value": -123,
-                    "datatype": "float32",
-                    "pred": []
-                }),
-                expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::F32(-123.0)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,

@@ -971,7 +971,6 @@ fn prim_from_op_action(action: &amp::OpType) -> Option<amp::ScalarValue> {
             amp::ScalarValue::Int(_) => Some(v.clone()),
             amp::ScalarValue::Uint(_) => Some(v.clone()),
             amp::ScalarValue::F64(_) => Some(v.clone()),
-            amp::ScalarValue::F32(_) => Some(v.clone()),
             amp::ScalarValue::Counter(_) => None,
             amp::ScalarValue::Timestamp(_) => None,
             amp::ScalarValue::Cursor(_) => None,
