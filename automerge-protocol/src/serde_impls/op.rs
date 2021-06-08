@@ -1,13 +1,14 @@
-use std::num::NonZeroU32;
-
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use std::num::NonZeroU32;
 
 use super::read_field;
-use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SortedVec};
+use crate::{
+    DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, ScalarValues, SortedVec
+};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -20,24 +21,13 @@ impl Serialize for Op {
             fields += 1
         }
 
-        #[derive(Debug)]
-        enum SingleOrVec<'a, T> {
-            Single(&'a T),
-            Vec(&'a Vec<T>),
-        }
-
-        let datatype_and_values = if let OpType::Set(value) = &self.action {
-            Some((value.as_numerical_datatype(), SingleOrVec::Single(value)))
-        } else if let OpType::MultiSet(values) = &self.action {
-            Some((values[0].as_numerical_datatype(), SingleOrVec::Vec(values)))
-        } else {
-            None
+        let numerical_datatype = match &self.action {
+            OpType::Set(value) => value.as_numerical_datatype(),
+            OpType::MultiSet(values) => values.as_numerical_datatype(),
+            _ => None,
         };
 
-        if datatype_and_values
-            .as_ref()
-            .map_or(false, |(dt, _)| dt.is_some())
-        {
+        if numerical_datatype.is_some() {
             fields += 2
         } else if !matches!(&self.action, OpType::Make(..)) {
             fields += 1
@@ -57,20 +47,15 @@ impl Serialize for Op {
         if self.insert {
             op.serialize_field("insert", &self.insert)?;
         }
-        if let Some((Some(datatype), value_or_values)) = datatype_and_values {
-            match value_or_values {
-                SingleOrVec::Single(x) => op.serialize_field("value", &x)?,
-                SingleOrVec::Vec(xs) => op.serialize_field("values", &xs)?,
-            };
+        if let Some(datatype) = numerical_datatype {
             op.serialize_field("datatype", &datatype)?;
-        } else {
-            match &self.action {
-                OpType::Inc(n) => op.serialize_field("value", &n)?,
-                OpType::Set(value) => op.serialize_field("value", &value)?,
-                OpType::MultiSet(values) => op.serialize_field("values", &values)?,
-                OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
-                OpType::Make(..) => {}
-            }
+        }
+        match &self.action {
+            OpType::Inc(n) => op.serialize_field("value", &n)?,
+            OpType::Set(value) => op.serialize_field("value", &value)?,
+            OpType::MultiSet(values) => op.serialize_field("values", &values.vec)?,
+            OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
+            OpType::Make(..) => {}
         }
         op.serialize_field("pred", &self.pred)?;
         op.end()
@@ -201,6 +186,8 @@ impl<'de> Deserialize<'de> for Op {
                     ),
                     RawOpType::Set => {
                         if let Some(values) = values {
+                            let values =
+                                ScalarValues::from_values_and_datatype::<V>(values, datatype)?;
                             OpType::MultiSet(values)
                         } else {
                             let value = if let Some(datatype) = datatype {
@@ -269,7 +256,7 @@ impl<'de> Deserialize<'de> for Op {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
+    use std::{convert::TryInto, str::FromStr};
 
     use super::*;
 
@@ -288,6 +275,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
+                    "datatype": "uint",
                     "value": 123,
                     "pred": []
                 }),
@@ -561,7 +549,11 @@ mod tests {
                     "values": ["one", "two"],
                 }),
                 expected: Ok(Op {
-                    action: OpType::MultiSet(vec!["one".into(), "two".into()]),
+                    action: OpType::MultiSet({
+                        let one = ScalarValue::Str("one".into());
+                        let two = ScalarValue::Str("two".into());
+                        vec![one, two].try_into().unwrap()
+                    }),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -718,7 +710,11 @@ mod tests {
                 pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()].into(),
             },
             Op {
-                action: OpType::MultiSet(vec!["one".into(), "two".into()]),
+                action: OpType::MultiSet({
+                    let one = ScalarValue::Str("one".into());
+                    let two = ScalarValue::Str("two".into());
+                    vec![one, two].try_into().unwrap()
+                }),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                     .unwrap()
