@@ -13,6 +13,7 @@ hex = "^0.4.2"
 uuid = { version = "^0.8.2", features=["v4"] }
 thiserror = "1.0.16"
 serde = { version = "^1.0", features=["derive"] }
+strum = { version = "0.21.0", features=["derive"]}
 arbitrary = { version = "1", features = ["derive"], optional = true }
 smol_str = { version = "0.1.17", features = ["serde"] }
 
