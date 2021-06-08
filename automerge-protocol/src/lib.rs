@@ -221,8 +221,6 @@ pub enum DataType {
     Uint,
     #[serde(rename = "int")]
     Int,
-    #[serde(rename = "float32")]
-    F32,
     #[serde(rename = "float64")]
     F64,
     #[serde(rename = "undefined")]
@@ -244,7 +242,6 @@ pub enum ScalarValue {
     Int(i64),
     Uint(u64),
     F64(f64),
-    F32(f32),
     Counter(i64),
     Timestamp(i64),
     Cursor(OpId),
@@ -319,14 +316,6 @@ impl ScalarValue {
                     datatype,
                 },
             )?)),
-            (DataType::F32, v) => Ok(ScalarValue::F32(v.to_f32().ok_or(
-                error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "an f32".to_string(),
-                    unexpected: v.to_string(),
-                    datatype,
-                },
-            )?)),
             (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
                 error::InvalidScalarValue {
                     raw_value: self.clone(),
@@ -349,7 +338,6 @@ impl ScalarValue {
             ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
             ScalarValue::Int(..) => Some(DataType::Int),
             ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F32(..) => Some(DataType::F32),
             ScalarValue::F64(..) => Some(DataType::F64),
             _ => None,
         }
@@ -360,7 +348,6 @@ impl ScalarValue {
         match self {
             ScalarValue::Int(n) => Some(*n),
             ScalarValue::Uint(n) => Some(*n as i64),
-            ScalarValue::F32(n) => Some(*n as i64),
             ScalarValue::F64(n) => Some(*n as i64),
             ScalarValue::Counter(n) => Some(*n),
             ScalarValue::Timestamp(n) => Some(*n),
@@ -372,22 +359,9 @@ impl ScalarValue {
         match self {
             ScalarValue::Int(n) => Some(*n as u64),
             ScalarValue::Uint(n) => Some(*n),
-            ScalarValue::F32(n) => Some(*n as u64),
             ScalarValue::F64(n) => Some(*n as u64),
             ScalarValue::Counter(n) => Some(*n as u64),
             ScalarValue::Timestamp(n) => Some(*n as u64),
-            _ => None,
-        }
-    }
-
-    pub fn to_f32(&self) -> Option<f32> {
-        match self {
-            ScalarValue::Int(n) => Some(*n as f32),
-            ScalarValue::Uint(n) => Some(*n as f32),
-            ScalarValue::F32(n) => Some(*n),
-            ScalarValue::F64(n) => Some(*n as f32),
-            ScalarValue::Counter(n) => Some(*n as f32),
-            ScalarValue::Timestamp(n) => Some(*n as f32),
             _ => None,
         }
     }
@@ -396,7 +370,6 @@ impl ScalarValue {
         match self {
             ScalarValue::Int(n) => Some(*n as f64),
             ScalarValue::Uint(n) => Some(*n as f64),
-            ScalarValue::F32(n) => Some(*n as f64),
             ScalarValue::F64(n) => Some(*n),
             ScalarValue::Counter(n) => Some(*n as f64),
             ScalarValue::Timestamp(n) => Some(*n as f64),
@@ -410,7 +383,6 @@ impl ScalarValue {
             ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
             ScalarValue::Int(..) => Some(DataType::Int),
             ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F32(..) => Some(DataType::F32),
             ScalarValue::F64(..) => Some(DataType::F64),
             ScalarValue::Cursor(..) => Some(DataType::Cursor),
             _ => None,

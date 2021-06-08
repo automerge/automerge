@@ -77,13 +77,6 @@ impl Serialize for Diff {
                     op.serialize_field("datatype", "uint")?;
                     op.end()
                 }
-                ScalarValue::F32(_) => {
-                    let mut op = serializer.serialize_struct("Value", 3)?;
-                    op.serialize_field("value", &val)?;
-                    op.serialize_field("type", "value")?;
-                    op.serialize_field("datatype", "float32")?;
-                    op.end()
-                }
                 ScalarValue::F64(_) => {
                     let mut op = serializer.serialize_struct("Value", 3)?;
                     op.serialize_field("value", &val)?;
