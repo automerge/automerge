@@ -2,6 +2,9 @@ use std::{collections::HashMap, convert::TryInto};
 
 use amp::{ElementId, MapType};
 use automerge_protocol as amp;
+use automerge_protocol::RootDiff;
+use diffable_sequence::DiffableSequence;
+use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 
@@ -9,10 +12,11 @@ mod diffable_sequence;
 mod multivalue;
 mod resolved_path;
 
-use diffable_sequence::DiffableSequence;
-use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
 pub(crate) use resolved_path::SetOrInsertPayload;
 pub use resolved_path::{ResolvedPath, ResolvedPathMut};
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct CheckedRootDiff(RootDiff);
 
 /// Represents the result of running a local operation (i.e one that happens within the frontend
 /// before any interaction with a backend).
@@ -44,7 +48,7 @@ impl StateTree {
         }
     }
 
-    pub fn check_diff(&self, diff: &amp::RootDiff) -> Result<(), error::InvalidPatch> {
+    pub fn check_diff(&self, diff: amp::RootDiff) -> Result<CheckedRootDiff, error::InvalidPatch> {
         for (prop, prop_diff) in &diff.props {
             let mut diff_iter = prop_diff.iter();
             match diff_iter.next() {
@@ -66,11 +70,11 @@ impl StateTree {
                 }
             }
         }
-        Ok(())
+        Ok(CheckedRootDiff(diff))
     }
 
-    pub fn apply_diff(&mut self, diff: amp::RootDiff) {
-        for (prop, prop_diff) in diff.props {
+    pub fn apply_diff(&mut self, diff: CheckedRootDiff) {
+        for (prop, prop_diff) in diff.0.props {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
                 None => {

@@ -119,9 +119,9 @@ impl FrontendState {
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
-                reconciled_root_state.check_diff(&patch.diffs)?;
+                let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
 
-                reconciled_root_state.apply_diff(patch.diffs);
+                reconciled_root_state.apply_diff(checked_diff);
                 if new_in_flight_requests.is_empty() {
                     if *seen_non_local_patch {
                         *optimistically_updated_root_state = reconciled_root_state.clone();
@@ -147,11 +147,11 @@ impl FrontendState {
                 max_op,
                 deps_of_last_received_patch,
             } => {
-                reconciled_root_state.check_diff(&patch.diffs)?;
+                let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
 
-                reconciled_root_state.apply_diff(patch.diffs.clone());
+                reconciled_root_state.apply_diff(checked_diff.clone());
                 // quicker and cheaper to apply the diff again than to clone the large root state
-                reconciled_root_state_copy_for_rollback.apply_diff(patch.diffs);
+                reconciled_root_state_copy_for_rollback.apply_diff(checked_diff);
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
