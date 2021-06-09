@@ -57,7 +57,7 @@ impl ObjState {
         self.props.get(key).iter().flat_map(|i| i.iter()).collect()
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(level = "debug", skip(self))]
     pub fn index_of(&self, id: OpId) -> Option<usize> {
         let mut prev_id = id.into();
         let mut index = None;
