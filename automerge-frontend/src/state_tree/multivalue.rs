@@ -249,19 +249,23 @@ impl MultiValue {
                 return Some(ResolvedPathMut::new_primitive(self));
             }
 
-            if let StateTreeValue::Composite(composite) = self.winning_value.1.clone() {
+            if let StateTreeValue::Composite(composite) = &self.winning_value.1 {
                 match composite {
                     StateTreeComposite::Map(map) => {
-                        return Some(ResolvedPathMut::new_map(self, map.object_id))
+                        let oid = map.object_id.clone();
+                        return Some(ResolvedPathMut::new_map(self, oid));
                     }
                     StateTreeComposite::Table(table) => {
-                        return Some(ResolvedPathMut::new_table(self, table.object_id))
+                        let oid = table.object_id.clone();
+                        return Some(ResolvedPathMut::new_table(self, oid));
                     }
                     StateTreeComposite::Text(text) => {
-                        return Some(ResolvedPathMut::new_text(self, text.object_id))
+                        let oid = text.object_id.clone();
+                        return Some(ResolvedPathMut::new_text(self, oid));
                     }
                     StateTreeComposite::List(list) => {
-                        return Some(ResolvedPathMut::new_list(self, list.object_id))
+                        let oid = list.object_id.clone();
+                        return Some(ResolvedPathMut::new_list(self, oid));
                     }
                 }
             }
