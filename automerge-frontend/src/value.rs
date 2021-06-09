@@ -139,6 +139,12 @@ where
     }
 }
 
+impl AsRef<Value> for Value {
+    fn as_ref(&self) -> &Value {
+        self
+    }
+}
+
 impl Value {
     pub fn from_json(json: &serde_json::Value) -> Value {
         match json {
