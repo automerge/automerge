@@ -1,7 +1,12 @@
-use std::{borrow::Borrow, collections::HashMap};
+use std::{
+    borrow::{Borrow, Cow},
+    collections::HashMap,
+};
 
 use automerge_protocol as amp;
 use serde::Serialize;
+
+use crate::path::PathElement;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Conflicts(HashMap<amp::OpId, Value>);
@@ -204,6 +209,35 @@ impl Value {
             },
         }
     }
+
+    pub fn get_value(&self, path: crate::Path) -> Option<Cow<'_, Self>> {
+        let mut path_elements = path.elements();
+        path_elements.reverse();
+        self.get_value_rev_path(path_elements)
+    }
+
+    fn get_value_rev_path(&self, mut rev_path: Vec<PathElement>) -> Option<Cow<'_, Self>> {
+        if let Some(element) = rev_path.pop() {
+            match (self, element) {
+                (Value::Map(m, _), PathElement::Key(k)) => {
+                    m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
+                }
+                (Value::Sequence(s), PathElement::Index(i)) => s
+                    .get(i as usize)
+                    .and_then(|v| v.get_value_rev_path(rev_path)),
+                (Value::Text(t), PathElement::Index(i)) => t
+                    .get(i as usize)
+                    .map(|v| Cow::Owned(Value::Primitive(Primitive::Str(v.clone())))),
+                (Value::Map(_, _), PathElement::Index(_))
+                | (Value::Sequence(_), PathElement::Key(_))
+                | (Value::Text(_), PathElement::Key(_))
+                | (Value::Primitive(_), PathElement::Key(_))
+                | (Value::Primitive(_), PathElement::Index(_)) => None,
+            }
+        } else {
+            Some(Cow::Borrowed(self))
+        }
+    }
 }
 
 /// Convert a value to a vector of op requests that will create said value.
@@ -322,5 +356,46 @@ pub(crate) fn value_to_op_requests(
             }];
             (ops, start_op + 1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use amp::MapType;
+    use maplit::hashmap;
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::Path;
+
+    #[test]
+    fn get_value() {
+        let v = Value::Map(
+            hashmap! {
+                "hello".to_owned() => Value::Primitive(Primitive::Str("world".to_owned())),
+                "again".to_owned() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
+            },
+            MapType::Map,
+        );
+
+        assert_eq!(v.get_value(Path::root()), Some(Cow::Borrowed(&v)));
+        assert_eq!(
+            v.get_value(Path::root().key("hello")),
+            Some(Cow::Borrowed(&Value::Primitive(Primitive::Str(
+                "world".to_owned()
+            ))))
+        );
+        assert_eq!(v.get_value(Path::root().index(0)), None);
+        assert_eq!(
+            v.get_value(Path::root().key("again")),
+            Some(Cow::Borrowed(&Value::Sequence(vec![Value::Primitive(
+                Primitive::Int(2)
+            )])))
+        );
+        assert_eq!(
+            v.get_value(Path::root().key("again").index(0)),
+            Some(Cow::Borrowed(&Value::Primitive(Primitive::Int(2))))
+        );
+        assert_eq!(v.get_value(Path::root().key("again").index(1)), None);
     }
 }
