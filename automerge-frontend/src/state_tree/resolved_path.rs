@@ -1005,6 +1005,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                         std::mem::replace(&mut preds, vec![]),
                         std::mem::replace(&mut cur_prim_vals, vec![]),
                     );
+                    cur_multiset_start = None;
                     new_ops.push(v);
                 }
                 (Some(typ), Some(scalar)) => match typ == discriminant(&scalar) {
