@@ -322,7 +322,7 @@ impl<'a> ResolvedRootMut<'a> {
         )
     }
 
-    pub(crate) fn rollback(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
         match value {
             Some(old) => {
                 self.root.root_props.insert(key, old);
@@ -331,6 +331,10 @@ impl<'a> ResolvedRootMut<'a> {
                 self.root.root_props.remove(&key);
             }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        self.root.root_props.insert(key, value);
     }
 }
 
@@ -362,6 +366,14 @@ impl<'a> ResolvedCounterMut<'a> {
                 pred: vec![self.multivalue.default_opid()],
             }],
         }
+    }
+
+    pub(crate) fn rollback_increment(&mut self, by: i64) {
+        let counter = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Leaf(Primitive::Counter(c)) => c,
+            _ => unreachable!(),
+        };
+        *counter -= by;
     }
 }
 
@@ -419,7 +431,7 @@ impl<'a> ResolvedMapMut<'a> {
         )
     }
 
-    pub(crate) fn rollback(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
@@ -432,6 +444,14 @@ impl<'a> ResolvedMapMut<'a> {
                 state_tree_map.props.remove(&key);
             }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.insert(key, value);
     }
 }
 
@@ -489,9 +509,9 @@ impl<'a> ResolvedTableMut<'a> {
         )
     }
 
-    pub(crate) fn rollback(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
-            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
         };
         match value {
@@ -502,6 +522,14 @@ impl<'a> ResolvedTableMut<'a> {
                 state_tree_map.props.remove(&key);
             }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.insert(key, value);
     }
 }
 
@@ -644,6 +672,36 @@ impl<'a> ResolvedTextMut<'a> {
                 }],
             },
         ))
+    }
+
+    pub(crate) fn rollback_set(&mut self, index: usize, value: MultiGrapheme) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .set(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_delete(&mut self, index: usize, value: MultiGrapheme) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .insert(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_insert(&mut self, index: usize) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .remove(index)
+            .expect("Failed to rollback insert");
     }
 }
 
@@ -798,6 +856,36 @@ impl<'a> ResolvedListMut<'a> {
                 }],
             },
         ))
+    }
+
+    pub(crate) fn rollback_set(&mut self, index: usize, value: MultiValue) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .set(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_delete(&mut self, index: usize, value: MultiValue) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .insert(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_insert(&mut self, index: usize) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .remove(index)
+            .expect("Failed to rollback insert");
     }
 }
 
