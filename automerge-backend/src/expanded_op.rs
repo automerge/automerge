@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::convert::TryInto;
 
 use amp::{ActorId, ElementId, Key, OpId, SortedVec};
 use automerge_protocol as amp;
@@ -138,8 +137,9 @@ impl<'a> ExpandedOpIterator<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto;
     use std::num::NonZeroU32;
-    use amp::{ObjectId, Op, OpType, ScalarValue, ScalarValues, SortedVec};
+    use amp::{ObjectId, Op, OpType, ScalarValues, SortedVec};
     use pretty_assertions::assert_eq;
 
     use super::*;

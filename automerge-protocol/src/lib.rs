@@ -308,6 +308,10 @@ impl ScalarValues {
         self.vec.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
+
     pub fn iter(&self) -> Iter<ScalarValue> {
         self.vec.iter()
     }
@@ -333,13 +337,13 @@ impl TryFrom<Vec<ScalarValue>> for ScalarValues {
     fn try_from(old_values: Vec<ScalarValue>) -> Result<Self, Self::Error> {
         let mut values: Option<ScalarValues> = None;
         for value in old_values.into_iter() {
-            match values {
-                Some(ref mut xs) => match xs.append(value) {
-                    Some(new_kind) => Err(InvalidScalarValues::UnexpectedKind(xs.kind, new_kind))?,
-                    None => (),
-                },
-                None => values = Some(value.into()),
-            };
+            if let Some(ref mut xs) = values {
+                if let Some(new_kind) = xs.append(value) {
+                    return Err(InvalidScalarValues::UnexpectedKind(xs.kind, new_kind));
+                }
+            } else {
+                values = Some(value.into());
+            }
         }
         values.ok_or(InvalidScalarValues::Empty)
     }
