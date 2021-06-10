@@ -500,14 +500,15 @@ fn apply_multi_insert_updates_inside_lists() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        edits: vec![amp::DiffEdit::MultiElementInsert {
+                        obj_type: amp::SequenceType::List,
+                        edits: vec![amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
                             values: vec![
-                                "greenfinch".into(),
-                                "bullfinch".into(),
-                            ]
-                        }],
+                                amp::ScalarValue::Str("greenfinch".into()),
+                                amp::ScalarValue::Str("bullfinch".into()),
+                            ].try_into().unwrap()
+                        })],
                     })
                 }
             },
