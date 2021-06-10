@@ -1,4 +1,4 @@
-use std::mem;
+use std::{convert::TryInto, mem};
 
 use automerge_protocol as amp;
 
@@ -36,18 +36,28 @@ impl Edits {
                     && std::mem::discriminant(value) == std::mem::discriminant(&next_value)
                     && op_id.delta(&next_op_id, 1) =>
                 {
-                    *last = amp::DiffEdit::MultiElementInsert {
+                    let values: amp::ScalarValues = vec![
+                        // We need ownership of `value`. We can either `clone` it
+                        // or swap it with a junk value using `mem::replace`
+                        mem::replace(value, amp::ScalarValue::Null),
+                        next_value,
+                    ]
+                    .try_into()
+                    // `unwrap` is safe: we check for same types above
+                    // in the if stmt
+                    .unwrap();
+                    *last = amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                         index: *index,
                         elem_id: elem_id.clone(),
-                        values: vec![mem::replace(value, amp::ScalarValue::Null), next_value],
-                    };
+                        values,
+                    });
                 }
                 (
-                    amp::DiffEdit::MultiElementInsert {
+                    amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                         index,
                         elem_id,
                         values,
-                    },
+                    }),
                     amp::DiffEdit::SingleElementInsert {
                         index: next_index,
                         elem_id: next_elem_id,
@@ -57,13 +67,16 @@ impl Edits {
                 ) if *index + (values.len() as u64) == next_index
                     && next_elem_id.as_opid() == Some(&op_id)
                     // Ensure the values have a common type
-                    && std::mem::discriminant(&values[0]) == std::mem::discriminant(&value)
+                    // `unwrap` is safe: `values` always has a length of at this point
+                    && std::mem::discriminant(values.get(0).unwrap()) == std::mem::discriminant(&value)
                     && elem_id
                         .as_opid()
                         .unwrap()
                         .delta(&op_id, values.len() as u64) =>
                 {
-                    values.push(value);
+                    // `unwrap_none` is safe: we check if they are the same type above
+                    //values.append(value).unwrap_none();
+                    values.append(value);
                 }
                 (
                     amp::DiffEdit::Remove { index, count },

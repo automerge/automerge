@@ -1,4 +1,8 @@
-use std::{convert::TryInto, num::NonZeroU32};
+use std::{
+    convert::TryInto,
+    mem::{discriminant, Discriminant},
+    num::NonZeroU32,
+};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -612,7 +616,8 @@ impl<'a> ResolvedTextMut<'a> {
         state_tree_text.insert_many(index.try_into().unwrap(), values)?;
         let action = match chars.len() {
             1 => amp::OpType::Set(chars[0].clone()),
-            _ => amp::OpType::MultiSet(chars),
+            // unwrap is safe here b/c we know all the `ScalarValue`s are of type `Str`
+            _ => amp::OpType::MultiSet(chars.try_into().unwrap()),
         };
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
@@ -928,36 +933,115 @@ pub struct ResolvedPrimitiveMut<'a> {
 }
 
 fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
+    // nothing to condense
     if ops.len() == 1 {
         return ops;
     }
-    let mut op_iter = ops.iter();
-    let mut prim_vals = Vec::with_capacity(ops.len());
-    let mut preds = Vec::new();
+    let mut op_iter = ops.into_iter();
     if let Some(v) = op_iter.next() {
-        if let Some(prim) = prim_from_op_action(&v.action) {
-            prim_vals.push(prim);
-            preds.extend(v.pred.iter());
-        }
-        for o in op_iter {
-            if let Some(prim) = prim_from_op_action(&o.action) {
-                prim_vals.push(prim);
-                preds.extend(o.pred.iter());
+        let mut new_ops = vec![];
+        let mut key = v.key.clone();
+        let mut obj = v.obj.clone();
+        let mut insert_if_not_condensed = false;
+        let mut op_iter = std::iter::once(v).chain(op_iter);
+        let mut cur_multiset_start: Option<Discriminant<amp::ScalarValue>> = None;
+        let mut cur_prim_vals = vec![];
+        let mut preds = vec![];
+
+        let finish_multiset = |not_condensed_insert: bool,
+                               key: &amp::Key,
+                               obj: &amp::ObjectId,
+                               new_ops: &mut Vec<amp::Op>,
+                               preds: Vec<amp::OpId>,
+                               mut vals: Vec<amp::ScalarValue>| {
+            if vals.len() > 1 {
+                new_ops.push(amp::Op {
+                    // safety: `unwrap` is safe b/c we ensure `cur_prim_vals`
+                    // only contains `ScalarValue`s of a single type
+                    action: amp::OpType::MultiSet(vals.try_into().unwrap()),
+                    obj: obj.clone(),
+                    key: key.clone(),
+                    pred: preds,
+                    insert: true,
+                })
+            } else if let Some(scalar) = vals.pop() {
+                new_ops.push(amp::Op {
+                    action: amp::OpType::Set(scalar),
+                    obj: obj.clone(),
+                    key: key.clone(),
+                    pred: preds,
+                    insert: not_condensed_insert,
+                })
+            }
+        };
+
+        while let Some(v) = op_iter.next() {
+            match (cur_multiset_start, prim_from_op_action(&v.action)) {
+                (None, None) => {
+                    // there is no multiset in progress & the current op
+                    // could not be part of a multiset
+                    new_ops.push(v);
+                }
+                (None, Some(scalar)) => {
+                    // there is no multiset in progress, but the current op
+                    // could start a multiset
+                    cur_multiset_start = Some(discriminant(&scalar));
+                    cur_prim_vals.push(scalar);
+                    preds.extend(v.pred);
+                    key = v.key.clone();
+                    obj = v.obj.clone();
+                    insert_if_not_condensed = v.insert;
+                }
+                (Some(_), None) => {
+                    // there is a multiset in progress but the current op
+                    // could not be part of it
+                    finish_multiset(
+                        insert_if_not_condensed,
+                        &key,
+                        &obj,
+                        &mut new_ops,
+                        std::mem::replace(&mut preds, vec![]),
+                        std::mem::replace(&mut cur_prim_vals, vec![]),
+                    );
+                    new_ops.push(v);
+                }
+                (Some(typ), Some(scalar)) => match typ == discriminant(&scalar) {
+                    // there is a multiset in progress & the current op could be part of it
+                    true => cur_prim_vals.push(scalar),
+                    false => {
+                        cur_multiset_start = Some(discriminant(&scalar));
+                        // there is a multiset in progress and the current op cannot be part of it
+                        // but it could be part of a new multiset
+                        // finish the current multiset & start a new one with the current op
+                        finish_multiset(
+                            insert_if_not_condensed,
+                            &key,
+                            &obj,
+                            &mut new_ops,
+                            std::mem::replace(&mut preds, vec![]),
+                            std::mem::replace(&mut cur_prim_vals, vec![scalar]),
+                        );
+                        preds.extend(v.pred);
+                        key = v.key.clone();
+                        obj = v.obj.clone();
+                        insert_if_not_condensed = v.insert;
+                    }
+                },
             }
         }
-        if prim_vals.len() == ops.len() {
-            vec![amp::Op {
-                action: amp::OpType::MultiSet(prim_vals),
-                pred: preds.into_iter().cloned().collect(),
-                insert: true,
-                key: v.key.clone(),
-                obj: v.obj.clone(),
-            }]
-        } else {
-            ops
-        }
+        finish_multiset(
+            insert_if_not_condensed,
+            &key,
+            &obj,
+            &mut new_ops,
+            preds,
+            cur_prim_vals,
+        );
+        new_ops
     } else {
-        ops
+        // this is the case where `ops` is empty
+        // using if/else avoids an `unwrap`
+        vec![]
     }
 }
 

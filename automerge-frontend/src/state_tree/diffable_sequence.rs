@@ -232,11 +232,11 @@ where
                     }
                     size += 1;
                 }
-                amp::DiffEdit::MultiElementInsert {
+                amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                     elem_id,
                     values,
                     index,
-                } => {
+                }) => {
                     let index = *index as usize;
                     if index > size {
                         return Err(InvalidPatch::InvalidIndex {
