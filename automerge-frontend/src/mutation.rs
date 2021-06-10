@@ -3,14 +3,16 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     error::InvalidChangeRequest,
-    state_tree::{LocalOperationResult, ResolvedPathMut, SetOrInsertPayload, StateTree},
+    state_tree::{
+        LocalOperationResult, ResolvedPath, ResolvedPathMut, SetOrInsertPayload, StateTree,
+    },
     value::{Cursor, Primitive, Value},
     Path, PathElement,
 };
 
 pub trait MutableDocument {
-    fn value_at_path(&mut self, path: &Path) -> Option<Value>;
-    fn cursor_to_path(&mut self, path: &Path) -> Option<Cursor>;
+    fn value_at_path(&self, path: &Path) -> Option<Value>;
+    fn cursor_to_path(&self, path: &Path) -> Option<Cursor>;
     fn add_change(&mut self, change: LocalChange) -> Result<(), InvalidChangeRequest>;
 }
 
@@ -199,16 +201,16 @@ impl<'a> MutationTracker<'a> {
 }
 
 impl<'a> MutableDocument for MutationTracker<'a> {
-    fn value_at_path(&mut self, path: &Path) -> Option<Value> {
-        self.state.resolve_path_mut(path).map(|r| r.default_value())
+    fn value_at_path(&self, path: &Path) -> Option<Value> {
+        self.state.resolve_path(path).map(|r| r.default_value())
     }
 
-    fn cursor_to_path(&mut self, path: &Path) -> Option<Cursor> {
+    fn cursor_to_path(&self, path: &Path) -> Option<Cursor> {
         if let Some(PathElement::Index(i)) = path.name() {
-            if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+            if let Some(parent) = self.state.resolve_path(&path.parent()) {
                 match parent {
-                    ResolvedPathMut::List(list_target) => list_target.get_cursor(*i).ok(),
-                    ResolvedPathMut::Text(text_target) => text_target.get_cursor(*i).ok(),
+                    ResolvedPath::List(list_target) => list_target.get_cursor(*i).ok(),
+                    ResolvedPath::Text(text_target) => text_target.get_cursor(*i).ok(),
                     _ => None,
                 }
             } else {
@@ -223,8 +225,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
         match change.operation {
             LocalOperation::Set(value) => {
                 //TODO double resolving is ugly here
-                if let Some(ResolvedPathMut::Counter(_)) = self.state.resolve_path_mut(&change.path)
-                {
+                if let Some(ResolvedPath::Counter(_)) = self.state.resolve_path(&change.path) {
                     return Err(InvalidChangeRequest::CannotOverwriteCounter { path: change.path });
                 };
                 if let Some(name) = change.path.name() {

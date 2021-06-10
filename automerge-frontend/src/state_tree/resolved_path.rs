@@ -597,7 +597,9 @@ impl<'a> ResolvedTextMut<'a> {
             }],
         })
     }
+}
 
+impl<'a> ResolvedText<'a> {
     pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
         let state_tree_text = match self.multivalue.default_statetree_value() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
@@ -747,7 +749,9 @@ impl<'a> ResolvedListMut<'a> {
             }],
         })
     }
+}
 
+impl<'a> ResolvedList<'a> {
     pub(crate) fn get_cursor(&self, index: u32) -> Result<Cursor, error::MissingIndexError> {
         let state_tree_list = match self.multivalue.default_statetree_value() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
