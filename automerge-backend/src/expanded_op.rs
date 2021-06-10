@@ -229,7 +229,7 @@ mod tests {
                     insert: true
                 },
                 ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("hi ".to_owned())),
+                    action: InternalOpType::Set(ScalarValue::Str("hi".to_owned())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
                     pred: Cow::Owned(vec![]),
