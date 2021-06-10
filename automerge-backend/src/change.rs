@@ -1123,7 +1123,7 @@ mod tests {
             actor_id: actor1.clone(),
             deps: vec![],
             operations: vec![amp::Op {
-                action: amp::OpType::MultiSet(vec![1.into(), 2.into()]),
+                action: amp::OpType::MultiSet(vec![amp::ScalarValue::Uint(1), amp::ScalarValue::Uint(2)].try_into().unwrap()),
                 key: amp::ElementId::Head.into(),
                 obj: actor1.op_id_at(10).into(),
                 insert: true,
@@ -1201,7 +1201,7 @@ mod tests {
                     pred: Vec::new(),
                 },
                 amp::Op {
-                    action: amp::OpType::MultiSet(vec![1.into(), 2.into(), 3.into()]),
+                    action: amp::OpType::MultiSet(vec![amp::ScalarValue::Uint(1), amp::ScalarValue::Uint(2), amp::ScalarValue::Uint(3)].try_into().unwrap()),
                     obj: actor.op_id_at(2).into(),
                     key: amp::ElementId::Head.into(),
                     insert: true,

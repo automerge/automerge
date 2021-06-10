@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -83,7 +85,14 @@ fn test_multiple_primitive_inserts() {
                 },
                 amp::Op {
                     key: amp::ElementId::Head.into(),
-                    action: amp::OpType::MultiSet(vec!["one".into(), "two".into(),]),
+                    action: amp::OpType::MultiSet(
+                        vec![
+                            amp::ScalarValue::Str("one".into()),
+                            amp::ScalarValue::Str("two".into())
+                        ]
+                        .try_into()
+                        .unwrap()
+                    ),
                     obj: frontend.actor_id.op_id_at(1).into(),
                     pred: Vec::new(),
                     insert: true,

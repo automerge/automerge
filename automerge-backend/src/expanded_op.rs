@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::convert::TryInto;
 
 use amp::{ActorId, ElementId, Key, OpId};
 use automerge_protocol as amp;
@@ -139,7 +140,7 @@ impl<'a> ExpandedOpIterator<'a> {
 mod tests {
     use std::num::NonZeroU32;
 
-    use amp::{ObjectId, Op, OpType, ScalarValue};
+    use amp::{ObjectId, Op, OpType, ScalarValue, ScalarValues};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -148,11 +149,7 @@ mod tests {
     fn expand_multi_set() {
         let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
         let ops = [Op {
-            action: OpType::MultiSet(vec![
-                ScalarValue::Uint(1),
-                ScalarValue::Uint(2),
-                ScalarValue::Uint(3),
-            ]),
+            action: OpType::MultiSet(vec![ScalarValue::Uint(1), ScalarValue::Uint(2), ScalarValue::Uint(3)].try_into().unwrap()),
             obj: ObjectId::Id(OpId(1, actor.clone())),
             key: Key::Seq(ElementId::Head),
             pred: vec![],
@@ -192,21 +189,14 @@ mod tests {
         let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
         let ops = [
             Op {
-                action: OpType::MultiSet(vec![
-                    ScalarValue::Uint(1),
-                    ScalarValue::Uint(2),
-                    ScalarValue::Uint(3),
-                ]),
+                action: OpType::MultiSet(vec![ScalarValue::Uint(1), ScalarValue::Uint(2), ScalarValue::Uint(3)].try_into().unwrap()),
                 obj: ObjectId::Id(OpId(1, actor.clone())),
                 key: Key::Seq(ElementId::Head),
                 pred: vec![],
                 insert: true,
             },
             Op {
-                action: OpType::MultiSet(vec![
-                    ScalarValue::Str("hi ".to_owned()),
-                    ScalarValue::Str("world".to_owned()),
-                ]),
+                action: OpType::MultiSet(vec![ScalarValue::Str("hi".into()), ScalarValue::Str("world".into())].try_into().unwrap()),
                 obj: ObjectId::Id(OpId(1, actor.clone())),
                 key: Key::Seq(ElementId::Id(OpId(4, actor.clone()))),
                 pred: vec![],
