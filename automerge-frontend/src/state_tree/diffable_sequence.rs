@@ -372,19 +372,23 @@ where
         self.underlying.len()
     }
 
-    pub(super) fn update(&mut self, index: usize, value: T) {
-        let elem_id = if let Some(existing) = self.underlying.get(index) {
-            existing.opid.clone()
-        } else {
-            value.default_opid()
-        };
-        self.underlying.set(
-            index,
-            SequenceElement {
-                opid: elem_id,
-                value: SequenceValue::Original(value),
-            },
-        );
+    pub(super) fn set(&mut self, index: usize, value: T) -> T {
+        let elem_id = self
+            .underlying
+            .get(index)
+            .map(|existing| existing.opid.clone())
+            .expect("Failed to get existing index in set");
+        self.underlying
+            .set(
+                index,
+                SequenceElement {
+                    opid: elem_id,
+                    value: SequenceValue::Original(value),
+                },
+            )
+            .value
+            .get()
+            .clone()
     }
 
     pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
