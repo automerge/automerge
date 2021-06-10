@@ -202,15 +202,23 @@ impl FrontendState {
                 seen_non_local_patch: _,
                 max_op,
             } => {
-                let mut state_clone = optimistically_updated_root_state.clone();
-                let mut mutation_tracker =
-                    mutation::MutationTracker::new(&mut state_clone, *max_op, actor.clone());
+                let mut mutation_tracker = mutation::MutationTracker::new(
+                    optimistically_updated_root_state,
+                    *max_op,
+                    actor.clone(),
+                );
                 // TODO: somehow handle rolling back the optimistic state if the closure gives an
                 // error
-                let result = change_closure(&mut mutation_tracker)?;
+                let result = match change_closure(&mut mutation_tracker) {
+                    Ok(result) => result,
+                    Err(e) => {
+                        // reset the original state
+                        mutation_tracker.rollback();
+                        return Err(e);
+                    }
+                };
                 *max_op = mutation_tracker.max_op;
                 let ops = mutation_tracker.ops();
-                *optimistically_updated_root_state = state_clone;
                 if !ops.is_empty() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
@@ -236,10 +244,8 @@ impl FrontendState {
                 let result = match change_closure(&mut mutation_tracker) {
                     Ok(result) => result,
                     Err(e) => {
-                        // we are in the reconciled state so reconciled_root_state should be the
-                        // same as optimistically_updated_root_state. Since we now have an error we
-                        // can use the former to revert back to the earlier situation.
-                        *reconciled_root_state_copy_for_rollback = reconciled_root_state.clone();
+                        // reset the original state
+                        mutation_tracker.rollback();
                         return Err(e);
                     }
                 };
