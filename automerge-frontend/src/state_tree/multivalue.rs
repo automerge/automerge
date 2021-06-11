@@ -61,7 +61,7 @@ impl MultiValue {
             req.key,
             req.value,
             req.insert,
-            req.pred.into_iter().collect(),
+            req.pred,
         )
     }
 
