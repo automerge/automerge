@@ -47,6 +47,7 @@ mod op_set;
 mod ordered_set;
 mod patches;
 mod sync;
+mod mark2;
 
 pub use backend::Backend;
 pub use change::Change;

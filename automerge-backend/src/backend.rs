@@ -16,12 +16,15 @@ use crate::{
     op_set::OpSet,
     patches::{generate_from_scratch_diff, IncrementalPatch},
     Change, EventHandler,
+    mark2,
 };
+
 
 #[derive(Debug, Default, Clone)]
 pub struct Backend {
     queue: Vec<Change>,
     op_set: OpSet,
+    op_set2: mark2::OpSet,
     states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
     history: Vec<Change>,

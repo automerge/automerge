@@ -217,11 +217,11 @@ pub struct Change {
     pub seq: u64,
     pub start_op: u64,
     pub time: i64,
-    message: Range<usize>,
-    actors: Vec<amp::ActorId>,
+    pub message: Range<usize>,
+    pub actors: Vec<amp::ActorId>,
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
-    extra_bytes: Range<usize>,
+    pub extra_bytes: Range<usize>,
 }
 
 impl Change {
@@ -244,7 +244,7 @@ impl Change {
         self.start_op + (len as u64) - 1
     }
 
-    fn message(&self) -> Option<String> {
+    pub fn message(&self) -> Option<String> {
         let m = &self.bytes.uncompressed()[self.message.clone()];
         if m.is_empty() {
             None
