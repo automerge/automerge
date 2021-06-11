@@ -395,11 +395,16 @@ impl MultiGrapheme {
         &self,
         opid: &amp::OpId,
         diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
     ) -> Result<(), error::InvalidPatch> {
-        self.check_diff_iter(&mut std::iter::once((opid, diff)))
+        self.check_diff_iter(&mut std::iter::once((opid, diff)), parent_object_id)
     }
 
-    pub(super) fn check_diff_iter<'a, 'b, I>(&self, diff: &mut I) -> Result<(), error::InvalidPatch>
+    pub(super) fn check_diff_iter<'a, 'b, I>(
+        &self,
+        diff: &mut I,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), error::InvalidPatch>
     where
         I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
     {
@@ -408,16 +413,14 @@ impl MultiGrapheme {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                            // object_id: subdiff.parent_object_id.clone(),
-                            object_id: amp::ObjectId::Root,
+                            object_id: parent_object_id.clone(),
                             diff: subdiff.clone(),
                         });
                     }
                 }
                 _ => {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        // object_id: subdiff.parent_object_id.clone(),
-                        object_id: amp::ObjectId::Root,
+                        object_id: parent_object_id.clone(),
                         diff: subdiff.clone(),
                     });
                 }

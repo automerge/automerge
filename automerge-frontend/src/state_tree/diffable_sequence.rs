@@ -15,7 +15,12 @@ pub(super) trait DiffableValue: Sized + Default {
 
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Self;
 
-    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
+    fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch>;
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff);
 
@@ -43,8 +48,13 @@ impl DiffableValue for MultiGrapheme {
         MultiGrapheme::new_from_diff(opid, diff)
     }
 
-    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
-        MultiGrapheme::check_diff(self, opid, diff)
+    fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch> {
+        MultiGrapheme::check_diff(self, opid, diff, parent_object_id)
     }
 
     fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
@@ -85,7 +95,12 @@ impl DiffableValue for MultiValue {
         MultiValue::new_from_diff(opid, diff)
     }
 
-    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        _parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch> {
         self.check_diff(opid, diff)
     }
 
@@ -462,7 +477,7 @@ where
         match self {
             SequenceValue::Original(v) | SequenceValue::New(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
-                    existing.check_diff(opid, diff)?;
+                    existing.check_diff(opid, diff, parent_object_id)?;
                 } else {
                     T::check_construct(opid, diff, parent_object_id)?
                 };
@@ -473,13 +488,13 @@ where
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
-                    update.check_diff(opid, diff)?;
+                    update.check_diff(opid, diff, parent_object_id)?;
                 } else if let Some(initial) =
                     updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
                 {
-                    initial.check_diff(opid, diff)?;
+                    initial.check_diff(opid, diff, parent_object_id)?;
                 } else if let Some(original) = original.only_for_opid(opid.clone()) {
-                    original.check_diff(opid, diff)?;
+                    original.check_diff(opid, diff, parent_object_id)?;
                 } else {
                     T::check_construct(opid, diff, parent_object_id)?
                 };
