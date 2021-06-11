@@ -7,7 +7,11 @@ use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
 pub(super) trait DiffableValue: Sized + Default {
-    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch>;
+    fn check_construct(
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch>;
 
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Self;
 
@@ -27,8 +31,12 @@ pub(super) trait DiffableValue: Sized + Default {
 }
 
 impl DiffableValue for MultiGrapheme {
-    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
-        MultiGrapheme::check_new_from_diff(opid, diff)
+    fn check_construct(
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch> {
+        MultiGrapheme::check_new_from_diff(opid, diff, parent_object_id)
     }
 
     fn construct(opid: amp::OpId, diff: amp::Diff) -> Self {
@@ -65,7 +73,11 @@ impl DiffableValue for MultiGrapheme {
 }
 
 impl DiffableValue for MultiValue {
-    fn check_construct(opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn check_construct(
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        _parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch> {
         MultiValue::check_new_from_diff(opid, diff)
     }
 
@@ -196,7 +208,7 @@ where
                     op_id,
                     value,
                 } => {
-                    T::check_construct(op_id, value)?;
+                    T::check_construct(op_id, value, object_id)?;
                     if *index as usize > size {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
@@ -219,7 +231,7 @@ where
                     }
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        T::check_construct(&opid, &amp::Diff::Value(value.clone()))?;
+                        T::check_construct(&opid, &amp::Diff::Value(value.clone()), object_id)?;
                     }
                     size += values.len();
                 }
@@ -441,13 +453,18 @@ where
         }
     }
 
-    fn check_diff(&self, opid: &amp::OpId, diff: &amp::Diff) -> Result<(), InvalidPatch> {
+    fn check_diff(
+        &self,
+        opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), InvalidPatch> {
         match self {
             SequenceValue::Original(v) | SequenceValue::New(v) => {
                 if let Some(existing) = v.only_for_opid(opid.clone()) {
                     existing.check_diff(opid, diff)?;
                 } else {
-                    T::check_construct(opid, diff)?
+                    T::check_construct(opid, diff, parent_object_id)?
                 };
                 Ok(())
             }
@@ -464,7 +481,7 @@ where
                 } else if let Some(original) = original.only_for_opid(opid.clone()) {
                     original.check_diff(opid, diff)?;
                 } else {
-                    T::check_construct(opid, diff)?
+                    T::check_construct(opid, diff, parent_object_id)?
                 };
                 Ok(())
             }

@@ -357,13 +357,13 @@ impl MultiGrapheme {
     pub(super) fn check_new_from_diff(
         _opid: &amp::OpId,
         diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
     ) -> Result<(), error::InvalidPatch> {
         match diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        // object_id: diff.parent_object_id.clone(),
-                        object_id: amp::ObjectId::Root,
+                        object_id: parent_object_id.clone(),
                         diff: diff.clone(),
                     });
                 } else {
@@ -372,8 +372,7 @@ impl MultiGrapheme {
             }
             _ => {
                 return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                    // object_id: diff.parent_object_id.clone(),
-                    object_id: amp::ObjectId::Root,
+                    object_id: parent_object_id.clone(),
                     diff: diff.clone(),
                 });
             }
