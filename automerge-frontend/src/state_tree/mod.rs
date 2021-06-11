@@ -98,6 +98,7 @@ impl StateTree {
     }
 
     fn update_cursors(&mut self) {
+        // TODO: get cursors working again
         // for cursor in self.cursors.iter_mut() {
         //     if let Some(referred_object) = self.objects.get(&cursor.referred_object_id) {
         //         match referred_object {
@@ -648,6 +649,7 @@ impl StateTreeTable {
                             MultiValue::check_new_from_diff(opid, diff)?;
                         }
                     };
+                    // TODO: get this working
                     // self.props
                     //     .get(prop)
                     //     .unwrap()
