@@ -3,6 +3,7 @@ use std::{convert::TryInto, num::NonZeroU32};
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
+use pretty_assertions::assert_eq;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[test]

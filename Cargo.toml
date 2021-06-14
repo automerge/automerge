@@ -10,7 +10,8 @@ members = [
     "automerge-cli",
     "automerge-protocol",
     "fuzz",
+    "perf",
 ]
 
 [profile.release]
-lto = true
+debug = true

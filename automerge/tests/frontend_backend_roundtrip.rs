@@ -224,7 +224,6 @@ fn test_frontend_doesnt_wait_for_empty_changes() {
             assert_eq!(doc.get_value(&Path::root()).unwrap(), *val);
 
             let (patch, _) = backend.apply_local_change(c).unwrap();
-            dbg!(&patch);
             doc.apply_patch(patch).unwrap();
 
             assert_eq!(doc.get_value(&Path::root()).unwrap(), *val);

@@ -1,54 +1,55 @@
-use std::{cmp::Ordering, iter::Iterator};
+use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
-    CursorState, Cursors, DiffApplicationResult, DiffToApply, DiffableSequence, StateTreeChange,
-    StateTreeComposite, StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+    CursorState, Cursors, DiffableSequence, ResolvedPath, ResolvedPathMut, StateTreeComposite,
+    StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
     error,
+    path::PathElement,
     value::{Primitive, Value},
 };
 
-pub(crate) struct NewValueRequest<'a, 'b, 'c, 'd> {
+pub(crate) struct NewValueRequest<'a, 'b, 'c> {
     pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
     pub(crate) key: &'b amp::Key,
-    pub(crate) value: &'c Value,
-    pub(crate) parent_obj: &'d amp::ObjectId,
+    pub(crate) value: Value,
+    pub(crate) parent_obj: &'c amp::ObjectId,
     pub(crate) insert: bool,
     pub(crate) pred: Vec<amp::OpId>,
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct MultiValue {
     winning_value: (amp::OpId, StateTreeValue),
-    conflicts: im_rc::HashMap<amp::OpId, StateTreeValue>,
+    conflicts: HashMap<amp::OpId, StateTreeValue>,
 }
 
 impl MultiValue {
-    pub fn new_from_diff<K>(
-        opid: amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        StateTreeValue::new_from_diff(diff)?.try_map(move |value| {
-            Ok(MultiValue {
-                winning_value: (opid, value),
-                conflicts: im_rc::HashMap::new(),
-            })
-        })
+    pub fn check_new_from_diff(
+        _opid: &amp::OpId,
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        StateTreeValue::check_new_from_diff(diff)
+    }
+
+    pub fn new_from_diff(opid: amp::OpId, diff: amp::Diff) -> MultiValue {
+        let value = StateTreeValue::new_from_diff(diff);
+        MultiValue {
+            winning_value: (opid, value),
+            conflicts: HashMap::new(),
+        }
     }
 
     pub fn from_statetree_value(statetree_val: StateTreeValue, opid: amp::OpId) -> MultiValue {
         MultiValue {
             winning_value: (opid, statetree_val),
-            conflicts: im_rc::HashMap::new(),
+            conflicts: HashMap::new(),
         }
     }
 
@@ -60,7 +61,7 @@ impl MultiValue {
             req.key,
             req.value,
             req.insert,
-            req.pred.into_iter().collect(),
+            req.pred,
         )
     }
 
@@ -69,7 +70,7 @@ impl MultiValue {
         start_op: u64,
         parent_id: amp::ObjectId,
         key: &amp::Key,
-        value: &Value,
+        value: Value,
         insert: bool,
         pred: Vec<amp::OpId>,
     ) -> NewValue {
@@ -84,56 +85,98 @@ impl MultiValue {
         .create(value)
     }
 
-    pub(super) fn apply_diff<K>(
+    pub(super) fn check_diff(
         &self,
         opid: &amp::OpId,
-        subdiff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        self.apply_diff_iter(&mut std::iter::once((opid, subdiff)))
+        diff: &amp::Diff,
+    ) -> Result<(), error::InvalidPatch> {
+        self.check_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
-        diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiValue>, error::InvalidPatch>
+    pub(super) fn check_diff_iter<'a, 'b, I>(&self, diff: &mut I) -> Result<(), error::InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
     {
-        let mut changes = StateTreeChange::empty();
-        let mut updated = self.tree_values();
         for (opid, subdiff) in diff {
-            let u = if let Some(existing_value) = updated.get(opid) {
+            if let Some(existing_value) = self.get(opid) {
                 match existing_value {
-                    StateTreeValue::Leaf(_) => StateTreeValue::new_from_diff(subdiff),
-                    StateTreeValue::Link(obj_id) => subdiff
-                        .current_objects
-                        .get(obj_id)
-                        .unwrap_or_else(|| panic!("link to nonexistent object: {:?}", obj_id))
-                        .apply_diff(&subdiff)
-                        .map(|c| c.map(|c| StateTreeValue::Link(c.object_id()))),
+                    StateTreeValue::Leaf(_) => {
+                        StateTreeValue::check_new_from_diff(subdiff)?;
+                    }
+                    StateTreeValue::Composite(composite) => {
+                        composite.check_diff(subdiff)?;
+                    }
                 }
             } else {
-                StateTreeValue::new_from_diff(subdiff)
-            }?;
-            changes.update_with(u.change);
-            updated = updated.update(opid, &u.value)
+                StateTreeValue::check_new_from_diff(subdiff)?;
+            };
         }
-        Ok(DiffApplicationResult::pure(updated.result()).with_changes(changes))
+        Ok(())
     }
 
-    pub(super) fn default_statetree_value(&self) -> StateTreeValue {
-        self.winning_value.1.clone()
+    pub(super) fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
+        self.apply_diff_iter(&mut std::iter::once((opid, diff)))
     }
 
-    pub(super) fn default_value(
-        &self,
-        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> Value {
-        self.winning_value.1.realise_value(objects)
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I)
+    where
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
+    {
+        for (opid, subdiff) in diff {
+            if let Some(existing_value) = self.get_mut(&opid) {
+                match existing_value {
+                    StateTreeValue::Leaf(_) => {
+                        let value = StateTreeValue::new_from_diff(subdiff);
+                        self.update(&opid, value)
+                    }
+                    StateTreeValue::Composite(composite) => {
+                        composite.apply_diff(subdiff);
+                    }
+                }
+            } else {
+                let value = StateTreeValue::new_from_diff(subdiff);
+                self.update(&opid, value)
+            };
+        }
+    }
+
+    fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
+        if opid == &self.winning_value.0 {
+            Some(&self.winning_value.1)
+        } else {
+            self.conflicts.get(opid)
+        }
+    }
+
+    fn get_mut(&mut self, opid: &amp::OpId) -> Option<&mut StateTreeValue> {
+        if opid == &self.winning_value.0 {
+            Some(&mut self.winning_value.1)
+        } else {
+            self.conflicts.get_mut(opid)
+        }
+    }
+
+    fn update(&mut self, opid: &amp::OpId, value: StateTreeValue) {
+        if *opid >= self.winning_value.0 {
+            self.conflicts
+                .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+            self.winning_value.0 = opid.clone();
+            self.winning_value.1 = value;
+        } else {
+            self.conflicts.insert(opid.clone(), value);
+        }
+    }
+
+    pub(super) fn default_statetree_value(&self) -> &StateTreeValue {
+        &self.winning_value.1
+    }
+
+    pub(super) fn default_statetree_value_mut(&mut self) -> &mut StateTreeValue {
+        &mut self.winning_value.1
+    }
+
+    pub(super) fn default_value(&self) -> Value {
+        self.winning_value.1.realise_value()
     }
 
     pub(super) fn default_opid(&self) -> amp::OpId {
@@ -147,20 +190,89 @@ impl MultiValue {
         }
     }
 
-    fn tree_values(&self) -> MultiValueTreeValues {
-        MultiValueTreeValues {
-            current: self.clone(),
-        }
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
+        std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
+            .chain(self.conflicts.iter())
     }
 
-    pub(super) fn realise_values(
-        &self,
-        objects: &im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
-    ) -> std::collections::HashMap<amp::OpId, Value> {
-        self.tree_values()
-            .iter()
-            .map(|(opid, v)| (opid.clone(), v.realise_value(objects)))
+    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+        self.iter()
+            .map(|(opid, v)| (opid.clone(), v.realise_value()))
             .collect()
+    }
+
+    pub(crate) fn resolve_path(
+        &self,
+        path: Vec<PathElement>,
+        parent_object_id: amp::ObjectId,
+        key: amp::Key,
+    ) -> Option<ResolvedPath> {
+        if path.is_empty() {
+            if let StateTreeValue::Leaf(Primitive::Counter(_)) = self.winning_value.1 {
+                return Some(ResolvedPath::new_counter(parent_object_id, key, self));
+            } else if let StateTreeValue::Leaf(_) = self.winning_value.1 {
+                return Some(ResolvedPath::new_primitive(self));
+            }
+
+            if let StateTreeValue::Composite(composite) = &self.winning_value.1 {
+                match composite {
+                    StateTreeComposite::Map(map) => {
+                        return Some(ResolvedPath::new_map(self, map.object_id.clone()))
+                    }
+                    StateTreeComposite::Table(table) => {
+                        return Some(ResolvedPath::new_table(self, table.object_id.clone()))
+                    }
+                    StateTreeComposite::Text(text) => {
+                        return Some(ResolvedPath::new_text(self, text.object_id.clone()))
+                    }
+                    StateTreeComposite::List(list) => {
+                        return Some(ResolvedPath::new_list(self, list.object_id.clone()))
+                    }
+                }
+            }
+        } else if let StateTreeValue::Composite(ref composite) = self.winning_value.1 {
+            return composite.resolve_path(path);
+        }
+        None
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        path: Vec<PathElement>,
+        parent_object_id: amp::ObjectId,
+        key: amp::Key,
+    ) -> Option<ResolvedPathMut> {
+        if path.is_empty() {
+            if let StateTreeValue::Leaf(Primitive::Counter(_)) = self.winning_value.1 {
+                return Some(ResolvedPathMut::new_counter(parent_object_id, key, self));
+            } else if let StateTreeValue::Leaf(_) = self.winning_value.1 {
+                return Some(ResolvedPathMut::new_primitive(self));
+            }
+
+            if let StateTreeValue::Composite(composite) = &self.winning_value.1 {
+                match composite {
+                    StateTreeComposite::Map(map) => {
+                        let oid = map.object_id.clone();
+                        return Some(ResolvedPathMut::new_map(self, oid));
+                    }
+                    StateTreeComposite::Table(table) => {
+                        let oid = table.object_id.clone();
+                        return Some(ResolvedPathMut::new_table(self, oid));
+                    }
+                    StateTreeComposite::Text(text) => {
+                        let oid = text.object_id.clone();
+                        return Some(ResolvedPathMut::new_text(self, oid));
+                    }
+                    StateTreeComposite::List(list) => {
+                        let oid = list.object_id.clone();
+                        return Some(ResolvedPathMut::new_list(self, oid));
+                    }
+                }
+            }
+        } else if let StateTreeValue::Composite(ref mut composite) = self.winning_value.1 {
+            return composite.resolve_path_mut(path);
+        }
+        None
     }
 
     pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpId> {
@@ -171,22 +283,22 @@ impl MultiValue {
         self.opids().any(|o| o == opid)
     }
 
-    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiValue> {
-        if *opid == self.winning_value.0 {
+    pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiValue> {
+        if opid == self.winning_value.0 {
             Some(MultiValue {
                 winning_value: self.winning_value.clone(),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         } else {
-            self.conflicts.get(opid).map(|value| MultiValue {
+            self.conflicts.get(&opid).map(|value| MultiValue {
                 winning_value: (opid.clone(), value.clone()),
-                conflicts: im_rc::HashMap::new(),
+                conflicts: HashMap::new(),
             })
         }
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiValue) {
-        for (opid, value) in other.tree_values().iter() {
+        for (opid, value) in other.iter() {
             match opid.cmp(&self.winning_value.0) {
                 Ordering::Greater => {
                     let mut temp = (opid.clone(), value.clone());
@@ -202,52 +314,11 @@ impl MultiValue {
     }
 }
 
-#[derive(Clone)]
-struct MultiValueTreeValues {
-    current: MultiValue,
-}
-
-impl MultiValueTreeValues {
-    fn get(&self, opid: &amp::OpId) -> Option<&StateTreeValue> {
-        if opid == &self.current.winning_value.0 {
-            Some(&self.current.winning_value.1)
-        } else {
-            self.current.conflicts.get(opid)
-        }
-    }
-
-    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
-        std::iter::once((
-            &(self.current.winning_value).0,
-            &(self.current.winning_value.1),
-        ))
-        .chain(self.current.conflicts.iter())
-    }
-
-    fn update(mut self, key: &amp::OpId, value: &StateTreeValue) -> MultiValueTreeValues {
-        if *key >= self.current.winning_value.0 {
-            self.current
-                .conflicts
-                .insert(self.current.winning_value.0, self.current.winning_value.1);
-            self.current.winning_value.0 = key.clone();
-            self.current.winning_value.1 = value.clone();
-        } else {
-            self.current.conflicts.insert(key.clone(), value.clone());
-        }
-        self
-    }
-
-    fn result(self) -> MultiValue {
-        self.current
-    }
-}
-
 #[derive(Debug)]
 pub(super) struct NewValue {
     value: StateTreeValue,
     opid: amp::OpId,
     ops: Vec<amp::Op>,
-    new_objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite>,
     new_cursors: Cursors,
     max_op: u64,
 }
@@ -261,24 +332,17 @@ impl NewValue {
         self.max_op
     }
 
-    fn multivalue(&self) -> MultiValue {
+    pub(super) fn multivalue(&self) -> MultiValue {
         MultiValue::from_statetree_value(self.value.clone(), self.opid.clone())
-    }
-
-    pub(super) fn diff_app_result(&self) -> DiffApplicationResult<MultiValue> {
-        DiffApplicationResult::pure(self.multivalue()).with_changes(
-            StateTreeChange::from_updates(self.new_objects.clone())
-                .with_cursors(self.new_cursors.clone()),
-        )
     }
 }
 
 /// This struct exists to constrain the values of a text type to just containing
 /// sequences of grapheme clusters
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub(super) struct MultiGrapheme {
     winning_value: (amp::OpId, String),
-    conflicts: Option<im_rc::HashMap<amp::OpId, String>>,
+    conflicts: HashMap<amp::OpId, String>,
 }
 
 impl MultiGrapheme {
@@ -286,83 +350,118 @@ impl MultiGrapheme {
         debug_assert_eq!(s.graphemes(true).count(), 1);
         MultiGrapheme {
             winning_value: (opid, s),
-            conflicts: None,
+            conflicts: HashMap::new(),
         }
     }
 
-    pub(super) fn new_from_diff<K>(
-        opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        let winning_value = match diff.diff {
+    pub(super) fn check_new_from_diff(
+        _opid: &amp::OpId,
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), error::InvalidPatch> {
+        match diff {
             amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                 if s.graphemes(true).count() != 1 {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        object_id: diff.parent_object_id.clone(),
-                        diff: diff.diff.clone(),
+                        object_id: parent_object_id.clone(),
+                        diff: diff.clone(),
                     });
                 } else {
-                    s.clone()
+                    s
                 }
             }
             _ => {
                 return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                    object_id: diff.parent_object_id.clone(),
-                    diff: diff.diff.clone(),
+                    object_id: parent_object_id.clone(),
+                    diff: diff.clone(),
                 });
             }
         };
-        Ok(MultiGrapheme {
-            winning_value: (opid.clone(), winning_value),
-            conflicts: None,
-        })
+        Ok(())
     }
 
-    pub(super) fn apply_diff<K>(
+    pub(super) fn new_from_diff(opid: amp::OpId, diff: amp::Diff) -> MultiGrapheme {
+        let winning_value = match diff {
+            amp::Diff::Value(amp::ScalarValue::Str(s)) => s,
+            _ => unreachable!("insert non text in text object"),
+        };
+        MultiGrapheme {
+            winning_value: (opid, winning_value),
+            conflicts: HashMap::new(),
+        }
+    }
+
+    pub(super) fn check_diff(
         &self,
         opid: &amp::OpId,
-        diff: DiffToApply<K, &amp::Diff>,
-    ) -> Result<MultiGrapheme, error::InvalidPatch>
-    where
-        K: Into<amp::Key>,
-    {
-        self.apply_diff_iter(&mut std::iter::once((opid, diff)))
-            .map(|d| d.value)
+        diff: &amp::Diff,
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), error::InvalidPatch> {
+        self.check_diff_iter(&mut std::iter::once((opid, diff)), parent_object_id)
     }
 
-    pub(super) fn apply_diff_iter<'a, 'b, 'c, 'd, I, K: 'c>(
-        &'a self,
+    pub(super) fn check_diff_iter<'a, 'b, I>(
+        &self,
         diff: &mut I,
-    ) -> Result<DiffApplicationResult<MultiGrapheme>, error::InvalidPatch>
+        parent_object_id: &amp::ObjectId,
+    ) -> Result<(), error::InvalidPatch>
     where
-        K: Into<amp::Key>,
-        I: Iterator<Item = (&'b amp::OpId, DiffToApply<'c, K, &'d amp::Diff>)>,
+        I: Iterator<Item = (&'a amp::OpId, &'b amp::Diff)>,
     {
-        let mut updated = self.values();
-        for (opid, subdiff) in diff {
-            match subdiff.diff {
+        for (_opid, subdiff) in diff {
+            match subdiff {
                 amp::Diff::Value(amp::ScalarValue::Str(s)) => {
                     if s.graphemes(true).count() != 1 {
                         return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                            object_id: subdiff.parent_object_id.clone(),
-                            diff: subdiff.diff.clone(),
+                            object_id: parent_object_id.clone(),
+                            diff: subdiff.clone(),
                         });
-                    } else {
-                        updated = updated.update(opid, s.clone());
                     }
                 }
                 _ => {
                     return Err(error::InvalidPatch::InsertNonTextInTextObject {
-                        object_id: subdiff.parent_object_id.clone(),
-                        diff: subdiff.diff.clone(),
-                    })
+                        object_id: parent_object_id.clone(),
+                        diff: subdiff.clone(),
+                    });
                 }
             }
         }
-        Ok(DiffApplicationResult::pure(updated.result()))
+        Ok(())
+    }
+
+    pub(super) fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
+        self.apply_diff_iter(&mut std::iter::once((opid, diff)))
+    }
+
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I)
+    where
+        I: Iterator<Item = (amp::OpId, amp::Diff)>,
+    {
+        for (opid, subdiff) in diff {
+            match subdiff {
+                amp::Diff::Value(amp::ScalarValue::Str(s)) => {
+                    self.update(&opid, s);
+                }
+                _ => unreachable!("insert non text in text object"),
+            }
+        }
+    }
+
+    fn update(&mut self, key: &amp::OpId, value: String) {
+        match key.cmp(&self.winning_value.0) {
+            Ordering::Equal => {
+                self.winning_value.1 = value;
+            }
+            Ordering::Greater => {
+                self.conflicts
+                    .insert(self.winning_value.0.clone(), self.winning_value.1.clone());
+                self.winning_value.0 = key.clone();
+                self.winning_value.1 = value;
+            }
+            Ordering::Less => {
+                self.conflicts.insert(key.clone(), value);
+            }
+        }
     }
 
     pub(super) fn default_grapheme(&self) -> String {
@@ -373,113 +472,62 @@ impl MultiGrapheme {
         &self.winning_value.0
     }
 
-    fn values(&self) -> MultiGraphemeValues {
-        MultiGraphemeValues {
-            current: self.clone(),
-        }
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &String)> {
+        std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
+            .chain(self.conflicts.iter())
+    }
+
+    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+        self.iter()
+            .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
+            .collect()
     }
 
     pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
-        if let Some(ref conflicts) = self.conflicts {
-            let mut opids = std::iter::once(&self.winning_value.0).chain(conflicts.keys());
-            opids.any(|o| o == opid)
-        } else {
-            self.winning_value.0 == *opid
-        }
+        self.winning_value.0 == *opid || self.conflicts.keys().any(|o| o == opid)
     }
 
-    pub(super) fn only_for_opid(&self, opid: &amp::OpId) -> Option<MultiGrapheme> {
-        if *opid == self.winning_value.0 {
+    pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiGrapheme> {
+        if opid == self.winning_value.0 {
             Some(MultiGrapheme {
                 winning_value: self.winning_value.clone(),
-                conflicts: None,
+                conflicts: HashMap::new(),
             })
         } else {
-            self.conflicts
-                .as_ref()
-                .and_then(|c| c.get(opid))
-                .map(|value| MultiGrapheme {
-                    winning_value: (opid.clone(), value.clone()),
-                    conflicts: None,
-                })
+            self.conflicts.get(&opid).map(|value| MultiGrapheme {
+                winning_value: (opid, value.clone()),
+                conflicts: HashMap::new(),
+            })
         }
     }
 
     pub(super) fn add_values_from(&mut self, other: MultiGrapheme) {
-        let mut new_conflicts = match (&self.conflicts, &other.conflicts) {
-            (Some(sc), Some(oc)) => sc.clone().union(oc.clone()),
-            (Some(sc), None) => sc.clone(),
-            (None, Some(oc)) => oc.clone(),
-            (None, None) => im_rc::HashMap::new(),
-        };
-        if other.winning_value.0 < self.winning_value.0 {
-            new_conflicts.insert(other.winning_value.0, other.winning_value.1);
-            self.conflicts = Some(new_conflicts);
-        } else {
-            for (opid, value) in other.values().iter() {
-                if opid > &self.winning_value.0 {
-                    let mut temp = (opid.clone(), value.to_string());
+        for (opid, value) in other.iter() {
+            match opid.cmp(&self.winning_value.0) {
+                Ordering::Greater => {
+                    let mut temp = (opid.clone(), value.to_owned());
                     std::mem::swap(&mut temp, &mut self.winning_value);
-                    new_conflicts.insert(temp.0, temp.1);
-                } else {
-                    new_conflicts.insert(opid.clone(), value.to_string());
+                    self.conflicts.insert(temp.0, temp.1);
                 }
+                Ordering::Less => {
+                    self.conflicts.insert(opid.clone(), value.to_owned());
+                }
+                Ordering::Equal => {}
             }
-            self.conflicts = Some(new_conflicts)
         }
     }
-}
 
-struct MultiGraphemeValues {
-    current: MultiGrapheme,
-}
-
-impl MultiGraphemeValues {
-    fn update(mut self, key: &amp::OpId, value: String) -> MultiGraphemeValues {
-        let mut conflicts = self.current.conflicts.unwrap_or_else(im_rc::HashMap::new);
-        if *key >= self.current.winning_value.0 {
-            conflicts.insert(self.current.winning_value.0, self.current.winning_value.1);
-            self.current.winning_value.0 = key.clone();
-            self.current.winning_value.1 = value;
+    pub(crate) fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if path.is_empty() {
+            Some(ResolvedPath::new_character(self))
         } else {
-            conflicts.insert(key.clone(), value);
-        }
-        self.current.conflicts = Some(conflicts);
-        self
-    }
-
-    fn result(self) -> MultiGrapheme {
-        self.current
-    }
-
-    fn iter(&self) -> MultiGraphemeValuesIter {
-        MultiGraphemeValuesIter {
-            winner: &self.current.winning_value,
-            conflicts_iter: self.current.conflicts.as_ref().map(|c| c.iter()),
-            winner_iterated: false,
+            None
         }
     }
-}
 
-struct MultiGraphemeValuesIter<'a> {
-    winner: &'a (amp::OpId, String),
-    conflicts_iter: Option<im_rc::hashmap::Iter<'a, amp::OpId, String>>,
-    winner_iterated: bool,
-}
-
-impl<'a> std::iter::Iterator for MultiGraphemeValuesIter<'a> {
-    type Item = (&'a amp::OpId, &'a str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.winner_iterated {
-            self.winner_iterated = true;
-            Some((&self.winner.0, self.winner.1.as_str()))
-        } else if let Some(citer) = self.conflicts_iter.as_mut() {
-            if let Some((o, c)) = citer.next() {
-                Some((o, c.as_str()))
-            } else {
-                None
-            }
+    pub(crate) fn resolve_path_mut(&mut self, path: Vec<PathElement>) -> Option<ResolvedPathMut> {
+        if path.is_empty() {
+            Some(ResolvedPathMut::new_character(self))
         } else {
             None
         }
@@ -505,7 +553,7 @@ where
     O: Into<amp::ObjectId>,
     O: Clone,
 {
-    fn create(self, value: &Value) -> NewValue {
+    fn create(self, value: Value) -> NewValue {
         match value {
             Value::Map(props, map_type) => self.new_map_or_table(props, map_type),
             Value::Sequence(values) => self.new_list(values),
@@ -516,37 +564,35 @@ where
 
     fn new_map_or_table(
         self,
-        props: &std::collections::HashMap<String, Value>,
-        map_type: &amp::MapType,
+        props: std::collections::HashMap<String, Value>,
+        map_type: amp::MapType,
     ) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::Map(*map_type)),
+            action: amp::OpType::Make(amp::ObjType::Map(map_type)),
             obj: self.parent_obj.clone().into(),
             key: self.key.clone(),
             insert: self.insert,
-            pred: self.pred.clone(),
+            pred: self.pred,
         };
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut objects: im_rc::HashMap<amp::ObjectId, StateTreeComposite> = im_rc::HashMap::new();
-        let mut result_props: im_rc::HashMap<String, MultiValue> = im_rc::HashMap::new();
-        for (prop, value) in props.iter() {
+        let mut result_props: HashMap<String, MultiValue> = HashMap::new();
+        for (prop, value) in props {
             let context = NewValueContext {
                 actor: self.actor,
                 parent_obj: &make_op_id,
                 start_op: current_max_op + 1,
-                key: &prop.into(),
+                key: &prop.clone().into(),
                 pred: Vec::new(),
                 insert: false,
             };
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
-            objects = next_value.new_objects.clone().union(objects.clone());
             ops.extend_from_slice(&next_value.ops[..]);
-            result_props = result_props.update(prop.clone(), next_value.multivalue())
+            result_props.insert(prop, next_value.multivalue());
         }
         let map = match map_type {
             amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
@@ -558,19 +604,17 @@ where
                 props: result_props,
             }),
         };
-        let value = StateTreeValue::Link(make_op_id.clone().into());
-        objects = objects.update(make_op_id.clone().into(), map);
+        let value = StateTreeValue::Composite(map);
         NewValue {
             value,
             opid: make_op_id,
             max_op: current_max_op,
             new_cursors: cursors,
-            new_objects: objects,
             ops,
         }
     }
 
-    fn new_list(self, values: &[Value]) -> NewValue {
+    fn new_list(self, values: Vec<Value>) -> NewValue {
         let make_list_opid = amp::OpId::new(self.start_op, self.actor);
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::list()),
@@ -582,10 +626,9 @@ where
         let mut ops = vec![make_op];
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut objects = im_rc::HashMap::new();
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
         let mut last_elemid = amp::ElementId::Head;
-        for value in values.iter() {
+        for value in values {
             let elem_opid = self.actor.op_id_at(current_max_op + 1);
             let context = NewValueContext {
                 start_op: current_max_op + 1,
@@ -599,7 +642,6 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             result_elems.push(next_value.multivalue());
-            objects = next_value.new_objects.union(objects.clone());
             cursors = next_value.new_cursors.union(cursors);
             ops.extend(next_value.ops);
         }
@@ -607,19 +649,17 @@ where
             object_id: make_list_opid.clone().into(),
             elements: DiffableSequence::new_from(result_elems),
         });
-        objects = objects.update(make_list_opid.clone().into(), list);
-        let value = StateTreeValue::Link(make_list_opid.clone().into());
+        let value = StateTreeValue::Composite(list);
         NewValue {
             value,
             opid: make_list_opid,
             max_op: current_max_op,
             new_cursors: cursors,
-            new_objects: objects,
             ops,
         }
     }
 
-    fn new_text(self, graphemes: &[String]) -> NewValue {
+    fn new_text(self, graphemes: Vec<String>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
         let mut ops: Vec<amp::Op> = vec![amp::Op {
             action: amp::OpType::Make(amp::ObjType::text()),
@@ -653,20 +693,19 @@ where
             object_id: make_text_opid.clone().into(),
             graphemes: seq,
         });
-        let value = StateTreeValue::Link(make_text_opid.clone().into());
+        let value = StateTreeValue::Composite(text);
         NewValue {
             value,
-            opid: make_text_opid.clone(),
+            opid: make_text_opid,
             ops,
-            new_objects: im_rc::hashmap! {make_text_opid.into() => text},
             new_cursors: Cursors::new(),
             max_op: current_max_op,
         }
     }
 
-    fn new_primitive(self, primitive: &Primitive) -> NewValue {
+    fn new_primitive(self, primitive: Primitive) -> NewValue {
         let new_cursors = match primitive {
-            Primitive::Cursor(c) => Cursors::new_from(CursorState {
+            Primitive::Cursor(ref c) => Cursors::new_from(CursorState {
                 index: c.index as usize,
                 referring_object_id: self.parent_obj.clone().into(),
                 referring_key: self.key.clone(),
@@ -675,7 +714,7 @@ where
             }),
             _ => Cursors::new(),
         };
-        let value = match primitive {
+        let value = match &primitive {
             Primitive::Bytes(b) => amp::ScalarValue::Bytes(b.clone()),
             Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
             Primitive::Int(i) => amp::ScalarValue::Int(*i),
@@ -690,7 +729,7 @@ where
         };
         let opid = self.actor.op_id_at(self.start_op);
         NewValue {
-            value: StateTreeValue::Leaf(primitive.clone()),
+            value: StateTreeValue::Leaf(primitive),
             opid,
             ops: vec![amp::Op {
                 action: amp::OpType::Set(value),
@@ -701,7 +740,6 @@ where
             }],
             max_op: self.start_op,
             new_cursors,
-            new_objects: im_rc::HashMap::new(),
         }
     }
 }
