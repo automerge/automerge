@@ -1,6 +1,4 @@
-use automerge::{
-    Backend, Frontend, InvalidChangeRequest, LocalChange, MapType, Path, Primitive, Value,
-};
+use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn small_change_backend() -> Backend {
@@ -115,17 +113,15 @@ fn medium_change_backend() -> Backend {
                 ),
                 (
                     "\u{1}".to_owned(),
-                    Value::Map(
+                    Value::Table(
                         vec![("".to_owned(), Value::Primitive(Primitive::F64(0.0)))]
                             .into_iter()
                             .collect(),
-                        MapType::Table,
                     ),
                 ),
             ]
             .into_iter()
             .collect(),
-            MapType::Map,
         ),
     )];
     let changes2 = vec![

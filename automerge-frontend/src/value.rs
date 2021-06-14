@@ -21,7 +21,8 @@ impl From<HashMap<amp::OpId, Value>> for Conflicts {
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Value {
-    Map(HashMap<String, Value>, amp::MapType),
+    Map(HashMap<String, Value>),
+    Table(HashMap<String, Value>),
     Sequence(Vec<Value>),
     /// Sequence of grapheme clusters
     Text(Vec<String>),
@@ -139,7 +140,6 @@ where
             h.into_iter()
                 .map(|(k, v)| (k.borrow().to_string(), v.into()))
                 .collect(),
-            amp::MapType::Map,
         )
     }
 }
@@ -158,7 +158,7 @@ impl Value {
                     .iter()
                     .map(|(k, v)| (k.clone(), Value::from_json(v)))
                     .collect();
-                Value::Map(result, amp::MapType::Map)
+                Value::Map(result)
             }
             serde_json::Value::Array(vs) => {
                 Value::Sequence(vs.iter().map(Value::from_json).collect())
@@ -174,7 +174,12 @@ impl Value {
 
     pub fn to_json(&self) -> serde_json::Value {
         match self {
-            Value::Map(map, _) => {
+            Value::Map(map) => {
+                let result: serde_json::map::Map<String, serde_json::Value> =
+                    map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
+                serde_json::Value::Object(result)
+            }
+            Value::Table(map) => {
                 let result: serde_json::map::Map<String, serde_json::Value> =
                     map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
                 serde_json::Value::Object(result)
@@ -219,7 +224,10 @@ impl Value {
     fn get_value_rev_path(&self, mut rev_path: Vec<PathElement>) -> Option<Cow<'_, Self>> {
         if let Some(element) = rev_path.pop() {
             match (self, element) {
-                (Value::Map(m, _), PathElement::Key(k)) => {
+                (Value::Map(m), PathElement::Key(k)) => {
+                    m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
+                }
+                (Value::Table(m), PathElement::Key(k)) => {
                     m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
                 }
                 (Value::Sequence(s), PathElement::Index(i)) => s
@@ -228,7 +236,8 @@ impl Value {
                 (Value::Text(t), PathElement::Index(i)) => t
                     .get(i as usize)
                     .map(|v| Cow::Owned(Value::Primitive(Primitive::Str(v.clone())))),
-                (Value::Map(_, _), PathElement::Index(_))
+                (Value::Map(_), PathElement::Index(_))
+                | (Value::Table(_), PathElement::Index(_))
                 | (Value::Sequence(_), PathElement::Key(_))
                 | (Value::Text(_), PathElement::Key(_))
                 | (Value::Primitive(_), PathElement::Key(_))
@@ -317,14 +326,35 @@ pub(crate) fn value_to_op_requests(
             ops.extend(insert_ops.into_iter());
             (ops, op_num)
         }
-        Value::Map(kvs, map_type) => {
-            let make_action = match map_type {
-                amp::MapType::Map => amp::OpType::Make(amp::ObjType::map()),
-                amp::MapType::Table => amp::OpType::Make(amp::ObjType::table()),
-            };
+        Value::Map(kvs) => {
             let make_op_id = amp::OpId::new(start_op, actor);
             let make_op = amp::Op {
-                action: make_action,
+                action: amp::OpType::Make(amp::ObjType::map()),
+                obj: parent_object,
+                key: key.clone(),
+                insert,
+                pred: Vec::new(),
+            };
+            let mut op_num = start_op + 1;
+            let mut result = vec![make_op];
+            for (key, v) in kvs.iter() {
+                let (child_requests, new_op_num) = value_to_op_requests(
+                    actor,
+                    op_num,
+                    amp::ObjectId::from(make_op_id.clone()),
+                    &amp::Key::from(key.as_str()),
+                    v,
+                    false,
+                );
+                op_num = new_op_num;
+                result.extend(child_requests);
+            }
+            (result, op_num)
+        }
+        Value::Table(kvs) => {
+            let make_op_id = amp::OpId::new(start_op, actor);
+            let make_op = amp::Op {
+                action: amp::OpType::Make(amp::ObjType::table()),
                 obj: parent_object,
                 key: key.clone(),
                 insert,
@@ -361,7 +391,6 @@ pub(crate) fn value_to_op_requests(
 
 #[cfg(test)]
 mod tests {
-    use amp::MapType;
     use maplit::hashmap;
     use pretty_assertions::assert_eq;
 
@@ -370,13 +399,10 @@ mod tests {
 
     #[test]
     fn get_value() {
-        let v = Value::Map(
-            hashmap! {
-                "hello".to_owned() => Value::Primitive(Primitive::Str("world".to_owned())),
-                "again".to_owned() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
-            },
-            MapType::Map,
-        );
+        let v = Value::Map(hashmap! {
+            "hello".to_owned() => Value::Primitive(Primitive::Str("world".to_owned())),
+            "again".to_owned() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
+        });
 
         assert_eq!(v.get_value(Path::root()), Some(Cow::Borrowed(&v)));
         assert_eq!(

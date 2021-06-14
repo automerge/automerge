@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use automerge::{
-    Backend, InvalidChangeRequest, LocalChange, MapType, ObjType, Path, Primitive, ScalarValue,
+    Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue,
     SequenceType, Value,
 };
 use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType, UncompressedChange};
@@ -19,8 +19,7 @@ fn test_frontend_uses_correct_elem_ids() {
     let mut backend = automerge::Backend::new();
 
     let (mut frontend, change) =
-        automerge::Frontend::new_with_initial_state(Value::Map(hm, automerge::MapType::Map))
-            .unwrap();
+        automerge::Frontend::new_with_initial_state(Value::Map(hm)).unwrap();
 
     println!("change1 {:?}", change);
 
@@ -51,7 +50,7 @@ fn test_frontend_uses_correct_elem_ids() {
             automerge::Value::Primitive(automerge::Primitive::Boolean(false)),
         ]),
     );
-    let expected = automerge::Value::Map(ehm.clone(), automerge::MapType::Map);
+    let expected = automerge::Value::Map(ehm.clone());
 
     assert_eq!(expected, frontend.get_value(&Path::root()).unwrap());
 
@@ -62,7 +61,7 @@ fn test_frontend_uses_correct_elem_ids() {
     }
     let v = frontend.get_value(&Path::root()).unwrap();
 
-    let expected = automerge::Value::Map(ehm, automerge::MapType::Map);
+    let expected = automerge::Value::Map(ehm);
     assert_eq!(expected, v);
 }
 
@@ -112,26 +111,23 @@ fn test_multi_insert_expands_to_correct_indices() {
         extra_bytes: vec![],
     };
 
-    let val = Value::Map(
-        hashmap! {
-            "a".to_owned() => Value::Sequence(
-                vec![
-                    Value::Sequence(
-                        vec![],
+    let val = Value::Map(hashmap! {
+        "a".to_owned() => Value::Sequence(
+            vec![
+                Value::Sequence(
+                    vec![],
+                ),
+                Value::Primitive(
+                    Primitive::Null,
+                ),
+                Value::Primitive(
+                    Primitive::Uint(
+                        0
                     ),
-                    Value::Primitive(
-                        Primitive::Null,
-                    ),
-                    Value::Primitive(
-                        Primitive::Uint(
-                            0
-                        ),
-                    ),
-                ],
-            ),
-        },
-        MapType::Map,
-    );
+                ),
+            ],
+        ),
+    });
 
     let mut doc = automerge::Frontend::new_with_actor_id(uuid);
 
@@ -164,41 +160,29 @@ fn test_multi_insert_expands_to_correct_indices() {
 #[test]
 fn test_frontend_doesnt_wait_for_empty_changes() {
     let vals = vec![
-        Value::Map(hashmap! {}, MapType::Map),
-        Value::Map(
-            hashmap! {
-                "0".to_owned() => Value::Map(
-                    hashmap! {},
-                    MapType::Map,
-                ),
-                "a".to_owned() => Value::Map(
-                    hashmap!{
-                        "b".to_owned() => Value::Map(
-                            hashmap!{},
-                            MapType::Map,
-                        ),
-                    },
-                    MapType::Map,
-                ),
-            },
-            MapType::Map,
-        ),
-        Value::Map(hashmap! {}, MapType::Map),
+        Value::Map(hashmap! {}),
+        Value::Map(hashmap! {
+            "0".to_owned() => Value::Map(
+                hashmap! {},
+            ),
+            "a".to_owned() => Value::Map(
+                hashmap!{
+                    "b".to_owned() => Value::Map(
+                        hashmap!{},
+                    ),
+                },
+            ),
+        }),
+        Value::Map(hashmap! {}),
     ];
 
     let changes = vec![
         vec![],
         vec![
-            LocalChange::set(
-                Path::root().key("0"),
-                Value::Map(HashMap::new(), MapType::Map),
-            ),
+            LocalChange::set(Path::root().key("0"), Value::Map(HashMap::new())),
             LocalChange::set(
                 Path::root().key("a"),
-                Value::Map(
-                    hashmap! {"b".to_owned() => Value::Map(HashMap::new(), MapType::Map)},
-                    MapType::Map,
-                ),
+                Value::Map(hashmap! {"b".to_owned() => Value::Map(HashMap::new() )}),
             ),
         ],
         vec![

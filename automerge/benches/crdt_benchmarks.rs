@@ -148,7 +148,7 @@ pub fn b3_1(c: &mut Criterion) {
                     .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("map"),
-                            Value::Map(HashMap::new(), automerge_protocol::MapType::Map),
+                            Value::Map(HashMap::new()),
                         ))
                     })
                     .unwrap()

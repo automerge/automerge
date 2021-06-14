@@ -104,17 +104,15 @@ fn missing_object_error_flaky_null_rle_decoding() {
                 ),
                 (
                     "\u{1}".to_owned(),
-                    Value::Map(
+                    Value::Table(
                         vec![("".to_owned(), Value::Primitive(Primitive::F64(0.0)))]
                             .into_iter()
                             .collect(),
-                        MapType::Table,
                     ),
                 ),
             ]
             .into_iter()
             .collect(),
-            MapType::Map,
         ),
     )];
     let changes2 = vec![

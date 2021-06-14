@@ -6,7 +6,6 @@ use std::{
 
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive};
 use automerge_frontend::Value;
-use automerge_protocol::MapType;
 use maplit::hashmap;
 use rand::Rng;
 
@@ -24,10 +23,9 @@ fn f() {
                 hashmap! {
                     "abc".to_owned() => Value::Primitive(Primitive::Str("hello world".to_owned()))
                 },
-                MapType::Map,
             ),
             "d".to_owned() => Value::Primitive(Primitive::Uint(20)),
-        },MapType::Map)
+        },)
     };
 
     let mut changes = Vec::new();
@@ -45,7 +43,7 @@ fn f() {
             .change::<_, _, InvalidChangeRequest>(None, |d| {
                 d.add_change(LocalChange::set(
                     Path::root().key(random_string),
-                    Value::Map(m.clone(), MapType::Map),
+                    Value::Map(m.clone()),
                 ))
             })
             .unwrap()

@@ -507,22 +507,16 @@ fn handle_counters_inside_maps() {
 
     assert_eq!(
         state_after_first_change,
-        Value::Map(
-            hashmap! {
-                "wrens".into() => Value::Primitive(Primitive::Counter(0))
-            },
-            amp::MapType::Map
-        )
+        Value::Map(hashmap! {
+            "wrens".into() => Value::Primitive(Primitive::Counter(0))
+        },)
     );
 
     assert_eq!(
         state_after_second_change,
-        Value::Map(
-            hashmap! {
-                "wrens".into() => Value::Primitive(Primitive::Counter(1))
-            },
-            amp::MapType::Map
-        )
+        Value::Map(hashmap! {
+            "wrens".into() => Value::Primitive(Primitive::Counter(1))
+        },)
     );
 
     let expected_change_request_1 = amp::UncompressedChange {
@@ -595,22 +589,16 @@ fn handle_counters_inside_lists() {
 
     assert_eq!(
         state_after_first_change,
-        Value::Map(
-            hashmap! {
-                "counts".into() => vec![Value::Primitive(Primitive::Counter(1))].into()
-            },
-            amp::MapType::Map
-        )
+        Value::Map(hashmap! {
+            "counts".into() => vec![Value::Primitive(Primitive::Counter(1))].into()
+        },)
     );
 
     assert_eq!(
         state_after_second_change,
-        Value::Map(
-            hashmap! {
-                "counts".into() => vec![Value::Primitive(Primitive::Counter(3))].into()
-            },
-            amp::MapType::Map
-        )
+        Value::Map(hashmap! {
+            "counts".into() => vec![Value::Primitive(Primitive::Counter(3))].into()
+        },)
     );
 
     let counts_id = doc.get_object_id(&Path::root().key("counts")).unwrap();
@@ -738,12 +726,9 @@ fn test_sets_characters_in_text() {
     assert_eq!(request, expected_change_request);
 
     let value = doc.get_value(&Path::root()).unwrap();
-    let expected_value: Value = Value::Map(
-        hashmap! {
-            "text".into() => Value::Text(vec!["s".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
-        },
-        amp::MapType::Map,
-    );
+    let expected_value: Value = Value::Map(hashmap! {
+        "text".into() => Value::Text(vec!["s".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
+    });
     assert_eq!(value, expected_value);
 }
 
@@ -795,12 +780,9 @@ fn test_inserts_characters_in_text() {
     assert_eq!(request, expected_change_request);
 
     let value = doc.get_value(&Path::root()).unwrap();
-    let expected_value: Value = Value::Map(
-        hashmap! {
-            "text".into() => Value::Text(vec!["s".to_owned(), "h".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
-        },
-        amp::MapType::Map,
-    );
+    let expected_value: Value = Value::Map(hashmap! {
+        "text".into() => Value::Text(vec!["s".to_owned(), "h".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
+    });
     assert_eq!(value, expected_value);
 }
 
@@ -852,12 +834,9 @@ fn test_inserts_characters_at_start_of_text() {
     assert_eq!(request, expected_change_request);
 
     let value = doc.get_value(&Path::root()).unwrap();
-    let expected_value: Value = Value::Map(
-        hashmap! {
-            "text".into() => Value::Text(vec!["i".to_owned()]),
-        },
-        amp::MapType::Map,
-    );
+    let expected_value: Value = Value::Map(hashmap! {
+        "text".into() => Value::Text(vec!["i".to_owned()]),
+    });
     assert_eq!(value, expected_value);
 }
 
@@ -922,11 +901,8 @@ fn test_inserts_at_end_of_lists() {
     assert_eq!(request, expected_change_request);
 
     let value = doc.get_value(&Path::root()).unwrap();
-    let expected_value: Value = Value::Map(
-        hashmap! {
-            "birds".into() => Value::Sequence(vec!["greenfinch".into(), "bullfinch".into()]),
-        },
-        amp::MapType::Map,
-    );
+    let expected_value: Value = Value::Map(hashmap! {
+        "birds".into() => Value::Sequence(vec!["greenfinch".into(), "bullfinch".into()]),
+    });
     assert_eq!(value, expected_value);
 }
