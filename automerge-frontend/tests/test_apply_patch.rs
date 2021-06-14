@@ -1072,9 +1072,6 @@ fn test_unchanged_diff_creates_empty_objects() {
     doc.apply_patch(patch).unwrap();
     assert_eq!(
         doc.state(),
-        &Value::Map(
-            hashmap! {"text".to_string() => Value::Text(Vec::new())},
-            amp::MapType::Map
-        ),
+        &Value::Map(hashmap! {"text".to_string() => Value::Text(Vec::new())},),
     );
 }

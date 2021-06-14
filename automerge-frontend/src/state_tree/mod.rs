@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use amp::{ElementId, MapType};
+use amp::ElementId;
 use automerge_protocol as amp;
 use automerge_protocol::RootDiff;
 use diffable_sequence::DiffableSequence;
@@ -172,7 +172,7 @@ impl StateTree {
         for (k, v) in &self.root_props {
             m.insert(k.clone(), v.default_value());
         }
-        Value::Map(m, MapType::Map)
+        Value::Map(m)
     }
 }
 
@@ -336,14 +336,12 @@ impl StateTreeComposite {
                     .iter()
                     .map(|(k, v)| (k.clone(), v.default_value()))
                     .collect(),
-                amp::MapType::Map,
             ),
-            Self::Table(StateTreeTable { props, .. }) => Value::Map(
+            Self::Table(StateTreeTable { props, .. }) => Value::Table(
                 props
                     .iter()
                     .map(|(k, v)| (k.clone(), v.default_value()))
                     .collect(),
-                amp::MapType::Table,
             ),
             Self::List(StateTreeList {
                 elements: elems, ..

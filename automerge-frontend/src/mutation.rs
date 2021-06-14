@@ -115,7 +115,7 @@ impl<'a> MutationTracker<'a> {
     /// the root object
     fn wrap_root_assignment(&mut self, value: Value) -> Result<(), InvalidChangeRequest> {
         match value {
-            Value::Map(kvs, amp::MapType::Map) => {
+            Value::Map(kvs) => {
                 for (k, v) in kvs.iter() {
                     self.add_change(LocalChange::set(Path::root().key(k), v.clone()))?;
                 }

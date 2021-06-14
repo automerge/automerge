@@ -555,7 +555,8 @@ where
 {
     fn create(self, value: Value) -> NewValue {
         match value {
-            Value::Map(props, map_type) => self.new_map_or_table(props, map_type),
+            Value::Map(props) => self.new_map_or_table(props, amp::MapType::Map),
+            Value::Table(props) => self.new_map_or_table(props, amp::MapType::Table),
             Value::Sequence(values) => self.new_list(values),
             Value::Text(graphemes) => self.new_text(graphemes),
             Value::Primitive(p) => self.new_primitive(p),

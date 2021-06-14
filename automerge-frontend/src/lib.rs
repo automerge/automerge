@@ -1,6 +1,4 @@
-use automerge_protocol::{
-    ActorId, ChangeHash, MapType, ObjectId, Op, OpId, Patch, UncompressedChange,
-};
+use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch, UncompressedChange};
 
 mod error;
 mod mutation;
@@ -396,7 +394,7 @@ impl Frontend {
         initial_state: Value,
     ) -> Result<(Self, UncompressedChange), InvalidInitialStateError> {
         match &initial_state {
-            Value::Map(kvs, MapType::Map) => {
+            Value::Map(kvs) => {
                 let mut front = Frontend::new();
                 let (init_ops, _) =
                     kvs.iter()
