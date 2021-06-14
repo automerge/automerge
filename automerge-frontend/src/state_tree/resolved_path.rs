@@ -691,7 +691,7 @@ impl<'a> ResolvedTextMut<'a> {
         };
         state_tree_text
             .insert(index, value)
-            .expect("Failed to rollback set");
+            .expect("Failed to rollback delete");
     }
 
     pub(crate) fn rollback_insert(&mut self, index: usize) {
@@ -875,7 +875,7 @@ impl<'a> ResolvedListMut<'a> {
         };
         state_tree_list
             .insert(index, value)
-            .expect("Failed to rollback set");
+            .expect("Failed to rollback delete");
     }
 
     pub(crate) fn rollback_insert(&mut self, index: usize) {
