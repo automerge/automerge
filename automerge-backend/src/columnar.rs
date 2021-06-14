@@ -795,7 +795,7 @@ pub(crate) struct ChangeEncoder {
 }
 
 impl ChangeEncoder {
-    #[instrument(skip(changes, actors))]
+    #[instrument(level = "debug", skip(changes, actors))]
     pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::UncompressedChange>,
@@ -900,7 +900,7 @@ pub(crate) struct DocOpEncoder {
 // FIXME - actors should not be mut here
 
 impl DocOpEncoder {
-    #[instrument(skip(ops, actors))]
+    #[instrument(level = "debug", skip(ops, actors))]
     pub(crate) fn encode_doc_ops<'a, 'b, I>(
         ops: I,
         actors: &'a mut Vec<amp::ActorId>,

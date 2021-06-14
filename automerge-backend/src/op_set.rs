@@ -84,7 +84,7 @@ impl OpSet {
         deps
     }
 
-    #[instrument(skip(self))]
+    #[instrument(level = "debug", skip(self))]
     fn apply_op(
         &mut self,
         op: OpHandle,
