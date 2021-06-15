@@ -287,7 +287,7 @@ impl<'a> ResolvedRootMut<'a> {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
-            key: &key.into(),
+            key: key.into(),
             parent_obj: &amp::ObjectId::Root,
             value: payload.value,
             insert: false,
@@ -375,7 +375,7 @@ impl<'a> ResolvedMapMut<'a> {
             actor: payload.actor,
             start_op: payload.start_op,
             parent_obj: &state_tree_map.object_id,
-            key: &key.into(),
+            key: key.into(),
             value: payload.value,
             insert: false,
             pred: state_tree_map.pred_for_key(key),
@@ -427,7 +427,7 @@ impl<'a> ResolvedTableMut<'a> {
             actor: payload.actor,
             start_op: payload.start_op,
             parent_obj: &state_tree_table.object_id,
-            key: &key.into(),
+            key: key.into(),
             value: payload.value,
             insert: false,
             pred: state_tree_table.pred_for_key(key),
@@ -632,7 +632,7 @@ impl<'a> ResolvedListMut<'a> {
             value: payload.value,
             pred: state_tree_list.pred_for_index(index),
             parent_obj: &state_tree_list.object_id.clone(),
-            key: &current_elemid.into(),
+            key: current_elemid.into(),
             insert: false,
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
@@ -663,7 +663,7 @@ impl<'a> ResolvedListMut<'a> {
             start_op: payload.start_op,
             value: payload.value,
             parent_obj: &state_tree_list.object_id,
-            key: &current_elemid.into(),
+            key: current_elemid.into(),
             insert: true,
             pred: Vec::new(),
         });
@@ -701,7 +701,7 @@ impl<'a> ResolvedListMut<'a> {
                 start_op: op_num,
                 value,
                 parent_obj: &state_tree_list.object_id,
-                key: &last_elemid.clone().into(),
+                key: last_elemid.clone().into(),
                 insert: true,
                 pred: Vec::new(),
             });

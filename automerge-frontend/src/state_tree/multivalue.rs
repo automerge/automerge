@@ -13,10 +13,10 @@ use crate::{
     value::{Primitive, Value},
 };
 
-pub(crate) struct NewValueRequest<'a, 'b, 'c> {
+pub(crate) struct NewValueRequest<'a, 'c> {
     pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
-    pub(crate) key: &'b amp::Key,
+    pub(crate) key: amp::Key,
     pub(crate) value: Value,
     pub(crate) parent_obj: &'c amp::ObjectId,
     pub(crate) insert: bool,
@@ -69,7 +69,7 @@ impl MultiValue {
         actor: &amp::ActorId,
         start_op: u64,
         parent_id: amp::ObjectId,
-        key: &amp::Key,
+        key: amp::Key,
         value: Value,
         insert: bool,
         pred: Vec<amp::OpId>,
@@ -324,10 +324,6 @@ pub(super) struct NewValue {
 }
 
 impl NewValue {
-    pub(super) fn ops(self) -> Vec<amp::Op> {
-        self.ops
-    }
-
     pub(super) fn max_op(&self) -> u64 {
         self.max_op
     }
@@ -539,20 +535,20 @@ impl MultiGrapheme {
 }
 
 #[derive(Clone)]
-pub(crate) struct NewValueContext<'a, 'b, O>
+pub(crate) struct NewValueContext<'a, O>
 where
     O: Into<amp::ObjectId>,
     O: Clone,
 {
     pub(crate) actor: &'a amp::ActorId,
     pub(crate) start_op: u64,
-    pub(crate) key: &'b amp::Key,
+    pub(crate) key: amp::Key,
     pub(crate) parent_obj: O,
     pub(crate) insert: bool,
     pub(crate) pred: Vec<amp::OpId>,
 }
 
-impl<'a, 'b, O> NewValueContext<'a, 'b, O>
+impl<'a, O> NewValueContext<'a, O>
 where
     O: Into<amp::ObjectId>,
     O: Clone,
@@ -589,7 +585,7 @@ where
                 actor: self.actor,
                 parent_obj: &make_op_id,
                 start_op: current_max_op + 1,
-                key: &prop.clone().into(),
+                key: amp::Key::Map(prop.clone()),
                 pred: Vec::new(),
                 insert: false,
             };
@@ -640,7 +636,7 @@ where
                 start_op: current_max_op + 1,
                 pred: Vec::new(),
                 insert: true,
-                key: &last_elemid.into(),
+                key: amp::Key::Seq(last_elemid),
                 actor: self.actor,
                 parent_obj: make_list_opid.clone(),
             };
@@ -684,7 +680,7 @@ where
             let op = amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(grapheme.clone())),
                 obj: make_text_opid.clone().into(),
-                key: last_elemid.clone().into(),
+                key: amp::Key::Seq(last_elemid),
                 insert: true,
                 pred: Vec::new(),
             };
@@ -741,7 +737,7 @@ where
             ops: vec![amp::Op {
                 action: amp::OpType::Set(value),
                 obj: self.parent_obj.into(),
-                key: self.key.clone(),
+                key: self.key,
                 insert: self.insert,
                 pred: self.pred.clone(),
             }],
