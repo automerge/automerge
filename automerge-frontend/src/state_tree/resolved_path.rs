@@ -297,12 +297,9 @@ impl<'a> ResolvedRootMut<'a> {
                 .map(|mv| vec![mv.default_opid()])
                 .unwrap_or_else(Vec::new),
         });
-        self.root
-            .root_props
-            .insert(key.to_string(), newvalue.multivalue());
-        LocalOperationResult {
-            new_ops: newvalue.ops(),
-        }
+        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        self.root.root_props.insert(key.to_string(), multivalue);
+        LocalOperationResult { new_ops }
     }
 
     pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
@@ -383,12 +380,9 @@ impl<'a> ResolvedMapMut<'a> {
             insert: false,
             pred: state_tree_map.pred_for_key(key),
         });
-        state_tree_map
-            .props
-            .insert(key.to_string(), newvalue.multivalue());
-        LocalOperationResult {
-            new_ops: newvalue.ops(),
-        }
+        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        state_tree_map.props.insert(key.to_string(), multivalue);
+        LocalOperationResult { new_ops }
     }
 
     pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
@@ -438,12 +432,9 @@ impl<'a> ResolvedTableMut<'a> {
             insert: false,
             pred: state_tree_table.pred_for_key(key),
         });
-        state_tree_table
-            .props
-            .insert(key.to_owned(), newvalue.multivalue());
-        LocalOperationResult {
-            new_ops: newvalue.ops(),
-        }
+        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        state_tree_table.props.insert(key.to_owned(), multivalue);
+        LocalOperationResult { new_ops }
     }
 
     pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
@@ -644,10 +635,9 @@ impl<'a> ResolvedListMut<'a> {
             key: &current_elemid.into(),
             insert: false,
         });
-        state_tree_list.set(index as usize, newvalue.multivalue())?;
-        Ok(LocalOperationResult {
-            new_ops: newvalue.ops(),
-        })
+        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        state_tree_list.set(index as usize, multivalue)?;
+        Ok(LocalOperationResult { new_ops })
     }
 
     #[allow(dead_code)]
@@ -677,10 +667,9 @@ impl<'a> ResolvedListMut<'a> {
             insert: true,
             pred: Vec::new(),
         });
-        state_tree_list.insert(index as usize, newvalue.multivalue())?;
-        Ok(LocalOperationResult {
-            new_ops: newvalue.ops(),
-        })
+        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        state_tree_list.insert(index as usize, multivalue)?;
+        Ok(LocalOperationResult { new_ops })
     }
 
     pub(crate) fn insert_many<I>(
@@ -718,8 +707,9 @@ impl<'a> ResolvedListMut<'a> {
             });
             last_elemid = amp::OpId::new(op_num, payload.actor).into();
             op_num = newvalue.max_op() + 1;
-            newvalues.push(newvalue.multivalue());
-            ops.extend(newvalue.ops());
+            let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+            newvalues.push(multivalue);
+            ops.extend(new_ops);
         }
         state_tree_list.insert_many(index as usize, newvalues)?;
         Ok(LocalOperationResult {

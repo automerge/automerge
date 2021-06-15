@@ -332,8 +332,11 @@ impl NewValue {
         self.max_op
     }
 
-    pub(super) fn multivalue(&self) -> MultiValue {
-        MultiValue::from_statetree_value(self.value.clone(), self.opid.clone())
+    pub(super) fn multivalue_and_ops(self) -> (MultiValue, Vec<amp::Op>) {
+        (
+            MultiValue::from_statetree_value(self.value, self.opid),
+            self.ops,
+        )
     }
 }
 
@@ -592,8 +595,9 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             cursors = next_value.new_cursors.clone().union(cursors);
-            ops.extend_from_slice(&next_value.ops[..]);
-            result_props.insert(prop, next_value.multivalue());
+            let (multivalue, new_ops) = next_value.multivalue_and_ops();
+            ops.extend(new_ops);
+            result_props.insert(prop, multivalue);
         }
         let map = match map_type {
             amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
@@ -642,9 +646,10 @@ where
             last_elemid = elem_opid.clone().into();
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
-            result_elems.push(next_value.multivalue());
             cursors = next_value.new_cursors.union(cursors);
-            ops.extend(next_value.ops);
+            let (multivalue, new_ops) = next_value.multivalue_and_ops();
+            ops.extend(new_ops);
+            result_elems.push(multivalue);
         }
         let list = StateTreeComposite::List(StateTreeList {
             object_id: make_list_opid.clone().into(),
