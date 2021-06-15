@@ -41,13 +41,13 @@ mod error;
 mod event_handlers;
 mod expanded_op;
 mod internal;
+mod mark2;
 mod object_store;
 mod op_handle;
 mod op_set;
 mod ordered_set;
 mod patches;
 mod sync;
-mod mark2;
 
 pub use backend::Backend;
 pub use change::Change;

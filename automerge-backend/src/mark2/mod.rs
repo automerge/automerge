@@ -1,18 +1,13 @@
+#![allow(dead_code)]
+
+use std::cmp::Ordering;
 
 use automerge_protocol as amp;
 
-use crate::{
-    //actor_map::ActorMap,
-    error::AutomergeError,
-    internal::{InternalOpType},
-    //object_store::ObjState,
-    op_handle::OpHandle,
-    //ordered_set::OrderedSet,
-    patches::{IncrementalPatch},
-};
+use crate::{error::AutomergeError, internal::InternalOpType, patches::IncrementalPatch};
 
 #[derive(Debug, PartialEq, Clone, Default)]
-pub (crate) struct OpSet {
+pub struct OpSet {
     actors: Vec<amp::ActorId>,
     changes: Vec<Change>,
     ops: Vec<Op>,
@@ -36,7 +31,6 @@ pub struct Change {
  */
 
 impl OpSet {
-
     fn index_for_actor(&self, actor: &amp::ActorId) -> Option<usize> {
         self.actors.iter().position(|n| n == actor)
     }
@@ -44,14 +38,14 @@ impl OpSet {
     fn import_key(&self, key: &amp::Key) -> Key {
         match key {
             amp::Key::Map(string) => Key::Map(string.clone()),
-            amp::Key::Seq(amp::ElementId::Head) => Key::Seq(OpId(0,0)),
+            amp::Key::Seq(amp::ElementId::Head) => Key::Seq(OpId(0, 0)),
             amp::Key::Seq(amp::ElementId::Id(id)) => Key::Seq(self.import_opid(id)),
         }
     }
 
     fn import_objectid(&self, obj: &amp::ObjectId) -> OpId {
         match obj {
-            amp::ObjectId::Root => OpId(0,0),
+            amp::ObjectId::Root => OpId(0, 0),
             amp::ObjectId::Id(id) => self.import_opid(id),
         }
     }
@@ -60,38 +54,111 @@ impl OpSet {
         OpId(opid.0, self.index_for_actor(&opid.1).unwrap())
     }
 
-    fn seek(&self, op: &Op) -> usize {
-        0
+    fn lamport_compare(&self, op1: &OpId, op2: &OpId) -> Ordering {
+        match (op1, op2) {
+            (OpId(0, 0), OpId(0, 0)) => Ordering::Equal,
+            (OpId(0, 0), OpId(_, _)) => Ordering::Less,
+            (OpId(_, _), OpId(0, 0)) => Ordering::Greater,
+            (OpId(ctr1, actor1), OpId(ctr2, actor2)) => {
+                if ctr1 == ctr2 {
+                    let actor1 = &self.actors[*actor1];
+                    let actor2 = &self.actors[*actor2];
+                    actor1.cmp(actor2)
+                } else {
+                    op1.0.cmp(&op2.0)
+                }
+            }
+        }
     }
 
-    fn apply_change(
+    fn seek_to_obj(&self, obj: &OpId) -> usize {
+        if self.ops.is_empty() {
+            return 0;
+        }
+        let mut current_obj = None;
+        for (i, next) in self.ops.iter().enumerate() {
+            if current_obj == Some(&next.obj) {
+                continue;
+            }
+            if &next.obj == obj || self.lamport_compare(&next.obj, obj) == Ordering::Greater {
+                return i;
+            }
+            current_obj = Some(&next.obj);
+        }
+        self.ops.len()
+    }
+
+    fn seek(&self, op: &Op) -> (usize, usize) {
+        let obj_start = self.seek_to_obj(&op.obj);
+
+        match &op.key {
+            Key::Map(_) => {
+                for (i, next) in self.ops[obj_start..].iter().enumerate() {
+                    if next.key >= op.key || next.obj != op.obj {
+                        return (obj_start + i, 0);
+                    }
+                }
+                (self.ops.len(), 0)
+            }
+            Key::Seq(_) => {
+                if op.insert {
+                    //for o in self.ops[obj_start..].iter().enumerate() {
+                    //}
+                    unimplemented!()
+                } else {
+                    let mut elem_visible = false;
+                    let mut visible = 0;
+                    for (i, next) in self.ops[obj_start..].iter().enumerate() {
+                        if next.insert && next.key == op.key || next.obj != op.obj {
+                            return (obj_start + i, visible);
+                        }
+                        if next.insert {
+                            elem_visible = false
+                        }
+                        if next.succ.is_empty() && !elem_visible {
+                            visible += 1;
+                            elem_visible = true
+                        }
+                    }
+                    panic!() // error - cant find place to insert
+                }
+            }
+        }
+    }
+
+    pub(crate) fn apply_change(
         &mut self,
         change: crate::Change,
-        diffs: &mut IncrementalPatch,
+        _diffs: &mut IncrementalPatch,
     ) -> Result<(), AutomergeError> {
-
-        for actor in change.actors.iter() {
+        for actor in &change.actors {
             if self.index_for_actor(actor).is_none() {
                 self.actors.push(actor.clone());
             }
         }
 
-        let actor = self.index_for_actor(&change.actor_id()).unwrap(); // can unwrap b/c we added it above
+        let actor = self.index_for_actor(change.actor_id()).unwrap(); // can unwrap b/c we added it above
         let extra_bytes = change.extra_bytes().to_vec();
 
         let change_id = self.changes.len();
-        let ops : Vec<Op> = change.iter_ops().enumerate().map(|(i, expanded_op)| {
-            Op {
+        let ops: Vec<Op> = change
+            .iter_ops()
+            .enumerate()
+            .map(|(i, expanded_op)| Op {
                 change: change_id,
                 id: OpId(change.start_op + i as u64, actor),
                 action: expanded_op.action,
                 insert: expanded_op.insert,
                 key: self.import_key(&expanded_op.key),
                 obj: self.import_objectid(&expanded_op.obj),
-                pred: expanded_op.pred.iter().map( |id| self.import_opid(&id)).collect(),
+                pred: expanded_op
+                    .pred
+                    .iter()
+                    .map(|id| self.import_opid(id))
+                    .collect(),
                 succ: vec![],
-            }
-        }).collect();
+            })
+            .collect();
 
         self.changes.push(Change {
             actor,
@@ -107,8 +174,8 @@ impl OpSet {
         for op in ops {
             // slow as balls
             // *** put them in the right place
-            let pos = self.seek(&op);
-            self.ops.insert_at(pos,op);
+            let (pos, _visible_count) = self.seek(&op);
+            self.ops.insert(pos, op);
         }
 
         // update pred/succ properly
@@ -154,10 +221,10 @@ impl OpSet {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct OpId(u64,usize);
+pub struct OpId(u64, usize);
 
 #[derive(PartialEq, Debug, Clone)]
-pub(crate) struct Change {
+pub struct Change {
     pub actor: usize,
     pub hash: amp::ChangeHash,
     pub seq: u64,
@@ -169,7 +236,7 @@ pub(crate) struct Change {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Op {
+struct Op {
     pub change: usize,
     pub id: OpId,
     pub action: InternalOpType,
@@ -186,3 +253,11 @@ pub enum Key {
     Seq(OpId),
 }
 
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        match (self, other) {
+            (Key::Map(p1), Key::Map(p2)) => p1.partial_cmp(p2),
+            _ => None,
+        }
+    }
+}

@@ -12,13 +12,12 @@ use crate::{
     change::encode_document,
     error::AutomergeError,
     event_handlers::{EventHandlerId, EventHandlers},
+    mark2,
     op_handle::OpHandle,
     op_set::OpSet,
     patches::{generate_from_scratch_diff, IncrementalPatch},
     Change, EventHandler,
-    mark2,
 };
-
 
 #[derive(Debug, Default, Clone)]
 pub struct Backend {
