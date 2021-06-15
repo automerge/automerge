@@ -297,7 +297,7 @@ impl<'a> ResolvedRootMut<'a> {
                 .map(|mv| vec![mv.default_opid()])
                 .unwrap_or_else(Vec::new),
         });
-        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         self.root.root_props.insert(key.to_string(), multivalue);
         LocalOperationResult { new_ops }
     }
@@ -380,7 +380,7 @@ impl<'a> ResolvedMapMut<'a> {
             insert: false,
             pred: state_tree_map.pred_for_key(key),
         });
-        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         state_tree_map.props.insert(key.to_string(), multivalue);
         LocalOperationResult { new_ops }
     }
@@ -432,7 +432,7 @@ impl<'a> ResolvedTableMut<'a> {
             insert: false,
             pred: state_tree_table.pred_for_key(key),
         });
-        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         state_tree_table.props.insert(key.to_owned(), multivalue);
         LocalOperationResult { new_ops }
     }
@@ -635,7 +635,7 @@ impl<'a> ResolvedListMut<'a> {
             key: &current_elemid.into(),
             insert: false,
         });
-        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         state_tree_list.set(index as usize, multivalue)?;
         Ok(LocalOperationResult { new_ops })
     }
@@ -667,7 +667,7 @@ impl<'a> ResolvedListMut<'a> {
             insert: true,
             pred: Vec::new(),
         });
-        let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         state_tree_list.insert(index as usize, multivalue)?;
         Ok(LocalOperationResult { new_ops })
     }
@@ -707,7 +707,7 @@ impl<'a> ResolvedListMut<'a> {
             });
             last_elemid = amp::OpId::new(op_num, payload.actor).into();
             op_num = newvalue.max_op() + 1;
-            let (multivalue, new_ops) = newvalue.multivalue_and_ops();
+            let (multivalue, new_ops, _new_cursors) = newvalue.finish();
             newvalues.push(multivalue);
             ops.extend(new_ops);
         }

@@ -332,10 +332,11 @@ impl NewValue {
         self.max_op
     }
 
-    pub(super) fn multivalue_and_ops(self) -> (MultiValue, Vec<amp::Op>) {
+    pub(super) fn finish(self) -> (MultiValue, Vec<amp::Op>, Cursors) {
         (
             MultiValue::from_statetree_value(self.value, self.opid),
             self.ops,
+            self.new_cursors,
         )
     }
 }
@@ -594,8 +595,8 @@ where
             };
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
-            cursors = next_value.new_cursors.clone().union(cursors);
-            let (multivalue, new_ops) = next_value.multivalue_and_ops();
+            let (multivalue, new_ops, new_cursors) = next_value.finish();
+            cursors.union(new_cursors);
             ops.extend(new_ops);
             result_props.insert(prop, multivalue);
         }
@@ -646,8 +647,8 @@ where
             last_elemid = elem_opid.clone().into();
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
-            cursors = next_value.new_cursors.union(cursors);
-            let (multivalue, new_ops) = next_value.multivalue_and_ops();
+            let (multivalue, new_ops, new_cursors) = next_value.finish();
+            cursors.union(new_cursors);
             ops.extend(new_ops);
             result_elems.push(multivalue);
         }
