@@ -53,8 +53,8 @@ impl ObjState {
         self.following.get(parent).cloned().unwrap_or_default()
     }
 
-    pub fn conflicts(&self, key: &Key) -> Vec<&OpHandle> {
-        self.props.get(key).iter().flat_map(|i| i.iter()).collect()
+    pub fn conflicts(&self, key: &Key) -> impl Iterator<Item = &OpHandle> {
+        self.props.get(key).into_iter().flat_map(|i| i.iter())
     }
 
     #[tracing::instrument(level = "debug", skip(self))]
