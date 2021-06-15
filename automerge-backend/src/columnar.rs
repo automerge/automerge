@@ -798,7 +798,7 @@ impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
     pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [amp::ActorId]) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'b amp::UncompressedChange>,
+        I: IntoIterator<Item = &'b amp::Change>,
     {
         let mut e = Self::new();
         e.encode(changes, actors);
@@ -821,7 +821,7 @@ impl ChangeEncoder {
 
     fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [amp::ActorId])
     where
-        I: IntoIterator<Item = &'c amp::UncompressedChange>,
+        I: IntoIterator<Item = &'c amp::Change>,
     {
         let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
         for (index, change) in changes.into_iter().enumerate() {

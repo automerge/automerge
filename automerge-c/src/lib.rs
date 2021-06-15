@@ -13,7 +13,8 @@ use std::{
 };
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{ChangeHash, UncompressedChange};
+use automerge_protocol as amp;
+use automerge_protocol::ChangeHash;
 use errno::{set_errno, Errno};
 use serde::ser::Serialize;
 
@@ -189,7 +190,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let request: &CStr = CStr::from_ptr(request);
     let request = request.to_string_lossy();
-    let request: Result<UncompressedChange, _> = serde_json::from_str(&request);
+    let request: Result<amp::Change, _> = serde_json::from_str(&request);
     match request {
         Ok(request) => {
             let result = (*backend).apply_local_change(request);
@@ -332,7 +333,7 @@ pub unsafe extern "C" fn automerge_encode_change(
 ) -> isize {
     let change: &CStr = CStr::from_ptr(change);
     let change = change.to_string_lossy();
-    let uncomp_change: UncompressedChange = serde_json::from_str(&change).unwrap();
+    let uncomp_change: amp::Change = serde_json::from_str(&change).unwrap();
     let change: Change = uncomp_change.try_into().unwrap();
     (*backend).handle_binary(Ok(change.raw_bytes().into()))
 }

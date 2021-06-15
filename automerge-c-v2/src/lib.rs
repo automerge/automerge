@@ -15,7 +15,8 @@ use std::{
 };
 
 use automerge_backend::{AutomergeError, Change};
-use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, Patch, UncompressedChange};
+use automerge_protocol as amp;
+use automerge_protocol::{error::InvalidActorId, ActorId, ChangeHash, Patch};
 use errno::{set_errno, Errno};
 
 // I dislike using macros but it saves me a bunch of typing
@@ -331,7 +332,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buffs = get_buff_mut!(buffs);
-    let request: UncompressedChange = from_msgpack!(backend, request, len);
+    let request: amp::Change = from_msgpack!(backend, request, len);
     let (patch, change) = call_automerge!(backend, backend.apply_local_change(request));
     backend.last_local_change = Some(change.raw_bytes().to_vec());
     backend.write_msgpack(&patch, buffs)
@@ -491,7 +492,7 @@ pub unsafe extern "C" fn automerge_encode_change(
 ) -> isize {
     let backend = get_backend_mut!(backend);
     let buff = get_buff_mut!(buffs);
-    let uncomp: UncompressedChange = from_msgpack!(backend, change, len);
+    let uncomp: amp::Change = from_msgpack!(backend, change, len);
     // This should never panic?
     let change: Change = uncomp.try_into().unwrap();
     write_bin_to_buff(change.raw_bytes(), buff);
@@ -683,7 +684,7 @@ pub unsafe extern "C" fn debug_json_change_to_msgpack(
 ) -> isize {
     let s = from_cstr(change);
     // `unwrap` here is ok b/c this is a debug function
-    let uncomp: UncompressedChange = serde_json::from_str(&s).unwrap();
+    let uncomp: amp::Change = serde_json::from_str(&s).unwrap();
 
     // `unwrap` here is ok b/c this is a debug function
     let mut bytes = ManuallyDrop::new(rmp_serde::to_vec_named(&uncomp).unwrap());
@@ -725,7 +726,7 @@ pub unsafe extern "C" fn debug_msgpack_change_to_json(
     out_json: *mut u8,
 ) -> isize {
     let slice = std::slice::from_raw_parts(msgpack, len);
-    let uncomp: UncompressedChange = rmp_serde::from_slice(slice).unwrap();
+    let uncomp: amp::Change = rmp_serde::from_slice(slice).unwrap();
     let json = serde_json::to_vec(&uncomp).unwrap();
     ptr::copy_nonoverlapping(json.as_ptr(), out_json, json.len());
     // null-terminate

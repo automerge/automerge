@@ -1,5 +1,5 @@
 use automerge_backend as amb;
-use automerge_protocol::UncompressedChange;
+use automerge_protocol as amp;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -32,8 +32,7 @@ pub fn examine(
         .map_err(|e| ExamineError::ErrReadingChanges { source: e })?;
     let changes = amb::Change::load_document(&buf)
         .map_err(|e| ExamineError::ErrApplyingInitialChanges { source: e })?;
-    let uncompressed_changes: Vec<UncompressedChange> =
-        changes.iter().map(|c| c.decode()).collect();
+    let uncompressed_changes: Vec<amp::Change> = changes.iter().map(|c| c.decode()).collect();
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
         colored_json::write_colored_json(&json_changes, &mut output).unwrap();

@@ -1,9 +1,9 @@
 use automerge::{
     Backend, Frontend, InvalidChangeRequest, LocalChange, MapType, Path, Primitive, Value,
 };
+use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
-    UncompressedChange,
 };
 use test_env_log::test;
 
@@ -196,7 +196,7 @@ fn missing_object_error_null_rle_decoding() {
     let actor_uuid = uuid::Uuid::new_v4();
     let actor_id = ActorId::from_bytes(actor_uuid.as_bytes());
 
-    let raw_change = UncompressedChange {
+    let raw_change = amp::Change {
         operations: vec![
             Op {
                 action: OpType::Make(ObjType::Sequence(SequenceType::List)),

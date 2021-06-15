@@ -9,7 +9,8 @@ use std::{
 };
 
 use automerge_backend::{AutomergeError, Backend, Change, SyncMessage, SyncState};
-use automerge_protocol::{ChangeHash, UncompressedChange};
+use automerge_protocol as amp;
+use automerge_protocol::ChangeHash;
 use js_sys::Array;
 use serde::{de::DeserializeOwned, Serialize};
 use types::{BinaryChange, BinaryDocument, BinarySyncMessage, BinarySyncState, RawSyncMessage};
@@ -127,7 +128,7 @@ pub fn free(input: Object) -> Result<(), JsValue> {
 pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsValue> {
     get_mut_input(input, |state| {
         // FIXME unwrap
-        let change: UncompressedChange = js_to_rust(&change).unwrap();
+        let change: amp::Change = js_to_rust(&change).unwrap();
         let (patch, change) = state.0.apply_local_change(change)?;
         let result = Array::new();
         let change_bytes = types::BinaryChange(change.raw_bytes().to_vec());
