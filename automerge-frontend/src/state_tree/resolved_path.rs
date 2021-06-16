@@ -283,7 +283,7 @@ impl<'a> ResolvedRootMut<'a> {
         &mut self,
         key: &str,
         payload: SetOrInsertPayload<Value>,
-    ) -> LocalOperationResult {
+    ) -> (Option<MultiValue>, LocalOperationResult) {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
@@ -298,25 +298,46 @@ impl<'a> ResolvedRootMut<'a> {
                 .unwrap_or_else(Vec::new),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        self.root.root_props.insert(key.to_string(), multivalue);
-        LocalOperationResult { new_ops }
+        let old = self.root.root_props.insert(key.to_string(), multivalue);
+        (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()])
             .unwrap_or_else(Vec::new);
-        self.root.remove(key);
-        LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: amp::ObjectId::Root,
-                key: key.into(),
-                insert: false,
-                pred,
-            }],
+        let old = self
+            .root
+            .remove(key)
+            .expect("Removing non existent key from map");
+        (
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                    obj: amp::ObjectId::Root,
+                    key: key.into(),
+                    insert: false,
+                    pred,
+                }],
+            },
+        )
+    }
+
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+        match value {
+            Some(old) => {
+                self.root.root_props.insert(key, old);
+            }
+            None => {
+                self.root.root_props.remove(&key);
+            }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        self.root.root_props.insert(key, value);
     }
 }
 
@@ -349,6 +370,14 @@ impl<'a> ResolvedCounterMut<'a> {
             }],
         }
     }
+
+    pub(crate) fn rollback_increment(&mut self, by: i64) {
+        let counter = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Leaf(Primitive::Counter(c)) => c,
+            _ => unreachable!(),
+        };
+        *counter -= by;
+    }
 }
 
 pub struct ResolvedMap<'a> {
@@ -366,7 +395,7 @@ impl<'a> ResolvedMapMut<'a> {
         &mut self,
         key: &str,
         payload: SetOrInsertPayload<Value>,
-    ) -> LocalOperationResult {
+    ) -> (Option<MultiValue>, LocalOperationResult) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
@@ -381,25 +410,54 @@ impl<'a> ResolvedMapMut<'a> {
             pred: state_tree_map.pred_for_key(key),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        state_tree_map.props.insert(key.to_string(), multivalue);
-        LocalOperationResult { new_ops }
+        let old = state_tree_map.props.insert(key.to_string(), multivalue);
+        (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
         };
-        state_tree_map.props.remove(key);
-        LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: state_tree_map.object_id.clone(),
-                key: key.into(),
-                insert: false,
-                pred: state_tree_map.pred_for_key(key),
-            }],
+        let old = state_tree_map
+            .props
+            .remove(key)
+            .expect("Removing non existent key from map");
+        (
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                    obj: state_tree_map.object_id.clone(),
+                    key: key.into(),
+                    insert: false,
+                    pred: state_tree_map.pred_for_key(key),
+                }],
+            },
+        )
+    }
+
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
+        match value {
+            Some(old) => {
+                state_tree_map.props.insert(key, old);
+            }
+            None => {
+                state_tree_map.props.remove(&key);
+            }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.insert(key, value);
     }
 }
 
@@ -418,7 +476,7 @@ impl<'a> ResolvedTableMut<'a> {
         &mut self,
         key: &str,
         payload: SetOrInsertPayload<Value>,
-    ) -> LocalOperationResult {
+    ) -> (Option<MultiValue>, LocalOperationResult) {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
@@ -433,25 +491,54 @@ impl<'a> ResolvedTableMut<'a> {
             pred: state_tree_table.pred_for_key(key),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        state_tree_table.props.insert(key.to_owned(), multivalue);
-        LocalOperationResult { new_ops }
+        let old = state_tree_table.props.insert(key.to_owned(), multivalue);
+        (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> LocalOperationResult {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
         };
-        state_tree_table.props.remove(key);
-        LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: state_tree_table.object_id.clone(),
-                key: key.into(),
-                insert: false,
-                pred: state_tree_table.pred_for_key(key),
-            }],
+        let old = state_tree_table
+            .props
+            .remove(key)
+            .expect("Removing non existent key from table");
+        (
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                    obj: state_tree_table.object_id.clone(),
+                    key: key.into(),
+                    insert: false,
+                    pred: state_tree_table.pred_for_key(key),
+                }],
+            },
+        )
+    }
+
+    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
+            _ => unreachable!(),
+        };
+        match value {
+            Some(old) => {
+                state_tree_map.props.insert(key, old);
+            }
+            None => {
+                state_tree_map.props.remove(&key);
+            }
         }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.insert(key, value);
     }
 }
 
@@ -544,7 +631,7 @@ impl<'a> ResolvedTextMut<'a> {
         &mut self,
         index: u32,
         payload: SetOrInsertPayload<String>,
-    ) -> Result<LocalOperationResult, error::MissingIndexError> {
+    ) -> Result<(MultiGrapheme, LocalOperationResult), error::MissingIndexError> {
         let state_tree_text = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
             _ => unreachable!(),
@@ -555,22 +642,25 @@ impl<'a> ResolvedTextMut<'a> {
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
         let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
         let pred = state_tree_text.pred_for_index(index as u32);
-        state_tree_text.set(index, c)?;
-        Ok(LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
-                obj: state_tree_text.object_id.clone(),
-                key: current_elemid.into(),
-                pred,
-                insert: false,
-            }],
-        })
+        let old = state_tree_text.set(index, c)?;
+        Ok((
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Set(amp::ScalarValue::Str(payload.value)),
+                    obj: state_tree_text.object_id.clone(),
+                    key: current_elemid.into(),
+                    pred,
+                    insert: false,
+                }],
+            },
+        ))
     }
 
     pub(crate) fn remove(
         &mut self,
         index: u32,
-    ) -> Result<LocalOperationResult, error::MissingIndexError> {
+    ) -> Result<(MultiGrapheme, LocalOperationResult), error::MissingIndexError> {
         let state_tree_text = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
             _ => unreachable!(),
@@ -578,16 +668,49 @@ impl<'a> ResolvedTextMut<'a> {
         let (current_elemid, _) = state_tree_text.elem_at(index.try_into().unwrap())?;
         let current_elemid = current_elemid.clone();
         let pred = state_tree_text.pred_for_index(index as u32);
-        state_tree_text.remove(index.try_into().unwrap())?;
-        Ok(LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: state_tree_text.object_id.clone(),
-                key: current_elemid.into(),
-                insert: false,
-                pred,
-            }],
-        })
+        let old = state_tree_text.remove(index.try_into().unwrap())?;
+        Ok((
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                    obj: state_tree_text.object_id.clone(),
+                    key: current_elemid.into(),
+                    insert: false,
+                    pred,
+                }],
+            },
+        ))
+    }
+
+    pub(crate) fn rollback_set(&mut self, index: usize, value: MultiGrapheme) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .set(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_delete(&mut self, index: usize, value: MultiGrapheme) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .insert(index, value)
+            .expect("Failed to rollback delete");
+    }
+
+    pub(crate) fn rollback_insert(&mut self, index: usize) {
+        let state_tree_text = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
+            _ => unreachable!(),
+        };
+        state_tree_text
+            .remove(index)
+            .expect("Failed to rollback insert");
     }
 }
 
@@ -621,7 +744,7 @@ impl<'a> ResolvedListMut<'a> {
         &mut self,
         index: u32,
         payload: SetOrInsertPayload<Value>,
-    ) -> Result<LocalOperationResult, error::MissingIndexError> {
+    ) -> Result<(MultiValue, LocalOperationResult), error::MissingIndexError> {
         let state_tree_list = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
             _ => unreachable!(),
@@ -637,8 +760,8 @@ impl<'a> ResolvedListMut<'a> {
             insert: false,
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        state_tree_list.set(index as usize, multivalue)?;
-        Ok(LocalOperationResult { new_ops })
+        let old = state_tree_list.set(index as usize, multivalue)?;
+        Ok((old, LocalOperationResult { new_ops }))
     }
 
     #[allow(dead_code)]
@@ -721,7 +844,7 @@ impl<'a> ResolvedListMut<'a> {
     pub(crate) fn remove(
         &mut self,
         index: u32,
-    ) -> Result<LocalOperationResult, error::MissingIndexError> {
+    ) -> Result<(MultiValue, LocalOperationResult), error::MissingIndexError> {
         let state_tree_list = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
             _ => unreachable!(),
@@ -729,16 +852,49 @@ impl<'a> ResolvedListMut<'a> {
         let (current_elemid, _) = state_tree_list.elem_at(index.try_into().unwrap())?;
         let current_elemid = current_elemid.clone();
         let pred = state_tree_list.pred_for_index(index);
-        state_tree_list.remove(index as usize)?;
-        Ok(LocalOperationResult {
-            new_ops: vec![amp::Op {
-                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: state_tree_list.object_id.clone(),
-                key: current_elemid.into(),
-                insert: false,
-                pred,
-            }],
-        })
+        let old = state_tree_list.remove(index as usize)?;
+        Ok((
+            old,
+            LocalOperationResult {
+                new_ops: vec![amp::Op {
+                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                    obj: state_tree_list.object_id.clone(),
+                    key: current_elemid.into(),
+                    insert: false,
+                    pred,
+                }],
+            },
+        ))
+    }
+
+    pub(crate) fn rollback_set(&mut self, index: usize, value: MultiValue) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .set(index, value)
+            .expect("Failed to rollback set");
+    }
+
+    pub(crate) fn rollback_delete(&mut self, index: usize, value: MultiValue) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .insert(index, value)
+            .expect("Failed to rollback delete");
+    }
+
+    pub(crate) fn rollback_insert(&mut self, index: usize) {
+        let state_tree_list = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::List(list)) => list,
+            _ => unreachable!(),
+        };
+        state_tree_list
+            .remove(index)
+            .expect("Failed to rollback insert");
     }
 }
 

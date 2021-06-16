@@ -4,7 +4,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     error::InvalidChangeRequest,
     state_tree::{
-        LocalOperationResult, ResolvedPath, ResolvedPathMut, SetOrInsertPayload, StateTree,
+        LocalOperationResult, MultiGrapheme, MultiValue, ResolvedPath, ResolvedPathMut,
+        SetOrInsertPayload, StateTree,
     },
     value::{Cursor, Primitive, Value},
     Path, PathElement,
@@ -82,6 +83,17 @@ impl LocalChange {
     }
 }
 
+enum LocalOperationForRollback {
+    Set { old: Option<MultiValue> },
+    SetList { old: MultiValue },
+    SetText { old: MultiGrapheme },
+    Delete { old: MultiValue },
+    DeleteText { old: MultiGrapheme },
+    Insert,
+    InsertMany { count: usize },
+    Increment { by: i64 },
+}
+
 /// `MutationTracker` is used as the context in which a mutation closure is
 /// applied. The mutation tracker implements `MutableDocument`, which is how it
 /// captures the changes that the mutation closure is making.
@@ -93,6 +105,7 @@ impl LocalChange {
 pub struct MutationTracker<'a> {
     state: &'a mut StateTree,
     ops: Vec<amp::Op>,
+    copies_for_rollback: Vec<(Path, LocalOperationForRollback)>,
     pub max_op: u64,
     actor_id: amp::ActorId,
 }
@@ -102,6 +115,7 @@ impl<'a> MutationTracker<'a> {
         Self {
             state: state_tree,
             ops: Vec::new(),
+            copies_for_rollback: Vec::new(),
             max_op,
             actor_id,
         }
@@ -198,6 +212,219 @@ impl<'a> MutationTracker<'a> {
             Err(InvalidChangeRequest::NoSuchPathError { path: path.clone() })
         }
     }
+
+    /// Undo the operations applied to this document.
+    ///
+    /// This is used in the case of an error to undo the already applied changes.
+    pub fn rollback(self) {
+        for (path, op) in self.copies_for_rollback.into_iter().rev() {
+            match op {
+                LocalOperationForRollback::Set { old } => {
+                    if let Some(key) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match (key, parent) {
+                                (PathElement::Key(key), ResolvedPathMut::Root(mut map)) => {
+                                    map.rollback_set(key.clone(), old)
+                                }
+                                (PathElement::Key(key), ResolvedPathMut::Map(mut map)) => {
+                                    map.rollback_set(key.clone(), old)
+                                }
+                                (PathElement::Key(key), ResolvedPathMut::Table(mut table)) => {
+                                    table.rollback_set(key.clone(), old)
+                                }
+                                (PathElement::Key(_), ResolvedPathMut::List(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non object with key")
+                                }
+                                (PathElement::Index(_), ResolvedPathMut::List(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found index element while rolling back a set")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::SetList { old } => {
+                    if let Some(key) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match (key, parent) {
+                                (PathElement::Key(_), _) => {
+                                    unreachable!("found key element while rolling back a setlist")
+                                }
+                                (PathElement::Index(i), ResolvedPathMut::List(mut list)) => {
+                                    list.rollback_set(*i as usize, old)
+                                }
+                                (PathElement::Index(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non list with index")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::SetText { old } => {
+                    if let Some(key) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match (key, parent) {
+                                (PathElement::Key(_), _) => {
+                                    unreachable!("found key element while rolling back a settext")
+                                }
+                                (PathElement::Index(i), ResolvedPathMut::Text(mut text)) => {
+                                    text.rollback_set(*i as usize, old)
+                                }
+                                (PathElement::Index(_), ResolvedPathMut::List(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non text with index")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::Delete { old } => {
+                    if let Some(key) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match (key, parent) {
+                                (PathElement::Key(key), ResolvedPathMut::Root(mut map)) => {
+                                    map.rollback_delete(key.clone(), old)
+                                }
+                                (PathElement::Key(key), ResolvedPathMut::Map(mut map)) => {
+                                    map.rollback_delete(key.clone(), old)
+                                }
+                                (PathElement::Key(key), ResolvedPathMut::Table(mut table)) => {
+                                    table.rollback_delete(key.clone(), old)
+                                }
+                                (PathElement::Key(_), ResolvedPathMut::List(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non object with key")
+                                }
+                                (PathElement::Index(i), ResolvedPathMut::List(mut list)) => {
+                                    list.rollback_delete(*i as usize, old)
+                                }
+                                (PathElement::Index(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non list with index")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::DeleteText { old } => {
+                    if let Some(key) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match (key, parent) {
+                                (PathElement::Key(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Key(_), ResolvedPathMut::List(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Text(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Key(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found key for SetText")
+                                }
+                                (PathElement::Index(i), ResolvedPathMut::Text(mut text)) => {
+                                    text.rollback_delete(*i as usize, old)
+                                }
+                                (PathElement::Index(_), ResolvedPathMut::List(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Root(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Table(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Character(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Counter(_))
+                                | (PathElement::Index(_), ResolvedPathMut::Primitive(_)) => {
+                                    unreachable!("found non text with index")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::Insert => {
+                    if let Some(PathElement::Index(index)) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match parent {
+                                ResolvedPathMut::List(mut list) => {
+                                    list.rollback_insert(*index as usize)
+                                }
+                                ResolvedPathMut::Text(mut text) => {
+                                    text.rollback_insert(*index as usize)
+                                }
+                                ResolvedPathMut::Root(_)
+                                | ResolvedPathMut::Map(_)
+                                | ResolvedPathMut::Table(_)
+                                | ResolvedPathMut::Character(_)
+                                | ResolvedPathMut::Counter(_)
+                                | ResolvedPathMut::Primitive(_) => {
+                                    unreachable!("Found non list object in rollback insert")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::InsertMany { count } => {
+                    if let Some(PathElement::Index(index)) = path.name() {
+                        if let Some(parent) = self.state.resolve_path_mut(&path.parent()) {
+                            match parent {
+                                ResolvedPathMut::List(mut list) => {
+                                    for _ in 0..count {
+                                        list.rollback_insert(*index as usize)
+                                    }
+                                }
+                                ResolvedPathMut::Text(mut text) => {
+                                    for _ in 0..count {
+                                        text.rollback_insert(*index as usize)
+                                    }
+                                }
+                                ResolvedPathMut::Root(_)
+                                | ResolvedPathMut::Map(_)
+                                | ResolvedPathMut::Table(_)
+                                | ResolvedPathMut::Character(_)
+                                | ResolvedPathMut::Counter(_)
+                                | ResolvedPathMut::Primitive(_) => {
+                                    unreachable!("Found non list object in rollback insert")
+                                }
+                            }
+                        }
+                    }
+                }
+                LocalOperationForRollback::Increment { by } => {
+                    if path.name().is_some() {
+                        if let Some(ResolvedPathMut::Counter(mut counter)) =
+                            self.state.resolve_path_mut(&path)
+                        {
+                            counter.rollback_increment(by)
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a> MutableDocument for MutationTracker<'a> {
@@ -230,7 +457,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                 };
                 if let Some(name) = change.path.name() {
                     if let Some(parent) = self.state.resolve_path_mut(&change.path.parent()) {
-                        match (name, parent) {
+                        let (rollback_op, res) = match (name, parent) {
                             (
                                 PathElement::Key(ref k),
                                 ResolvedPathMut::Root(ref mut root_target),
@@ -240,9 +467,8 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let res = root_target.set_key(k, payload);
-                                self.apply_state_change(res);
-                                Ok(())
+                                let (old, res) = root_target.set_key(k, payload);
+                                Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             (PathElement::Key(ref k), ResolvedPathMut::Map(ref mut maptarget)) => {
                                 let payload = SetOrInsertPayload {
@@ -250,9 +476,8 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let res = maptarget.set_key(k, payload);
-                                self.apply_state_change(res);
-                                Ok(())
+                                let (old, res) = maptarget.set_key(k, payload);
+                                Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             (
                                 PathElement::Key(ref k),
@@ -263,14 +488,15 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let res = tabletarget.set_key(k, payload);
-                                self.apply_state_change(res);
-                                Ok(())
+                                let (old, res) = tabletarget.set_key(k, payload);
+                                Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             // In this case we are trying to modify a key in something which is not
                             // an object or a table, so the path does not exist
                             (PathElement::Key(_), _) => {
-                                Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
+                                Err(InvalidChangeRequest::NoSuchPathError {
+                                    path: change.path.clone(),
+                                })
                             }
                             (PathElement::Index(i), ResolvedPathMut::List(ref mut list_target)) => {
                                 let payload = SetOrInsertPayload {
@@ -278,9 +504,8 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let res = list_target.set(*i, payload)?;
-                                self.apply_state_change(res);
-                                Ok(())
+                                let (old, res) = list_target.set(*i, payload)?;
+                                Ok((LocalOperationForRollback::SetList { old }, res))
                             }
                             (PathElement::Index(i), ResolvedPathMut::Text(ref mut text)) => {
                                 match value {
@@ -291,9 +516,8 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                                 actor: &self.actor_id.clone(),
                                                 value: s,
                                             };
-                                            let res = text.set(*i, payload)?;
-                                            self.apply_state_change(res);
-                                            Ok(())
+                                            let (old, res) = text.set(*i, payload)?;
+                                            Ok((LocalOperationForRollback::SetText { old }, res))
                                         } else {
                                             Err(InvalidChangeRequest::InsertNonTextInTextObject {
                                                 path: change.path.clone(),
@@ -312,7 +536,11 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     path: change.path.clone(),
                                 })
                             }
-                        }
+                        }?;
+
+                        self.copies_for_rollback.push((change.path, rollback_op));
+                        self.apply_state_change(res);
+                        Ok(())
                     } else {
                         Err(InvalidChangeRequest::NoSuchPathError { path: change.path })
                     }
@@ -323,14 +551,17 @@ impl<'a> MutableDocument for MutationTracker<'a> {
             LocalOperation::Delete => {
                 if let Some(name) = change.path.name() {
                     if let Some(pr) = self.state.resolve_path_mut(&change.path.parent()) {
-                        let state_change = match pr {
+                        let (rollback_op, state_change) = match pr {
                             ResolvedPathMut::Counter(_) => {
                                 return Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path,
                                 })
                             }
                             ResolvedPathMut::List(mut l) => match name {
-                                PathElement::Index(i) => l.remove(*i)?,
+                                PathElement::Index(i) => {
+                                    let (old, res) = l.remove(*i)?;
+                                    (LocalOperationForRollback::Delete { old }, res)
+                                }
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
                                         path: change.path,
@@ -338,7 +569,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 }
                             },
                             ResolvedPathMut::Text(mut t) => match name {
-                                PathElement::Index(i) => t.remove(*i)?,
+                                PathElement::Index(i) => {
+                                    let (old, res) = t.remove(*i)?;
+                                    (LocalOperationForRollback::DeleteText { old }, res)
+                                }
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
                                         path: change.path,
@@ -351,7 +585,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 })
                             }
                             ResolvedPathMut::Map(mut m) => match name {
-                                PathElement::Key(k) => m.delete_key(k),
+                                PathElement::Key(k) => {
+                                    let (old, res) = m.delete_key(k);
+                                    (LocalOperationForRollback::Delete { old }, res)
+                                }
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
                                         path: change.path,
@@ -359,7 +596,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 }
                             },
                             ResolvedPathMut::Table(mut t) => match name {
-                                PathElement::Key(k) => t.delete_key(k),
+                                PathElement::Key(k) => {
+                                    let (old, res) = t.delete_key(k);
+                                    (LocalOperationForRollback::Delete { old }, res)
+                                }
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
                                         path: change.path,
@@ -372,7 +612,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 })
                             }
                             ResolvedPathMut::Root(mut r) => match name {
-                                PathElement::Key(k) => r.delete_key(k),
+                                PathElement::Key(k) => {
+                                    let (old, res) = r.delete_key(k);
+                                    (LocalOperationForRollback::Delete { old }, res)
+                                }
                                 _ => {
                                     return Err(InvalidChangeRequest::NoSuchPathError {
                                         path: change.path,
@@ -380,6 +623,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 }
                             },
                         };
+                        self.copies_for_rollback.push((change.path, rollback_op));
                         self.apply_state_change(state_change);
                         Ok(())
                     } else {
@@ -395,6 +639,10 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                         match pr {
                             ResolvedPathMut::Counter(mut counter_target) => {
                                 let res = counter_target.increment(by);
+                                self.copies_for_rollback.push((
+                                    change.path,
+                                    LocalOperationForRollback::Increment { by },
+                                ));
                                 self.apply_state_change(res);
                                 Ok(())
                             }
@@ -412,10 +660,25 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                 }
             }
             LocalOperation::Insert(value) => {
-                self.insert_helper(&change.path, std::iter::once(value))
+                match self.insert_helper(&change.path, std::iter::once(value)) {
+                    Ok(()) => {
+                        self.copies_for_rollback
+                            .push((change.path, LocalOperationForRollback::Insert));
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
             }
             LocalOperation::InsertMany(values) => {
-                self.insert_helper(&change.path, values.into_iter())
+                let count = values.len();
+                match self.insert_helper(&change.path, values.into_iter()) {
+                    Ok(()) => {
+                        self.copies_for_rollback
+                            .push((change.path, LocalOperationForRollback::InsertMany { count }));
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
             }
         }
     }

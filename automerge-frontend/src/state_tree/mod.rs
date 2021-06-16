@@ -4,7 +4,7 @@ use amp::ElementId;
 use automerge_protocol as amp;
 use automerge_protocol::RootDiff;
 use diffable_sequence::DiffableSequence;
-use multivalue::{MultiGrapheme, MultiValue, NewValueRequest};
+use multivalue::NewValueRequest;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 
@@ -12,6 +12,7 @@ mod diffable_sequence;
 mod multivalue;
 mod resolved_path;
 
+pub use multivalue::{MultiGrapheme, MultiValue};
 pub(crate) use resolved_path::SetOrInsertPayload;
 pub use resolved_path::{ResolvedPath, ResolvedPathMut};
 
@@ -121,8 +122,8 @@ impl StateTree {
         // }
     }
 
-    fn remove(&mut self, k: &str) {
-        self.root_props.remove(k);
+    fn remove(&mut self, k: &str) -> Option<MultiValue> {
+        self.root_props.remove(k)
     }
 
     fn get(&self, k: &str) -> Option<&MultiValue> {
@@ -732,22 +733,26 @@ struct StateTreeText {
 }
 
 impl StateTreeText {
-    fn remove(&mut self, index: usize) -> Result<(), error::MissingIndexError> {
+    fn remove(&mut self, index: usize) -> Result<MultiGrapheme, error::MissingIndexError> {
         if index >= self.graphemes.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.graphemes.len(),
             })
         } else {
-            self.graphemes.remove(index);
-            Ok(())
+            let old = self.graphemes.remove(index);
+            Ok(old)
         }
     }
 
-    fn set(&mut self, index: usize, value: MultiGrapheme) -> Result<(), error::MissingIndexError> {
+    fn set(
+        &mut self,
+        index: usize,
+        value: MultiGrapheme,
+    ) -> Result<MultiGrapheme, error::MissingIndexError> {
         if self.graphemes.len() > index {
-            self.graphemes.update(index, value);
-            Ok(())
+            let old = self.graphemes.set(index, value);
+            Ok(old)
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
@@ -849,22 +854,26 @@ struct StateTreeList {
 }
 
 impl StateTreeList {
-    fn remove(&mut self, index: usize) -> Result<(), error::MissingIndexError> {
+    fn remove(&mut self, index: usize) -> Result<MultiValue, error::MissingIndexError> {
         if index >= self.elements.len() {
             Err(error::MissingIndexError {
                 missing_index: index,
                 size_of_collection: self.elements.len(),
             })
         } else {
-            self.elements.remove(index);
-            Ok(())
+            let old = self.elements.remove(index);
+            Ok(old)
         }
     }
 
-    fn set(&mut self, index: usize, value: MultiValue) -> Result<(), error::MissingIndexError> {
+    fn set(
+        &mut self,
+        index: usize,
+        value: MultiValue,
+    ) -> Result<MultiValue, error::MissingIndexError> {
         if self.elements.len() > index {
-            self.elements.update(index, value);
-            Ok(())
+            let old = self.elements.set(index, value);
+            Ok(old)
         } else {
             Err(error::MissingIndexError {
                 missing_index: index,
