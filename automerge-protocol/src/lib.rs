@@ -497,7 +497,7 @@ pub struct RootDiff {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct UncompressedChange {
+pub struct Change {
     #[serde(rename = "ops")]
     pub operations: Vec<Op>,
     #[serde(rename = "actor")]
@@ -514,7 +514,7 @@ pub struct UncompressedChange {
     pub extra_bytes: Vec<u8>,
 }
 
-impl PartialEq for UncompressedChange {
+impl PartialEq for Change {
     // everything but hash (its computed and not always present)
     fn eq(&self, other: &Self) -> bool {
         self.operations == other.operations
@@ -528,7 +528,7 @@ impl PartialEq for UncompressedChange {
     }
 }
 
-impl UncompressedChange {
+impl Change {
     pub fn op_id_of(&self, index: u64) -> Option<OpId> {
         if let Ok(index_usize) = usize::try_from(index) {
             if index_usize < self.operations.len() {

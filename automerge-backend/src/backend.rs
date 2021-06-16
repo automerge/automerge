@@ -107,7 +107,7 @@ impl Backend {
 
     pub fn apply_local_change(
         &mut self,
-        mut change: amp::UncompressedChange,
+        mut change: amp::Change,
     ) -> Result<(amp::Patch, Change), AutomergeError> {
         self.check_for_duplicate(&change)?; // Change has already been applied
 
@@ -126,7 +126,7 @@ impl Backend {
         Ok((patch, bin_change))
     }
 
-    fn check_for_duplicate(&self, change: &amp::UncompressedChange) -> Result<(), AutomergeError> {
+    fn check_for_duplicate(&self, change: &amp::Change) -> Result<(), AutomergeError> {
         if self
             .states
             .get(&change.actor_id)
@@ -311,8 +311,7 @@ impl Backend {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let changes: Vec<amp::UncompressedChange> =
-            self.history.iter().map(Change::decode).collect();
+        let changes: Vec<amp::Change> = self.history.iter().map(Change::decode).collect();
         //self.history.iter().map(|change| change.decode()).collect();
         Ok(encode_document(&changes)?)
     }
@@ -463,7 +462,7 @@ impl Backend {
 mod tests {
     use std::convert::TryInto;
 
-    use automerge_protocol::{ActorId, ObjectId, Op, OpType, UncompressedChange};
+    use automerge_protocol::{ActorId, ObjectId, Op, OpType};
 
     use super::*;
 
@@ -471,7 +470,7 @@ mod tests {
     fn test_get_changes_fast_behavior() {
         let actor_a: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
         let actor_b: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
-        let change_a1: Change = UncompressedChange {
+        let change_a1: Change = amp::Change {
             actor_id: actor_a.clone(),
             seq: 1,
             start_op: 1,
@@ -490,7 +489,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let change_a2: Change = UncompressedChange {
+        let change_a2: Change = amp::Change {
             actor_id: actor_a,
             seq: 2,
             start_op: 2,
@@ -509,7 +508,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let change_b1: Change = UncompressedChange {
+        let change_b1: Change = amp::Change {
             actor_id: actor_b.clone(),
             seq: 1,
             start_op: 1,
@@ -528,7 +527,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let change_b2: Change = UncompressedChange {
+        let change_b2: Change = amp::Change {
             actor_id: actor_b.clone(),
             seq: 2,
             start_op: 2,
@@ -547,7 +546,7 @@ mod tests {
         }
         .try_into()
         .unwrap();
-        let change_b3: Change = UncompressedChange {
+        let change_b3: Change = amp::Change {
             actor_id: actor_b,
             seq: 3,
             start_op: 3,

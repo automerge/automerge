@@ -6,7 +6,7 @@ use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch,
-    ScalarValue, SeqDiff, SequenceType, UncompressedChange,
+    ScalarValue, SeqDiff, SequenceType,
 };
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
@@ -14,7 +14,7 @@ use pretty_assertions::assert_eq;
 #[test]
 fn test_incremental_diffs_in_a_map() {
     let actor: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -53,7 +53,7 @@ fn test_incremental_diffs_in_a_map() {
 #[test]
 fn test_bytes() {
     let actor: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -96,7 +96,7 @@ fn test_bytes() {
 #[test]
 fn test_increment_key_in_map() {
     let actor: ActorId = "cdee6963c1664645920be8b41a933c2b".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -116,7 +116,7 @@ fn test_increment_key_in_map() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -159,7 +159,7 @@ fn test_increment_key_in_map() {
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
     let actor_1 = ActorId::from_str("ac11").unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor_1.clone(),
         seq: 1,
         message: None,
@@ -180,7 +180,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
     .unwrap();
 
     let actor_2 = ActorId::from_str("ac22").unwrap();
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor_2.clone(),
         start_op: 2,
         seq: 1,
@@ -229,7 +229,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
 #[test]
 fn delete_key_from_map() {
     let actor: ActorId = "cd86c07f109348f494af5be30fdc4c71".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -249,7 +249,7 @@ fn delete_key_from_map() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -292,7 +292,7 @@ fn delete_key_from_map() {
 #[test]
 fn create_nested_maps() {
     let actor: ActorId = "d6226fcd55204b82b396f2473da3e26f".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -353,7 +353,7 @@ fn create_nested_maps() {
 #[test]
 fn test_assign_to_nested_keys_in_map() {
     let actor: ActorId = "3c39c994039042778f4779a01a59a917".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -382,7 +382,7 @@ fn test_assign_to_nested_keys_in_map() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -437,7 +437,7 @@ fn test_assign_to_nested_keys_in_map() {
 #[test]
 fn test_create_lists() {
     let actor: ActorId = "f82cb62dabe64372ab87466b77792010".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -502,7 +502,7 @@ fn test_create_lists() {
 #[test]
 fn test_apply_updates_inside_lists() {
     let actor: ActorId = "4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -531,7 +531,7 @@ fn test_apply_updates_inside_lists() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -586,7 +586,7 @@ fn test_apply_updates_inside_lists() {
 #[test]
 fn test_delete_list_elements() {
     let actor: ActorId = "8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -615,7 +615,7 @@ fn test_delete_list_elements() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -666,7 +666,7 @@ fn test_delete_list_elements() {
 #[test]
 fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     let actor: ActorId = "ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -686,7 +686,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -755,7 +755,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 fn test_handle_changes_within_conflicted_objects() {
     let actor1: ActorId = "9f17517523e54ee888e9cd51dfd7a572".try_into().unwrap();
     let actor2: ActorId = "83768a19a13842beb6dde8c68a662fad".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -775,7 +775,7 @@ fn test_handle_changes_within_conflicted_objects() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
@@ -795,7 +795,7 @@ fn test_handle_changes_within_conflicted_objects() {
     .try_into()
     .unwrap();
 
-    let change3: Change = UncompressedChange {
+    let change3: Change = amp::Change {
         actor_id: actor2.clone(),
         seq: 2,
         start_op: 2,
@@ -858,7 +858,7 @@ fn test_handle_changes_within_conflicted_objects() {
 fn test_handle_changes_within_conflicted_lists() {
     let actor1: ActorId = "01234567".try_into().unwrap();
     let actor2: ActorId = "89abcdef".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -887,7 +887,7 @@ fn test_handle_changes_within_conflicted_lists() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 2,
         start_op: 3,
@@ -923,7 +923,7 @@ fn test_handle_changes_within_conflicted_lists() {
     .try_into()
     .unwrap();
 
-    let change3: Change = UncompressedChange {
+    let change3: Change = amp::Change {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 3,
@@ -962,7 +962,7 @@ fn test_handle_changes_within_conflicted_lists() {
     let mut change4_deps = vec![change2.hash, change3.hash];
     change4_deps.sort();
 
-    let change4: Change = UncompressedChange {
+    let change4: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 3,
         start_op: 6,
@@ -1040,7 +1040,7 @@ fn test_handle_changes_within_conflicted_lists() {
 #[test]
 fn test_support_date_objects_at_root() {
     let actor: ActorId = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1086,7 +1086,7 @@ fn test_support_date_objects_at_root() {
 #[test]
 fn test_support_date_objects_in_a_list() {
     let actor: ActorId = "27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap();
-    let change: Change = UncompressedChange {
+    let change: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1150,7 +1150,7 @@ fn test_support_date_objects_in_a_list() {
 #[test]
 fn test_cursor_objects() {
     let actor = ActorId::random();
-    let change = UncompressedChange {
+    let change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1225,7 +1225,7 @@ fn test_cursor_objects() {
 #[test]
 fn test_throws_on_attempt_to_create_missing_cursor() {
     let actor = ActorId::random();
-    let change = UncompressedChange {
+    let change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1262,7 +1262,7 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
 #[test]
 fn test_updating_sequences_updates_referring_cursors() {
     let actor = ActorId::random();
-    let change1 = UncompressedChange {
+    let change1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1296,7 +1296,7 @@ fn test_updating_sequences_updates_referring_cursors() {
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
-    let change2 = UncompressedChange {
+    let change2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 4,
@@ -1356,7 +1356,7 @@ fn test_updating_sequences_updates_referring_cursors() {
 #[test]
 fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
     let actor = ActorId::random();
-    let change1 = UncompressedChange {
+    let change1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -1397,7 +1397,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
-    let change2 = UncompressedChange {
+    let change2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 5,

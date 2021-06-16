@@ -41,26 +41,26 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-impl From<amp::UncompressedChange> for Change {
-    fn from(value: amp::UncompressedChange) -> Self {
+impl From<amp::Change> for Change {
+    fn from(value: amp::Change) -> Self {
         encode(&value)
     }
 }
 
-impl From<&amp::UncompressedChange> for Change {
-    fn from(value: &amp::UncompressedChange) -> Self {
+impl From<&amp::Change> for Change {
+    fn from(value: &amp::Change) -> Self {
         encode(value)
     }
 }
 
-fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
+fn encode(change: &amp::Change) -> Change {
     let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
-    let mut deps = uncompressed_change.deps.clone();
+    let mut deps = change.deps.clone();
     deps.sort_unstable();
 
-    let mut chunk = encode_chunk(uncompressed_change, &deps);
+    let mut chunk = encode_chunk(change, &deps);
 
     bytes.extend(&MAGIC_BYTES);
 
@@ -110,9 +110,9 @@ fn encode(uncompressed_change: &amp::UncompressedChange) -> Change {
     Change {
         bytes,
         hash,
-        seq: uncompressed_change.seq,
-        start_op: uncompressed_change.start_op,
-        time: uncompressed_change.time,
+        seq: change.seq,
+        start_op: change.start_op,
+        time: change.time,
         actors: chunk.actors,
         message: chunk.message,
         deps,
@@ -130,10 +130,7 @@ struct ChunkIntermediate {
     extra_bytes: Range<usize>,
 }
 
-fn encode_chunk(
-    uncompressed_change: &amp::UncompressedChange,
-    deps: &[amp::ChangeHash],
-) -> ChunkIntermediate {
+fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermediate {
     let mut bytes = Vec::new();
 
     // All these unwraps are okay because we're writing to an in memory buffer so io erros should
@@ -146,26 +143,19 @@ fn encode_chunk(
     }
 
     // encode first actor
-    let mut actors = vec![uncompressed_change.actor_id.clone()];
-    uncompressed_change
-        .actor_id
-        .to_bytes()
-        .encode(&mut bytes)
-        .unwrap();
+    let mut actors = vec![change.actor_id.clone()];
+    change.actor_id.to_bytes().encode(&mut bytes).unwrap();
 
     // encode seq, start_op, time, message
-    uncompressed_change.seq.encode(&mut bytes).unwrap();
-    uncompressed_change.start_op.encode(&mut bytes).unwrap();
-    uncompressed_change.time.encode(&mut bytes).unwrap();
+    change.seq.encode(&mut bytes).unwrap();
+    change.start_op.encode(&mut bytes).unwrap();
+    change.time.encode(&mut bytes).unwrap();
     let message = bytes.len() + 1;
-    uncompressed_change.message.encode(&mut bytes).unwrap();
+    change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
-    let expanded_ops = ExpandedOpIterator::new(
-        &uncompressed_change.operations,
-        uncompressed_change.start_op,
-        uncompressed_change.actor_id.clone(),
-    );
+    let expanded_ops =
+        ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone());
 
     // encode ops into a side buffer - collect all other actors
     let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
@@ -181,8 +171,8 @@ fn encode_chunk(
     bytes.write_all(&ops_buf).unwrap();
 
     // write out the extra bytes
-    let extra_bytes = bytes.len()..(bytes.len() + uncompressed_change.extra_bytes.len());
-    bytes.write_all(&uncompressed_change.extra_bytes).unwrap();
+    let extra_bytes = bytes.len()..(bytes.len() + change.extra_bytes.len());
+    bytes.write_all(&change.extra_bytes).unwrap();
     let body = 0..bytes.len();
 
     ChunkIntermediate {
@@ -263,8 +253,8 @@ impl Change {
         }
     }
 
-    pub fn decode(&self) -> amp::UncompressedChange {
-        amp::UncompressedChange {
+    pub fn decode(&self) -> amp::Change {
+        amp::Change {
             start_op: self.start_op,
             seq: self.seq,
             time: self.time,
@@ -671,10 +661,10 @@ fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorId]) -> Vec<amp::OpId> {
 fn doc_changes_to_uncompressed_changes(
     changes: &[DocChange],
     actors: &[amp::ActorId],
-) -> Vec<amp::UncompressedChange> {
+) -> Vec<amp::Change> {
     changes
         .iter()
-        .map(|change| amp::UncompressedChange {
+        .map(|change| amp::Change {
             // we've already confirmed that all change.actor's are valid
             actor_id: actors[change.actor].clone(),
             seq: change.seq,
@@ -777,7 +767,7 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
 }
 
 fn compress_doc_changes(
-    uncompressed_changes: &mut [amp::UncompressedChange],
+    uncompressed_changes: &mut [amp::Change],
     doc_changes: &[DocChange],
 ) -> Option<Vec<Change>> {
     let mut changes: Vec<Change> = Vec::with_capacity(doc_changes.len());
@@ -796,7 +786,7 @@ fn compress_doc_changes(
 }
 
 #[instrument(level = "debug", skip(changes, actors))]
-fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -> Vec<DocOp> {
+fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp> {
     let mut by_obj_id = HashMap::<amp::ObjectId, HashMap<amp::Key, HashMap<amp::OpId, _>>>::new();
     let mut by_ref = HashMap::<amp::ObjectId, HashMap<amp::Key, Vec<amp::OpId>>>::new();
     let mut is_seq = HashSet::<amp::ObjectId>::new();
@@ -900,7 +890,7 @@ fn group_doc_ops(changes: &[amp::UncompressedChange], actors: &[amp::ActorId]) -
     ops
 }
 
-fn get_heads(changes: &[amp::UncompressedChange]) -> HashSet<amp::ChangeHash> {
+fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
     changes.iter().fold(HashSet::new(), |mut acc, c| {
         if let Some(hash) = c.hash {
             acc.insert(hash);
@@ -913,9 +903,7 @@ fn get_heads(changes: &[amp::UncompressedChange]) -> HashSet<amp::ChangeHash> {
 }
 
 #[instrument(level = "debug", skip(changes))]
-pub(crate) fn encode_document(
-    changes: &[amp::UncompressedChange],
-) -> Result<Vec<u8>, encoding::Error> {
+pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encoding::Error> {
     let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
@@ -981,13 +969,13 @@ pub(crate) const HEADER_BYTES: usize = PREAMBLE_BYTES + 1;
 mod tests {
     use std::{num::NonZeroU32, str::FromStr};
 
-    use amp::{ActorId, UncompressedChange};
+    use amp::ActorId;
 
     use super::*;
 
     #[test]
     fn test_empty_change() {
-        let change1 = amp::UncompressedChange {
+        let change1 = amp::Change {
             start_op: 1,
             seq: 2,
             time: 1234,
@@ -1025,7 +1013,7 @@ mod tests {
         let keyseq1 = amp::Key::from(&opid1);
         let keyseq2 = amp::Key::from(&opid2);
         let insert = false;
-        let change1 = amp::UncompressedChange {
+        let change1 = amp::Change {
             start_op: 123,
             seq: 29291,
             time: 12_341_231,
@@ -1124,7 +1112,7 @@ mod tests {
     #[test_env_log::test]
     fn test_multiops() {
         let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
-        let change1 = amp::UncompressedChange {
+        let change1 = amp::Change {
             start_op: 123,
             seq: 29291,
             time: 12_341_231,
@@ -1151,7 +1139,7 @@ mod tests {
     fn test_encode_decode_document() {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
-        let change1 = amp::UncompressedChange {
+        let change1 = amp::Change {
             start_op: 1,
             seq: 1,
             time: 0,
@@ -1194,7 +1182,7 @@ mod tests {
         let binchange1: Change = Change::try_from(change1.clone()).unwrap();
         backend.apply_changes(vec![binchange1.clone()]).unwrap();
 
-        let change2 = amp::UncompressedChange {
+        let change2 = amp::Change {
             start_op: 5,
             seq: 2,
             time: 0,
@@ -1226,12 +1214,12 @@ mod tests {
         let changes = backend.get_changes(&[]);
         let encoded = backend.save().unwrap();
         let loaded_changes = Change::load_document(&encoded).unwrap();
-        let decoded_loaded: Vec<amp::UncompressedChange> = loaded_changes
+        let decoded_loaded: Vec<amp::Change> = loaded_changes
             .clone()
             .into_iter()
             .map(|c| c.decode())
             .collect();
-        let decoded_preload: Vec<amp::UncompressedChange> =
+        let decoded_preload: Vec<amp::Change> =
             changes.clone().into_iter().map(Change::decode).collect();
         assert_eq!(decoded_loaded, decoded_preload);
         assert_eq!(
@@ -1246,7 +1234,7 @@ mod tests {
     fn test_encode_decode_document_large_enough_for_compression() {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
-        let mut change1 = amp::UncompressedChange {
+        let mut change1 = amp::Change {
             start_op: 1,
             seq: 1,
             time: 0,
@@ -1280,12 +1268,12 @@ mod tests {
         let changes = backend.get_changes(&[]);
         let encoded = backend.save().unwrap();
         let loaded_changes = Change::load_document(&encoded).unwrap();
-        let decoded_loaded: Vec<amp::UncompressedChange> = loaded_changes
+        let decoded_loaded: Vec<amp::Change> = loaded_changes
             .clone()
             .into_iter()
             .map(|c| c.decode())
             .collect();
-        let decoded_preload: Vec<amp::UncompressedChange> =
+        let decoded_preload: Vec<amp::Change> =
             changes.clone().into_iter().map(Change::decode).collect();
         assert_eq!(decoded_loaded[0].operations.len(), 257);
         assert_eq!(decoded_loaded, decoded_preload);
@@ -1297,7 +1285,7 @@ mod tests {
 
     #[test]
     fn test_invalid_document_checksum() {
-        let change = UncompressedChange {
+        let change = amp::Change {
             operations: Vec::new(),
             actor_id: ActorId::random(),
             hash: None,

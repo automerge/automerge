@@ -61,7 +61,7 @@ fn test_set_root_object_properties() {
             cr.time = 0;
             cr
         });
-    let expected_change = amp::UncompressedChange {
+    let expected_change = amp::Change {
         actor_id: doc.actor_id,
         start_op: 1,
         seq: 1,
@@ -99,7 +99,7 @@ fn test_set_bytes() {
             cr.time = 0;
             cr
         });
-    let expected_change = amp::UncompressedChange {
+    let expected_change = amp::Change {
         actor_id: doc.actor_id,
         start_op: 1,
         seq: 1,
@@ -146,7 +146,7 @@ fn it_should_create_nested_maps() {
         .1
         .unwrap();
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
-    let expected_change = amp::UncompressedChange {
+    let expected_change = amp::Change {
         actor_id: doc.actor_id,
         start_op: 1,
         seq: 1,
@@ -222,7 +222,7 @@ fn apply_updates_inside_nested_maps() {
     );
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
         seq: 2,
         start_op: 3,
@@ -281,7 +281,7 @@ fn delete_keys_in_a_map() {
         }))
     );
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 3,
@@ -338,7 +338,7 @@ fn create_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
         seq: 1,
         start_op: 1,
@@ -404,7 +404,7 @@ fn apply_updates_inside_lists() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 3,
@@ -458,7 +458,7 @@ fn delete_list_elements() {
 
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 4,
@@ -519,7 +519,7 @@ fn handle_counters_inside_maps() {
         },)
     );
 
-    let expected_change_request_1 = amp::UncompressedChange {
+    let expected_change_request_1 = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 1,
         start_op: 1,
@@ -538,7 +538,7 @@ fn handle_counters_inside_maps() {
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::UncompressedChange {
+    let expected_change_request_2 = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 2,
@@ -603,7 +603,7 @@ fn handle_counters_inside_lists() {
 
     let counts_id = doc.get_object_id(&Path::root().key("counts")).unwrap();
 
-    let expected_change_request_1 = amp::UncompressedChange {
+    let expected_change_request_1 = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 1,
         time: req1.time,
@@ -631,7 +631,7 @@ fn handle_counters_inside_lists() {
     };
     assert_eq!(req1, expected_change_request_1);
 
-    let expected_change_request_2 = amp::UncompressedChange {
+    let expected_change_request_2 = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 3,
@@ -706,7 +706,7 @@ fn test_sets_characters_in_text() {
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 6,
@@ -760,7 +760,7 @@ fn test_inserts_characters_in_text() {
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 6,
@@ -814,7 +814,7 @@ fn test_inserts_characters_at_start_of_text() {
 
     let text_id = doc.get_object_id(&Path::root().key("text")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 2,
@@ -872,7 +872,7 @@ fn test_inserts_at_end_of_lists() {
 
     let list_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
         seq: 2,
         start_op: 2,

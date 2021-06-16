@@ -4,7 +4,8 @@ use automerge::{
     Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue,
     SequenceType, Value,
 };
-use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType, UncompressedChange};
+use automerge_protocol as amp;
+use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType};
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
 use test_env_log::test;
@@ -70,7 +71,7 @@ fn test_multi_insert_expands_to_correct_indices() {
     let uuid = uuid::Uuid::new_v4();
     let actor = ActorId::from_bytes(uuid.as_bytes());
 
-    let change = UncompressedChange {
+    let change = amp::Change {
         operations: vec![
             Op {
                 action: OpType::Make(ObjType::Sequence(SequenceType::List)),

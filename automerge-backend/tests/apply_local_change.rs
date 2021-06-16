@@ -1,19 +1,19 @@
 extern crate automerge_backend;
 use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
 
+use amp::RootDiff;
 use automerge_backend::{Backend, Change};
-use automerge_protocol as protocol;
+use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, ChangeHash, Diff, DiffEdit, ElementId, ObjType, ObjectId, Op, OpType, Patch, SeqDiff,
-    SequenceType, UncompressedChange,
+    SequenceType,
 };
 use maplit::hashmap;
-use protocol::RootDiff;
 
 #[test]
 fn test_apply_local_change() {
     let actor: ActorId = "eb738e04ef8848ce8b77309b6c7f7e39".try_into().unwrap();
-    let change_request = UncompressedChange {
+    let change_request = amp::Change {
         actor_id: actor.clone(),
         time: 0,
         message: None,
@@ -22,7 +22,7 @@ fn test_apply_local_change() {
         deps: Vec::new(),
         start_op: 1,
         operations: vec![Op {
-            action: protocol::OpType::Set("magpie".into()),
+            action: amp::OpType::Set("magpie".into()),
             key: "bird".into(),
             obj: ObjectId::Root,
             insert: false,
@@ -35,7 +35,7 @@ fn test_apply_local_change() {
     let patch = backend.apply_local_change(change_request).unwrap().0;
 
     let changes = backend.get_changes(&[]);
-    let expected_change = UncompressedChange {
+    let expected_change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -79,7 +79,7 @@ fn test_apply_local_change() {
 #[test]
 fn test_error_on_duplicate_requests() {
     let actor: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
-    let change_request1 = UncompressedChange {
+    let change_request1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
@@ -88,7 +88,7 @@ fn test_error_on_duplicate_requests() {
         deps: Vec::new(),
         start_op: 1,
         operations: vec![Op {
-            action: protocol::OpType::Set("magpie".into()),
+            action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
@@ -97,7 +97,7 @@ fn test_error_on_duplicate_requests() {
         extra_bytes: Vec::new(),
     };
 
-    let change_request2 = UncompressedChange {
+    let change_request2 = amp::Change {
         actor_id: actor,
         seq: 2,
         message: None,
@@ -106,7 +106,7 @@ fn test_error_on_duplicate_requests() {
         deps: Vec::new(),
         start_op: 2,
         operations: vec![Op {
-            action: protocol::OpType::Set("jay".into()),
+            action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
@@ -124,7 +124,7 @@ fn test_error_on_duplicate_requests() {
 #[test]
 fn test_handle_concurrent_frontend_and_backend_changes() {
     let actor: ActorId = "cb55260e9d7e457886a4fc73fd949202".try_into().unwrap();
-    let local1 = UncompressedChange {
+    let local1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         time: 0,
@@ -133,7 +133,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         start_op: 1,
         operations: vec![Op {
-            action: protocol::OpType::Set("magpie".into()),
+            action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
@@ -142,7 +142,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         extra_bytes: Vec::new(),
     };
 
-    let local2 = UncompressedChange {
+    let local2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -151,7 +151,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         message: None,
         hash: None,
         operations: vec![Op {
-            action: protocol::OpType::Set("jay".into()),
+            action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
@@ -160,7 +160,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         extra_bytes: Vec::new(),
     };
     let remote_actor: ActorId = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
-    let remote1 = UncompressedChange {
+    let remote1 = amp::Change {
         actor_id: remote_actor.clone(),
         seq: 1,
         start_op: 1,
@@ -169,7 +169,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         message: None,
         hash: None,
         operations: vec![Op {
-            action: protocol::OpType::Set("goldfish".into()),
+            action: amp::OpType::Set("goldfish".into()),
             obj: ObjectId::Root,
             key: "fish".into(),
             pred: Vec::new(),
@@ -180,7 +180,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
     .try_into()
     .unwrap();
 
-    let mut expected_change1 = UncompressedChange {
+    let mut expected_change1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -189,7 +189,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            action: protocol::OpType::Set("magpie".into()),
+            action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             pred: Vec::new(),
@@ -198,7 +198,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         extra_bytes: Vec::new(),
     };
 
-    let mut expected_change2 = UncompressedChange {
+    let mut expected_change2 = amp::Change {
         actor_id: remote_actor,
         seq: 1,
         start_op: 1,
@@ -207,7 +207,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            action: protocol::OpType::Set("goldfish".into()),
+            action: amp::OpType::Set("goldfish".into()),
             key: "fish".into(),
             obj: ObjectId::Root,
             pred: Vec::new(),
@@ -216,7 +216,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         extra_bytes: Vec::new(),
     };
 
-    let mut expected_change3 = UncompressedChange {
+    let mut expected_change3 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -225,7 +225,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            action: protocol::OpType::Set("jay".into()),
+            action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
             pred: vec![actor.op_id_at(1)],
@@ -263,7 +263,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 fn test_transform_list_indexes_into_element_ids() {
     let actor: ActorId = "8f389df8fecb4ddc989102321af3578e".try_into().unwrap();
     let remote_actor: ActorId = "9ba21574dc44411b8ce37bc6037a9687".try_into().unwrap();
-    let remote1: Change = UncompressedChange {
+    let remote1: Change = amp::Change {
         actor_id: remote_actor.clone(),
         seq: 1,
         start_op: 1,
@@ -272,7 +272,7 @@ fn test_transform_list_indexes_into_element_ids() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            action: protocol::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::list()),
             key: "birds".into(),
             obj: ObjectId::Root,
             pred: Vec::new(),
@@ -283,7 +283,7 @@ fn test_transform_list_indexes_into_element_ids() {
     .try_into()
     .unwrap();
 
-    let remote2: Change = UncompressedChange {
+    let remote2: Change = amp::Change {
         actor_id: remote_actor.clone(),
         seq: 2,
         start_op: 2,
@@ -292,7 +292,7 @@ fn test_transform_list_indexes_into_element_ids() {
         hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
-            action: protocol::OpType::Set("magpie".into()),
+            action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::from(remote_actor.op_id_at(1)),
             key: ElementId::Head.into(),
             insert: true,
@@ -303,7 +303,7 @@ fn test_transform_list_indexes_into_element_ids() {
     .try_into()
     .unwrap();
 
-    let local1 = UncompressedChange {
+    let local1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
@@ -313,14 +313,14 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 2,
         operations: vec![Op {
             obj: ObjectId::from(remote_actor.op_id_at(1)),
-            action: protocol::OpType::Set("goldfinch".into()),
+            action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
         extra_bytes: Vec::new(),
     };
-    let local2 = UncompressedChange {
+    let local2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         message: None,
@@ -330,7 +330,7 @@ fn test_transform_list_indexes_into_element_ids() {
         start_op: 3,
         operations: vec![Op {
             obj: ObjectId::from(remote_actor.op_id_at(1)),
-            action: protocol::OpType::Set("wagtail".into()),
+            action: amp::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
             pred: Vec::new(),
@@ -338,7 +338,7 @@ fn test_transform_list_indexes_into_element_ids() {
         extra_bytes: Vec::new(),
     };
 
-    let local3 = UncompressedChange {
+    let local3 = amp::Change {
         actor_id: actor.clone(),
         seq: 3,
         message: None,
@@ -349,14 +349,14 @@ fn test_transform_list_indexes_into_element_ids() {
         operations: vec![
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
-                action: protocol::OpType::Set("Magpie".into()),
+                action: amp::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
                 insert: false,
                 pred: vec![remote_actor.op_id_at(2)],
             },
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
-                action: protocol::OpType::Set("Goldfinch".into()),
+                action: amp::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
                 pred: vec![actor.op_id_at(2)],
@@ -365,7 +365,7 @@ fn test_transform_list_indexes_into_element_ids() {
         extra_bytes: Vec::new(),
     };
 
-    let mut expected_change1 = UncompressedChange {
+    let mut expected_change1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 2,
@@ -375,14 +375,14 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: vec![remote1.hash],
         operations: vec![Op {
             obj: ObjectId::from(remote_actor.op_id_at(1)),
-            action: protocol::OpType::Set("goldfinch".into()),
+            action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
             pred: Vec::new(),
         }],
         extra_bytes: Vec::new(),
     };
-    let mut expected_change2 = UncompressedChange {
+    let mut expected_change2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -392,14 +392,14 @@ fn test_transform_list_indexes_into_element_ids() {
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectId::from(remote_actor.op_id_at(1)),
-            action: protocol::OpType::Set("wagtail".into()),
+            action: amp::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
             pred: Vec::new(),
         }],
         extra_bytes: Vec::new(),
     };
-    let mut expected_change3 = UncompressedChange {
+    let mut expected_change3 = amp::Change {
         actor_id: actor.clone(),
         seq: 3,
         start_op: 4,
@@ -410,14 +410,14 @@ fn test_transform_list_indexes_into_element_ids() {
         operations: vec![
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
-                action: protocol::OpType::Set("Magpie".into()),
+                action: amp::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
                 pred: vec![remote_actor.op_id_at(2)],
                 insert: false,
             },
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
-                action: protocol::OpType::Set("Goldfinch".into()),
+                action: amp::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
                 pred: vec![actor.op_id_at(2)],
                 insert: false,
@@ -458,7 +458,7 @@ fn test_transform_list_indexes_into_element_ids() {
 #[test]
 fn test_handle_list_insertion_and_deletion_in_same_change() {
     let actor: ActorId = "0723d2a1940744868ffd6b294ada813f".try_into().unwrap();
-    let local1 = UncompressedChange {
+    let local1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         message: None,
@@ -468,7 +468,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         start_op: 1,
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: protocol::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::list()),
             key: "birds".into(),
             insert: false,
             pred: Vec::new(),
@@ -476,7 +476,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         extra_bytes: Vec::new(),
     };
 
-    let local2 = UncompressedChange {
+    let local2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         message: None,
@@ -487,7 +487,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         operations: vec![
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Set("magpie".into()),
+                action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
@@ -544,7 +544,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     let change1 = changes[0].clone();
     let change2 = changes[1].clone();
 
-    let expected_change1 = UncompressedChange {
+    let expected_change1 = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -554,7 +554,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: protocol::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::list()),
             key: "birds".into(),
             insert: false,
             pred: Vec::new(),
@@ -564,7 +564,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     .try_into()
     .unwrap();
 
-    let expected_change2 = UncompressedChange {
+    let expected_change2 = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -575,7 +575,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         operations: vec![
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
-                action: protocol::OpType::Set("magpie".into()),
+                action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: Vec::new(),
@@ -599,7 +599,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
 /// Asserts that the changes are equal without respect to order of the hashes
 /// in the change dependencies
-fn assert_changes_equal(mut change1: UncompressedChange, change2: UncompressedChange) {
+fn assert_changes_equal(mut change1: amp::Change, change2: amp::Change) {
     let change2_clone = change2.clone();
     let deps1: HashSet<&ChangeHash> = change1.deps.iter().collect();
     let deps2: HashSet<&ChangeHash> = change2.deps.iter().collect();

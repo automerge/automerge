@@ -6,7 +6,7 @@ use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch, ScalarValue,
-    SeqDiff, SequenceType, UncompressedChange,
+    SeqDiff, SequenceType,
 };
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
@@ -14,7 +14,7 @@ use pretty_assertions::assert_eq;
 #[test]
 fn test_include_most_recent_value_for_key() {
     let actor: ActorId = "ec28cfbcdb9e4f32ad24b3c776e651b0".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -34,7 +34,7 @@ fn test_include_most_recent_value_for_key() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -82,7 +82,7 @@ fn test_include_most_recent_value_for_key() {
 fn test_includes_conflicting_values_for_key() {
     let actor1: ActorId = "111111".try_into().unwrap();
     let actor2: ActorId = "222222".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -102,7 +102,7 @@ fn test_includes_conflicting_values_for_key() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,
@@ -151,7 +151,7 @@ fn test_includes_conflicting_values_for_key() {
 #[test]
 fn test_handles_counter_increment_at_keys_in_a_map() {
     let actor: ActorId = "46c92088e4484ae5945dc63bf606a4a5".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -171,7 +171,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 2,
@@ -218,7 +218,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
 #[test]
 fn test_creates_nested_maps() {
     let actor: ActorId = "06148f9422cb40579fd02f1975c34a51".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -247,7 +247,7 @@ fn test_creates_nested_maps() {
     .try_into()
     .unwrap();
 
-    let change2: Change = UncompressedChange {
+    let change2: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 2,
         start_op: 3,
@@ -311,7 +311,7 @@ fn test_creates_nested_maps() {
 #[test]
 fn test_create_lists() {
     let actor: ActorId = "90bf7df682f747fa82ac604b35010906".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -376,7 +376,7 @@ fn test_create_lists() {
 #[test]
 fn test_includes_latests_state_of_list() {
     let actor: ActorId = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -466,7 +466,7 @@ fn test_includes_latests_state_of_list() {
 #[test]
 fn test_includes_date_objects_at_root() {
     let actor: ActorId = "90f5dd5d4f524e95ad5929e08d1194f1".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -513,7 +513,7 @@ fn test_includes_date_objects_at_root() {
 #[test]
 fn test_includes_date_objects_in_a_list() {
     let actor: ActorId = "08b050f976a249349021a2e63d99c8e8".try_into().unwrap();
-    let change1: Change = UncompressedChange {
+    let change1: Change = amp::Change {
         actor_id: actor.clone(),
         seq: 1,
         start_op: 1,
@@ -580,7 +580,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
     let local_actor = ActorId::random();
     let actor1: ActorId = "da45d93f2b18456f8318c723d1430563".try_into().unwrap();
     let actor2: ActorId = "6caaa2e433de42ae9c3fa65c9ff3f03e".try_into().unwrap();
-    let local_change = UncompressedChange {
+    let local_change = amp::Change {
         actor_id: local_actor.clone(),
         seq: 1,
         start_op: 1,
@@ -608,7 +608,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
     };
     let binchange: Change = local_change.clone().try_into().unwrap();
 
-    let remote_change_1: Change = UncompressedChange {
+    let remote_change_1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,
         start_op: 1,
@@ -628,7 +628,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
     .try_into()
     .unwrap();
 
-    let remote_change_2: Change = UncompressedChange {
+    let remote_change_2: Change = amp::Change {
         actor_id: actor2.clone(),
         seq: 1,
         start_op: 1,

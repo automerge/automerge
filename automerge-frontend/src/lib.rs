@@ -1,4 +1,5 @@
-use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch, UncompressedChange};
+use automerge_protocol as amp;
+use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
 
 mod error;
 mod mutation;
@@ -392,7 +393,7 @@ impl Frontend {
     #[cfg(feature = "std")]
     pub fn new_with_initial_state(
         initial_state: Value,
-    ) -> Result<(Self, UncompressedChange), InvalidInitialStateError> {
+    ) -> Result<(Self, amp::Change), InvalidInitialStateError> {
         match &initial_state {
             Value::Map(kvs) => {
                 let mut front = Frontend::new();
@@ -411,7 +412,7 @@ impl Frontend {
                             (ops, max_op)
                         });
 
-                let init_change_request = UncompressedChange {
+                let init_change_request = amp::Change {
                     actor_id: front.actor_id.clone(),
                     start_op: 1,
                     time: (front.timestamper)().unwrap_or(0),
@@ -449,7 +450,7 @@ impl Frontend {
         &mut self,
         message: Option<String>,
         change_closure: F,
-    ) -> Result<(O, Option<UncompressedChange>), E>
+    ) -> Result<(O, Option<amp::Change>), E>
     where
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
@@ -461,7 +462,7 @@ impl Frontend {
         self.cached_value = None;
         if !change_result.ops.is_empty() {
             self.seq += 1;
-            let change = UncompressedChange {
+            let change = amp::Change {
                 start_op,
                 actor_id: self.actor_id.clone(),
                 seq: self.seq,

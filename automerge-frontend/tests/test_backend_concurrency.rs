@@ -56,7 +56,7 @@ fn use_version_and_sequence_number_from_backend() {
         .1
         .unwrap();
 
-    let expected_change_request = amp::UncompressedChange {
+    let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
         seq: 5,
         start_op: 5,
@@ -500,7 +500,7 @@ fn allow_interleaving_of_patches_and_changes() {
 
     assert_eq!(
         req1,
-        amp::UncompressedChange {
+        amp::Change {
             actor_id: doc.actor_id.clone(),
             seq: 1,
             start_op: 1,
@@ -521,7 +521,7 @@ fn allow_interleaving_of_patches_and_changes() {
 
     assert_eq!(
         req2,
-        amp::UncompressedChange {
+        amp::Change {
             actor_id: doc.actor_id.clone(),
             seq: 2,
             start_op: 2,
@@ -558,7 +558,7 @@ fn allow_interleaving_of_patches_and_changes() {
 
     assert_eq!(
         req3,
-        amp::UncompressedChange {
+        amp::Change {
             actor_id: doc.actor_id.clone(),
             seq: 3,
             start_op: 3,
@@ -653,7 +653,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         .1
         .unwrap();
 
-    let expected_change2 = amp::UncompressedChange {
+    let expected_change2 = amp::Change {
         actor_id: doc2.actor_id.clone(),
         start_op: 2,
         seq: 1,
@@ -672,7 +672,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     };
     assert_eq!(change2, expected_change2);
 
-    let expected_change3 = amp::UncompressedChange {
+    let expected_change3 = amp::Change {
         actor_id: doc2.actor_id.clone(),
         start_op: 3,
         seq: 2,
@@ -714,7 +714,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
         .1
         .unwrap();
 
-    let expected_change4 = amp::UncompressedChange {
+    let expected_change4 = amp::Change {
         actor_id: doc2.actor_id.clone(),
         start_op: 4,
         seq: 3,

@@ -64,7 +64,7 @@ fn test_multiple_primitive_inserts() {
 
     assert_eq!(
         cr,
-        amp::UncompressedChange {
+        amp::Change {
             message: None,
             seq: 1,
             actor_id: frontend.actor_id.clone(),
@@ -118,7 +118,7 @@ fn test_multiple_non_primitive_inserts() {
 
     assert_eq!(
         cr,
-        amp::UncompressedChange {
+        amp::Change {
             message: None,
             seq: 1,
             actor_id: actor.clone(),
