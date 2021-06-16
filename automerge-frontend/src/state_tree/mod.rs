@@ -1019,24 +1019,27 @@ struct CursorState {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-struct Cursors(im_rc::HashMap<amp::ObjectId, Vec<CursorState>>);
+struct Cursors(HashMap<amp::ObjectId, Vec<CursorState>>);
 
 impl Cursors {
     fn new() -> Cursors {
-        Cursors(im_rc::HashMap::new())
+        Cursors(HashMap::new())
     }
 
     fn new_from(cursor: CursorState) -> Cursors {
-        Cursors(im_rc::hashmap! {
+        Cursors(maplit::hashmap! {
             cursor.referred_object_id.clone() => vec![cursor],
         })
     }
 
-    fn union(&self, other: Cursors) -> Cursors {
-        Cursors(self.0.clone().union_with(other.0, |mut c1, c2| {
-            c1.extend(c2);
-            c1
-        }))
+    fn extend(&mut self, other: Cursors) {
+        for (k, v) in other.0 {
+            if let Some(c1) = self.0.get_mut(&k) {
+                c1.extend(v)
+            } else {
+                self.0.insert(k, v);
+            }
+        }
     }
 
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut CursorState> {
