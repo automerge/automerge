@@ -326,7 +326,7 @@ impl Debug for Frontend {
             timestamper: _,
         } = self;
         {
-            let mut builder = f.debug_struct("Person");
+            let mut builder = f.debug_struct("Frontend");
             let _ = builder.field("actor_id", &actor_id);
             let _ = builder.field("seq", &seq);
             let _ = builder.field("state", &state);
