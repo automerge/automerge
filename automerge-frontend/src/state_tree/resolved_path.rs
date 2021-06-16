@@ -302,12 +302,15 @@ impl<'a> ResolvedRootMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (Option<MultiValue>, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()])
             .unwrap_or_else(Vec::new);
-        let old = self.root.remove(key);
+        let old = self
+            .root
+            .remove(key)
+            .expect("Removing non existent key from map");
         (
             old,
             LocalOperationResult {
@@ -411,12 +414,15 @@ impl<'a> ResolvedMapMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (Option<MultiValue>, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
         };
-        let old = state_tree_map.props.remove(key);
+        let old = state_tree_map
+            .props
+            .remove(key)
+            .expect("Removing non existent key from map");
         (
             old,
             LocalOperationResult {
@@ -489,12 +495,15 @@ impl<'a> ResolvedTableMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (Option<MultiValue>, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
         };
-        let old = state_tree_table.props.remove(key);
+        let old = state_tree_table
+            .props
+            .remove(key)
+            .expect("Removing non existent key from table");
         (
             old,
             LocalOperationResult {
