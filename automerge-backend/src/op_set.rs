@@ -227,6 +227,10 @@ impl OpSet {
     fn update_cursors(&mut self, patch: &mut IncrementalPatch) {
         // For each cursor, if the cursor references an object which has been changed we generate a
         // diff for the cursor
+        if self.cursors.is_empty() {
+            return;
+        }
+
         let mut cursor_changes: HashMap<ObjectId, Vec<Key>> = HashMap::new();
         for obj_id in patch.changed_object_ids() {
             if let Some(cursors) = self.cursors.get_mut(obj_id) {

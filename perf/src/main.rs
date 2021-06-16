@@ -56,12 +56,21 @@ fn f() {
         applys.push(a.elapsed());
     }
 
+    let save = Instant::now();
+    let bytes = backend.save().unwrap();
+    let save = save.elapsed();
+    let load = Instant::now();
+    Backend::load(bytes).unwrap();
+    let load = load.elapsed();
+
     println!(
-        "maps x{} {:?} {:?} {:?}",
+        "maps x{} total:{:?} change:{:?} apply:{:?} save:{:?} load:{:?}",
         iterations,
         start.elapsed(),
         changes.iter().sum::<Duration>(),
-        applys.iter().sum::<Duration>()
+        applys.iter().sum::<Duration>(),
+        save,
+        load,
     );
 }
 
@@ -108,7 +117,20 @@ fn g() {
 
     f.apply_patch(patch).unwrap();
 
-    println!("seqs x{} {:?}", iterations, start.elapsed());
+    let save = Instant::now();
+    let bytes = backend.save().unwrap();
+    let save = save.elapsed();
+    let load = Instant::now();
+    Backend::load(bytes).unwrap();
+    let load = load.elapsed();
+
+    println!(
+        "seqs x{} {:?} save:{:?} load:{:?}",
+        iterations,
+        start.elapsed(),
+        save,
+        load
+    );
 }
 
 fn h() {
@@ -198,12 +220,22 @@ fn h() {
         doc2.apply_patch(patch2).unwrap();
         applys.push(a.elapsed());
     }
+
+    let save = Instant::now();
+    let bytes = backend1.save().unwrap();
+    let save = save.elapsed();
+    let load = Instant::now();
+    Backend::load(bytes).unwrap();
+    let load = load.elapsed();
+
     println!(
-        "rand x{} {:?} {:?} {:?}",
+        "rand x{} {:?} change:{:?} apply:{:?} save:{:?} load:{:?}",
         iterations,
         start.elapsed(),
         changes.iter().sum::<Duration>(),
-        applys.iter().sum::<Duration>()
+        applys.iter().sum::<Duration>(),
+        save,
+        load,
     );
 }
 
@@ -267,7 +299,19 @@ fn trace(edits: Vec<(u32, u32, Option<String>)>) {
         doc.apply_patch(patch).unwrap();
     }
 
-    println!("trace {:?}", start.elapsed());
+    let save = Instant::now();
+    let bytes = backend.save().unwrap();
+    let save = save.elapsed();
+    let load = Instant::now();
+    Backend::load(bytes).unwrap();
+    let load = load.elapsed();
+
+    println!(
+        "trace {:?} save:{:?} load:{:?}",
+        start.elapsed(),
+        save,
+        load
+    );
 }
 
 fn main() {

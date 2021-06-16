@@ -136,7 +136,7 @@ impl IncrementalPatch {
         self.0.keys()
     }
 
-    pub(crate) fn finalize(&mut self, workshop: &dyn PatchWorkshop) -> amp::RootDiff {
+    pub(crate) fn finalize(mut self, workshop: &dyn PatchWorkshop) -> amp::RootDiff {
         if self.0.is_empty() {
             return amp::RootDiff::default();
         }
@@ -163,7 +163,7 @@ impl IncrementalPatch {
             for key in &keys {
                 let key_string = workshop.key_to_string(key);
                 let mut opid_to_value = HashMap::new();
-                for op in &obj.conflicts(key) {
+                for op in obj.conflicts(key) {
                     let link = match op.action {
                         InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                         InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
@@ -268,7 +268,7 @@ impl IncrementalPatch {
                     })
                 }
                 PendingDiff::Set(op) => {
-                    for op in &obj.conflicts(&op.operation_key()) {
+                    for op in obj.conflicts(&op.operation_key()) {
                         if !seen_op_ids.contains(&op.id) {
                             seen_op_ids.insert(op.id);
                             let value = match op.action {
@@ -314,7 +314,7 @@ impl IncrementalPatch {
         for key in &keys {
             let key_string = workshop.key_to_string(key);
             let mut opid_to_value = HashMap::new();
-            for op in &obj.conflicts(key) {
+            for op in obj.conflicts(key) {
                 let link = match op.action {
                     InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                     InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
