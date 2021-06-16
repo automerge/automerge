@@ -586,6 +586,7 @@ impl<'a> ResolvedTextMut<'a> {
         };
         let (current_elemid, _) = state_tree_text.elem_at(index.try_into().unwrap())?;
         let current_elemid = current_elemid.clone();
+        let pred = state_tree_text.pred_for_index(index as u32);
         state_tree_text.remove(index.try_into().unwrap())?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
@@ -593,7 +594,7 @@ impl<'a> ResolvedTextMut<'a> {
                 obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: false,
-                pred: state_tree_text.pred_for_index(index as u32),
+                pred,
             }],
         })
     }
