@@ -592,7 +592,7 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             let (multivalue, new_ops, new_cursors) = next_value.finish();
-            cursors.union(new_cursors);
+            cursors.extend(new_cursors);
             ops.extend(new_ops);
             result_props.insert(prop, multivalue);
         }
@@ -644,7 +644,7 @@ where
             let next_value = context.create(value);
             current_max_op = next_value.max_op;
             let (multivalue, new_ops, new_cursors) = next_value.finish();
-            cursors.union(new_cursors);
+            cursors.extend(new_cursors);
             ops.extend(new_ops);
             result_elems.push(multivalue);
         }

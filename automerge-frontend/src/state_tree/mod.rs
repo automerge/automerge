@@ -1032,7 +1032,7 @@ impl Cursors {
         })
     }
 
-    fn union(&mut self, other: Cursors) {
+    fn extend(&mut self, other: Cursors) {
         for (k, v) in other.0 {
             if let Some(c1) = self.0.get_mut(&k) {
                 c1.extend(v)
