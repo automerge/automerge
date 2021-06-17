@@ -897,12 +897,12 @@ pub(crate) struct DocOpEncoder {
 
 impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
-    pub(crate) fn encode_doc_ops<'a, 'b, I>(
+    pub(crate) fn encode_doc_ops<'a, I>(
         ops: I,
         actors: &'a mut Vec<amp::ActorId>,
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'b DocOp>,
+        I: IntoIterator<Item = DocOp>,
     {
         let mut e = Self::new();
         e.encode(ops, actors);
@@ -922,9 +922,9 @@ impl DocOpEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
+    fn encode<I>(&mut self, ops: I, actors: &mut Vec<amp::ActorId>)
     where
-        I: IntoIterator<Item = &'c DocOp>,
+        I: IntoIterator<Item = DocOp>,
     {
         for op in ops {
             self.actor.append_value(op.actor);
@@ -1047,12 +1047,12 @@ impl ColumnEncoder {
     where
         I: IntoIterator<Item = ColumnOp<'c>>,
     {
-        for mut op in ops {
-            self.append(&mut op, actors)
+        for op in ops {
+            self.append(op, actors)
         }
     }
 
-    fn append<'a>(&mut self, op: &mut ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
