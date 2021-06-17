@@ -1,7 +1,6 @@
 use core::cmp::max;
 use std::collections::HashMap;
 
-use amp::{MapType, SequenceType};
 use automerge_protocol as amp;
 
 use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
@@ -34,6 +33,22 @@ pub(crate) fn generate_from_scratch_diff(workshop: &dyn PatchWorkshop) -> amp::R
 fn construct_map(
     object_id: &ObjectId,
     object: &ObjState,
+    workshop: &dyn PatchWorkshop,
+) -> amp::MapDiff {
+    construct_map_or_table(object_id, object, amp::MapType::Map, workshop)
+}
+
+fn construct_table(
+    object_id: &ObjectId,
+    object: &ObjState,
+    workshop: &dyn PatchWorkshop,
+) -> amp::MapDiff {
+    construct_map_or_table(object_id, object, amp::MapType::Table, workshop)
+}
+
+fn construct_map_or_table(
+    object_id: &ObjectId,
+    object: &ObjState,
     map_type: amp::MapType,
     workshop: &dyn PatchWorkshop,
 ) -> amp::MapDiff {
@@ -62,6 +77,22 @@ fn construct_map(
 }
 
 fn construct_list(
+    object_id: &ObjectId,
+    object: &ObjState,
+    workshop: &dyn PatchWorkshop,
+) -> amp::SeqDiff {
+    construct_list_or_text(object_id, object, amp::SequenceType::List, workshop)
+}
+
+fn construct_text(
+    object_id: &ObjectId,
+    object: &ObjState,
+    workshop: &dyn PatchWorkshop,
+) -> amp::SeqDiff {
+    construct_list_or_text(object_id, object, amp::SequenceType::Text, workshop)
+}
+
+fn construct_list_or_text(
     object_id: &ObjectId,
     object: &ObjState,
     seq_type: amp::SequenceType,
@@ -119,23 +150,9 @@ fn construct_object(object_id: &ObjectId, workshop: &dyn PatchWorkshop) -> amp::
     // scratch then the document is corrupt
     let object = workshop.get_obj(object_id).expect("missing object");
     match object.obj_type {
-        amp::ObjType::Map => {
-            amp::Diff::Map(construct_map(object_id, object, MapType::Map, workshop))
-        }
-        amp::ObjType::Table => {
-            amp::Diff::Map(construct_map(object_id, object, MapType::Table, workshop))
-        }
-        amp::ObjType::List => amp::Diff::Seq(construct_list(
-            object_id,
-            object,
-            SequenceType::List,
-            workshop,
-        )),
-        amp::ObjType::Text => amp::Diff::Seq(construct_list(
-            object_id,
-            object,
-            SequenceType::Text,
-            workshop,
-        )),
+        amp::ObjType::Map => amp::Diff::Map(construct_map(object_id, object, workshop)),
+        amp::ObjType::Table => amp::Diff::Map(construct_table(object_id, object, workshop)),
+        amp::ObjType::List => amp::Diff::Seq(construct_list(object_id, object, workshop)),
+        amp::ObjType::Text => amp::Diff::Seq(construct_text(object_id, object, workshop)),
     }
 }
