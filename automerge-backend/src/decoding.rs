@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
+use amp::ActorId;
 use automerge_protocol as amp;
 
 /// The error type for decoding operations.
@@ -391,6 +392,6 @@ impl Decodable for amp::ActorId {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        Some(buffer.into())
+        Some(ActorId::try_from(buffer.as_slice()).expect("Failed to create ActorId"))
     }
 }

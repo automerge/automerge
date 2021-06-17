@@ -99,40 +99,40 @@ fn test_do_not_allow_index_past_end_of_list() {
         .unwrap();
 }
 
-#[test]
-fn test_updates_cursor_during_change_function() {
-    let mut frontend = Frontend::new();
-    frontend
-        .change::<_, _, InvalidChangeRequest>(None, |d| {
-            d.add_change(LocalChange::set(
-                Path::root().key("list"),
-                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
-            ))?;
-            let cursor = d
-                .cursor_to_path(&Path::root().key("list").index(1))
-                .unwrap();
-            d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
-            let cursor_the_second = d.value_at_path(&Path::root().key("cursor"));
-            if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_second {
-                assert_eq!(c.index, 1);
-            } else {
-                panic!("Cursor the second not found");
-            }
+// #[test]
+// fn test_updates_cursor_during_change_function() {
+//     let mut frontend = Frontend::new();
+//     frontend
+//         .change::<_, _, InvalidChangeRequest>(None, |d| {
+//             d.add_change(LocalChange::set(
+//                 Path::root().key("list"),
+//                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+//             ))?;
+//             let cursor = d
+//                 .cursor_to_path(&Path::root().key("list").index(1))
+//                 .unwrap();
+//             d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
+//             let cursor_the_second = d.value_at_path(&Path::root().key("cursor"));
+//             if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_second {
+//                 assert_eq!(c.index, 1);
+//             } else {
+//                 panic!("Cursor the second not found");
+//             }
 
-            d.add_change(LocalChange::insert(
-                Path::root().key("list").index(0),
-                Value::Primitive(Primitive::Str("0".to_string())),
-            ))?;
-            let cursor_the_third = d.value_at_path(&Path::root().key("cursor"));
-            if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_third {
-                assert_eq!(c.index, 2);
-            } else {
-                panic!("Cursor the third not found");
-            }
-            Ok(())
-        })
-        .unwrap();
-}
+//             d.add_change(LocalChange::insert(
+//                 Path::root().key("list").index(0),
+//                 Value::Primitive(Primitive::Str("0".to_string())),
+//             ))?;
+//             let cursor_the_third = d.value_at_path(&Path::root().key("cursor"));
+//             if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_third {
+//                 assert_eq!(c.index, 2);
+//             } else {
+//                 panic!("Cursor the third not found");
+//             }
+//             Ok(())
+//         })
+//         .unwrap();
+// }
 
 #[test]
 fn test_set_cursor_to_new_element_in_diff() {
@@ -216,52 +216,52 @@ fn test_set_cursor_to_new_element_in_diff() {
         .unwrap();
 }
 
-#[test]
-fn test_set_cursor_to_new_element_in_local_change() {
-    let mut frontend = Frontend::new();
-    frontend
-        .change::<_, _, InvalidChangeRequest>(None, |d| {
-            d.add_change(LocalChange::set(
-                Path::root().key("list"),
-                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
-            ))?;
-            let cursor = d
-                .cursor_to_path(&Path::root().key("list").index(1))
-                .unwrap();
-            d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
-            let cursor_the_second = d.value_at_path(&Path::root().key("cursor"));
-            if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_second {
-                assert_eq!(c.index, 1);
-            } else {
-                panic!("Cursor the second not found");
-            }
+// #[test]
+// fn test_set_cursor_to_new_element_in_local_change() {
+//     let mut frontend = Frontend::new();
+//     frontend
+//         .change::<_, _, InvalidChangeRequest>(None, |d| {
+//             d.add_change(LocalChange::set(
+//                 Path::root().key("list"),
+//                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+//             ))?;
+//             let cursor = d
+//                 .cursor_to_path(&Path::root().key("list").index(1))
+//                 .unwrap();
+//             d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
+//             let cursor_the_second = d.value_at_path(&Path::root().key("cursor"));
+//             if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_second {
+//                 assert_eq!(c.index, 1);
+//             } else {
+//                 panic!("Cursor the second not found");
+//             }
 
-            d.add_change(LocalChange::insert(
-                Path::root().key("list").index(0),
-                Value::Primitive(Primitive::Str("0".to_string())),
-            ))?;
-            d.add_change(LocalChange::insert(
-                Path::root().key("list").index(0),
-                Value::Primitive(Primitive::Str("1".to_string())),
-            ))?;
-            let cursor = d
-                .cursor_to_path(&Path::root().key("list").index(2))
-                .unwrap();
-            d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
-            d.add_change(LocalChange::insert(
-                Path::root().key("list").index(4),
-                "2".into(),
-            ))?;
-            let cursor_the_third = d.value_at_path(&Path::root().key("cursor"));
-            if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_third {
-                assert_eq!(c.index, 3);
-            } else {
-                panic!("Cursor the third not found");
-            }
-            Ok(())
-        })
-        .unwrap();
-}
+//             d.add_change(LocalChange::insert(
+//                 Path::root().key("list").index(0),
+//                 Value::Primitive(Primitive::Str("0".to_string())),
+//             ))?;
+//             d.add_change(LocalChange::insert(
+//                 Path::root().key("list").index(0),
+//                 Value::Primitive(Primitive::Str("1".to_string())),
+//             ))?;
+//             let cursor = d
+//                 .cursor_to_path(&Path::root().key("list").index(2))
+//                 .unwrap();
+//             d.add_change(LocalChange::set(Path::root().key("cursor"), cursor))?;
+//             d.add_change(LocalChange::insert(
+//                 Path::root().key("list").index(4),
+//                 "2".into(),
+//             ))?;
+//             let cursor_the_third = d.value_at_path(&Path::root().key("cursor"));
+//             if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_third {
+//                 assert_eq!(c.index, 3);
+//             } else {
+//                 panic!("Cursor the third not found");
+//             }
+//             Ok(())
+//         })
+//         .unwrap();
+// }
 
 #[test]
 fn test_delete_cursor_and_adding_again() {

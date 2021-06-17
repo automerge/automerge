@@ -80,8 +80,8 @@ fn test_include_most_recent_value_for_key() {
 
 #[test]
 fn test_includes_conflicting_values_for_key() {
-    let actor1: ActorId = "111111".try_into().unwrap();
-    let actor2: ActorId = "222222".try_into().unwrap();
+    let actor1: ActorId = "11111111111111111111111111111111".try_into().unwrap();
+    let actor2: ActorId = "22222222222222222222222222222222".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,

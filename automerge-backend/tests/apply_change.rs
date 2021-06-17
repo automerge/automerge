@@ -158,7 +158,7 @@ fn test_increment_key_in_map() {
 
 #[test]
 fn test_conflict_on_assignment_to_same_map_key() {
-    let actor_1 = ActorId::from_str("ac11").unwrap();
+    let actor_1 = ActorId::from_str("ac11ac11ac11ac11ac11ac11ac11ac11").unwrap();
     let change1: Change = amp::Change {
         actor_id: actor_1.clone(),
         seq: 1,
@@ -179,7 +179,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
     .try_into()
     .unwrap();
 
-    let actor_2 = ActorId::from_str("ac22").unwrap();
+    let actor_2 = ActorId::from_str("ac22ac22ac22ac22ac22ac22ac22ac22").unwrap();
     let change2: Change = amp::Change {
         actor_id: actor_2.clone(),
         start_op: 2,
@@ -856,8 +856,8 @@ fn test_handle_changes_within_conflicted_objects() {
 
 #[test_env_log::test]
 fn test_handle_changes_within_conflicted_lists() {
-    let actor1: ActorId = "01234567".try_into().unwrap();
-    let actor2: ActorId = "89abcdef".try_into().unwrap();
+    let actor1: ActorId = "01234567012345670123456701234567".try_into().unwrap();
+    let actor2: ActorId = "89abcdef89abcdef89abcdef89abcdef".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor1.clone(),
         seq: 1,

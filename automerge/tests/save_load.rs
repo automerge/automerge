@@ -194,7 +194,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
 #[test]
 fn missing_object_error_null_rle_decoding() {
     let actor_uuid = uuid::Uuid::new_v4();
-    let actor_id = ActorId::from_bytes(actor_uuid.as_bytes());
+    let actor_id = ActorId::from(actor_uuid);
 
     let raw_change = amp::Change {
         operations: vec![

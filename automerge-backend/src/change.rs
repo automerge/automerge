@@ -431,11 +431,14 @@ fn decode_actors(
         actors.push(actor)
     }
     for _ in 0..num_actors {
-        actors.push(amp::ActorId::from(
-            bytes
-                .get(slice_bytes(bytes, cursor)?)
-                .ok_or(decoding::Error::NotEnoughBytes)?,
-        ));
+        actors.push(
+            amp::ActorId::try_from(
+                bytes
+                    .get(slice_bytes(bytes, cursor)?)
+                    .ok_or(decoding::Error::NotEnoughBytes)?,
+            )
+            .expect("Failed to create ActorId"),
+        );
     }
     Ok(actors)
 }
@@ -518,8 +521,10 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
 
     let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
 
-    let actor =
-        amp::ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
+    let actor = amp::ActorId::try_from(
+        &bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?],
+    )
+    .expect("Failed to create ActorId");
     let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
     let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
     let time = read_slice(bytes.uncompressed(), &mut cursor)?;
@@ -981,7 +986,7 @@ mod tests {
             time: 1234,
             message: None,
             hash: None,
-            actor_id: amp::ActorId::from_str("deadbeefdeadbeef").unwrap(),
+            actor_id: amp::ActorId::from_str("deadbeefdeadbeefdeadbeefdeadbeef").unwrap(),
             deps: vec![],
             operations: vec![],
             extra_bytes: vec![1, 1, 1],
@@ -995,9 +1000,9 @@ mod tests {
 
     #[test]
     fn test_complex_change() {
-        let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
-        let actor2 = amp::ActorId::from_str("feeddefaff").unwrap();
-        let actor3 = amp::ActorId::from_str("00101010fafafafa").unwrap();
+        let actor1 = amp::ActorId::from_str("deadbeefdeadbeefdeadbeefdeadbeef").unwrap();
+        let actor2 = amp::ActorId::from_str("feeddefafeeddefafeeddefafeeddefa").unwrap();
+        let actor3 = amp::ActorId::from_str("0101fafa0101fafa0101fafa0101fafa").unwrap();
         let opid1 = amp::OpId::new(102, &actor1);
         let opid2 = amp::OpId::new(391, &actor1);
         let opid3 = amp::OpId::new(299, &actor2);
@@ -1111,7 +1116,7 @@ mod tests {
 
     #[test_env_log::test]
     fn test_multiops() {
-        let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
+        let actor1 = amp::ActorId::from_str("deadbeefdeadbeefdeadbeefdeadbeef").unwrap();
         let change1 = amp::Change {
             start_op: 123,
             seq: 29291,

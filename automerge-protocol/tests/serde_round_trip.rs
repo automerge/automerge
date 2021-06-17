@@ -1,9 +1,11 @@
 extern crate automerge_protocol as amp;
+use std::convert::TryFrom;
+
 use maplit::hashmap;
 
 #[test]
 fn test_msgpack_roundtrip_diff() {
-    let actor = amp::ActorId::from_bytes("bd1850df21004038a8141a98473ff142".as_bytes());
+    let actor = amp::ActorId::try_from("bd1850df21004038a8141a98473ff142").unwrap();
     let diff = amp::RootDiff {
         props: hashmap! {
             "bird".into() => hashmap! {

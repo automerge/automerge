@@ -383,7 +383,7 @@ impl Frontend {
     ) -> Self {
         let root_state = state_tree::StateTree::new();
         Frontend {
-            actor_id: ActorId::from_bytes(actor_id.as_bytes()),
+            actor_id: ActorId::from(actor_id),
             seq: 0,
             state: FrontendState::Reconciled {
                 reconciled_root_state: root_state.clone(),
