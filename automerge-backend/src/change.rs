@@ -54,13 +54,14 @@ impl From<&amp::Change> for Change {
 }
 
 fn encode(change: &amp::Change) -> Change {
-    let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
     let mut deps = change.deps.clone();
     deps.sort_unstable();
 
     let mut chunk = encode_chunk(change, &deps);
+
+    let mut bytes = Vec::with_capacity(MAGIC_BYTES.len() + 4 + chunk.bytes.len());
 
     bytes.extend(&MAGIC_BYTES);
 
