@@ -584,7 +584,7 @@ where
         ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut result_props: HashMap<String, MultiValue> = HashMap::new();
+        let mut result_props: HashMap<String, MultiValue> = HashMap::with_capacity(props.len());
         for (prop, value) in props {
             let context = NewValueContext {
                 actor: self.actor,
@@ -630,7 +630,9 @@ where
             insert: self.insert,
             pred: self.pred,
         };
-        let mut ops = vec![make_op];
+        // for each value we add at least one op
+        let mut ops = Vec::with_capacity(values.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
@@ -669,13 +671,16 @@ where
 
     fn new_text(self, graphemes: Vec<String>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
-        let mut ops: Vec<amp::Op> = vec![amp::Op {
+        let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::Text),
             obj: self.parent_obj.into(),
             key: self.key.clone(),
             insert: self.insert,
             pred: self.pred,
-        }];
+        };
+        // for each value we add at least one op
+        let mut ops = Vec::with_capacity(graphemes.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut last_elemid = amp::ElementId::Head;
         let mut multigraphemes: Vec<MultiGrapheme> = Vec::with_capacity(graphemes.len());
