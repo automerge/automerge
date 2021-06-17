@@ -191,30 +191,18 @@ impl IncrementalPatch {
             .expect("Missing object in internal diff");
         if let Some(pending) = self.0.get(obj_id) {
             match obj.obj_type {
-                amp::ObjType::List => amp::Diff::Seq(self.gen_seq_diff(
-                    obj_id,
-                    obj,
-                    pending,
-                    workshop,
-                    SequenceType::List,
-                )),
-                amp::ObjType::Text => amp::Diff::Seq(self.gen_seq_diff(
-                    obj_id,
-                    obj,
-                    pending,
-                    workshop,
-                    SequenceType::Text,
-                )),
-                amp::ObjType::Map => {
-                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, pending, workshop, MapType::Map))
+                amp::ObjType::List => {
+                    amp::Diff::Seq(self.gen_list_diff(obj_id, obj, pending, workshop))
                 }
-                amp::ObjType::Table => amp::Diff::Map(self.gen_map_diff(
-                    obj_id,
-                    obj,
-                    pending,
-                    workshop,
-                    MapType::Table,
-                )),
+                amp::ObjType::Text => {
+                    amp::Diff::Seq(self.gen_text_diff(obj_id, obj, pending, workshop))
+                }
+                amp::ObjType::Map => {
+                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, pending, workshop))
+                }
+                amp::ObjType::Table => {
+                    amp::Diff::Map(self.gen_table_diff(obj_id, obj, pending, workshop))
+                }
             }
         } else {
             // no changes so just return empty edits or props
@@ -241,6 +229,26 @@ impl IncrementalPatch {
                 }),
             }
         }
+    }
+
+    fn gen_list_diff(
+        &self,
+        obj_id: &ObjectId,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        workshop: &dyn PatchWorkshop,
+    ) -> amp::SeqDiff {
+        self.gen_seq_diff(obj_id, obj, pending, workshop, amp::SequenceType::List)
+    }
+
+    fn gen_text_diff(
+        &self,
+        obj_id: &ObjectId,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        workshop: &dyn PatchWorkshop,
+    ) -> amp::SeqDiff {
+        self.gen_seq_diff(obj_id, obj, pending, workshop, amp::SequenceType::Text)
     }
 
     fn gen_seq_diff(
@@ -330,6 +338,26 @@ impl IncrementalPatch {
     }
 
     fn gen_map_diff(
+        &self,
+        obj_id: &ObjectId,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        workshop: &dyn PatchWorkshop,
+    ) -> amp::MapDiff {
+        self.gen_map_or_table_diff(obj_id, obj, pending, workshop, amp::MapType::Map)
+    }
+
+    fn gen_table_diff(
+        &self,
+        obj_id: &ObjectId,
+        obj: &ObjState,
+        pending: &[PendingDiff],
+        workshop: &dyn PatchWorkshop,
+    ) -> amp::MapDiff {
+        self.gen_map_or_table_diff(obj_id, obj, pending, workshop, amp::MapType::Table)
+    }
+
+    fn gen_map_or_table_diff(
         &self,
         obj_id: &ObjectId,
         obj: &ObjState,
