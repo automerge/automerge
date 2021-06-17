@@ -223,7 +223,7 @@ impl Backend {
                 .iter()
                 .all(|d| self.history_index.contains_key(d))
             {
-                return Some(self.queue.remove(index));
+                return Some(self.queue.swap_remove(index));
             }
             index += 1
         }
