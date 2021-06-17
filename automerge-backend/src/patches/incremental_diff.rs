@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use automerge_protocol as amp;
 
@@ -23,13 +26,13 @@ enum PendingDiff {
 }
 
 impl PendingDiff {
-    pub fn operation_key(&self) -> Key {
+    pub fn operation_key(&self) -> Cow<Key> {
         match self {
             Self::SeqInsert(op, ..)
             | Self::SeqUpdate(op, ..)
             | Self::SeqRemove(op, ..)
             | Self::Set(op) => op.operation_key(),
-            Self::CursorChange(k) => k.clone(),
+            Self::CursorChange(k) => Cow::Borrowed(k),
         }
     }
 }

@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     fmt,
     hash::{Hash, Hasher},
     ops::Deref,
@@ -54,11 +55,11 @@ impl OpHandle {
         }
     }
 
-    pub fn operation_key(&self) -> Key {
+    pub fn operation_key(&self) -> Cow<Key> {
         if self.insert {
-            self.id.into()
+            Cow::Owned(self.id.into())
         } else {
-            self.key.clone()
+            Cow::Borrowed(&self.key)
         }
     }
 

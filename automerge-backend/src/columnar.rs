@@ -554,6 +554,8 @@ struct ValEncoder {
 }
 
 impl ValEncoder {
+    const COLUMNS: usize = 4;
+
     fn new() -> ValEncoder {
         ValEncoder {
             len: RleEncoder::new(),
@@ -626,8 +628,8 @@ impl ValEncoder {
         self.len.append_value(VALUE_TYPE_NULL)
     }
 
-    fn finish(self) -> Vec<ColData> {
-        vec![
+    fn finish(self) -> [ColData; Self::COLUMNS] {
+        [
             self.ref_counter.finish(COL_REF_CTR),
             self.ref_actor.finish(COL_REF_ACTOR),
             self.len.finish(COL_VAL_LEN),
@@ -643,6 +645,8 @@ struct KeyEncoder {
 }
 
 impl KeyEncoder {
+    const COLUMNS: usize = 3;
+
     fn new() -> KeyEncoder {
         KeyEncoder {
             actor: RleEncoder::new(),
@@ -651,12 +655,12 @@ impl KeyEncoder {
         }
     }
 
-    fn append(&mut self, key: &amp::Key, actors: &mut Vec<amp::ActorId>) {
-        match &key {
+    fn append(&mut self, key: amp::Key, actors: &mut Vec<amp::ActorId>) {
+        match key {
             amp::Key::Map(s) => {
                 self.actor.append_null();
                 self.ctr.append_null();
-                self.str.append_value(s.clone());
+                self.str.append_value(s);
             }
             amp::Key::Seq(amp::ElementId::Head) => {
                 self.actor.append_null();
@@ -664,15 +668,15 @@ impl KeyEncoder {
                 self.str.append_null();
             }
             amp::Key::Seq(amp::ElementId::Id(amp::OpId(ctr, actor))) => {
-                self.actor.append_value(map_actor(actor, actors));
-                self.ctr.append_value(*ctr);
+                self.actor.append_value(map_actor(&actor, actors));
+                self.ctr.append_value(ctr);
                 self.str.append_null();
             }
         }
     }
 
-    fn finish(self) -> Vec<ColData> {
-        vec![
+    fn finish(self) -> [ColData; Self::COLUMNS] {
+        [
             self.actor.finish(COL_KEY_ACTOR),
             self.ctr.finish(COL_KEY_CTR),
             self.str.finish(COL_KEY_STR),
@@ -719,6 +723,8 @@ struct PredEncoder {
 }
 
 impl PredEncoder {
+    const COLUMNS: usize = 3;
+
     fn new() -> PredEncoder {
         PredEncoder {
             num: RleEncoder::new(),
@@ -735,8 +741,8 @@ impl PredEncoder {
         }
     }
 
-    fn finish(self) -> Vec<ColData> {
-        vec![
+    fn finish(self) -> [ColData; Self::COLUMNS] {
+        [
             self.num.finish(COL_PRED_NUM),
             self.actor.finish(COL_PRED_ACTOR),
             self.ctr.finish(COL_PRED_CTR),
@@ -750,6 +756,8 @@ struct ObjEncoder {
 }
 
 impl ObjEncoder {
+    const COLUMNS: usize = 2;
+
     fn new() -> ObjEncoder {
         ObjEncoder {
             actor: RleEncoder::new(),
@@ -770,8 +778,8 @@ impl ObjEncoder {
         }
     }
 
-    fn finish(self) -> Vec<ColData> {
-        vec![
+    fn finish(self) -> [ColData; Self::COLUMNS] {
+        [
             self.actor.finish(COL_OBJ_ACTOR),
             self.ctr.finish(COL_OBJ_CTR),
         ]
@@ -930,7 +938,7 @@ impl DocOpEncoder {
             self.actor.append_value(op.actor);
             self.ctr.append_value(op.ctr);
             self.obj.append(&op.obj, actors);
-            self.key.append(&op.key, actors);
+            self.key.append(op.key, actors);
             self.insert.append(op.insert);
             self.succ.append(&op.succ);
             let action = match &op.action {
@@ -1054,7 +1062,7 @@ impl ColumnEncoder {
 
     fn append<'a>(&mut self, op: ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
-        self.key.append(&op.key, actors);
+        self.key.append(op.key.into_owned(), actors);
         self.insert.append(op.insert);
 
         self.pred.append(&op.pred, actors);
@@ -1085,10 +1093,15 @@ impl ColumnEncoder {
     }
 
     fn finish(self) -> (Vec<u8>, HashMap<u32, Range<usize>>) {
-        let mut coldata = vec![
-            self.insert.finish(COL_INSERT),
-            self.action.finish(COL_ACTION),
-        ];
+        // allocate for the exact number of columns
+        let mut coldata = Vec::with_capacity(
+            2 + ObjEncoder::COLUMNS
+                + KeyEncoder::COLUMNS
+                + ValEncoder::COLUMNS
+                + PredEncoder::COLUMNS,
+        );
+        coldata.push(self.insert.finish(COL_INSERT));
+        coldata.push(self.action.finish(COL_ACTION));
         coldata.extend(self.obj.finish());
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());

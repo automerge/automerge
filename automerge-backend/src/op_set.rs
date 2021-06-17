@@ -133,7 +133,10 @@ impl OpSet {
                 );
             }
 
-            let ops = object.props.entry(op.operation_key()).or_default();
+            let ops = object
+                .props
+                .entry(op.operation_key().into_owned())
+                .or_default();
             let before = !ops.is_empty();
             let (op, overwritten_ops) = ops.incorporate_new_op(op)?;
             let after = !ops.is_empty();
