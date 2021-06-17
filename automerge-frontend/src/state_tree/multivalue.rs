@@ -579,7 +579,9 @@ where
             insert: self.insert,
             pred: self.pred,
         };
-        let mut ops = vec![make_op];
+        // for each prop we add at least one op
+        let mut ops = Vec::with_capacity(props.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut result_props: HashMap<String, MultiValue> = HashMap::new();
