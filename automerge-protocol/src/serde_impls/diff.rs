@@ -9,8 +9,8 @@ use serde::{
 
 use super::read_field;
 use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, MapType, ObjType, ObjectId, OpId, ScalarValue,
-    SeqDiff, SequenceType,
+    CursorDiff, DataType, Diff, DiffEdit, ListDiff, MapDiff, MapType, ObjType, ObjectId, OpId,
+    ScalarValue, SequenceType, TableDiff, TextDiff,
 };
 
 impl Serialize for Diff {
@@ -19,8 +19,34 @@ impl Serialize for Diff {
         S: Serializer,
     {
         match self {
-            Diff::Map(diff) => diff.serialize(serializer),
-            Diff::Seq(diff) => diff.serialize(serializer),
+            Diff::Map(diff) => {
+                let mut op = serializer.serialize_struct("MapDiff", 3)?;
+                op.serialize_field("objectId", &diff.object_id)?;
+                op.serialize_field("type", &MapType::Map)?;
+                op.serialize_field("props", &diff.props)?;
+                op.end()
+            }
+            Diff::Table(diff) => {
+                let mut op = serializer.serialize_struct("TableDiff", 3)?;
+                op.serialize_field("objectId", &diff.object_id)?;
+                op.serialize_field("type", &MapType::Table)?;
+                op.serialize_field("props", &diff.props)?;
+                op.end()
+            }
+            Diff::List(diff) => {
+                let mut op = serializer.serialize_struct("ListDiff", 3)?;
+                op.serialize_field("objectId", &diff.object_id)?;
+                op.serialize_field("type", &SequenceType::List)?;
+                op.serialize_field("edits", &diff.edits)?;
+                op.end()
+            }
+            Diff::Text(diff) => {
+                let mut op = serializer.serialize_struct("TextDiff", 3)?;
+                op.serialize_field("objectId", &diff.object_id)?;
+                op.serialize_field("type", &SequenceType::Text)?;
+                op.serialize_field("edits", &diff.edits)?;
+                op.end()
+            }
             Diff::Value(val) => match val {
                 ScalarValue::Counter(_) => {
                     let mut op = serializer.serialize_struct("Value", 3)?;
@@ -169,17 +195,15 @@ impl<'de> Deserialize<'de> for Diff {
                         Some(obj_type) => match obj_type {
                             ObjType::List => {
                                 let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
-                                Ok(Diff::Seq(SeqDiff {
+                                Ok(Diff::List(ListDiff {
                                     object_id,
-                                    seq_type: SequenceType::List,
                                     edits,
                                 }))
                             },
                             ObjType::Text => {
                                 let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
-                                Ok(Diff::Seq(SeqDiff {
+                                Ok(Diff::Text(TextDiff {
                                     object_id,
-                                    seq_type: SequenceType::Text,
                                     edits,
                                 }))
                             },
@@ -187,15 +211,13 @@ impl<'de> Deserialize<'de> for Diff {
                                 let props = props.ok_or_else(|| Error::missing_field("props"))?;
                                 Ok(Diff::Map(MapDiff{
                                     object_id,
-                                    map_type:MapType::Map ,
                                     props,
                                 }))
                             },
                             ObjType::Table => {
                                 let props = props.ok_or_else(|| Error::missing_field("props"))?;
-                                Ok(Diff::Map(MapDiff{
+                                Ok(Diff::Table(TableDiff{
                                     object_id,
-                                    map_type: MapType::Table,
                                     props,
                                 }))
                             },
@@ -263,7 +285,7 @@ mod tests {
 
     use maplit::hashmap;
 
-    use crate::{CursorDiff, Diff, MapDiff, MapType, ObjectId, OpId, SeqDiff, SequenceType};
+    use crate::{CursorDiff, Diff, ListDiff, MapDiff, ObjectId, OpId};
 
     #[test]
     fn map_diff_serialization_round_trip() {
@@ -281,7 +303,6 @@ mod tests {
         });
         let diff = Diff::Map(MapDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
-            map_type: MapType::Map,
             props: hashmap! {
                 "key".to_string() => hashmap!{
                     OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
@@ -324,9 +345,8 @@ mod tests {
                 //}
             //],
         });
-        let diff = Diff::Seq(SeqDiff {
+        let diff = Diff::List(ListDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
-            seq_type: SequenceType::List,
             edits: vec![], //DiffEdit::SingleElementInsert{
                            //index: 1,
                            //elem_id: ElementId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),

@@ -148,9 +148,8 @@ fn test_set_cursor_to_new_element_in_diff() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".to_string() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,

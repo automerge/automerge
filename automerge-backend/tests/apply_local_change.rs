@@ -5,8 +5,7 @@ use amp::RootDiff;
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ObjType, ObjectId, Op, OpType, Patch, SeqDiff,
-    SequenceType,
+    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ListDiff, ObjType, ObjectId, Op, OpType, Patch,
 };
 use maplit::hashmap;
 
@@ -515,9 +514,8 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        seq_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,

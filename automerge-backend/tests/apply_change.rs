@@ -5,8 +5,8 @@ use amp::RootDiff;
 use automerge_backend::{AutomergeError, Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, CursorDiff, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch,
-    ScalarValue, SeqDiff, SequenceType,
+    ActorId, CursorDiff, Diff, DiffEdit, ElementId, ListDiff, MapDiff, ObjectId, Op, Patch,
+    ScalarValue,
 };
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
@@ -333,7 +333,6 @@ fn create_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: actor.op_id_at(1).into(),
-                        map_type: MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
                                 actor.op_id_at(2) => Diff::Value(ScalarValue::F64(3.0))
@@ -416,7 +415,6 @@ fn test_assign_to_nested_keys_in_map() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: actor.op_id_at(1).into(),
-                        map_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
                                 actor.op_id_at(3) => Diff::Value(ScalarValue::F64(15.0))
@@ -478,9 +476,8 @@ fn test_create_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -563,9 +560,8 @@ fn test_apply_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::Update{
                             index: 0,
                             op_id: actor.op_id_at(3),
@@ -647,9 +643,8 @@ fn test_delete_list_elements() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id:  actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::Remove{index: 0, count: 1}]
                     })
                 }
@@ -727,9 +722,8 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
@@ -828,14 +822,12 @@ fn test_handle_changes_within_conflicted_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "conflict".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor1.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor1.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: Vec::new(),
                     }),
                     actor2.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: actor2.op_id_at(1).into(),
-                        map_type: MapType::Map,
                         props: hashmap!{
                             "sparrow".into() => hashmap!{
                                 actor2.op_id_at(2) => Diff::Value(ScalarValue::F64(12.0))
@@ -995,16 +987,14 @@ fn test_handle_changes_within_conflicted_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "todos".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor1.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor1.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
                                 op_id: actor1.op_id_at(3),
                                 value: Diff::Map(MapDiff{
                                     object_id: actor1.op_id_at(3).into(),
-                                    map_type: MapType::Map,
                                     props: hashmap!{
                                         "done".to_string() => hashmap!{
                                             actor1.op_id_at(6) => Diff::Value(true.into())
@@ -1016,7 +1006,6 @@ fn test_handle_changes_within_conflicted_lists() {
                                 index: 0,
                                 op_id: actor2.op_id_at(3),
                                 value: Diff::Map(MapDiff{
-                                    map_type: MapType::Map,
                                     object_id: actor2.op_id_at(3).into(),
                                     props: hashmap!{},
                                 })
@@ -1127,9 +1116,8 @@ fn test_support_date_objects_in_a_list() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -1198,9 +1186,8 @@ fn test_cursor_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -1329,9 +1316,8 @@ fn test_updating_sequences_updates_referring_cursors() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(4).into(),
@@ -1430,9 +1416,8 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::Remove{index: 0, count: 1}],
                     })
                 },

@@ -398,26 +398,62 @@ impl fmt::Debug for ChangeHash {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Diff {
     Map(MapDiff),
-    Seq(SeqDiff),
+    Table(TableDiff),
+    List(ListDiff),
+    Text(TextDiff),
     Value(ScalarValue),
     Cursor(CursorDiff),
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+impl Diff {
+    pub fn object_type(&self) -> Option<ObjType> {
+        match self {
+            Diff::Map(_) => Some(ObjType::Map),
+            Diff::Table(_) => Some(ObjType::Table),
+            Diff::List(_) => Some(ObjType::List),
+            Diff::Text(_) => Some(ObjType::Text),
+            Diff::Value(_) => None,
+            Diff::Cursor(_) => None,
+        }
+    }
+
+    pub fn object_id(&self) -> Option<ObjectId> {
+        match self {
+            Diff::Map(mapdiff) => Some(mapdiff.object_id.clone()),
+            Diff::Table(tablediff) => Some(tablediff.object_id.clone()),
+            Diff::List(listdiff) => Some(listdiff.object_id.clone()),
+            Diff::Text(textdiff) => Some(textdiff.object_id.clone()),
+            Diff::Value(..) => None,
+            Diff::Cursor(CursorDiff { object_id, .. }) => Some(object_id.clone()),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MapDiff {
     pub object_id: ObjectId,
-    #[serde(rename = "type")]
-    pub map_type: MapType,
     pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct SeqDiff {
+pub struct TableDiff {
     pub object_id: ObjectId,
-    #[serde(rename = "type")]
-    pub seq_type: SequenceType,
+    pub props: HashMap<String, HashMap<OpId, Diff>>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDiff {
+    pub object_id: ObjectId,
+    pub edits: Vec<DiffEdit>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TextDiff {
+    pub object_id: ObjectId,
     pub edits: Vec<DiffEdit>,
 }
 

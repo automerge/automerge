@@ -131,7 +131,6 @@ fn create_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor.op_id_at(2).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
@@ -167,7 +166,6 @@ fn apply_updates_inside_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor.op_id_at(2).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
@@ -197,7 +195,6 @@ fn apply_updates_inside_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: birds_id,
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
                                 actor.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(15))
@@ -248,7 +245,6 @@ fn apply_updates_inside_map_conflicts() {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor1.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
                                 actor1.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(1)),
@@ -257,7 +253,6 @@ fn apply_updates_inside_map_conflicts() {
                     }),
                     actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor2.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "wrens".into() => hashmap!{
                                 actor2.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3)),
@@ -301,7 +296,6 @@ fn apply_updates_inside_map_conflicts() {
                 "favouriteBirds".into() => hashmap!{
                     actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor1.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
                                 actor1.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(2)),
@@ -310,7 +304,6 @@ fn apply_updates_inside_map_conflicts() {
                     }),
                     actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor2.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: HashMap::new(),
                     })
                 }
@@ -407,9 +400,8 @@ fn create_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -445,9 +437,8 @@ fn apply_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -473,9 +464,8 @@ fn apply_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
                             op_id: actor.op_id_at(3),
@@ -508,9 +498,8 @@ fn apply_multi_insert_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::MultiElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -565,9 +554,8 @@ fn apply_updates_inside_list_conflicts() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: other_actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,
@@ -575,7 +563,6 @@ fn apply_updates_inside_list_conflicts() {
                                 op_id: actor1.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
-                                    map_type: amp::MapType::Map,
                                     props: hashmap!{
                                         "species".into() => hashmap!{
                                             actor1.op_id_at(3) => amp::Diff::Value("woodpecker".into()),
@@ -591,7 +578,6 @@ fn apply_updates_inside_list_conflicts() {
                                 op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
-                                    map_type: amp::MapType::Map,
                                     props: hashmap!{
                                         "species".into() => hashmap!{
                                             actor2.op_id_at(3) => amp::Diff::Value("lapwing".into()),
@@ -648,16 +634,14 @@ fn apply_updates_inside_list_conflicts() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: other_actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
                                 op_id: actor1.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor1.op_id_at(2).into(),
-                                    map_type: amp::MapType::Map,
                                     props: hashmap!{
                                         "numSeen".into() => hashmap!{
                                             actor1.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Int(2)),
@@ -670,7 +654,6 @@ fn apply_updates_inside_list_conflicts() {
                                 op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
-                                    map_type: amp::MapType::Map,
                                     props: HashMap::new(),
                                 })
                             }
@@ -719,16 +702,14 @@ fn apply_updates_inside_list_conflicts() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: other_actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
                                 op_id: actor2.op_id_at(2),
                                 value: amp::Diff::Map(amp::MapDiff{
                                     object_id: actor2.op_id_at(2).into(),
-                                    map_type: amp::MapType::Map,
                                     props: HashMap::new(),
                                 })
                             }
@@ -778,9 +759,8 @@ fn delete_list_elements() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
@@ -818,9 +798,8 @@ fn delete_list_elements() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Remove{ index: 0, count: 1 }],
                     })
                 }
@@ -849,7 +828,6 @@ fn apply_updates_at_different_levels_of_object_tree() {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "magpie".into() => hashmap!{
                                 actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(2))
@@ -858,16 +836,14 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     })
                 },
                 "details".into() => hashmap!{
-                    actor.op_id_at(3) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(3) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(3).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(4).into(),
                             op_id: actor.op_id_at(4),
                             value:  amp::Diff::Map(amp::MapDiff{
                                 object_id: actor.op_id_at(4).into(),
-                                map_type: amp::MapType::Map,
                                 props: hashmap!{
                                     "species".into() => hashmap!{
                                         actor.op_id_at(5) => amp::Diff::Value("magpie".into())
@@ -910,7 +886,6 @@ fn apply_updates_at_different_levels_of_object_tree() {
                 "counts".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
                         object_id: actor.op_id_at(1).into(),
-                        map_type: amp::MapType::Map,
                         props: hashmap!{
                             "magpie".into() => hashmap!{
                                 actor.op_id_at(7) => amp::Diff::Value(amp::ScalarValue::Int(3))
@@ -919,15 +894,13 @@ fn apply_updates_at_different_levels_of_object_tree() {
                     })
                 },
                 "details".into() => hashmap!{
-                    actor.op_id_at(3) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(3) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(3).into(),
-                        seq_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
                             op_id: actor.op_id_at(4),
                             value: amp::Diff::Map(amp::MapDiff{
                                 object_id: actor.op_id_at(4).into(),
-                                map_type: amp::MapType::Map,
                                 props: hashmap!{
                                     "species".into() => hashmap!{
                                         actor.op_id_at(8) => amp::Diff::Value("Eurasian magpie".into())
@@ -971,9 +944,8 @@ fn test_text_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::Text(amp::TextDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::Text,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
@@ -1020,9 +992,8 @@ fn test_text_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    actor.op_id_at(1) => amp::Diff::Text(amp::TextDiff{
                         object_id: actor.op_id_at(1).into(),
-                        seq_type: amp::SequenceType::Text,
                         edits: vec![
                             amp::DiffEdit::Remove { index: 1, count: 1 },
                             amp::DiffEdit::Update{
@@ -1060,9 +1031,8 @@ fn test_unchanged_diff_creates_empty_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Seq(amp::SeqDiff{
+                    "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Text(amp::TextDiff{
                         object_id: "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap(),
-                        seq_type: amp::SequenceType::Text,
                         edits: Vec::new(),
                     })
                 }

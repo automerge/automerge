@@ -5,8 +5,7 @@ use amp::RootDiff;
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, Diff, DiffEdit, ElementId, MapDiff, MapType, ObjectId, Op, Patch, ScalarValue,
-    SeqDiff, SequenceType,
+    ActorId, Diff, DiffEdit, ElementId, ListDiff, MapDiff, ObjectId, Op, Patch, ScalarValue,
 };
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
@@ -290,7 +289,6 @@ fn test_creates_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        map_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
                                 actor.op_id_at(4) => Diff::Value(ScalarValue::F64(15.0))
@@ -352,9 +350,8 @@ fn test_create_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -431,16 +428,14 @@ fn test_includes_latests_state_of_list() {
         diffs: RootDiff {
             props: hashmap! {
                 "todos".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
                             op_id: actor.op_id_at(2),
                             value: Diff::Map(MapDiff{
                                 object_id: actor.op_id_at(2).into(),
-                                map_type: MapType::Map,
                                 props: hashmap!{
                                     "title".into() => hashmap!{
                                         actor.op_id_at(3) => Diff::Value("water plants".into()),
@@ -554,9 +549,8 @@ fn test_includes_date_objects_in_a_list() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -664,9 +658,8 @@ fn test_includes_updates_for_conflicting_list_elements() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    local_actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    local_actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(local_actor.op_id_at(1)),
-                        seq_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
