@@ -159,9 +159,9 @@ impl IncrementalPatch {
         }
 
         if let Some(root) = self.0.remove(&ObjectId::Root) {
-            let mut props = HashMap::new();
             // I may have duplicate keys - I do this to make sure I visit each one only once
             let keys: HashSet<_> = root.iter().map(PendingDiff::operation_key).collect();
+            let mut props = HashMap::with_capacity(keys.len());
             let obj = workshop.get_obj(&ObjectId::Root).expect("no root found");
             for key in &keys {
                 let key_string = workshop.key_to_string(key);
@@ -404,19 +404,19 @@ impl IncrementalPatch {
         pending: &[PendingDiff],
         workshop: &dyn PatchWorkshop,
     ) -> amp::MapDiff {
-        let mut props = HashMap::new();
         // I may have duplicate keys - I do this to make sure I visit each one only once
         let keys: HashSet<_> = pending.iter().map(PendingDiff::operation_key).collect();
+        let mut props = HashMap::with_capacity(keys.len());
         for key in &keys {
             let key_string = workshop.key_to_string(key);
             let mut opid_to_value = HashMap::new();
             for op in obj.conflicts(key) {
-                let link = match op.action {
+                let value = match op.action {
                     InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                     InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                     _ => panic!("del or inc found in field_operations"),
                 };
-                opid_to_value.insert(workshop.make_external_opid(&op.id), link);
+                opid_to_value.insert(workshop.make_external_opid(&op.id), value);
             }
             props.insert(key_string, opid_to_value);
         }
