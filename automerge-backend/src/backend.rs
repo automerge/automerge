@@ -462,6 +462,7 @@ impl Backend {
 mod tests {
     use std::convert::TryInto;
 
+    use amp::SortedVec;
     use automerge_protocol::{ActorId, ObjectId, Op, OpType};
 
     use super::*;
@@ -483,7 +484,7 @@ mod tests {
                 action: OpType::Set("magpie".into()),
                 key: "bird".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -502,7 +503,7 @@ mod tests {
                 action: OpType::Set("ant".into()),
                 key: "bug".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -521,7 +522,7 @@ mod tests {
                 action: OpType::Set("dove".into()),
                 key: "bird".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -540,7 +541,7 @@ mod tests {
                 action: OpType::Set("stag beetle".into()),
                 key: "bug".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -559,7 +560,7 @@ mod tests {
                 action: OpType::Set("bugs and birds".into()),
                 key: "title".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }

@@ -1,5 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
+use amp::SortedVec;
 use automerge_protocol as amp;
 use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
@@ -21,7 +22,7 @@ pub(crate) struct NewValueRequest<'a, 'c> {
     pub(crate) value: Value,
     pub(crate) parent_obj: &'c amp::ObjectId,
     pub(crate) insert: bool,
-    pub(crate) pred: Vec<amp::OpId>,
+    pub(crate) pred: SortedVec<amp::OpId>,
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
@@ -76,7 +77,7 @@ impl MultiValue {
         key: amp::Key,
         value: Value,
         insert: bool,
-        pred: Vec<amp::OpId>,
+        pred: SortedVec<amp::OpId>,
     ) -> NewValue {
         NewValueContext {
             start_op,
@@ -549,7 +550,7 @@ where
     pub(crate) key: amp::Key,
     pub(crate) parent_obj: O,
     pub(crate) insert: bool,
-    pub(crate) pred: Vec<amp::OpId>,
+    pub(crate) pred: SortedVec<amp::OpId>,
 }
 
 impl<'a, O> NewValueContext<'a, O>
@@ -592,7 +593,7 @@ where
                 parent_obj: &make_op_id,
                 start_op: current_max_op + 1,
                 key: amp::Key::Map(prop.clone()),
-                pred: Vec::new(),
+                pred: SortedVec::new(),
                 insert: false,
             };
             let next_value = context.create(value);
@@ -642,7 +643,7 @@ where
             let elem_opid = self.actor.op_id_at(current_max_op + 1);
             let context = NewValueContext {
                 start_op: current_max_op + 1,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
                 insert: true,
                 key: amp::Key::Seq(last_elemid),
                 actor: self.actor,
@@ -693,7 +694,7 @@ where
                 obj: make_text_opid.clone().into(),
                 key: amp::Key::Seq(last_elemid),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             };
             multigraphemes.push(MultiGrapheme::new_from_grapheme_cluster(
                 opid.clone(),

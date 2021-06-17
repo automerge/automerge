@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::TryInto};
 
-use amp::ElementId;
+use amp::{ElementId, SortedVec};
 use automerge_protocol as amp;
 use automerge_protocol::RootDiff;
 use diffable_sequence::DiffableSequence;
@@ -522,11 +522,11 @@ impl StateTreeMap {
         }
     }
 
-    pub fn pred_for_key(&self, key: &str) -> Vec<amp::OpId> {
+    pub fn pred_for_key(&self, key: &str) -> SortedVec<amp::OpId> {
         self.props
             .get(key)
-            .map(|v| vec![v.default_opid()])
-            .unwrap_or_else(Vec::new)
+            .map(|v| vec![v.default_opid()].into())
+            .unwrap_or_else(SortedVec::new)
     }
 
     pub fn mutably_update_cursor(&mut self, key: &str, cursor: Primitive) {
@@ -622,11 +622,11 @@ impl StateTreeTable {
         }
     }
 
-    pub fn pred_for_key(&self, key: &str) -> Vec<amp::OpId> {
+    pub fn pred_for_key(&self, key: &str) -> SortedVec<amp::OpId> {
         self.props
             .get(key)
-            .map(|v| vec![v.default_opid()])
-            .unwrap_or_else(Vec::new)
+            .map(|v| vec![v.default_opid()].into())
+            .unwrap_or_else(SortedVec::new)
     }
 
     pub fn mutably_update_cursor(&mut self, key: &SmolStr, cursor: Primitive) {
@@ -747,11 +747,11 @@ impl StateTreeText {
         self.graphemes.apply_diff(&self.object_id, edits)
     }
 
-    pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
+    pub fn pred_for_index(&self, index: u32) -> SortedVec<amp::OpId> {
         self.graphemes
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.1.default_opid().clone()])
-            .unwrap_or_else(Vec::new)
+            .map(|v| vec![v.1.default_opid().clone()].into())
+            .unwrap_or_else(SortedVec::new)
     }
 
     pub(crate) fn index_of(&self, opid: &amp::OpId) -> Option<usize> {
@@ -850,11 +850,11 @@ impl StateTreeList {
         self.elements.apply_diff(&self.object_id, edits);
     }
 
-    pub fn pred_for_index(&self, index: u32) -> Vec<amp::OpId> {
+    pub fn pred_for_index(&self, index: u32) -> SortedVec<amp::OpId> {
         self.elements
             .get(index.try_into().unwrap())
-            .map(|v| vec![v.1.default_opid()])
-            .unwrap_or_else(Vec::new)
+            .map(|v| vec![v.1.default_opid()].into())
+            .unwrap_or_else(SortedVec::new)
     }
 
     pub(crate) fn elem_at(

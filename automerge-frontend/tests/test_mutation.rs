@@ -1,3 +1,4 @@
+use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -77,7 +78,7 @@ fn test_multiple_primitive_inserts() {
                 amp::Op {
                     key: "vals".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     obj: amp::ObjectId::Root,
                     action: amp::OpType::Make(amp::ObjType::List),
                 },
@@ -85,7 +86,7 @@ fn test_multiple_primitive_inserts() {
                     key: amp::ElementId::Head.into(),
                     action: amp::OpType::MultiSet(vec!["one".into(), "two".into(),]),
                     obj: frontend.actor_id.op_id_at(1).into(),
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     insert: true,
                 }
             ]
@@ -131,35 +132,35 @@ fn test_multiple_non_primitive_inserts() {
                 amp::Op {
                     key: "vals".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     obj: amp::ObjectId::Root,
                     action: amp::OpType::Make(amp::ObjType::List),
                 },
                 amp::Op {
                     key: amp::ElementId::Head.into(),
                     obj: actor.op_id_at(1).into(),
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     insert: true,
                     action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),
                     obj: actor.op_id_at(2).into(),
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     insert: false,
                     action: amp::OpType::Set("test1".into()),
                 },
                 amp::Op {
                     key: actor.op_id_at(2).into(),
                     obj: actor.op_id_at(1).into(),
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     insert: true,
                     action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),
                     obj: actor.op_id_at(4).into(),
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                     insert: false,
                     action: amp::OpType::Set("test2".into()),
                 }

@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use amp::{ActorId, ElementId, Key, OpId};
+use amp::{ActorId, ElementId, Key, OpId, SortedVec};
 use automerge_protocol as amp;
 
 use crate::internal::InternalOpType;
@@ -13,7 +13,7 @@ pub struct ExpandedOp<'a> {
     pub(crate) action: InternalOpType,
     pub obj: Cow<'a, amp::ObjectId>,
     pub key: Cow<'a, amp::Key>,
-    pub pred: Cow<'a, [amp::OpId]>,
+    pub pred: Cow<'a, SortedVec<amp::OpId>>,
     pub insert: bool,
 }
 
@@ -64,12 +64,12 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
                             self.expand_count = Some(1);
                             0
                         };
-                        let pred = op.pred[0].increment_by(index as u64);
+                        let pred = op.pred.get(0).unwrap().increment_by(index as u64);
                         let key = op.key.increment_by(index as u64).unwrap();
                         return Some(ExpandedOp {
                             action: InternalOpType::Del,
                             insert: op.insert,
-                            pred: Cow::Owned(vec![pred]),
+                            pred: Cow::Owned(vec![pred].into()),
                             key: Cow::Owned(key),
                             obj: Cow::Borrowed(&op.obj),
                         });
@@ -139,7 +139,7 @@ impl<'a> ExpandedOpIterator<'a> {
 mod tests {
     use std::num::NonZeroU32;
 
-    use amp::{ObjectId, Op, OpType, ScalarValue};
+    use amp::{ObjectId, Op, OpType, ScalarValue, SortedVec};
     use pretty_assertions::assert_eq;
 
     use super::*;
@@ -155,7 +155,7 @@ mod tests {
             ]),
             obj: ObjectId::Id(OpId(1, actor.clone())),
             key: Key::Seq(ElementId::Head),
-            pred: vec![],
+            pred: SortedVec::new(),
             insert: true,
         }];
         let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
@@ -166,21 +166,21 @@ mod tests {
                     action: InternalOpType::Set(ScalarValue::Uint(1)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Head)),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(2)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(3)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor)))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
             ]
@@ -199,7 +199,7 @@ mod tests {
                 ]),
                 obj: ObjectId::Id(OpId(1, actor.clone())),
                 key: Key::Seq(ElementId::Head),
-                pred: vec![],
+                pred: SortedVec::new(),
                 insert: true,
             },
             Op {
@@ -209,7 +209,7 @@ mod tests {
                 ]),
                 obj: ObjectId::Id(OpId(1, actor.clone())),
                 key: Key::Seq(ElementId::Id(OpId(4, actor.clone()))),
-                pred: vec![],
+                pred: SortedVec::new(),
                 insert: true,
             },
         ];
@@ -221,35 +221,35 @@ mod tests {
                     action: InternalOpType::Set(ScalarValue::Uint(1)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Head)),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(2)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(3)),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Str("hi ".into())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Str("world".into())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(5, actor)))),
-                    pred: Cow::Owned(vec![]),
+                    pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
             ]
@@ -264,7 +264,7 @@ mod tests {
             action: OpType::Del(NonZeroU32::new(3).unwrap()),
             obj: ObjectId::Id(OpId(1, actor.clone())),
             key: Key::Seq(ElementId::Id(OpId(1, actor.clone()))),
-            pred: vec![pred],
+            pred: vec![pred].into(),
             insert: true,
         }];
         let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
@@ -275,21 +275,21 @@ mod tests {
                     action: InternalOpType::Del,
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(1, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(1, actor.clone())]),
+                    pred: Cow::Owned(vec![OpId(1, actor.clone())].into()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Del,
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(2, actor.clone())]),
+                    pred: Cow::Owned(vec![OpId(2, actor.clone())].into()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Del,
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(3, actor)]),
+                    pred: Cow::Owned(vec![OpId(3, actor)].into()),
                     insert: true
                 },
             ]
