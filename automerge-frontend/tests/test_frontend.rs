@@ -156,7 +156,7 @@ fn it_should_create_nested_maps() {
         deps: Vec::new(),
         operations: vec![
             amp::Op {
-                action: amp::OpType::Make(amp::ObjType::map()),
+                action: amp::OpType::Make(amp::ObjType::Map),
                 obj: amp::ObjectId::Root,
                 key: "birds".into(),
                 insert: false,
@@ -348,7 +348,7 @@ fn create_lists() {
         deps: Vec::new(),
         operations: vec![
             amp::Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 key: "birds".into(),
                 obj: amp::ObjectId::Root,
                 insert: false,
@@ -613,7 +613,7 @@ fn handle_counters_inside_lists() {
         start_op: 1,
         operations: vec![
             amp::Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: amp::ObjectId::Root,
                 key: "counts".into(),
                 insert: false,

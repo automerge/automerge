@@ -3,18 +3,12 @@ use std::num::NonZeroU32;
 
 use proptest::prelude::*;
 
-fn arb_maptype() -> impl Strategy<Value = amp::MapType> {
-    prop_oneof![Just(amp::MapType::Map), Just(amp::MapType::Table),]
-}
-
-fn arb_seqtype() -> impl Strategy<Value = amp::SequenceType> {
-    prop_oneof![Just(amp::SequenceType::List), Just(amp::SequenceType::Text),]
-}
-
 fn arb_objtype() -> impl Strategy<Value = amp::ObjType> {
     prop_oneof![
-        arb_maptype().prop_map(amp::ObjType::Map),
-        arb_seqtype().prop_map(amp::ObjType::Sequence),
+        Just(amp::ObjType::Map),
+        Just(amp::ObjType::Table),
+        Just(amp::ObjType::List),
+        Just(amp::ObjType::Text),
     ]
 }
 

@@ -17,9 +17,8 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
+                    make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                         object_id: make_list_opid.clone().into(),
-                        obj_type: amp::SequenceType::Text,
                         edits: Vec::new(),
                     }),
                 }
@@ -39,9 +38,8 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             diffs: RootDiff {
                 props: hashmap! {
                     "text".to_string() => hashmap!{
-                        make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
+                        make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                             object_id: make_list_opid.clone().into(),
-                            obj_type: amp::SequenceType::Text,
                             edits: vec![amp::DiffEdit::SingleElementInsert{
                                 index,
                                 elem_id: this_op_id.clone().into(),
@@ -101,9 +99,8 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         diffs: RootDiff {
             props: hashmap! {
                 "text".to_string() => hashmap!{
-                    make_list_opid.clone() => amp::Diff::Seq(amp::SeqDiff{
+                    make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                         object_id: make_list_opid.into(),
-                        obj_type: amp::SequenceType::Text,
                         edits,
                     }),
                 }

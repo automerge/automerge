@@ -336,9 +336,8 @@ fn handle_concurrent_insertions_into_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".to_string() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id.clone(),
-                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: doc.actor_id.op_id_at(1).into(),
@@ -400,9 +399,8 @@ fn handle_concurrent_insertions_into_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id.clone(),
-                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 1,
                             elem_id: remote.op_id_at(1).into(),
@@ -438,9 +436,8 @@ fn handle_concurrent_insertions_into_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".to_string() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::Seq(amp::SeqDiff{
+                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id,
-                        obj_type: amp::SequenceType::List,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,

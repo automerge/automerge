@@ -1,16 +1,4 @@
-use crate::{Diff, MapDiff, ScalarValue, SeqDiff};
-
-impl From<MapDiff> for Diff {
-    fn from(m: MapDiff) -> Self {
-        Diff::Map(m)
-    }
-}
-
-impl From<SeqDiff> for Diff {
-    fn from(s: SeqDiff) -> Self {
-        Diff::Seq(s)
-    }
-}
+use crate::{Diff, ScalarValue};
 
 impl From<&ScalarValue> for Diff {
     fn from(v: &ScalarValue) -> Self {

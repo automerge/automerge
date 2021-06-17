@@ -46,35 +46,43 @@ impl ActorId {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
-    Map(MapType),
-    Sequence(SequenceType),
+    Map,
+    Table,
+    List,
+    Text,
 }
 
 impl ObjType {
-    pub fn map() -> ObjType {
-        ObjType::Map(MapType::Map)
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Self::List | Self::Text)
     }
+}
 
-    pub fn table() -> ObjType {
-        ObjType::Map(MapType::Table)
+impl From<MapType> for ObjType {
+    fn from(other: MapType) -> Self {
+        match other {
+            MapType::Map => Self::Map,
+            MapType::Table => Self::Table,
+        }
     }
+}
 
-    pub fn text() -> ObjType {
-        ObjType::Sequence(SequenceType::Text)
-    }
-
-    pub fn list() -> ObjType {
-        ObjType::Sequence(SequenceType::List)
+impl From<SequenceType> for ObjType {
+    fn from(other: SequenceType) -> Self {
+        match other {
+            SequenceType::List => Self::List,
+            SequenceType::Text => Self::Text,
+        }
     }
 }
 
 impl fmt::Display for ObjType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ObjType::Map(MapType::Map) => write!(f, "map"),
-            ObjType::Map(MapType::Table) => write!(f, "table"),
-            ObjType::Sequence(SequenceType::List) => write!(f, "list"),
-            ObjType::Sequence(SequenceType::Text) => write!(f, "text"),
+            ObjType::Map => write!(f, "map"),
+            ObjType::Table => write!(f, "table"),
+            ObjType::List => write!(f, "list"),
+            ObjType::Text => write!(f, "text"),
         }
     }
 }
@@ -390,26 +398,62 @@ impl fmt::Debug for ChangeHash {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Diff {
     Map(MapDiff),
-    Seq(SeqDiff),
+    Table(TableDiff),
+    List(ListDiff),
+    Text(TextDiff),
     Value(ScalarValue),
     Cursor(CursorDiff),
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+impl Diff {
+    pub fn object_type(&self) -> Option<ObjType> {
+        match self {
+            Diff::Map(_) => Some(ObjType::Map),
+            Diff::Table(_) => Some(ObjType::Table),
+            Diff::List(_) => Some(ObjType::List),
+            Diff::Text(_) => Some(ObjType::Text),
+            Diff::Value(_) => None,
+            Diff::Cursor(_) => None,
+        }
+    }
+
+    pub fn object_id(&self) -> Option<ObjectId> {
+        match self {
+            Diff::Map(mapdiff) => Some(mapdiff.object_id.clone()),
+            Diff::Table(tablediff) => Some(tablediff.object_id.clone()),
+            Diff::List(listdiff) => Some(listdiff.object_id.clone()),
+            Diff::Text(textdiff) => Some(textdiff.object_id.clone()),
+            Diff::Value(..) => None,
+            Diff::Cursor(CursorDiff { object_id, .. }) => Some(object_id.clone()),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct MapDiff {
     pub object_id: ObjectId,
-    #[serde(rename = "type")]
-    pub obj_type: MapType,
     pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct SeqDiff {
+pub struct TableDiff {
     pub object_id: ObjectId,
-    #[serde(rename = "type")]
-    pub obj_type: SequenceType,
+    pub props: HashMap<String, HashMap<OpId, Diff>>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ListDiff {
+    pub object_id: ObjectId,
+    pub edits: Vec<DiffEdit>,
+}
+
+#[derive(Deserialize, Debug, PartialEq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TextDiff {
+    pub object_id: ObjectId,
     pub edits: Vec<DiffEdit>,
 }
 

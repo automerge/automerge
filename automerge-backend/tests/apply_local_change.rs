@@ -5,8 +5,7 @@ use amp::RootDiff;
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ObjType, ObjectId, Op, OpType, Patch, SeqDiff,
-    SequenceType,
+    ActorId, ChangeHash, Diff, DiffEdit, ElementId, ListDiff, ObjType, ObjectId, Op, OpType, Patch,
 };
 use maplit::hashmap;
 
@@ -272,7 +271,7 @@ fn test_transform_list_indexes_into_element_ids() {
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            action: amp::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             obj: ObjectId::Root,
             pred: Vec::new(),
@@ -468,7 +467,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         start_op: 1,
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: amp::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             insert: false,
             pred: Vec::new(),
@@ -515,9 +514,8 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Seq(SeqDiff{
+                    actor.op_id_at(1) => Diff::List(ListDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        obj_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
@@ -554,7 +552,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
         deps: Vec::new(),
         operations: vec![Op {
             obj: ObjectId::Root,
-            action: amp::OpType::Make(ObjType::list()),
+            action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             insert: false,
             pred: Vec::new(),

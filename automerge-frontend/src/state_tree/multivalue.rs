@@ -573,16 +573,18 @@ where
     ) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::Map(map_type)),
+            action: amp::OpType::Make(amp::ObjType::from(map_type)),
             obj: self.parent_obj.clone().into(),
             key: self.key.clone(),
             insert: self.insert,
             pred: self.pred,
         };
-        let mut ops = vec![make_op];
+        // for each prop we add at least one op
+        let mut ops = Vec::with_capacity(props.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut result_props: HashMap<String, MultiValue> = HashMap::new();
+        let mut result_props: HashMap<String, MultiValue> = HashMap::with_capacity(props.len());
         for (prop, value) in props {
             let context = NewValueContext {
                 actor: self.actor,
@@ -622,13 +624,15 @@ where
     fn new_list(self, values: Vec<Value>) -> NewValue {
         let make_list_opid = amp::OpId::new(self.start_op, self.actor);
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::list()),
+            action: amp::OpType::Make(amp::ObjType::List),
             obj: self.parent_obj.into(),
             key: self.key.clone(),
             insert: self.insert,
             pred: self.pred,
         };
-        let mut ops = vec![make_op];
+        // for each value we add at least one op
+        let mut ops = Vec::with_capacity(values.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
@@ -667,13 +671,16 @@ where
 
     fn new_text(self, graphemes: Vec<String>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
-        let mut ops: Vec<amp::Op> = vec![amp::Op {
-            action: amp::OpType::Make(amp::ObjType::text()),
+        let make_op = amp::Op {
+            action: amp::OpType::Make(amp::ObjType::Text),
             obj: self.parent_obj.into(),
             key: self.key.clone(),
             insert: self.insert,
             pred: self.pred,
-        }];
+        };
+        // for each value we add at least one op
+        let mut ops = Vec::with_capacity(graphemes.len() + 1);
+        ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut last_elemid = amp::ElementId::Head;
         let mut multigraphemes: Vec<MultiGrapheme> = Vec::with_capacity(graphemes.len());

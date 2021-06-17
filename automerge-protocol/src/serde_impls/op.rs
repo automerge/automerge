@@ -7,9 +7,7 @@ use serde::{
 };
 
 use super::read_field;
-use crate::{
-    DataType, Key, MapType, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
-};
+use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -176,10 +174,10 @@ impl<'de> Deserialize<'de> for Op {
                 let pred = pred.ok_or_else(|| Error::missing_field("pred"))?;
                 let insert = insert.unwrap_or(false);
                 let action = match action {
-                    RawOpType::MakeMap => OpType::Make(ObjType::Map(MapType::Map)),
-                    RawOpType::MakeTable => OpType::Make(ObjType::Map(MapType::Table)),
-                    RawOpType::MakeList => OpType::Make(ObjType::Sequence(SequenceType::List)),
-                    RawOpType::MakeText => OpType::Make(ObjType::Sequence(SequenceType::Text)),
+                    RawOpType::MakeMap => OpType::Make(ObjType::Map),
+                    RawOpType::MakeTable => OpType::Make(ObjType::Table),
+                    RawOpType::MakeList => OpType::Make(ObjType::List),
+                    RawOpType::MakeText => OpType::Make(ObjType::Text),
                     RawOpType::Del => OpType::Del(
                         multi_op
                             .map(|i| NonZeroU32::new(i).unwrap())

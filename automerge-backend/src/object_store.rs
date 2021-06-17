@@ -42,7 +42,7 @@ impl ObjState {
     }
 
     pub fn is_seq(&self) -> bool {
-        matches!(self.obj_type, amp::ObjType::Sequence(_))
+        self.obj_type.is_sequence()
     }
 
     fn get_parent(&self, id: &ElementId) -> Option<ElementId> {
