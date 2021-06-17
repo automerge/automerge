@@ -364,7 +364,7 @@ impl ColData {
         }
         if self.data.len() > DEFLATE_MIN_SIZE {
             let mut deflated = Vec::new();
-            let mut deflater = DeflateEncoder::new(&self.data[..], Compression::best());
+            let mut deflater = DeflateEncoder::new(&self.data[..], Compression::default());
             //This unwrap should be okay as we're reading and writing to in memory buffers
             deflater.read_to_end(&mut deflated).unwrap();
             self.col |= COLUMN_TYPE_DEFLATE;

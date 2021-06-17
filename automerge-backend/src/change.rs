@@ -95,7 +95,7 @@ fn encode(change: &amp::Change) -> Change {
         let mut result = Vec::with_capacity(bytes.len());
         result.extend(&bytes[0..8]);
         result.push(BLOCK_TYPE_DEFLATE);
-        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::best());
+        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::default());
         let mut deflated = Vec::new();
         let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
         leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
