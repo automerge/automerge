@@ -209,15 +209,15 @@ impl StateTreeComposite {
         };
         match diff {
             amp::Diff::Map(amp::MapDiff {
-                obj_type,
+                map_type,
                 props: prop_diffs,
                 object_id: _,
             }) => match self {
                 StateTreeComposite::Map(map) => {
-                    if *obj_type != amp::MapType::Map {
+                    if *map_type != amp::MapType::Map {
                         Err(error::InvalidPatch::MismatchingObjectType {
                             object_id: map.object_id.clone(),
-                            patch_expected_type: Some(amp::ObjType::Map(*obj_type)),
+                            patch_expected_type: Some(amp::ObjType::from(*map_type)),
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
@@ -225,10 +225,10 @@ impl StateTreeComposite {
                     }
                 }
                 StateTreeComposite::Table(table) => {
-                    if *obj_type != amp::MapType::Table {
+                    if *map_type != amp::MapType::Table {
                         Err(error::InvalidPatch::MismatchingObjectType {
                             object_id: table.object_id.clone(),
-                            patch_expected_type: Some(amp::ObjType::Map(*obj_type)),
+                            patch_expected_type: Some(amp::ObjType::from(*map_type)),
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
@@ -237,20 +237,20 @@ impl StateTreeComposite {
                 }
                 _ => Err(error::InvalidPatch::MismatchingObjectType {
                     object_id: self.object_id(),
-                    patch_expected_type: Some(amp::ObjType::Map(*obj_type)),
+                    patch_expected_type: Some(amp::ObjType::from(*map_type)),
                     actual_type: Some(self.obj_type()),
                 }),
             },
             amp::Diff::Seq(amp::SeqDiff {
                 edits,
-                obj_type,
+                seq_type,
                 object_id: _,
             }) => match self {
                 StateTreeComposite::List(list) => {
-                    if *obj_type != amp::SequenceType::List {
+                    if *seq_type != amp::SequenceType::List {
                         Err(error::InvalidPatch::MismatchingObjectType {
                             object_id: list.object_id.clone(),
-                            patch_expected_type: Some(amp::ObjType::Sequence(*obj_type)),
+                            patch_expected_type: Some(amp::ObjType::from(*seq_type)),
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
@@ -258,10 +258,10 @@ impl StateTreeComposite {
                     }
                 }
                 StateTreeComposite::Text(text) => {
-                    if *obj_type != amp::SequenceType::Text {
+                    if *seq_type != amp::SequenceType::Text {
                         Err(error::InvalidPatch::MismatchingObjectType {
                             object_id: text.object_id.clone(),
-                            patch_expected_type: Some(amp::ObjType::Sequence(*obj_type)),
+                            patch_expected_type: Some(amp::ObjType::from(*seq_type)),
                             actual_type: Some(self.obj_type()),
                         })
                     } else {
@@ -270,7 +270,7 @@ impl StateTreeComposite {
                 }
                 _ => Err(error::InvalidPatch::MismatchingObjectType {
                     object_id: self.object_id(),
-                    patch_expected_type: Some(amp::ObjType::Sequence(*obj_type)),
+                    patch_expected_type: Some(amp::ObjType::from(*seq_type)),
                     actual_type: Some(self.obj_type()),
                 }),
             },
@@ -286,7 +286,7 @@ impl StateTreeComposite {
     fn apply_diff(&mut self, diff: amp::Diff) {
         match diff {
             amp::Diff::Map(amp::MapDiff {
-                obj_type: _,
+                map_type: _,
                 props: prop_diffs,
                 object_id: _,
             }) => match self {
@@ -296,7 +296,7 @@ impl StateTreeComposite {
             },
             amp::Diff::Seq(amp::SeqDiff {
                 edits,
-                obj_type: _,
+                seq_type: _,
                 object_id: _,
             }) => match self {
                 StateTreeComposite::List(list) => list.apply_diff(edits),
@@ -314,10 +314,10 @@ impl StateTreeComposite {
 
     fn obj_type(&self) -> amp::ObjType {
         match self {
-            Self::Map(..) => amp::ObjType::map(),
-            Self::Table(..) => amp::ObjType::table(),
-            Self::Text(..) => amp::ObjType::text(),
-            Self::List(..) => amp::ObjType::list(),
+            Self::Map(..) => amp::ObjType::Map,
+            Self::Table(..) => amp::ObjType::Table,
+            Self::Text(..) => amp::ObjType::Text,
+            Self::List(..) => amp::ObjType::List,
         }
     }
 
@@ -410,10 +410,10 @@ impl StateTreeValue {
             },
             amp::Diff::Map(amp::MapDiff {
                 object_id,
-                obj_type,
+                map_type,
                 props: _,
             }) => {
-                let map = match obj_type {
+                let map = match map_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
                         props: HashMap::new(),
@@ -428,10 +428,10 @@ impl StateTreeValue {
             }
             amp::Diff::Seq(amp::SeqDiff {
                 object_id,
-                obj_type,
+                seq_type,
                 edits: _,
             }) => {
-                let seq = match obj_type {
+                let seq = match seq_type {
                     amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                         object_id: object_id.clone(),
                         graphemes: DiffableSequence::new(),
@@ -471,10 +471,10 @@ impl StateTreeValue {
             }
             amp::Diff::Map(amp::MapDiff {
                 object_id,
-                obj_type,
+                map_type,
                 props,
             }) => {
-                let mut map = match obj_type {
+                let mut map = match map_type {
                     amp::MapType::Map => StateTreeComposite::Map(StateTreeMap {
                         object_id: object_id.clone(),
                         props: HashMap::new(),
@@ -486,17 +486,17 @@ impl StateTreeValue {
                 };
                 map.apply_diff(amp::Diff::Map(amp::MapDiff {
                     object_id,
-                    obj_type,
+                    map_type,
                     props,
                 }));
                 StateTreeValue::Composite(map)
             }
             amp::Diff::Seq(amp::SeqDiff {
                 object_id,
-                obj_type,
+                seq_type,
                 edits,
             }) => {
-                let mut seq = match obj_type {
+                let mut seq = match seq_type {
                     amp::SequenceType::Text => StateTreeComposite::Text(StateTreeText {
                         object_id: object_id.clone(),
                         graphemes: DiffableSequence::new(),
@@ -508,7 +508,7 @@ impl StateTreeValue {
                 };
                 seq.apply_diff(amp::Diff::Seq(amp::SeqDiff {
                     object_id,
-                    obj_type,
+                    seq_type,
                     edits,
                 }));
                 StateTreeValue::Composite(seq)
@@ -997,8 +997,8 @@ impl StateTreeList {
 /// Helper method to get the object type of an amp::Diff
 fn diff_object_type(diff: &amp::Diff) -> Option<amp::ObjType> {
     match diff {
-        amp::Diff::Map(mapdiff) => Some(amp::ObjType::Map(mapdiff.obj_type)),
-        amp::Diff::Seq(seqdiff) => Some(amp::ObjType::Sequence(seqdiff.obj_type)),
+        amp::Diff::Map(mapdiff) => Some(amp::ObjType::from(mapdiff.map_type)),
+        amp::Diff::Seq(seqdiff) => Some(amp::ObjType::from(seqdiff.seq_type)),
         amp::Diff::Value(..) => None,
         amp::Diff::Cursor(..) => None,
     }

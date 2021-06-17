@@ -1,9 +1,7 @@
-use automerge::{
-    Backend, Frontend, InvalidChangeRequest, LocalChange, MapType, Path, Primitive, Value,
-};
+use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
 use automerge_protocol::{
-    ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SequenceType,
+    ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue,
 };
 use test_env_log::test;
 
@@ -199,7 +197,7 @@ fn missing_object_error_null_rle_decoding() {
     let raw_change = amp::Change {
         operations: vec![
             Op {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                action: OpType::Make(ObjType::List),
                 obj: ObjectId::Root,
                 key: Key::Map("b".to_owned()),
                 pred: vec![],
@@ -311,7 +309,7 @@ fn missing_object_error_null_rle_decoding() {
                 insert: true,
             },
             Op {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                action: OpType::Make(ObjType::List),
                 obj: ObjectId::Root,
                 key: Key::Map("\u{0}".to_owned()),
                 pred: vec![],
@@ -661,7 +659,7 @@ fn missing_object_error_null_rle_decoding() {
                 insert: true,
             },
             Op {
-                action: OpType::Make(ObjType::Map(MapType::Map)),
+                action: OpType::Make(ObjType::Map),
                 obj: ObjectId::Root,
                 key: Key::Map("\u{1}".to_owned()),
                 pred: vec![],

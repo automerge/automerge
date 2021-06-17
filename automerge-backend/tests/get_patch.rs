@@ -228,7 +228,7 @@ fn test_creates_nested_maps() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                action: amp::OpType::Make(amp::ObjType::map()),
+                action: amp::OpType::Make(amp::ObjType::Map),
                 obj: ObjectId::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -290,7 +290,7 @@ fn test_creates_nested_maps() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Map(MapDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        obj_type: MapType::Map,
+                        map_type: MapType::Map,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
                                 actor.op_id_at(4) => Diff::Value(ScalarValue::F64(15.0))
@@ -321,7 +321,7 @@ fn test_create_lists() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: ObjectId::Root,
                 key: "birds".into(),
                 pred: Vec::new(),
@@ -354,7 +354,7 @@ fn test_create_lists() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        obj_type: SequenceType::List,
+                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -386,14 +386,14 @@ fn test_includes_latests_state_of_list() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: ObjectId::Root,
                 key: "todos".into(),
                 pred: Vec::new(),
                 insert: false,
             },
             Op {
-                action: amp::OpType::Make(amp::ObjType::map()),
+                action: amp::OpType::Make(amp::ObjType::Map),
                 obj: ObjectId::from(actor.op_id_at(1)),
                 key: ElementId::Head.into(),
                 insert: true,
@@ -433,14 +433,14 @@ fn test_includes_latests_state_of_list() {
                 "todos".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        obj_type: SequenceType::List,
+                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
                             op_id: actor.op_id_at(2),
                             value: Diff::Map(MapDiff{
                                 object_id: actor.op_id_at(2).into(),
-                                obj_type: MapType::Map,
+                                map_type: MapType::Map,
                                 props: hashmap!{
                                     "title".into() => hashmap!{
                                         actor.op_id_at(3) => Diff::Value("water plants".into()),
@@ -524,7 +524,7 @@ fn test_includes_date_objects_in_a_list() {
         operations: vec![
             Op {
                 obj: ObjectId::Root,
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 key: "list".into(),
                 pred: Vec::new(),
                 insert: false,
@@ -556,7 +556,7 @@ fn test_includes_date_objects_in_a_list() {
                 "list".into() => hashmap!{
                     actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: ObjectId::from(actor.op_id_at(1)),
-                        obj_type: SequenceType::List,
+                        seq_type: SequenceType::List,
                         edits: vec![DiffEdit::SingleElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),
@@ -590,7 +590,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
         deps: Vec::new(),
         operations: vec![
             Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: ObjectId::Root,
                 key: "list".into(),
                 pred: Vec::new(),
@@ -666,7 +666,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
                 "list".into() => hashmap!{
                     local_actor.op_id_at(1) => Diff::Seq(SeqDiff{
                         object_id: ObjectId::from(local_actor.op_id_at(1)),
-                        obj_type: SequenceType::List,
+                        seq_type: SequenceType::List,
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,

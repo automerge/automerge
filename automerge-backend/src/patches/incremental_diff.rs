@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use amp::{MapType, SequenceType};
 use automerge_protocol as amp;
 
 use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
@@ -190,24 +191,52 @@ impl IncrementalPatch {
             .expect("Missing object in internal diff");
         if let Some(pending) = self.0.get(obj_id) {
             match obj.obj_type {
-                amp::ObjType::Sequence(seq_type) => {
-                    amp::Diff::Seq(self.gen_seq_diff(obj_id, obj, pending, workshop, seq_type))
+                amp::ObjType::List => amp::Diff::Seq(self.gen_seq_diff(
+                    obj_id,
+                    obj,
+                    pending,
+                    workshop,
+                    SequenceType::List,
+                )),
+                amp::ObjType::Text => amp::Diff::Seq(self.gen_seq_diff(
+                    obj_id,
+                    obj,
+                    pending,
+                    workshop,
+                    SequenceType::Text,
+                )),
+                amp::ObjType::Map => {
+                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, pending, workshop, MapType::Map))
                 }
-                amp::ObjType::Map(map_type) => {
-                    amp::Diff::Map(self.gen_map_diff(obj_id, obj, pending, workshop, map_type))
-                }
+                amp::ObjType::Table => amp::Diff::Map(self.gen_map_diff(
+                    obj_id,
+                    obj,
+                    pending,
+                    workshop,
+                    MapType::Table,
+                )),
             }
         } else {
             // no changes so just return empty edits or props
             match obj.obj_type {
-                amp::ObjType::Map(map_type) => amp::Diff::Map(amp::MapDiff {
+                amp::ObjType::Map => amp::Diff::Map(amp::MapDiff {
                     object_id: workshop.make_external_objid(obj_id),
-                    obj_type: map_type,
+                    map_type: MapType::Map,
                     props: HashMap::new(),
                 }),
-                amp::ObjType::Sequence(seq_type) => amp::Diff::Seq(amp::SeqDiff {
+                amp::ObjType::Table => amp::Diff::Map(amp::MapDiff {
                     object_id: workshop.make_external_objid(obj_id),
-                    obj_type: seq_type,
+                    map_type: MapType::Table,
+                    props: HashMap::new(),
+                }),
+                amp::ObjType::List => amp::Diff::Seq(amp::SeqDiff {
+                    object_id: workshop.make_external_objid(obj_id),
+                    seq_type: SequenceType::List,
+                    edits: Vec::new(),
+                }),
+                amp::ObjType::Text => amp::Diff::Seq(amp::SeqDiff {
+                    object_id: workshop.make_external_objid(obj_id),
+                    seq_type: SequenceType::Text,
                     edits: Vec::new(),
                 }),
             }
@@ -295,7 +324,7 @@ impl IncrementalPatch {
         }
         amp::SeqDiff {
             object_id: workshop.make_external_objid(obj_id),
-            obj_type: seq_type,
+            seq_type,
             edits: edits.into_vec(),
         }
     }
@@ -326,7 +355,7 @@ impl IncrementalPatch {
         }
         amp::MapDiff {
             object_id: workshop.make_external_objid(obj_id),
-            obj_type: map_type,
+            map_type,
             props,
         }
     }

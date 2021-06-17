@@ -9,7 +9,8 @@ use serde::{
 
 use super::read_field;
 use crate::{
-    CursorDiff, DataType, Diff, DiffEdit, MapDiff, ObjType, ObjectId, OpId, ScalarValue, SeqDiff,
+    CursorDiff, DataType, Diff, DiffEdit, MapDiff, MapType, ObjType, ObjectId, OpId, ScalarValue,
+    SeqDiff, SequenceType,
 };
 
 impl Serialize for Diff {
@@ -78,10 +79,10 @@ impl<'de> Deserialize<'de> for RawDiffType {
 impl RawDiffType {
     fn obj_type(&self) -> Option<ObjType> {
         match self {
-            RawDiffType::Map => Some(ObjType::map()),
-            RawDiffType::Table => Some(ObjType::table()),
-            RawDiffType::List => Some(ObjType::list()),
-            RawDiffType::Text => Some(ObjType::text()),
+            RawDiffType::Map => Some(ObjType::Map),
+            RawDiffType::Table => Some(ObjType::Table),
+            RawDiffType::List => Some(ObjType::List),
+            RawDiffType::Text => Some(ObjType::Text),
             RawDiffType::Value => None,
         }
     }
@@ -166,19 +167,35 @@ impl<'de> Deserialize<'de> for Diff {
                     let diff_type = diff_type.ok_or_else(|| Error::missing_field("type"))?;
                     match diff_type.obj_type() {
                         Some(obj_type) => match obj_type {
-                            ObjType::Sequence(seq_type) => {
+                            ObjType::List => {
                                 let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
                                 Ok(Diff::Seq(SeqDiff {
                                     object_id,
-                                    obj_type: seq_type,
+                                    seq_type: SequenceType::List,
                                     edits,
                                 }))
                             },
-                            ObjType::Map(map_type) => {
+                            ObjType::Text => {
+                                let edits = edits.ok_or_else(|| Error::missing_field("edits"))?;
+                                Ok(Diff::Seq(SeqDiff {
+                                    object_id,
+                                    seq_type: SequenceType::Text,
+                                    edits,
+                                }))
+                            },
+                            ObjType::Map => {
                                 let props = props.ok_or_else(|| Error::missing_field("props"))?;
                                 Ok(Diff::Map(MapDiff{
                                     object_id,
-                                    obj_type: map_type,
+                                    map_type:MapType::Map ,
+                                    props,
+                                }))
+                            },
+                            ObjType::Table => {
+                                let props = props.ok_or_else(|| Error::missing_field("props"))?;
+                                Ok(Diff::Map(MapDiff{
+                                    object_id,
+                                    map_type: MapType::Table,
                                     props,
                                 }))
                             },
@@ -264,7 +281,7 @@ mod tests {
         });
         let diff = Diff::Map(MapDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
-            obj_type: MapType::Map,
+            map_type: MapType::Map,
             props: hashmap! {
                 "key".to_string() => hashmap!{
                     OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
@@ -309,7 +326,7 @@ mod tests {
         });
         let diff = Diff::Seq(SeqDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
-            obj_type: SequenceType::List,
+            seq_type: SequenceType::List,
             edits: vec![], //DiffEdit::SingleElementInsert{
                            //index: 1,
                            //elem_id: ElementId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),

@@ -79,7 +79,7 @@ fn test_multiple_primitive_inserts() {
                     insert: false,
                     pred: Vec::new(),
                     obj: amp::ObjectId::Root,
-                    action: amp::OpType::Make(amp::ObjType::list()),
+                    action: amp::OpType::Make(amp::ObjType::List),
                 },
                 amp::Op {
                     key: amp::ElementId::Head.into(),
@@ -133,14 +133,14 @@ fn test_multiple_non_primitive_inserts() {
                     insert: false,
                     pred: Vec::new(),
                     obj: amp::ObjectId::Root,
-                    action: amp::OpType::Make(amp::ObjType::list()),
+                    action: amp::OpType::Make(amp::ObjType::List),
                 },
                 amp::Op {
                     key: amp::ElementId::Head.into(),
                     obj: actor.op_id_at(1).into(),
                     pred: Vec::new(),
                     insert: true,
-                    action: amp::OpType::Make(amp::ObjType::map()),
+                    action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),
@@ -154,7 +154,7 @@ fn test_multiple_non_primitive_inserts() {
                     obj: actor.op_id_at(1).into(),
                     pred: Vec::new(),
                     insert: true,
-                    action: amp::OpType::Make(amp::ObjType::map()),
+                    action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),

@@ -275,7 +275,7 @@ pub(crate) fn value_to_op_requests(
         Value::Sequence(vs) => {
             let list_op = amp::OpId(start_op, actor.clone());
             let make_op = amp::Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: parent_object,
                 key: key.clone(),
                 insert,
@@ -302,7 +302,7 @@ pub(crate) fn value_to_op_requests(
         Value::Text(chars) => {
             let make_text_op = amp::OpId(start_op, actor.clone());
             let make_op = amp::Op {
-                action: amp::OpType::Make(amp::ObjType::text()),
+                action: amp::OpType::Make(amp::ObjType::Text),
                 obj: parent_object,
                 key: key.clone(),
                 insert,
@@ -329,7 +329,7 @@ pub(crate) fn value_to_op_requests(
         Value::Map(kvs) => {
             let make_op_id = amp::OpId::new(start_op, actor);
             let make_op = amp::Op {
-                action: amp::OpType::Make(amp::ObjType::map()),
+                action: amp::OpType::Make(amp::ObjType::Map),
                 obj: parent_object,
                 key: key.clone(),
                 insert,
@@ -354,7 +354,7 @@ pub(crate) fn value_to_op_requests(
         Value::Table(kvs) => {
             let make_op_id = amp::OpId::new(start_op, actor);
             let make_op = amp::Op {
-                action: amp::OpType::Make(amp::ObjType::table()),
+                action: amp::OpType::Make(amp::ObjType::Table),
                 obj: parent_object,
                 key: key.clone(),
                 insert,

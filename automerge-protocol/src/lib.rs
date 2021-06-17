@@ -46,35 +46,43 @@ impl ActorId {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
-    Map(MapType),
-    Sequence(SequenceType),
+    Map,
+    Table,
+    List,
+    Text,
 }
 
 impl ObjType {
-    pub fn map() -> ObjType {
-        ObjType::Map(MapType::Map)
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Self::List | Self::Text)
     }
+}
 
-    pub fn table() -> ObjType {
-        ObjType::Map(MapType::Table)
+impl From<MapType> for ObjType {
+    fn from(other: MapType) -> Self {
+        match other {
+            MapType::Map => Self::Map,
+            MapType::Table => Self::Table,
+        }
     }
+}
 
-    pub fn text() -> ObjType {
-        ObjType::Sequence(SequenceType::Text)
-    }
-
-    pub fn list() -> ObjType {
-        ObjType::Sequence(SequenceType::List)
+impl From<SequenceType> for ObjType {
+    fn from(other: SequenceType) -> Self {
+        match other {
+            SequenceType::List => Self::List,
+            SequenceType::Text => Self::Text,
+        }
     }
 }
 
 impl fmt::Display for ObjType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ObjType::Map(MapType::Map) => write!(f, "map"),
-            ObjType::Map(MapType::Table) => write!(f, "table"),
-            ObjType::Sequence(SequenceType::List) => write!(f, "list"),
-            ObjType::Sequence(SequenceType::Text) => write!(f, "text"),
+            ObjType::Map => write!(f, "map"),
+            ObjType::Table => write!(f, "table"),
+            ObjType::List => write!(f, "list"),
+            ObjType::Text => write!(f, "text"),
         }
     }
 }
@@ -400,7 +408,7 @@ pub enum Diff {
 pub struct MapDiff {
     pub object_id: ObjectId,
     #[serde(rename = "type")]
-    pub obj_type: MapType,
+    pub map_type: MapType,
     pub props: HashMap<String, HashMap<OpId, Diff>>,
 }
 
@@ -409,7 +417,7 @@ pub struct MapDiff {
 pub struct SeqDiff {
     pub object_id: ObjectId,
     #[serde(rename = "type")]
-    pub obj_type: SequenceType,
+    pub seq_type: SequenceType,
     pub edits: Vec<DiffEdit>,
 }
 

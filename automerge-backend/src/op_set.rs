@@ -55,7 +55,7 @@ impl Default for OpSet {
 impl OpSet {
     pub fn new() -> OpSet {
         let mut objs = HashMap::default();
-        objs.insert(ObjectId::Root, ObjState::new(amp::ObjType::map()));
+        objs.insert(ObjectId::Root, ObjState::new(amp::ObjType::Map));
 
         OpSet {
             objs,

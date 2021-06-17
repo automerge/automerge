@@ -573,7 +573,7 @@ where
     ) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::Map(map_type)),
+            action: amp::OpType::Make(amp::ObjType::from(map_type)),
             obj: self.parent_obj.clone().into(),
             key: self.key.clone(),
             insert: self.insert,
@@ -622,7 +622,7 @@ where
     fn new_list(self, values: Vec<Value>) -> NewValue {
         let make_list_opid = amp::OpId::new(self.start_op, self.actor);
         let make_op = amp::Op {
-            action: amp::OpType::Make(amp::ObjType::list()),
+            action: amp::OpType::Make(amp::ObjType::List),
             obj: self.parent_obj.into(),
             key: self.key.clone(),
             insert: self.insert,
@@ -668,7 +668,7 @@ where
     fn new_text(self, graphemes: Vec<String>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
         let mut ops: Vec<amp::Op> = vec![amp::Op {
-            action: amp::OpType::Make(amp::ObjType::text()),
+            action: amp::OpType::Make(amp::ObjType::Text),
             obj: self.parent_obj.into(),
             key: self.key.clone(),
             insert: self.insert,

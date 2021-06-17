@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use automerge::{
-    Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue,
-    SequenceType, Value,
+    Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue, Value,
 };
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType};
@@ -74,14 +73,14 @@ fn test_multi_insert_expands_to_correct_indices() {
     let change = amp::Change {
         operations: vec![
             Op {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                action: OpType::Make(ObjType::List),
                 obj: ObjectId::Root,
                 key: Key::Map("a".to_owned()),
                 pred: vec![],
                 insert: false,
             },
             Op {
-                action: OpType::Make(ObjType::Sequence(SequenceType::List)),
+                action: OpType::Make(ObjType::List),
                 obj: actor.op_id_at(1).into(),
                 key: Key::Seq(ElementId::Head),
                 pred: vec![],

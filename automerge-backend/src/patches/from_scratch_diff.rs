@@ -1,6 +1,7 @@
 use core::cmp::max;
 use std::collections::HashMap;
 
+use amp::{MapType, SequenceType};
 use automerge_protocol as amp;
 
 use super::{gen_value_diff::gen_value_diff, Edits, PatchWorkshop};
@@ -55,7 +56,7 @@ fn construct_map(
     }
     amp::MapDiff {
         object_id: workshop.make_external_objid(object_id),
-        obj_type: map_type,
+        map_type,
         props,
     }
 }
@@ -108,7 +109,7 @@ fn construct_list(
     }
     amp::SeqDiff {
         object_id: workshop.make_external_objid(object_id),
-        obj_type: seq_type,
+        seq_type,
         edits: edits.into_vec(),
     }
 }
@@ -118,11 +119,23 @@ fn construct_object(object_id: &ObjectId, workshop: &dyn PatchWorkshop) -> amp::
     // scratch then the document is corrupt
     let object = workshop.get_obj(object_id).expect("missing object");
     match object.obj_type {
-        amp::ObjType::Map(map_type) => {
-            amp::Diff::Map(construct_map(object_id, object, map_type, workshop))
+        amp::ObjType::Map => {
+            amp::Diff::Map(construct_map(object_id, object, MapType::Map, workshop))
         }
-        amp::ObjType::Sequence(seq_type) => {
-            amp::Diff::Seq(construct_list(object_id, object, seq_type, workshop))
+        amp::ObjType::Table => {
+            amp::Diff::Map(construct_map(object_id, object, MapType::Table, workshop))
         }
+        amp::ObjType::List => amp::Diff::Seq(construct_list(
+            object_id,
+            object,
+            SequenceType::List,
+            workshop,
+        )),
+        amp::ObjType::Text => amp::Diff::Seq(construct_list(
+            object_id,
+            object,
+            SequenceType::Text,
+            workshop,
+        )),
     }
 }

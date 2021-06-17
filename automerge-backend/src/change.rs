@@ -800,8 +800,10 @@ fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp>
             //for (i, op) in change.operations.iter().enumerate() {
             let opid = amp::OpId(change.start_op + i as u64, change.actor_id.clone());
             let objid = op.obj.clone();
-            if let InternalOpType::Make(amp::ObjType::Sequence(_)) = op.action {
-                is_seq.insert(opid.clone().into());
+            if let InternalOpType::Make(obj_type) = op.action {
+                if obj_type.is_sequence() {
+                    is_seq.insert(opid.clone().into());
+                }
             }
 
             let key = if op.insert {
@@ -1051,7 +1053,7 @@ mod tests {
                     pred: vec![opid3.clone(), opid4.clone()],
                 },
                 amp::Op {
-                    action: amp::OpType::Make(amp::ObjType::map()),
+                    action: amp::OpType::Make(amp::ObjType::Map),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
@@ -1156,7 +1158,7 @@ mod tests {
                     pred: Vec::new(),
                 },
                 amp::Op {
-                    action: amp::OpType::Make(amp::ObjType::list()),
+                    action: amp::OpType::Make(amp::ObjType::List),
                     obj: amp::ObjectId::Root,
                     key: "somelist".into(),
                     insert: false,
@@ -1243,7 +1245,7 @@ mod tests {
             actor_id: actor.clone(),
             deps: Vec::new(),
             operations: vec![amp::Op {
-                action: amp::OpType::Make(amp::ObjType::list()),
+                action: amp::OpType::Make(amp::ObjType::List),
                 obj: amp::ObjectId::Root,
                 key: "somelist".into(),
                 insert: false,
