@@ -766,6 +766,45 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
         .ok_or(decoding::Error::NoDocChanges)
 }
 
+// this function is only used for testing - delete after mark2 is done
+#[allow(dead_code)]
+pub (crate) fn decode_document_opids(bytes: &[u8]) -> Result<Vec<amp::OpId>, decoding::Error> {
+    let (chunktype, _hash, mut cursor) = decode_header(bytes)?;
+
+    // chunktype == 0 is a document, chunktype = 1 is a change
+    if chunktype > 0 {
+        return Err(decoding::Error::WrongType {
+            expected_one_of: vec![0],
+            found: chunktype,
+        });
+    }
+
+    let actors = decode_actors(bytes, &mut cursor, None)?;
+    // FIXME
+    // I should calculate the deads generated on decode and confirm they match these
+    let _heads = decode_hashes(bytes, &mut cursor)?;
+
+    let changes_info = decode_column_info(bytes, &mut cursor, true)?;
+    let ops_info = decode_column_info(bytes, &mut cursor, true)?;
+
+    let changes_data = decode_columns(&mut cursor, &changes_info);
+    let _doc_changes: Vec<_> = ChangeIterator::new(bytes, &changes_data).collect();
+
+    let ops_data = decode_columns(&mut cursor, &ops_info);
+    let doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
+
+    Ok(doc_ops.iter().map(|op| amp::OpId(op.ctr,actors[op.actor].clone())).collect())
+
+    /*
+    group_doc_change_and_doc_ops(&mut doc_changes, doc_ops, &actors)?;
+
+    let mut uncompressed_changes = doc_changes_to_uncompressed_changes(&doc_changes, &actors);
+
+    compress_doc_changes(&mut uncompressed_changes, &doc_changes)
+        .ok_or(decoding::Error::NoDocChanges)
+    */
+}
+
 fn compress_doc_changes(
     uncompressed_changes: &mut [amp::Change],
     doc_changes: &[DocChange],

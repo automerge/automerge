@@ -1018,10 +1018,10 @@ fn test_handle_changes_within_conflicted_lists() {
     };
 
     let mut backend = Backend::new();
-    let patch = backend
+    let _patch = backend
         .apply_changes(vec![change1, change2, change3])
         .unwrap();
-    println!("patch {:#?}", patch);
+    //println!("patch {:#?}", patch);
     let patch = backend.apply_changes(vec![change4]).unwrap();
     assert_eq!(patch, expected_patch)
 }

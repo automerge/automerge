@@ -21,6 +21,7 @@ extern crate itertools;
 extern crate maplit;
 extern crate rand;
 extern crate web_sys;
+extern crate base64;
 
 // this is needed for print debugging via WASM
 #[allow(unused_macros)]

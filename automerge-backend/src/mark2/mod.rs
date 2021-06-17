@@ -30,6 +30,16 @@ pub struct Change {
 
  */
 
+fn inc_visible(next: &Op, elem_visible: &mut bool, visible: &mut usize) {
+    if next.insert {
+        *elem_visible = false
+    }
+    if next.succ.is_empty() && !*elem_visible {
+        *visible += 1;
+        *elem_visible = true
+    }
+}
+
 impl OpSet {
     fn index_for_actor(&self, actor: &amp::ActorId) -> Option<usize> {
         self.actors.iter().position(|n| n == actor)
@@ -88,49 +98,64 @@ impl OpSet {
         self.ops.len()
     }
 
-    fn seek(&self, op: &Op) -> (usize, usize) {
+    fn seek_to_op(&self, op: &Op) -> Result<(usize, usize),AutomergeError> {
         let obj_start = self.seek_to_obj(&op.obj);
+        let mut elem_visible = false;
+        let mut visible = 0;
 
         match &op.key {
             Key::Map(_) => {
                 for (i, next) in self.ops[obj_start..].iter().enumerate() {
                     if next.key >= op.key || next.obj != op.obj {
-                        return (obj_start + i, 0);
+                        return Ok((obj_start + i, 0));
                     }
                 }
-                (self.ops.len(), 0)
+                Ok((self.ops.len(), 0))
             }
             Key::Seq(_) => {
                 if op.insert {
-                    //for o in self.ops[obj_start..].iter().enumerate() {
-                    //}
-                    unimplemented!()
-                } else {
-                    let mut elem_visible = false;
-                    let mut visible = 0;
-                    for (i, next) in self.ops[obj_start..].iter().enumerate() {
-                        if next.insert && next.key == op.key || next.obj != op.obj {
-                            return (obj_start + i, visible);
+                    let mut insert_start = obj_start;
+                    println!("is_head {:?}",op.key.is_head());
+                    if !op.key.is_head() {
+                        let mut found = false;
+                        for (i, next) in self.ops[obj_start..].iter().enumerate() {
+                            if next.obj != op.obj {
+                                break;
+                            }
+                            if Key::Seq(next.id) == op.key {
+                                found = true;
+                                insert_start += i;
+                                inc_visible(next,&mut elem_visible, &mut visible);
+                                break;
+                            }
+                            inc_visible(next,&mut elem_visible, &mut visible);
                         }
-                        if next.insert {
-                            elem_visible = false
-                        }
-                        if next.succ.is_empty() && !elem_visible {
-                            visible += 1;
-                            elem_visible = true
+                        if !found {
+                          return Err(AutomergeError::GeneralError("Cant find elemid to insert after".into()))
                         }
                     }
-                    panic!() // error - cant find place to insert
+                    for next in &self.ops[insert_start..] {
+                        if next.obj != op.obj || (next.insert && self.lamport_compare(&next.id,&op.id) == Ordering::Greater) {
+                            break
+                        }
+                        insert_start += 1;
+                        inc_visible(next,&mut elem_visible, &mut visible);
+                    }
+                    Ok((insert_start, visible))
+                } else {
+                    for (i, next) in self.ops[obj_start..].iter().enumerate() {
+                        if next.insert && next.key == op.key || next.obj != op.obj {
+                            return Ok((obj_start + i, visible));
+                        }
+                        inc_visible(next,&mut elem_visible, &mut visible);
+                    }
+                    Err(AutomergeError::GeneralError("Cant find elemid to replace".into()))
                 }
             }
         }
     }
 
-    pub(crate) fn apply_change(
-        &mut self,
-        change: crate::Change,
-        _diffs: &mut IncrementalPatch,
-    ) -> Result<(), AutomergeError> {
+    fn import_change(&mut self, change: crate::Change) -> Vec<Op> {
         for actor in &change.actors {
             if self.index_for_actor(actor).is_none() {
                 self.actors.push(actor.clone());
@@ -171,20 +196,48 @@ impl OpSet {
             extra_bytes,
         });
 
+        ops
+    }
+
+    pub(crate) fn apply_changes(&mut self, changes: Vec<crate::Change>) -> Result<(), AutomergeError> {
+        let mut patch = crate::patches::IncrementalPatch::new();
+        for change in changes {
+            self.apply_change(change, &mut patch)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn apply_change(
+        &mut self,
+        change: crate::Change,
+        _diffs: &mut IncrementalPatch,
+    ) -> Result<(), AutomergeError> {
+
+        let ops = self.import_change(change);
+
         for op in ops {
             // slow as balls
             // *** put them in the right place
-            let (pos, _visible_count) = self.seek(&op);
-            self.ops.insert(pos, op);
+            let (pos, _visible_count) = self.seek_to_op(&op)?;
+
+            // 1. insert the ops into the list at the right place
+            // 2. update the succ[] vecs - seek_to_op_id + update
+            // 3. --> generate the diffs ***
+            // 4. make it fast (b-tree)
+
+            println!("op {:?} {:?}",pos, op);
+            if op.action != InternalOpType::Del {
+                self.ops.insert(pos, op);
+            }
         }
 
+        Ok(())
         // update pred/succ properly
         // handle inc/del - they are special
         // generate diffs as we do it
         //
         // look at old code below and see what we might also need to do
 
-        unimplemented!()
         /*
         if self.history_index.contains_key(&change.hash) {
             return Ok(());
@@ -218,9 +271,13 @@ impl OpSet {
         Ok(())
         */
     }
+
+    fn opids(&self) -> Vec<amp::OpId> {
+        self.ops.iter().map(|op| amp::OpId(op.id.0, self.actors[op.id.1].clone())).collect()
+    }
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub struct OpId(u64, usize);
 
 #[derive(PartialEq, Debug, Clone)]
@@ -253,11 +310,92 @@ pub enum Key {
     Seq(OpId),
 }
 
+impl Key {
+    fn is_head(&self) -> bool {
+        matches!(self, Key::Seq(OpId(0,_)))
+    }
+}
+
 impl PartialOrd for Key {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         match (self, other) {
             (Key::Map(p1), Key::Map(p2)) => p1.partial_cmp(p2),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::TryInto;
+
+    use automerge_protocol as amp;
+
+    use automerge_protocol::{ ObjectId, OpType, ActorId };
+
+    use base64;
+
+    use crate::{ Change, Backend };
+
+    use crate::change::{decode_document_opids};
+    use super::*;
+
+    fn compare_backends(save: Vec<u8>) {
+//        let mut mark1 = crate::Backend::new();
+        let mark1 = Backend::load(save).unwrap();
+        let mut mark2 = OpSet::default();
+
+        let changes = mark1.get_changes(&[]);
+        mark2.apply_changes(changes.into_iter().cloned().collect()).unwrap();
+
+        let saved = mark1.save().unwrap();
+        let ops1 = decode_document_opids(&saved).unwrap();
+        let ops2 = mark2.opids();
+        println!("--- OPS ---");
+        println!("OPS1 {:?}",ops1);
+        println!("OPS2 {:?}",ops2);
+        println!("--- OPS ---");
+        assert_eq!(ops1,ops2);
+    }
+
+    #[test]
+    fn test_save_vs_mark2() {
+         let actor_a: ActorId = "aaaaaa".try_into().unwrap();
+         let change_a1: Change = amp::Change {
+            actor_id: actor_a.clone(),
+            seq: 1,
+            start_op: 1,
+            time: 0,
+            message: None,
+            hash: None,
+            deps: Vec::new(),
+            operations: vec![
+                amp::Op { obj: ObjectId::Root, action: OpType::Set("magpie".into()), key: "bird".into(), insert: false, pred: Vec::new() },
+                amp::Op { obj: ObjectId::Root, action: OpType::Set("xxx".into()), key: "xxx".into(), insert: false, pred: Vec::new() },
+                amp::Op { obj: ObjectId::Root, action: OpType::Set("aaa".into()), key: "aaa".into(), insert: false, pred: Vec::new() },
+                amp::Op { obj: ObjectId::Root, action: OpType::Set("fff".into()), key: "fff".into(), insert: false, pred: Vec::new() }
+            ],
+            extra_bytes: Vec::new(),
+        }
+        .try_into()
+        .unwrap();
+
+        compare_backends(change_a1.raw_bytes().to_vec());
+
+        let simple_list = base64::decode("hW9Kg4GAiacArQEBECmUwPz1kEZagKFl16rGqPYBmOik0/Zv7jELzKiUMyOFtA3XUZzGwxc8O12ssIsw0AsHAQIDAhMCIwY1EEACVgIMAQQCBBEEEwcVCCECIwI0AkIEVgRXBoABAn8AfwF/B3+doaqGBn8OSW5pdGlhbGl6YXRpb25/AH8HAAEGAAABBgEAAgUAAAF+AAIEAX8EbGlzdAAGBwAHAQEGfwIGAX8ABhMBAgMEBQYHAA==").unwrap();
+        let test1a = base64::decode("hW9Kg0rKILsAnwIBEJu7Qtn7K0smqt1Q/BCcrvwBcDC+HoGmfNIk6Oqjq/BlGAwWZcvHHv3f5jkYU/koDpUHAQIDAhMCIwY1EEACVgIMAQQCDBEIEw4VMSECIws0BEIOVg9XHIABAn8AfwF/FX+Xr6qGBn8OSW5pdGlhbGl6YXRpb25/AH8HAAMSAAADBgICCQILAg0GDwAEBQAABwUAAAN+AAMEAQAGfnkQBAF9BWhlbGxvBGxpc3QEb2JqMQAGegNrZXkEb2JqMgNrZXkEb2JqMwNrZXkEbGlzdAAGFQACAX4HegUBfwILAQMGBgZ9AQIABwF7AAEAAQIGAX9WAgAGE3o2AEYARgAGE3dvcmxkAQIDBAUGdmFsdmFsMnZhbDMBAgMEBQYVAA==").unwrap();
+        let test1b = base64::decode("hW9Kg7Cumy8AwgIBEJu7Qtn7K0smqt1Q/BCcrvwBXEUEIn/UuOAWRdn6Ezo5VWU7g8yFWWHfdNkrrLKnzDEIAQIDAhMDIwc1EUADQwJWAg4BBAIMEQgTERUxIQIjDjQGQg5WE1cdgAEGgQECgwECAgACAX4VAX6Xr6qGBgB+DkluaXRpYWxpemF0aW9uAH4AAX8AAgcAAxMAAAMHAgIJAgsCDQYPAAQGAAAHBQAAA34AAwMBfgABAAZ+eRAEAX0FaGVsbG8EbGlzdARvYmoxAAd6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYWAAIBfgd6AwF8EHEBAgsBAwQBAgYGfQECAAgBewABAAECBgF/VgIABBN/FgITejYARgBGAAYTd29ybGQBAgMEYQUGdmFsdmFsMnZhbDMBAgMEBQYGAH8BDwB/AH8W").unwrap();
+        let test1c = base64::decode("hW9Kg3IGRdUA0gIBEJu7Qtn7K0smqt1Q/BCcrvwB8yfjx27fDO1zrPWviQDKX5rwvZ/ekvhmnA6m+rterhQIAQIDAhMEIwg1EkAEQwNWAg4BBAIMEQgTFRUxIQIjEjQGQg5WE1cggAEGgQECgwECAwADAX0VAQN/l6+qhgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwADFgAAAwoCAgkCCwINBg8ABAkAAAcFAAADfgADAwF/AAIBfg8BAAZ+aBAEAX0FaGVsbG8EbGlzdARvYmoxAAp6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYZAAIBfgd6AwF8EHEBDwIBf3ELAQMEAQUGBn0BAgALAXsAAQABAgYBf1YCAAQTfxYFE3o2AEYARgAGE3dvcmxkAQIDBGEFBgQFBnZhbHZhbDJ2YWwzAQIDBAUGBgB/ARIAfwB/Fg==").unwrap();
+        //let test1d = base64::decode("hW9Kg+X6dsUA2wIBEJu7Qtn7K0smqt1Q/BCcrvwBoXwYdv30XZI1roqo/Ox7ilRrThYI3jBgTZzkAnOnqO4IAQIDAhMFIwg1EkAEQwRWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECBAAEAXwVAQMCf5evqoYGAwB/DkluaXRpYWxpemF0aW9uAwB/AAMBfwACAQQHAAMYAAADDAICCQILAg0GDwAGCQAABwUAAAMDAH8DAwF/AAIBfg8BAAZ+aBAEAX0FaGVsbG8EbGlzdARvYmoxAAx6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYbAAIBfAcSf2kDAXwQcQEPAgF/cQsBAwYBBQYGfQECAA0BewABAAECBgF/VgIAfxQFE38WBRN6NgBGAEYABhN3b3JsZH8AAQIDBGEFBgQFBnZhbHZhbDJ2YWwzAQIDBAUGCAB/ARIAfwB/Fg==").unwrap();
+        //let nested_objects_and_list_inserts2 = base64::decode("hW9Kg3VDsTMA2QIBEFi6HuSjyUELm4iTM1VtpFsBSaXXvVAz2BHS9i8jlWwqohfGPGPFqAkEG4BN0gWfgX8IAQIDAhMEIwg1EkAEQwNWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECAwADAX8VAgN/gKiqhgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwADGAAAAwwCAgkCCwINBg8ABgkAAAcFAAADAwB/AwMBfwACAX4OAQAGfmkQBAF9BWhlbGxvBGxpc3QEb2JqMQAMegNrZXkEb2JqMgNrZXkEb2JqMwNrZXkEbGlzdAAGGwACAXwHEn9pAwF8E24BDgIBf3ILAQMGAQUGBn0BAgANAXsAAQABAgYBf1YCAH8UBRN/FgUTejYARgBGAAYTd29ybGR/AAECAwRhBQYEBQZ2YWx2YWwydmFsMwECAwQFBggAfwESAH8Afxk=").unwrap();
+        let nested_objects_with_deletes = base64::decode("hW9Kg1G4LGoAvQIBEJSubXV2MUdBlah2/lbGXfUBmozh93gHSQmP+3KPhwFEbEUyMf+or+B4o6kgIh1j0IcIAQIDAhMDIwc1EUADQwJWAg4BBAIMEQgTDhUxIQIjCzQEQg5WD1ccgAEMgQECgwEEAgACAX4VA36fqKqGBgB+DkluaXRpYWxpemF0aW9uAH4AAX8AAgcAAxIAAAMGAgIJAgsCDQYPAAQFAAAHBQAAA34AAwQBAAZ+eRAEAX0FaGVsbG8EbGlzdARvYmoxAAZ6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYVAAIBfgd6BQF/AgsBAwYGBn0BAgAHAXsAAQABAgYBf1YCAAYTejYARgBGAAYTd29ybGQBAgMEBQZ2YWx2YWwydmFsMwECAwQFBn8BAgB/AQQAfwEMAAMAfRYCfw==").unwrap();
+
+        compare_backends(simple_list);
+        compare_backends(test1a);
+        compare_backends(test1b);
+        compare_backends(test1c);
+        //compare_backends(test1d); // fails
+        //compare_backends(nested_objects_and_list_inserts2);
+        compare_backends(nested_objects_with_deletes);
     }
 }
