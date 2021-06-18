@@ -498,9 +498,8 @@ fn apply_multi_insert_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
+                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff {
                         object_id: actor.op_id_at(1).into(),
-                        obj_type: amp::SequenceType::List,
                         edits: vec![amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                             index: 0,
                             elem_id: actor.op_id_at(2).into(),

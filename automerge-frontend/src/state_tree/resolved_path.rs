@@ -943,7 +943,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
         let mut key = v.key.clone();
         let mut obj = v.obj.clone();
         let mut insert_if_not_condensed = false;
-        let mut op_iter = std::iter::once(v).chain(op_iter);
+        let op_iter = std::iter::once(v).chain(op_iter);
         let mut cur_multiset_start: Option<Discriminant<amp::ScalarValue>> = None;
         let mut cur_prim_vals = vec![];
         let mut preds = vec![];
@@ -975,7 +975,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
             }
         };
 
-        while let Some(v) = op_iter.next() {
+        for v in op_iter {
             match (cur_multiset_start, prim_from_op_action(&v.action)) {
                 (None, None) => {
                     // there is no multiset in progress & the current op
@@ -1000,8 +1000,8 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                         &key,
                         &obj,
                         &mut new_ops,
-                        std::mem::replace(&mut preds, vec![]),
-                        std::mem::replace(&mut cur_prim_vals, vec![]),
+                        std::mem::take(&mut preds),
+                        std::mem::take(&mut cur_prim_vals),
                     );
                     cur_multiset_start = None;
                     new_ops.push(v);
@@ -1019,7 +1019,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                             &key,
                             &obj,
                             &mut new_ops,
-                            std::mem::replace(&mut preds, vec![]),
+                            std::mem::take(&mut preds),
                             std::mem::replace(&mut cur_prim_vals, vec![scalar]),
                         );
                         preds.extend(v.pred);

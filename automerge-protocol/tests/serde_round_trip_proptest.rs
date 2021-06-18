@@ -115,14 +115,14 @@ proptest! {
     #[test]
     fn test_round_trip_serialization_json(change in arb_change()) {
         let serialized = serde_json::to_string(&change)?;
-        let deserialized: amp::UncompressedChange = serde_json::from_str(&serialized)?;
+        let deserialized: amp::Change = serde_json::from_str(&serialized)?;
         prop_assert_eq!(change, deserialized);
     }
 
     #[test]
     fn test_round_trip_serialization_msgpack(change in arb_change()) {
         let serialized = rmp_serde::to_vec_named(&change).unwrap();
-        let deserialized: amp::UncompressedChange = rmp_serde::from_slice(&serialized)?;
+        let deserialized: amp::Change = rmp_serde::from_slice(&serialized)?;
         prop_assert_eq!(change, deserialized);
     }
 }
