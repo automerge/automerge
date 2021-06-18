@@ -137,7 +137,7 @@ impl<'a> ExpandedOpIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, num::NonZeroU32};
+    use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
 
     use amp::{ObjectId, Op, OpType, ScalarValue, SortedVec};
     use pretty_assertions::assert_eq;
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn expand_multi_set() {
-        let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
+        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
         let ops = [Op {
             action: OpType::MultiSet(
                 vec![
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn expand_multi_set_double() {
-        let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
+        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
         let ops = [
             Op {
                 action: OpType::MultiSet(
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn expand_multi_del() {
-        let actor = ActorId::from_bytes(b"7f12a4d3567c4257af34f216aa16fe48");
+        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
         let pred = OpId(1, actor.clone());
         let ops = [Op {
             action: OpType::Del(NonZeroU32::new(3).unwrap()),

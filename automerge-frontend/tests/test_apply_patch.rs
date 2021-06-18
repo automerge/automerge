@@ -66,16 +66,10 @@ fn set_bytes_value() {
 fn reveal_conflicts_on_root_properties() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 > actor2)
-    let actor1 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
-            .unwrap()
-            .as_bytes(),
-    );
-    let actor2 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
-            .unwrap()
-            .as_bytes(),
-    );
+    let actor1 =
+        amp::ActorId::from(uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43").unwrap());
+    let actor2 =
+        amp::ActorId::from(uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd").unwrap());
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -220,16 +214,10 @@ fn apply_updates_inside_nested_maps() {
 fn apply_updates_inside_map_conflicts() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 < actor2)
-    let actor1 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
-            .unwrap()
-            .as_bytes(),
-    );
-    let actor2 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
-            .unwrap()
-            .as_bytes(),
-    );
+    let actor1 =
+        amp::ActorId::from(uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43").unwrap());
+    let actor2 =
+        amp::ActorId::from(uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd").unwrap());
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
@@ -526,16 +514,10 @@ fn apply_multi_insert_updates_inside_lists() {
 fn apply_updates_inside_list_conflicts() {
     // We don't just use random actor IDs because we need to have a specific
     // ordering (actor1 < actor2)
-    let actor1 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43")
-            .unwrap()
-            .as_bytes(),
-    );
-    let actor2 = amp::ActorId::from_bytes(
-        uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd")
-            .unwrap()
-            .as_bytes(),
-    );
+    let actor1 =
+        amp::ActorId::from(uuid::Uuid::parse_str("02ef21f3-c9eb-4087-880e-bedd7c4bbe43").unwrap());
+    let actor2 =
+        amp::ActorId::from(uuid::Uuid::parse_str("2a1d376b-24f7-4400-8d4a-f58252d644dd").unwrap());
 
     let other_actor = amp::ActorId::random();
 
