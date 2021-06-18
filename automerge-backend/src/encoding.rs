@@ -202,7 +202,9 @@ where
                 if other == value {
                     RleState::Run(value, 2)
                 } else {
-                    RleState::LiteralRun(value, vec![other])
+                    let mut v = Vec::with_capacity(2);
+                    v.push(other);
+                    RleState::LiteralRun(value, v)
                 }
             }
             RleState::Run(other, len) => {
