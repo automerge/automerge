@@ -1109,16 +1109,13 @@ impl ColumnEncoder {
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
         let mut data = Vec::new();
-        let mut rangemap = HashMap::new();
-        coldata
-            .iter()
-            .filter(|&d| !d.data.is_empty())
-            .count()
-            .encode(&mut data)
-            .ok();
+        let non_empty_column_count = coldata.iter().filter(|&d| !d.data.is_empty()).count();
+        non_empty_column_count.encode(&mut data).ok();
         for d in &mut coldata {
             d.encode_col_len(&mut data).ok();
         }
+
+        let mut rangemap = HashMap::with_capacity(non_empty_column_count);
         for d in &coldata {
             let begin = data.len();
             data.write_all(d.data.as_slice()).ok();
