@@ -1,14 +1,13 @@
+use std::num::NonZeroU32;
+
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::num::NonZeroU32;
 
 use super::read_field;
-use crate::{
-    DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, ScalarValues,
-};
+use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, ScalarValues};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
