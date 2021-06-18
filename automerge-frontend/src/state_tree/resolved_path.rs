@@ -1,6 +1,7 @@
 use std::{convert::TryInto, num::NonZeroU32};
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 
 use super::{
     random_op_id, LocalOperationResult, MultiGrapheme, MultiValue, NewValueRequest, StateTree,
@@ -571,7 +572,7 @@ impl<'a> ResolvedTextMut<'a> {
                 .into(),
         };
         let insert_op = amp::OpId::new(payload.start_op, payload.actor);
-        let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, payload.value.clone());
+        let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, SmolStr::new(&payload.value));
         state_tree_text.insert(index.try_into().unwrap(), c)?;
         Ok(LocalOperationResult {
             new_ops: vec![amp::Op {
@@ -608,7 +609,7 @@ impl<'a> ResolvedTextMut<'a> {
         for (i, c) in payload.value.enumerate() {
             let insert_op = amp::OpId::new(payload.start_op + i as u64, payload.actor);
             chars.push(amp::ScalarValue::Str(c.to_string()));
-            let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, c);
+            let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, SmolStr::new(c));
             values.push(c)
         }
         state_tree_text.insert_many(index.try_into().unwrap(), values)?;
@@ -640,7 +641,7 @@ impl<'a> ResolvedTextMut<'a> {
         let (current_elemid, _) = state_tree_text.elem_at(index)?;
         let current_elemid = current_elemid.clone();
         let update_op = amp::OpId::new(payload.start_op, payload.actor);
-        let c = MultiGrapheme::new_from_grapheme_cluster(update_op, payload.value.clone());
+        let c = MultiGrapheme::new_from_grapheme_cluster(update_op, SmolStr::new(&payload.value));
         let pred = state_tree_text.pred_for_index(index as u32);
         let old = state_tree_text.set(index, c)?;
         Ok((

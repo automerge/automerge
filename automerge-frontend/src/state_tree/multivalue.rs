@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
@@ -344,12 +345,12 @@ impl NewValue {
 /// sequences of grapheme clusters
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MultiGrapheme {
-    winning_value: (amp::OpId, String),
-    conflicts: HashMap<amp::OpId, String>,
+    winning_value: (amp::OpId, SmolStr),
+    conflicts: HashMap<amp::OpId, SmolStr>,
 }
 
 impl MultiGrapheme {
-    pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: String) -> MultiGrapheme {
+    pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: SmolStr) -> MultiGrapheme {
         debug_assert_eq!(s.graphemes(true).count(), 1);
         MultiGrapheme {
             winning_value: (opid, s),
@@ -389,7 +390,7 @@ impl MultiGrapheme {
             _ => unreachable!("insert non text in text object"),
         };
         MultiGrapheme {
-            winning_value: (opid, winning_value),
+            winning_value: (opid, SmolStr::new(winning_value)),
             conflicts: HashMap::new(),
         }
     }
@@ -451,6 +452,7 @@ impl MultiGrapheme {
     }
 
     fn update(&mut self, key: &amp::OpId, value: String) {
+        let value = SmolStr::new(value);
         match key.cmp(&self.winning_value.0) {
             Ordering::Equal => {
                 self.winning_value.1 = value;
@@ -468,21 +470,26 @@ impl MultiGrapheme {
     }
 
     pub(super) fn default_grapheme(&self) -> String {
-        self.winning_value.1.clone()
+        self.winning_value.1.to_string()
     }
 
     pub fn default_opid(&self) -> &amp::OpId {
         &self.winning_value.0
     }
 
-    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &String)> {
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &SmolStr)> {
         std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
             .chain(self.conflicts.iter())
     }
 
     pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
         self.iter()
-            .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
+            .map(|(opid, v)| {
+                (
+                    opid.clone(),
+                    Value::Primitive(Primitive::Str(v.to_string())),
+                )
+            })
             .collect()
     }
 
@@ -696,7 +703,7 @@ where
             };
             multigraphemes.push(MultiGrapheme::new_from_grapheme_cluster(
                 opid.clone(),
-                grapheme.clone(),
+                SmolStr::new(grapheme),
             ));
             ops.push(op);
             last_elemid = opid.clone().into();
