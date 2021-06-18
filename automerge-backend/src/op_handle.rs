@@ -23,11 +23,12 @@ pub(crate) struct OpHandle {
 impl OpHandle {
     pub fn extract(change: &Change, actors: &mut ActorMap) -> Vec<OpHandle> {
         let mut opnum = change.start_op;
+        let actor = actors.import_actor(change.actor_id());
         change
             .iter_ops()
             .map(|op| {
                 let internal_op = actors.import_op(op);
-                let id = OpId(opnum, actors.import_actor(change.actor_id()));
+                let id = OpId(opnum, actor);
                 opnum += 1;
                 OpHandle {
                     id,
