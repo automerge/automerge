@@ -1108,8 +1108,12 @@ impl ColumnEncoder {
         coldata.extend(self.pred.finish());
         coldata.sort_by(|a, b| a.col.cmp(&b.col));
 
-        let mut data = Vec::new();
         let non_empty_column_count = coldata.iter().filter(|&d| !d.data.is_empty()).count();
+        let data_len: usize = coldata.iter().map(|d| d.data.len()).sum();
+        // 1 for the non_empty_column_count, 2 for each non_empty column (encode_col_len), data_len
+        //   for all the actual data
+        let mut data = Vec::with_capacity(1 + (non_empty_column_count * 2) + data_len);
+
         non_empty_column_count.encode(&mut data).ok();
         for d in &mut coldata {
             d.encode_col_len(&mut data).ok();
