@@ -139,7 +139,8 @@ impl<'a> ExpandedOpIterator<'a> {
 mod tests {
     use std::convert::TryInto;
     use std::num::NonZeroU32;
-    use amp::{ObjectId, Op, OpType, ScalarValues, SortedVec};
+    use std::{convert::TryInto, num::NonZeroU32};
+    use amp::{ObjectId, Op, OpType, ScalarValue, SortedVec};
     use pretty_assertions::assert_eq;
 
     use super::*;

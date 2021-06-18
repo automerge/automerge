@@ -1,12 +1,13 @@
 use std::convert::TryInto;
 
-use crate::{
-    serde_impls::read_field, DataType, ElementId, MultiElementInsert, ScalarValue, ScalarValues,
-};
 use serde::{
     de::{Error, MapAccess, Visitor},
     ser::{SerializeStruct, Serializer},
     Deserialize, Serialize,
+};
+
+use crate::{
+    serde_impls::read_field, DataType, ElementId, MultiElementInsert, ScalarValue, ScalarValues,
 };
 
 impl Serialize for MultiElementInsert {

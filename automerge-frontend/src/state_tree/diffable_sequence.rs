@@ -311,11 +311,11 @@ where
                     };
                     changed_indices.insert(index);
                 }
-                amp::DiffEdit::MultiElementInsert {
+                amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                     elem_id,
                     values,
                     index,
-                } => {
+                }) => {
                     let index = index as usize;
                     // building an intermediate vector can be better than just inserting
                     // TODO: only do this if there are a certain (to be worked out) number of
