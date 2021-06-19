@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Deserializer};
+use smol_str::SmolStr;
 
 use crate::{ElementId, Key};
 
@@ -9,7 +10,7 @@ impl<'de> Deserialize<'de> for Key {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
+        let s = SmolStr::deserialize(deserializer)?;
         if let Ok(eid) = ElementId::from_str(&s) {
             Ok(Key::Seq(eid))
         } else {

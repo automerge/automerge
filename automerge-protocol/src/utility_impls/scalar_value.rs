@@ -1,5 +1,7 @@
 use std::fmt;
 
+use smol_str::SmolStr;
+
 use crate::ScalarValue;
 
 impl From<&str> for ScalarValue {
@@ -34,7 +36,7 @@ impl From<bool> for ScalarValue {
 
 impl From<char> for ScalarValue {
     fn from(c: char) -> Self {
-        ScalarValue::Str(c.to_string())
+        ScalarValue::Str(SmolStr::new(c.to_string()))
     }
 }
 

@@ -600,7 +600,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".into()), "numSeen" => Primitive::Int(2)}]}
         )
     );
 
@@ -669,7 +669,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".into()), "numSeen" => Primitive::Int(2)}]}
         )
     );
 
@@ -726,7 +726,7 @@ fn apply_updates_inside_list_conflicts() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".to_string()), "numSeen" => Primitive::Int(2)}]}
+            hashmap! {"birds" => vec![hashmap!{"species" => Primitive::Str("lapwing".into()), "numSeen" => Primitive::Int(2)}]}
         )
     );
 
@@ -976,7 +976,7 @@ fn test_text_objects() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"name" => Value::Text("ben".graphemes(true).map(|s|s.to_owned()).collect())}
+            hashmap! {"name" => Value::Text("ben".graphemes(true).map(|s|s.into()).collect())}
         )
     );
 
@@ -999,7 +999,7 @@ fn test_text_objects() {
                             amp::DiffEdit::Update{
                                 index: 1,
                                 op_id: actor.op_id_at(5),
-                                value: amp::Diff::Value(amp::ScalarValue::Str("i".to_string())),
+                                value: amp::Diff::Value(amp::ScalarValue::Str("i".into())),
                             }
                         ],
                     })
@@ -1013,7 +1013,7 @@ fn test_text_objects() {
     assert_eq!(
         frontend.state(),
         &Into::<Value>::into(
-            hashmap! {"name" => Value::Text("bi".graphemes(true).map(|s|s.to_owned()).collect())}
+            hashmap! {"name" => Value::Text("bi".graphemes(true).map(|s|s.into()).collect())}
         )
     );
 }
@@ -1030,7 +1030,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
-                "text".to_string() => hashmap!{
+                "text".into() => hashmap!{
                     "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap() =>  amp::Diff::Text(amp::TextDiff{
                         object_id: "1@cfe5fefb771f4c15a716d488012cbf40".try_into().unwrap(),
                         edits: Vec::new(),
@@ -1042,6 +1042,6 @@ fn test_unchanged_diff_creates_empty_objects() {
     doc.apply_patch(patch).unwrap();
     assert_eq!(
         doc.state(),
-        &Value::Map(hashmap! {"text".to_string() => Value::Text(Vec::new())},),
+        &Value::Map(hashmap! {"text".into() => Value::Text(Vec::new())},),
     );
 }

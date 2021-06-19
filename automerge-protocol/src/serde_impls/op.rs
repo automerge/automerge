@@ -311,7 +311,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Str("somestring".to_string())),
+                    action: OpType::Set(ScalarValue::Str("somestring".into())),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,

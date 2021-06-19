@@ -1,5 +1,6 @@
 use automerge_protocol as amp;
 use nonzero_ext::nonzero;
+use smol_str::SmolStr;
 
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ActorId(pub usize);
@@ -21,7 +22,7 @@ pub(crate) enum ElementId {
 
 #[derive(PartialEq, Eq, Debug, Hash, Clone)]
 pub(crate) enum Key {
-    Map(String),
+    Map(SmolStr),
     Seq(ElementId),
 }
 

@@ -289,7 +289,7 @@ fn dont_allow_out_of_order_request_patches() {
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
-                "partridges".to_string() => hashmap!{
+                "partridges".into() => hashmap!{
                     random_op_id() => amp::Diff::Value(amp::ScalarValue::Int(1))
                 }
             },
@@ -335,7 +335,7 @@ fn handle_concurrent_insertions_into_lists() {
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
-                "birds".to_string() => hashmap!{
+                "birds".into() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id.clone(),
                         edits: vec![amp::DiffEdit::SingleElementInsert{
@@ -435,7 +435,7 @@ fn handle_concurrent_insertions_into_lists() {
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
-                "birds".to_string() => hashmap!{
+                "birds".into() => hashmap!{
                     doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id,
                         edits: vec![

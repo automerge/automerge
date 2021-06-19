@@ -6,6 +6,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+use smol_str::SmolStr;
 
 use super::read_field;
 use crate::{
@@ -147,7 +148,7 @@ impl<'de> Deserialize<'de> for Diff {
                 let mut object_id: Option<ObjectId> = None;
                 let mut diff_type: Option<RawDiffType> = None;
                 //let mut obj_type: Option<ObjType> = None;
-                let mut props: Option<HashMap<String, HashMap<OpId, Diff>>> = None;
+                let mut props: Option<HashMap<SmolStr, HashMap<OpId, Diff>>> = None;
                 let mut value: Option<ScalarValue> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut elem_id: Option<OpId> = None;
@@ -304,7 +305,7 @@ mod tests {
         let diff = Diff::Map(MapDiff {
             object_id: ObjectId::from_str("1@6121f8757d5d46609b665218b2b3a141").unwrap(),
             props: hashmap! {
-                "key".to_string() => hashmap!{
+                "key".into() => hashmap!{
                     OpId::from_str("1@4a093244de2b4fd0a4203724e15dfc16").unwrap() => "value".into()
                 }
             },

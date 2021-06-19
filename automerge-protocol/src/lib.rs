@@ -4,6 +4,7 @@ mod utility_impls;
 use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
 
 use serde::{Deserialize, Serialize};
+use smol_str::SmolStr;
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -169,7 +170,7 @@ impl ElementId {
 #[derive(Serialize, PartialEq, Eq, Debug, Hash, Clone)]
 #[serde(untagged)]
 pub enum Key {
-    Map(String),
+    Map(SmolStr),
     Seq(ElementId),
 }
 
@@ -231,7 +232,7 @@ impl DataType {
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
-    Str(String),
+    Str(SmolStr),
     Int(i64),
     Uint(u64),
     F64(f64),
@@ -433,14 +434,14 @@ impl Diff {
 #[serde(rename_all = "camelCase")]
 pub struct MapDiff {
     pub object_id: ObjectId,
-    pub props: HashMap<String, HashMap<OpId, Diff>>,
+    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TableDiff {
     pub object_id: ObjectId,
-    pub props: HashMap<String, HashMap<OpId, Diff>>,
+    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Debug, PartialEq, Clone)]
@@ -537,7 +538,7 @@ pub struct Patch {
 /// A custom MapDiff that implicitly has the object_id Root and is a map object.
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct RootDiff {
-    pub props: HashMap<String, HashMap<OpId, Diff>>,
+    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

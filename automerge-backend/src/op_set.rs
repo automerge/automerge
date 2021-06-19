@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
+use smol_str::SmolStr;
 use tracing::instrument;
 
 use crate::{
@@ -335,7 +336,7 @@ impl<'a> PatchWorkshop for PatchWorkshopImpl<'a> {
             })
     }
 
-    fn key_to_string(&self, key: &crate::internal::Key) -> String {
+    fn key_to_string(&self, key: &crate::internal::Key) -> SmolStr {
         self.actors.key_to_string(key)
     }
 

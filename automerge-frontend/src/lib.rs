@@ -410,7 +410,7 @@ impl Frontend {
                                 &front.actor_id,
                                 max_op,
                                 ObjectId::Root,
-                                &k.into(),
+                                &amp::Key::Map(k.clone()),
                                 v,
                                 false,
                             );

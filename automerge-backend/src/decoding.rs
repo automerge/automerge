@@ -2,6 +2,7 @@ use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 
 /// The error type for decoding operations.
 #[derive(Debug, thiserror::Error)]
@@ -362,6 +363,17 @@ impl Decodable for Vec<u8> {
         Some(buffer)
     }
 }
+
+impl Decodable for SmolStr {
+    fn decode<R>(bytes: &mut R) -> Option<SmolStr>
+    where
+        R: Read,
+    {
+        let buffer = Vec::decode(bytes)?;
+        str::from_utf8(&buffer).map(|t| t.into()).ok()
+    }
+}
+
 impl Decodable for String {
     fn decode<R>(bytes: &mut R) -> Option<String>
     where

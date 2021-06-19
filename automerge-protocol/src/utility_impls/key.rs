@@ -1,5 +1,7 @@
 use std::cmp::{Ordering, PartialOrd};
 
+use smol_str::SmolStr;
+
 use crate::{ElementId, Key, OpId};
 
 impl PartialOrd for Key {
@@ -42,6 +44,6 @@ where
     S: AsRef<str>,
 {
     fn from(s: S) -> Self {
-        Key::Map(s.as_ref().to_string())
+        Key::Map(SmolStr::new(s))
     }
 }

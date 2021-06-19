@@ -1,11 +1,12 @@
+use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[test]
 fn create_frontend_with_grapheme_clusters() {
     let mut hm = std::collections::HashMap::new();
     hm.insert(
-        String::new(),
-        automerge::Value::Text("\u{80}".graphemes(true).map(|s| s.to_owned()).collect()),
+        SmolStr::default(),
+        automerge::Value::Text("\u{80}".graphemes(true).map(|s| s.into()).collect()),
     );
     let (mut f, c) =
         automerge::Frontend::new_with_initial_state(automerge::Value::Map(hm)).unwrap();

@@ -8,6 +8,7 @@ use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Prim
 use automerge_frontend::Value;
 use maplit::hashmap;
 use rand::Rng;
+use smol_str::SmolStr;
 
 fn f() {
     let mut doc = Frontend::new();
@@ -16,15 +17,15 @@ fn f() {
     let start = Instant::now();
 
     let m = hashmap! {
-        "a".to_owned() =>
+        "a".into() =>
         Value::Map(hashmap!{
-            "b".to_owned()=>
+            "b".into()=>
             Value::Map(
                 hashmap! {
-                    "abc".to_owned() => Value::Primitive(Primitive::Str("hello world".to_owned()))
+                    "abc".into() => Value::Primitive(Primitive::Str("hello world".into()))
                 },
             ),
-            "d".to_owned() => Value::Primitive(Primitive::Uint(20)),
+            "d".into() => Value::Primitive(Primitive::Uint(20)),
         },)
     };
 
@@ -92,7 +93,7 @@ fn g() {
 
     let iterations = 10_000;
     for i in 0..iterations {
-        let random_string: String = rand::thread_rng()
+        let random_string: SmolStr = rand::thread_rng()
             .sample_iter(&rand::distributions::Alphanumeric)
             .take(1)
             .map(char::from)
@@ -284,7 +285,7 @@ fn trace(edits: Vec<(u32, u32, Option<String>)>) {
                     if let Some(c) = edit.2.clone() {
                         d.add_change(LocalChange::insert(
                             Path::root().key("text").index(edit.0),
-                            Value::Primitive(Primitive::Str(c)),
+                            Value::Primitive(Primitive::Str(SmolStr::new(c))),
                         ))?;
                     }
                 }
