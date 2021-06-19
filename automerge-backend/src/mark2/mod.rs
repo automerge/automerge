@@ -113,9 +113,9 @@ impl OpSet {
                 Ok((self.ops.len(), 0))
             }
             Key::Seq(_) => {
+                //println!("seek to obj - {:?}", obj_start);
                 if op.insert {
                     let mut insert_start = obj_start;
-                    println!("is_head {:?}",op.key.is_head());
                     if !op.key.is_head() {
                         let mut found = false;
                         for (i, next) in self.ops[obj_start..].iter().enumerate() {
@@ -124,7 +124,8 @@ impl OpSet {
                             }
                             if Key::Seq(next.id) == op.key {
                                 found = true;
-                                insert_start += i;
+                                insert_start += i + 1;
+                                //println!("step {:?}", insert_start);
                                 inc_visible(next,&mut elem_visible, &mut visible);
                                 break;
                             }
@@ -133,12 +134,15 @@ impl OpSet {
                         if !found {
                           return Err(AutomergeError::GeneralError("Cant find elemid to insert after".into()))
                         }
+                        //println!("not head - seek to {:?}", insert_start);
                     }
                     for next in &self.ops[insert_start..] {
-                        if next.obj != op.obj || (next.insert && self.lamport_compare(&next.id,&op.id) == Ordering::Greater) {
+                        if next.obj != op.obj || (next.insert && self.lamport_compare(&next.id,&op.id) == Ordering::Less) {
+                            //println!("less - break");
                             break
                         }
                         insert_start += 1;
+                        //println!("step {:?}", insert_start);
                         inc_visible(next,&mut elem_visible, &mut visible);
                     }
                     Ok((insert_start, visible))
@@ -225,7 +229,7 @@ impl OpSet {
             // 3. --> generate the diffs ***
             // 4. make it fast (b-tree)
 
-            println!("op {:?} {:?}",pos, op);
+            //println!("op {:?} {:?}",pos, op);
             if op.action != InternalOpType::Del {
                 self.ops.insert(pos, op);
             }
@@ -351,10 +355,10 @@ mod tests {
         let saved = mark1.save().unwrap();
         let ops1 = decode_document_opids(&saved).unwrap();
         let ops2 = mark2.opids();
-        println!("--- OPS ---");
-        println!("OPS1 {:?}",ops1);
-        println!("OPS2 {:?}",ops2);
-        println!("--- OPS ---");
+        //println!("--- OPS ---");
+        //println!("OPS1 {:?}",ops1);
+        //println!("OPS2 {:?}",ops2);
+        //println!("--- OPS ---");
         assert_eq!(ops1,ops2);
     }
 
@@ -386,16 +390,32 @@ mod tests {
         let test1a = base64::decode("hW9Kg0rKILsAnwIBEJu7Qtn7K0smqt1Q/BCcrvwBcDC+HoGmfNIk6Oqjq/BlGAwWZcvHHv3f5jkYU/koDpUHAQIDAhMCIwY1EEACVgIMAQQCDBEIEw4VMSECIws0BEIOVg9XHIABAn8AfwF/FX+Xr6qGBn8OSW5pdGlhbGl6YXRpb25/AH8HAAMSAAADBgICCQILAg0GDwAEBQAABwUAAAN+AAMEAQAGfnkQBAF9BWhlbGxvBGxpc3QEb2JqMQAGegNrZXkEb2JqMgNrZXkEb2JqMwNrZXkEbGlzdAAGFQACAX4HegUBfwILAQMGBgZ9AQIABwF7AAEAAQIGAX9WAgAGE3o2AEYARgAGE3dvcmxkAQIDBAUGdmFsdmFsMnZhbDMBAgMEBQYVAA==").unwrap();
         let test1b = base64::decode("hW9Kg7Cumy8AwgIBEJu7Qtn7K0smqt1Q/BCcrvwBXEUEIn/UuOAWRdn6Ezo5VWU7g8yFWWHfdNkrrLKnzDEIAQIDAhMDIwc1EUADQwJWAg4BBAIMEQgTERUxIQIjDjQGQg5WE1cdgAEGgQECgwECAgACAX4VAX6Xr6qGBgB+DkluaXRpYWxpemF0aW9uAH4AAX8AAgcAAxMAAAMHAgIJAgsCDQYPAAQGAAAHBQAAA34AAwMBfgABAAZ+eRAEAX0FaGVsbG8EbGlzdARvYmoxAAd6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYWAAIBfgd6AwF8EHEBAgsBAwQBAgYGfQECAAgBewABAAECBgF/VgIABBN/FgITejYARgBGAAYTd29ybGQBAgMEYQUGdmFsdmFsMnZhbDMBAgMEBQYGAH8BDwB/AH8W").unwrap();
         let test1c = base64::decode("hW9Kg3IGRdUA0gIBEJu7Qtn7K0smqt1Q/BCcrvwB8yfjx27fDO1zrPWviQDKX5rwvZ/ekvhmnA6m+rterhQIAQIDAhMEIwg1EkAEQwNWAg4BBAIMEQgTFRUxIQIjEjQGQg5WE1cggAEGgQECgwECAwADAX0VAQN/l6+qhgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwADFgAAAwoCAgkCCwINBg8ABAkAAAcFAAADfgADAwF/AAIBfg8BAAZ+aBAEAX0FaGVsbG8EbGlzdARvYmoxAAp6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYZAAIBfgd6AwF8EHEBDwIBf3ELAQMEAQUGBn0BAgALAXsAAQABAgYBf1YCAAQTfxYFE3o2AEYARgAGE3dvcmxkAQIDBGEFBgQFBnZhbHZhbDJ2YWwzAQIDBAUGBgB/ARIAfwB/Fg==").unwrap();
-        //let test1d = base64::decode("hW9Kg+X6dsUA2wIBEJu7Qtn7K0smqt1Q/BCcrvwBoXwYdv30XZI1roqo/Ox7ilRrThYI3jBgTZzkAnOnqO4IAQIDAhMFIwg1EkAEQwRWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECBAAEAXwVAQMCf5evqoYGAwB/DkluaXRpYWxpemF0aW9uAwB/AAMBfwACAQQHAAMYAAADDAICCQILAg0GDwAGCQAABwUAAAMDAH8DAwF/AAIBfg8BAAZ+aBAEAX0FaGVsbG8EbGlzdARvYmoxAAx6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYbAAIBfAcSf2kDAXwQcQEPAgF/cQsBAwYBBQYGfQECAA0BewABAAECBgF/VgIAfxQFE38WBRN6NgBGAEYABhN3b3JsZH8AAQIDBGEFBgQFBnZhbHZhbDJ2YWwzAQIDBAUGCAB/ARIAfwB/Fg==").unwrap();
-        //let nested_objects_and_list_inserts2 = base64::decode("hW9Kg3VDsTMA2QIBEFi6HuSjyUELm4iTM1VtpFsBSaXXvVAz2BHS9i8jlWwqohfGPGPFqAkEG4BN0gWfgX8IAQIDAhMEIwg1EkAEQwNWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECAwADAX8VAgN/gKiqhgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwADGAAAAwwCAgkCCwINBg8ABgkAAAcFAAADAwB/AwMBfwACAX4OAQAGfmkQBAF9BWhlbGxvBGxpc3QEb2JqMQAMegNrZXkEb2JqMgNrZXkEb2JqMwNrZXkEbGlzdAAGGwACAXwHEn9pAwF8E24BDgIBf3ILAQMGAQUGBn0BAgANAXsAAQABAgYBf1YCAH8UBRN/FgUTejYARgBGAAYTd29ybGR/AAECAwRhBQYEBQZ2YWx2YWwydmFsMwECAwQFBggAfwESAH8Afxk=").unwrap();
+        let test1d = base64::decode("hW9Kg+X6dsUA2wIBEJu7Qtn7K0smqt1Q/BCcrvwBoXwYdv30XZI1roqo/Ox7ilRrThYI3jBgTZzkAnOnqO4IAQIDAhMFIwg1EkAEQwRWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECBAAEAXwVAQMCf5evqoYGAwB/DkluaXRpYWxpemF0aW9uAwB/AAMBfwACAQQHAAMYAAADDAICCQILAg0GDwAGCQAABwUAAAMDAH8DAwF/AAIBfg8BAAZ+aBAEAX0FaGVsbG8EbGlzdARvYmoxAAx6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYbAAIBfAcSf2kDAXwQcQEPAgF/cQsBAwYBBQYGfQECAA0BewABAAECBgF/VgIAfxQFE38WBRN6NgBGAEYABhN3b3JsZH8AAQIDBGEFBgQFBnZhbHZhbDJ2YWwzAQIDBAUGCAB/ARIAfwB/Fg==").unwrap();
+        let nested_objects_and_list_inserts2 = base64::decode("hW9Kg3VDsTMA2QIBEFi6HuSjyUELm4iTM1VtpFsBSaXXvVAz2BHS9i8jlWwqohfGPGPFqAkEG4BN0gWfgX8IAQIDAhMEIwg1EkAEQwNWAg4BBAIMEQgTFhUxIQIjFDQGQg5WFVcigAEGgQECgwECAwADAX8VAgN/gKiqhgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwADGAAAAwwCAgkCCwINBg8ABgkAAAcFAAADAwB/AwMBfwACAX4OAQAGfmkQBAF9BWhlbGxvBGxpc3QEb2JqMQAMegNrZXkEb2JqMgNrZXkEb2JqMwNrZXkEbGlzdAAGGwACAXwHEn9pAwF8E24BDgIBf3ILAQMGAQUGBn0BAgANAXsAAQABAgYBf1YCAH8UBRN/FgUTejYARgBGAAYTd29ybGR/AAECAwRhBQYEBQZ2YWx2YWwydmFsMwECAwQFBggAfwESAH8Afxk=").unwrap();
         let nested_objects_with_deletes = base64::decode("hW9Kg1G4LGoAvQIBEJSubXV2MUdBlah2/lbGXfUBmozh93gHSQmP+3KPhwFEbEUyMf+or+B4o6kgIh1j0IcIAQIDAhMDIwc1EUADQwJWAg4BBAIMEQgTDhUxIQIjCzQEQg5WD1ccgAEMgQECgwEEAgACAX4VA36fqKqGBgB+DkluaXRpYWxpemF0aW9uAH4AAX8AAgcAAxIAAAMGAgIJAgsCDQYPAAQFAAAHBQAAA34AAwQBAAZ+eRAEAX0FaGVsbG8EbGlzdARvYmoxAAZ6A2tleQRvYmoyA2tleQRvYmozA2tleQRsaXN0AAYVAAIBfgd6BQF/AgsBAwYGBn0BAgAHAXsAAQABAgYBf1YCAAYTejYARgBGAAYTd29ybGQBAgMEBQZ2YWx2YWwydmFsMwECAwQFBn8BAgB/AQQAfwEMAAMAfRYCfw==").unwrap();
+
+        let test2a = base64::decode("hW9KgzBGpZIAnQEBEI1ypR4ywkNNpp96l7zXTxUB6LDl3wzr1G2U8Iy19fzBzhdDdhnH/+FcM+KyKGuJPS8HAQIDAhMCIwY1EEACVgILAQQCBBMEFQghAiMCNAJCA1YDVwGAAQJ/AH8BfwJ/mMu4hgZ/DkluaXRpYWxpemF0aW9ufwB/BwABfwAAAX8BAAF/AH8EbGlzdAABAgACAQEBfgIBfgAUAQIA").unwrap();
+        let test2b = base64::decode("hW9Kg5pvmycArwEBEI1ypR4ywkNNpp96l7zXTxUBeFm40CfXxlImmWuVOoPY8xAJeyUKW1oVoRZcamH3CjsIAQIDAhMDIwc1EUADQwJWAgwBBAIEEQQTBRUIIQIjAjQCQgRWBFcCgAECAgACAX4CAX6Yy7iGBgB+DkluaXRpYWxpemF0aW9uAH4AAX8AAgcAAQIAAAECAQACfwAAAX4AAn8EbGlzdAACAwADAQECfwICAX8AAhQBAgMA").unwrap();
+        let test2c = base64::decode("hW9Kg8RtIrUAuQEBEI1ypR4ywkNNpp96l7zXTxUBnVTRJYAjAI4VFCHV/Sf8G/neum+KYZVmywMClPvNoZwIAQIDAhMEIwg1EkAEQwNWAgwBBAIEEQQTBhUIIQIjBTQCQgRWBFcDgAECAwADAX8CAgF/mMu4hgYCAH8OSW5pdGlhbGl6YXRpb24CAH8AAgF+AAEDBwABAwAAAQMBAAN/AAABAgB/An8EbGlzdAADBAB8AQN+AQEDfwIDAX8AAxQAAQIEAA==").unwrap();
+
+        let test2d = base64::decode("hW9Kg9VXZL4A0AEBEMwPa/zJ3Ewzr0WmHsBddIoBUvT34IK8sCqecfLDuuAmVuij0/OK4NO60JYIajJ5VKgIAQIDAhMEIwg1EkAEQwRWAg4BBAIEEQQTBxUIIQIjBjQEQgRWB1cEgAEGgQECgwECBAAEAX8CAwF/wNG4hgYDAH8OSW5pdGlhbGl6YXRpb24DAH8AAwF/AAIBBAcAAQQAAAEEAQADAgAAAQIAfgIAfwRsaXN0AAQFAHsBA34DfgECAQF/AgQBfwACFH4WFAABYgICAH8BAgB/AH8F").unwrap();
+        let test2e = base64::decode("hW9KgzVDLxEA4gEBEMwPa/zJ3Ewzr0WmHsBddIoBTQS9F2q3aVXqmepEcgRu7fYg7X4JLpT48JQO1as/GxcIAQIDAhMGIwg1EkAEQwRWAg4BBAIEEQgTChUIIQIjCjQEQgRWCVcHgAEGgQECgwECBQAFAX8CAwF/A3/A0biGBgQAfw5Jbml0aWFsaXphdGlvbgQAfwAEAX8AAwEFBwABBwAAAQcBAAIDAAABAgAAAXkABAIBeQIAfwRsaXN0AAcIAH0BAwICAX16A34BBQEBfwIHAX4AFAMWfRQWFAB4eXoBYgIFAH8BAgB/AH8F").unwrap();
+        let test2f = base64::decode("hW9Kg8lkGKoA6wEBEMwPa/zJ3Ewzr0WmHsBddIoBOJQny6rv0rp5VuaCBRuBEGkSi9rKJ+BA/xkHhXtXD0AIAQIDAhMHIwg1EkAEQwRWAg4BBAIEEQgTCxUIIQIjDDQEQgRWDFcJgAEGgQECgwECBgAGAX8CAwF+AwJ/wNG4hgYFAH8OSW5pdGlhbGl6YXRpb24FAH8ABQF/AAQBBgcAAQkAAAEJAQAEAwAAAQIAAAEDAHoEAgF5AgB/BGxpc3QACQoAewEJf3sCAgF9egN+AQcBAX8CCQF/AAIWfxQDFn0UFhRycQB4eXoBYgIHAH8BAgB/AH8F").unwrap();
+        let test2g = base64::decode("hW9Kg8+YqnIA9AEBEMwPa/zJ3Ewzr0WmHsBddIoB5tFFgKkrur3AcdnC+OV5y08zXGq1Eaa/L8JLu9JZtVoIAQIDAhMIIwg1EkAEQwRWAg4BBAIEEQgTDRUIIQIjDjQEQgRWDlcLgAEGgQECgwECBwAHAX8CAwF/AwICf8DRuIYGBgB/DkluaXRpYWxpemF0aW9uBgB/AAYBfwAFAQcHAAELAAABCwEABAMAAAEEAAABAwB4BAIBeQIAAQh/BGxpc3QACwwAewEJf3sCAgF7egN+CAEBBwEDfwILAX8AAhZ/FAMWfRQWFAIWcnEAeHl6AWICc3QHAH8BBAB/AH8F").unwrap();
 
         compare_backends(simple_list);
         compare_backends(test1a);
         compare_backends(test1b);
         compare_backends(test1c);
-        //compare_backends(test1d); // fails
-        //compare_backends(nested_objects_and_list_inserts2);
+        compare_backends(test1d);
+        compare_backends(test2a);
+        compare_backends(test2b);
+        compare_backends(test2c);
+        compare_backends(test2d);
+        compare_backends(test2e);
+        compare_backends(test2f);
+        compare_backends(test2g);
+        compare_backends(nested_objects_and_list_inserts2);
         compare_backends(nested_objects_with_deletes);
     }
 }
