@@ -54,13 +54,14 @@ impl From<&amp::Change> for Change {
 }
 
 fn encode(change: &amp::Change) -> Change {
-    let mut bytes: Vec<u8> = Vec::new();
     let mut hasher = Sha256::new();
 
     let mut deps = change.deps.clone();
     deps.sort_unstable();
 
     let mut chunk = encode_chunk(change, &deps);
+
+    let mut bytes = Vec::with_capacity(MAGIC_BYTES.len() + 4 + chunk.bytes.len());
 
     bytes.extend(&MAGIC_BYTES);
 
@@ -94,7 +95,7 @@ fn encode(change: &amp::Change) -> Change {
         let mut result = Vec::with_capacity(bytes.len());
         result.extend(&bytes[0..8]);
         result.push(BLOCK_TYPE_DEFLATE);
-        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::best());
+        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::default());
         let mut deflated = Vec::new();
         let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
         leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
@@ -925,7 +926,7 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
 
     let doc_ops = group_doc_ops(changes, &actors);
 
-    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(&doc_ops, &mut actors);
+    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &mut actors);
 
     bytes.extend(&MAGIC_BYTES);
     bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake

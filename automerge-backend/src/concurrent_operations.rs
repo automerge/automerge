@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use crate::{error::AutomergeError, internal::InternalOpType, op_handle::OpHandle};
+use crate::{internal::InternalOpType, op_handle::OpHandle};
 
 /// Represents a set of operations which are relevant to either an element ID
 /// or object ID and which occurred without knowledge of each other
@@ -38,17 +38,14 @@ impl ConcurrentOperations {
     /// replaces.
     /// This is to cover the case of increment operations actually being reflected as Sets on
     /// counters.
-    pub fn incorporate_new_op(
-        &mut self,
-        new_op: OpHandle,
-    ) -> Result<(OpHandle, Vec<OpHandle>), AutomergeError> {
+    pub fn incorporate_new_op(&mut self, new_op: OpHandle) -> (OpHandle, Vec<OpHandle>) {
         if new_op.is_inc() {
             for op in &mut self.ops {
                 if op.maybe_increment(&new_op) {
-                    return Ok((op.clone(), Vec::new()));
+                    return (op.clone(), Vec::new());
                 }
             }
-            Ok((new_op, Vec::new()))
+            (new_op, Vec::new())
         } else {
             let mut overwritten_ops = Vec::new();
             let mut i = 0;
@@ -67,7 +64,7 @@ impl ConcurrentOperations {
                 _ => {}
             }
 
-            Ok((new_op, overwritten_ops))
+            (new_op, overwritten_ops)
         }
     }
 }
