@@ -11,6 +11,7 @@ use std::{
 
 use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
+use smol_str::SmolStr;
 use tracing::instrument;
 
 use crate::{
@@ -324,7 +325,7 @@ pub struct KeyIterator<'a> {
     pub(crate) actors: &'a [amp::ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
-    pub(crate) str: RleDecoder<'a, String>,
+    pub(crate) str: RleDecoder<'a, SmolStr>,
 }
 
 pub struct ValueIterator<'a> {
@@ -435,7 +436,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(data).ok()?;
-                Some(amp::ScalarValue::Str(s.to_string()))
+                Some(amp::ScalarValue::Str(SmolStr::new(s)))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
@@ -643,7 +644,7 @@ impl ValEncoder {
 struct KeyEncoder {
     actor: RleEncoder<usize>,
     ctr: DeltaEncoder,
-    str: RleEncoder<String>,
+    str: RleEncoder<SmolStr>,
 }
 
 impl KeyEncoder {
@@ -1347,7 +1348,7 @@ mod tests {
         let col_op = ColumnOp {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
-            key: Cow::Owned(Key::Map("r".to_owned())),
+            key: Cow::Owned(Key::Map("r".into())),
             pred: vec![actor.op_id_at(1), actor2.op_id_at(1)],
             insert: false,
         };
@@ -1359,7 +1360,7 @@ mod tests {
         let col_op2 = ColumnOp {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
-            key: Cow::Owned(Key::Map("r".to_owned())),
+            key: Cow::Owned(Key::Map("r".into())),
             pred: vec![actor2.op_id_at(1), actor.op_id_at(1)],
             insert: false,
         };

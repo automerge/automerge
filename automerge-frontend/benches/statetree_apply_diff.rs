@@ -16,7 +16,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
-                "text".to_string() => hashmap!{
+                "text".into() => hashmap!{
                     make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                         object_id: make_list_opid.clone().into(),
                         edits: Vec::new(),
@@ -37,14 +37,14 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             pending_changes: 0,
             diffs: RootDiff {
                 props: hashmap! {
-                    "text".to_string() => hashmap!{
+                    "text".into() => hashmap!{
                         make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                             object_id: make_list_opid.clone().into(),
                             edits: vec![amp::DiffEdit::SingleElementInsert{
                                 index,
                                 elem_id: this_op_id.clone().into(),
                                 op_id: this_op_id.clone(),
-                                value: amp::Diff::Value(amp::ScalarValue::Str("c".to_string())),
+                                value: amp::Diff::Value(amp::ScalarValue::Str("c".into())),
                             }],
                         })
                     }
@@ -86,7 +86,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
             index,
             elem_id: this_op_id.clone().into(),
             op_id: this_op_id.clone(),
-            value: amp::Diff::Value(amp::ScalarValue::Str("c".to_string())),
+            value: amp::Diff::Value(amp::ScalarValue::Str("c".into())),
         });
     }
     let patch: amp::Patch = amp::Patch {
@@ -98,7 +98,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
-                "text".to_string() => hashmap!{
+                "text".into() => hashmap!{
                     make_list_opid.clone() => amp::Diff::Text(amp::TextDiff{
                         object_id: make_list_opid.into(),
                         edits,

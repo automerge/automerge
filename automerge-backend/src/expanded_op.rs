@@ -204,8 +204,8 @@ mod tests {
             },
             Op {
                 action: OpType::MultiSet(vec![
-                    ScalarValue::Str("hi ".to_owned()),
-                    ScalarValue::Str("world".to_owned()),
+                    ScalarValue::Str("hi ".into()),
+                    ScalarValue::Str("world".into()),
                 ]),
                 obj: ObjectId::Id(OpId(1, actor.clone())),
                 key: Key::Seq(ElementId::Id(OpId(4, actor.clone()))),
@@ -239,14 +239,14 @@ mod tests {
                     insert: true
                 },
                 ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("hi ".to_owned())),
+                    action: InternalOpType::Set(ScalarValue::Str("hi ".into())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
                     pred: Cow::Owned(vec![]),
                     insert: true
                 },
                 ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("world".to_owned())),
+                    action: InternalOpType::Set(ScalarValue::Str("world".into())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(5, actor)))),
                     pred: Cow::Owned(vec![]),

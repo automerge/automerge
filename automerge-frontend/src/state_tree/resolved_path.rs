@@ -1,6 +1,7 @@
 use std::{convert::TryInto, num::NonZeroU32};
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 
 use super::{
     random_op_id, LocalOperationResult, MultiGrapheme, MultiValue, NewValueRequest, StateTree,
@@ -108,9 +109,9 @@ impl<'a> ResolvedPath<'a> {
             ResolvedPath::Text(texttarget) => texttarget.multivalue.default_value(),
             ResolvedPath::Counter(countertarget) => countertarget.multivalue.default_value(),
             ResolvedPath::Primitive(p) => p.multivalue.default_value(),
-            ResolvedPath::Character(ctarget) => {
-                Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
-            }
+            ResolvedPath::Character(ctarget) => Value::Primitive(Primitive::Str(
+                ctarget.multivalue.default_grapheme().clone(),
+            )),
         }
     }
 
@@ -257,9 +258,9 @@ impl<'a> ResolvedPathMut<'a> {
             ResolvedPathMut::Text(texttarget) => texttarget.multivalue.default_value(),
             ResolvedPathMut::Counter(countertarget) => countertarget.multivalue.default_value(),
             ResolvedPathMut::Primitive(p) => p.multivalue.default_value(),
-            ResolvedPathMut::Character(ctarget) => {
-                Value::Primitive(Primitive::Str(ctarget.multivalue.default_grapheme()))
-            }
+            ResolvedPathMut::Character(ctarget) => Value::Primitive(Primitive::Str(
+                ctarget.multivalue.default_grapheme().clone(),
+            )),
         }
     }
 }
@@ -281,24 +282,24 @@ pub struct ResolvedRootMut<'a> {
 impl<'a> ResolvedRootMut<'a> {
     pub(crate) fn set_key(
         &mut self,
-        key: &str,
+        key: SmolStr,
         payload: SetOrInsertPayload<Value>,
     ) -> (Option<MultiValue>, LocalOperationResult) {
         let newvalue = MultiValue::new_from_value_2(NewValueRequest {
             actor: payload.actor,
             start_op: payload.start_op,
-            key: key.into(),
+            key: amp::Key::Map(key.clone()),
             parent_obj: &amp::ObjectId::Root,
             value: payload.value,
             insert: false,
             pred: self
                 .root
-                .get(key)
+                .get(&key)
                 .map(|mv| vec![mv.default_opid()])
                 .unwrap_or_else(Vec::new),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        let old = self.root.root_props.insert(key.to_string(), multivalue);
+        let old = self.root.root_props.insert(key, multivalue);
         (old, LocalOperationResult { new_ops })
     }
 
@@ -325,7 +326,7 @@ impl<'a> ResolvedRootMut<'a> {
         )
     }
 
-    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
         match value {
             Some(old) => {
                 self.root.root_props.insert(key, old);
@@ -336,7 +337,7 @@ impl<'a> ResolvedRootMut<'a> {
         }
     }
 
-    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+    pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
         self.root.root_props.insert(key, value);
     }
 }
@@ -393,7 +394,7 @@ pub struct ResolvedMapMut<'a> {
 impl<'a> ResolvedMapMut<'a> {
     pub(crate) fn set_key(
         &mut self,
-        key: &str,
+        key: SmolStr,
         payload: SetOrInsertPayload<Value>,
     ) -> (Option<MultiValue>, LocalOperationResult) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
@@ -404,13 +405,13 @@ impl<'a> ResolvedMapMut<'a> {
             actor: payload.actor,
             start_op: payload.start_op,
             parent_obj: &state_tree_map.object_id,
-            key: key.into(),
+            key: amp::Key::Map(key.clone()),
             value: payload.value,
             insert: false,
-            pred: state_tree_map.pred_for_key(key),
+            pred: state_tree_map.pred_for_key(&key),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        let old = state_tree_map.props.insert(key.to_string(), multivalue);
+        let old = state_tree_map.props.insert(key, multivalue);
         (old, LocalOperationResult { new_ops })
     }
 
@@ -437,7 +438,7 @@ impl<'a> ResolvedMapMut<'a> {
         )
     }
 
-    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
@@ -452,7 +453,7 @@ impl<'a> ResolvedMapMut<'a> {
         }
     }
 
-    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+    pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
@@ -474,7 +475,7 @@ pub struct ResolvedTableMut<'a> {
 impl<'a> ResolvedTableMut<'a> {
     pub(crate) fn set_key(
         &mut self,
-        key: &str,
+        key: SmolStr,
         payload: SetOrInsertPayload<Value>,
     ) -> (Option<MultiValue>, LocalOperationResult) {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
@@ -485,13 +486,13 @@ impl<'a> ResolvedTableMut<'a> {
             actor: payload.actor,
             start_op: payload.start_op,
             parent_obj: &state_tree_table.object_id,
-            key: key.into(),
+            key: amp::Key::Map(key.clone()),
             value: payload.value,
             insert: false,
-            pred: state_tree_table.pred_for_key(key),
+            pred: state_tree_table.pred_for_key(&key),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        let old = state_tree_table.props.insert(key.to_owned(), multivalue);
+        let old = state_tree_table.props.insert(key, multivalue);
         (old, LocalOperationResult { new_ops })
     }
 
@@ -518,7 +519,7 @@ impl<'a> ResolvedTableMut<'a> {
         )
     }
 
-    pub(crate) fn rollback_set(&mut self, key: String, value: Option<MultiValue>) {
+    pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
@@ -533,7 +534,7 @@ impl<'a> ResolvedTableMut<'a> {
         }
     }
 
-    pub(crate) fn rollback_delete(&mut self, key: String, value: MultiValue) {
+    pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
@@ -557,7 +558,7 @@ impl<'a> ResolvedTextMut<'a> {
     pub(crate) fn insert(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<String>,
+        payload: SetOrInsertPayload<SmolStr>,
     ) -> Result<LocalOperationResult, error::MissingIndexError> {
         let state_tree_text = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
@@ -590,7 +591,7 @@ impl<'a> ResolvedTextMut<'a> {
         payload: SetOrInsertPayload<I>,
     ) -> Result<LocalOperationResult, error::MissingIndexError>
     where
-        I: ExactSizeIterator<Item = String>,
+        I: ExactSizeIterator<Item = SmolStr>,
     {
         let state_tree_text = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,
@@ -607,7 +608,7 @@ impl<'a> ResolvedTextMut<'a> {
         let mut chars: Vec<amp::ScalarValue> = Vec::with_capacity(payload.value.len());
         for (i, c) in payload.value.enumerate() {
             let insert_op = amp::OpId::new(payload.start_op + i as u64, payload.actor);
-            chars.push(amp::ScalarValue::Str(c.to_string()));
+            chars.push(amp::ScalarValue::Str(c.clone()));
             let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, c);
             values.push(c)
         }
@@ -630,7 +631,7 @@ impl<'a> ResolvedTextMut<'a> {
     pub(crate) fn set(
         &mut self,
         index: u32,
-        payload: SetOrInsertPayload<String>,
+        payload: SetOrInsertPayload<SmolStr>,
     ) -> Result<(MultiGrapheme, LocalOperationResult), error::MissingIndexError> {
         let state_tree_text = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Text(text)) => text,

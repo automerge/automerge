@@ -50,7 +50,7 @@ fn test_set_root_object_properties() {
         .change::<_, _, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("bird"),
-                Value::Primitive(Primitive::Str("magpie".to_string())),
+                Value::Primitive(Primitive::Str("magpie".into())),
             ))?;
             Ok(())
         })
@@ -70,7 +70,7 @@ fn test_set_root_object_properties() {
         hash: None,
         deps: Vec::new(),
         operations: vec![amp::Op {
-            action: amp::OpType::Set(amp::ScalarValue::Str("magpie".to_string())),
+            action: amp::OpType::Set(amp::ScalarValue::Str("magpie".into())),
             obj: "_root".try_into().unwrap(),
             key: "bird".into(),
             insert: false,
@@ -687,7 +687,7 @@ fn test_sets_characters_in_text() {
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
-            Value::Text("some".graphemes(true).map(|s| s.to_owned()).collect()),
+            Value::Text("some".graphemes(true).map(|s| s.into()).collect()),
         ))?;
         Ok(())
     })
@@ -727,7 +727,7 @@ fn test_sets_characters_in_text() {
 
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(hashmap! {
-        "text".into() => Value::Text(vec!["s".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
+        "text".into() => Value::Text(vec!["s".into(), "a".into(), "m".into(), "e".into()]),
     });
     assert_eq!(value, expected_value);
 }
@@ -738,7 +738,7 @@ fn test_inserts_characters_in_text() {
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
-            Value::Text("same".graphemes(true).map(|s| s.to_owned()).collect()),
+            Value::Text("same".graphemes(true).map(|s| s.into()).collect()),
         ))?;
         Ok(())
     })
@@ -781,7 +781,7 @@ fn test_inserts_characters_in_text() {
 
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(hashmap! {
-        "text".into() => Value::Text(vec!["s".to_owned(), "h".to_owned(), "a".to_owned(), "m".to_owned(), "e".to_owned()]),
+        "text".into() => Value::Text(vec!["s".into(), "h".into(), "a".into(), "m".into(), "e".into()]),
     });
     assert_eq!(value, expected_value);
 }
@@ -835,7 +835,7 @@ fn test_inserts_characters_at_start_of_text() {
 
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(hashmap! {
-        "text".into() => Value::Text(vec!["i".to_owned()]),
+        "text".into() => Value::Text(vec!["i".into()]),
     });
     assert_eq!(value, expected_value);
 }

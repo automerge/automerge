@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
@@ -344,12 +345,12 @@ impl NewValue {
 /// sequences of grapheme clusters
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct MultiGrapheme {
-    winning_value: (amp::OpId, String),
-    conflicts: HashMap<amp::OpId, String>,
+    winning_value: (amp::OpId, SmolStr),
+    conflicts: HashMap<amp::OpId, SmolStr>,
 }
 
 impl MultiGrapheme {
-    pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: String) -> MultiGrapheme {
+    pub(super) fn new_from_grapheme_cluster(opid: amp::OpId, s: SmolStr) -> MultiGrapheme {
         debug_assert_eq!(s.graphemes(true).count(), 1);
         MultiGrapheme {
             winning_value: (opid, s),
@@ -450,7 +451,7 @@ impl MultiGrapheme {
         }
     }
 
-    fn update(&mut self, key: &amp::OpId, value: String) {
+    fn update(&mut self, key: &amp::OpId, value: SmolStr) {
         match key.cmp(&self.winning_value.0) {
             Ordering::Equal => {
                 self.winning_value.1 = value;
@@ -467,15 +468,15 @@ impl MultiGrapheme {
         }
     }
 
-    pub(super) fn default_grapheme(&self) -> String {
-        self.winning_value.1.clone()
+    pub(super) fn default_grapheme(&self) -> &SmolStr {
+        &self.winning_value.1
     }
 
     pub fn default_opid(&self) -> &amp::OpId {
         &self.winning_value.0
     }
 
-    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &String)> {
+    fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &SmolStr)> {
         std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
             .chain(self.conflicts.iter())
     }
@@ -568,7 +569,7 @@ where
 
     fn new_map_or_table(
         self,
-        props: std::collections::HashMap<String, Value>,
+        props: std::collections::HashMap<SmolStr, Value>,
         map_type: amp::MapType,
     ) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
@@ -584,7 +585,7 @@ where
         ops.push(make_op);
         let mut current_max_op = self.start_op;
         let mut cursors = Cursors::new();
-        let mut result_props: HashMap<String, MultiValue> = HashMap::with_capacity(props.len());
+        let mut result_props: HashMap<SmolStr, MultiValue> = HashMap::with_capacity(props.len());
         for (prop, value) in props {
             let context = NewValueContext {
                 actor: self.actor,
@@ -669,7 +670,7 @@ where
         }
     }
 
-    fn new_text(self, graphemes: Vec<String>) -> NewValue {
+    fn new_text(self, graphemes: Vec<SmolStr>) -> NewValue {
         let make_text_opid = self.actor.op_id_at(self.start_op);
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::Text),

@@ -5,6 +5,7 @@ use automerge_protocol as amp;
 use automerge_protocol::RootDiff;
 use diffable_sequence::DiffableSequence;
 use multivalue::NewValueRequest;
+use smol_str::SmolStr;
 
 use crate::{error, Cursor, Path, PathElement, Primitive, Value};
 
@@ -28,7 +29,7 @@ pub(crate) struct LocalOperationResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
-    root_props: HashMap<String, MultiValue>,
+    root_props: HashMap<SmolStr, MultiValue>,
     cursors: Cursors,
 }
 
@@ -327,9 +328,12 @@ impl StateTreeComposite {
             Self::List(StateTreeList {
                 elements: elems, ..
             }) => Value::Sequence(elems.iter().map(|e| e.default_value()).collect()),
-            Self::Text(StateTreeText { graphemes, .. }) => {
-                Value::Text(graphemes.iter().map(|c| c.default_grapheme()).collect())
-            }
+            Self::Text(StateTreeText { graphemes, .. }) => Value::Text(
+                graphemes
+                    .iter()
+                    .map(|c| c.default_grapheme().clone())
+                    .collect(),
+            ),
         }
     }
 
@@ -464,13 +468,13 @@ impl StateTreeValue {
 #[derive(Debug, Clone, PartialEq)]
 struct StateTreeMap {
     object_id: amp::ObjectId,
-    props: HashMap<String, MultiValue>,
+    props: HashMap<SmolStr, MultiValue>,
 }
 
 impl StateTreeMap {
     fn check_diff(
         &self,
-        prop_diffs: &HashMap<String, HashMap<amp::OpId, amp::Diff>>,
+        prop_diffs: &HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
     ) -> Result<(), error::InvalidPatch> {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.iter();
@@ -494,7 +498,7 @@ impl StateTreeMap {
         Ok(())
     }
 
-    fn apply_diff(&mut self, prop_diffs: HashMap<String, HashMap<amp::OpId, amp::Diff>>) {
+    fn apply_diff(&mut self, prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>) {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -531,7 +535,7 @@ impl StateTreeMap {
             .get(key)
             .map(|mv| mv.update_default(StateTreeValue::Leaf(cursor)));
         if let Some(new_mv) = new_mv {
-            self.props.insert(key.to_string(), new_mv);
+            self.props.insert(key.into(), new_mv);
         }
     }
 
@@ -564,13 +568,13 @@ impl StateTreeMap {
 #[derive(Debug, Clone, PartialEq)]
 struct StateTreeTable {
     object_id: amp::ObjectId,
-    props: HashMap<String, MultiValue>,
+    props: HashMap<SmolStr, MultiValue>,
 }
 
 impl StateTreeTable {
     fn check_diff(
         &self,
-        prop_diffs: &HashMap<String, HashMap<amp::OpId, amp::Diff>>,
+        prop_diffs: &HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
     ) -> Result<(), error::InvalidPatch> {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.iter();
@@ -594,7 +598,7 @@ impl StateTreeTable {
         Ok(())
     }
 
-    fn apply_diff(&mut self, prop_diffs: HashMap<String, HashMap<amp::OpId, amp::Diff>>) {
+    fn apply_diff(&mut self, prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>) {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -625,13 +629,13 @@ impl StateTreeTable {
             .unwrap_or_else(Vec::new)
     }
 
-    pub fn mutably_update_cursor(&mut self, key: &str, cursor: Primitive) {
+    pub fn mutably_update_cursor(&mut self, key: &SmolStr, cursor: Primitive) {
         let new_mv = self
             .props
             .get(key)
             .map(|mv| mv.update_default(StateTreeValue::Leaf(cursor)));
         if let Some(new_mv) = new_mv {
-            self.props.insert(key.to_string(), new_mv);
+            self.props.insert(key.clone(), new_mv);
         }
     }
 
@@ -699,7 +703,7 @@ impl StateTreeText {
     pub(crate) fn elem_at(
         &self,
         index: usize,
-    ) -> Result<(&amp::OpId, String), error::MissingIndexError> {
+    ) -> Result<(&amp::OpId, &SmolStr), error::MissingIndexError> {
         self.graphemes
             .get(index)
             .map(|mc| (mc.0, mc.1.default_grapheme()))

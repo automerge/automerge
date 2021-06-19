@@ -14,7 +14,7 @@ fn arb_objtype() -> impl Strategy<Value = amp::ObjType> {
 
 fn arb_scalar_value() -> impl Strategy<Value = amp::ScalarValue> {
     prop_oneof![
-        any::<String>().prop_map(amp::ScalarValue::Str),
+        any::<String>().prop_map(|s| amp::ScalarValue::Str(s.into())),
         any::<i64>().prop_map(amp::ScalarValue::Int),
         //This is necessary because we don't support integers larger than i64 in the JSON protocol
         //any::<i64>().prop_map(|i| amp::ScalarValue::Uint(i as u64)),
@@ -61,7 +61,7 @@ fn arb_elemid() -> impl Strategy<Value = amp::ElementId> {
 
 fn arb_key() -> impl Strategy<Value = amp::Key> {
     prop_oneof![
-        any::<String>().prop_map(amp::Key::Map),
+        any::<String>().prop_map(|s| amp::Key::Map(s.into())),
         arb_elemid().prop_map(amp::Key::Seq),
     ]
 }

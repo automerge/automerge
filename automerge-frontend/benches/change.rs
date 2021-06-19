@@ -1,6 +1,7 @@
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use rand::{thread_rng, Rng};
+use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub fn insert_long_string(c: &mut Criterion) {
@@ -8,7 +9,7 @@ pub fn insert_long_string(c: &mut Criterion) {
         b.iter_batched(
             || {
                 let doc = Frontend::new();
-                let random_string: String = thread_rng()
+                let random_string: SmolStr = thread_rng()
                     .sample_iter(&rand::distributions::Alphanumeric)
                     .take(6000)
                     .map(char::from)
@@ -21,7 +22,7 @@ pub fn insert_long_string(c: &mut Criterion) {
                     doc.change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
                             Path::root().key("text"),
-                            Value::Text(string.graphemes(true).map(|s| s.to_owned()).collect()),
+                            Value::Text(string.graphemes(true).map(|s| s.into()).collect()),
                         ))
                     })
                     .unwrap()

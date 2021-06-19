@@ -1,10 +1,8 @@
-use std::{
-    borrow::{Borrow, Cow},
-    collections::HashMap,
-};
+use std::{borrow::Cow, collections::HashMap};
 
 use automerge_protocol as amp;
 use serde::Serialize;
+use smol_str::SmolStr;
 
 use crate::path::PathElement;
 
@@ -21,11 +19,11 @@ impl From<HashMap<amp::OpId, Value>> for Conflicts {
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Value {
-    Map(HashMap<String, Value>),
-    Table(HashMap<String, Value>),
+    Map(HashMap<SmolStr, Value>),
+    Table(HashMap<SmolStr, Value>),
     Sequence(Vec<Value>),
     /// Sequence of grapheme clusters
-    Text(Vec<String>),
+    Text(Vec<SmolStr>),
     Primitive(Primitive),
 }
 
@@ -33,7 +31,7 @@ pub enum Value {
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Primitive {
     Bytes(Vec<u8>),
-    Str(String),
+    Str(SmolStr),
     Int(i64),
     Uint(u64),
     F64(f64),
@@ -95,7 +93,7 @@ impl From<Primitive> for Value {
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::Primitive(Primitive::Str(s.to_string()))
+        Value::Primitive(Primitive::Str(SmolStr::new(s)))
     }
 }
 
@@ -111,7 +109,7 @@ impl From<&amp::CursorDiff> for Primitive {
 
 impl From<char> for Value {
     fn from(c: char) -> Value {
-        Value::Primitive(Primitive::Str(c.to_string()))
+        Value::Primitive(Primitive::Str(SmolStr::new(c.to_string())))
     }
 }
 
@@ -133,12 +131,12 @@ impl From<i64> for Value {
 impl<T, K> From<HashMap<K, T>> for Value
 where
     T: Into<Value>,
-    K: Borrow<str>,
+    K: AsRef<str>,
 {
     fn from(h: HashMap<K, T>) -> Self {
         Value::Map(
             h.into_iter()
-                .map(|(k, v)| (k.borrow().to_string(), v.into()))
+                .map(|(k, v)| (SmolStr::new(k), v.into()))
                 .collect(),
         )
     }
@@ -154,16 +152,16 @@ impl Value {
     pub fn from_json(json: &serde_json::Value) -> Value {
         match json {
             serde_json::Value::Object(kvs) => {
-                let result: HashMap<String, Value> = kvs
+                let result: HashMap<SmolStr, Value> = kvs
                     .iter()
-                    .map(|(k, v)| (k.clone(), Value::from_json(v)))
+                    .map(|(k, v)| (SmolStr::new(k), Value::from_json(v)))
                     .collect();
                 Value::Map(result)
             }
             serde_json::Value::Array(vs) => {
                 Value::Sequence(vs.iter().map(Value::from_json).collect())
             }
-            serde_json::Value::String(s) => Value::Primitive(Primitive::Str(s.clone())),
+            serde_json::Value::String(s) => Value::Primitive(Primitive::Str(SmolStr::new(s))),
             serde_json::Value::Number(n) => {
                 Value::Primitive(Primitive::F64(n.as_f64().unwrap_or(0.0)))
             }
@@ -175,13 +173,17 @@ impl Value {
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             Value::Map(map) => {
-                let result: serde_json::map::Map<String, serde_json::Value> =
-                    map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
+                let result: serde_json::map::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect();
                 serde_json::Value::Object(result)
             }
             Value::Table(map) => {
-                let result: serde_json::map::Map<String, serde_json::Value> =
-                    map.iter().map(|(k, v)| (k.clone(), v.to_json())).collect();
+                let result: serde_json::map::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect();
                 serde_json::Value::Object(result)
             }
             Value::Sequence(elements) => {
@@ -313,7 +315,7 @@ pub(crate) fn value_to_op_requests(
             let mut op_num = start_op + 1;
             for c in chars.iter() {
                 insert_ops.push(amp::Op {
-                    action: amp::OpType::Set(amp::ScalarValue::Str(c.to_string())),
+                    action: amp::OpType::Set(amp::ScalarValue::Str(c.clone())),
                     obj: amp::ObjectId::from(make_text_op.clone()),
                     key: last_elemid.clone().into(),
                     insert: true,
@@ -400,15 +402,15 @@ mod tests {
     #[test]
     fn get_value() {
         let v = Value::Map(hashmap! {
-            "hello".to_owned() => Value::Primitive(Primitive::Str("world".to_owned())),
-            "again".to_owned() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
+            "hello".into() => Value::Primitive(Primitive::Str("world".into())),
+            "again".into() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
         });
 
         assert_eq!(v.get_value(Path::root()), Some(Cow::Borrowed(&v)));
         assert_eq!(
             v.get_value(Path::root().key("hello")),
             Some(Cow::Borrowed(&Value::Primitive(Primitive::Str(
-                "world".to_owned()
+                "world".into()
             ))))
         );
         assert_eq!(v.get_value(Path::root().index(0)), None);

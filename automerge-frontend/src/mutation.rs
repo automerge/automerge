@@ -131,7 +131,7 @@ impl<'a> MutationTracker<'a> {
         match value {
             Value::Map(kvs) => {
                 for (k, v) in kvs.iter() {
-                    self.add_change(LocalChange::set(Path::root().key(k), v.clone()))?;
+                    self.add_change(LocalChange::set(Path::root().key(k.clone()), v.clone()))?;
                 }
                 Ok(())
             }
@@ -467,7 +467,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let (old, res) = root_target.set_key(k, payload);
+                                let (old, res) = root_target.set_key(k.clone(), payload);
                                 Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             (PathElement::Key(ref k), ResolvedPathMut::Map(ref mut maptarget)) => {
@@ -476,7 +476,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let (old, res) = maptarget.set_key(k, payload);
+                                let (old, res) = maptarget.set_key(k.clone(), payload);
                                 Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             (
@@ -488,7 +488,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
-                                let (old, res) = tabletarget.set_key(k, payload);
+                                let (old, res) = tabletarget.set_key(k.clone(), payload);
                                 Ok((LocalOperationForRollback::Set { old }, res))
                             }
                             // In this case we are trying to modify a key in something which is not

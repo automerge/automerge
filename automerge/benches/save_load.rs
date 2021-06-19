@@ -8,7 +8,7 @@ fn small_change_backend() -> Backend {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("a"),
-                Value::Primitive(Primitive::Str("hello world".to_owned())),
+                Value::Primitive(Primitive::Str("hello world".into())),
             ))?;
             Ok(())
         })
@@ -28,11 +28,11 @@ fn medium_change_backend() -> Backend {
         Value::Map(
             vec![
                 (
-                    "\u{0}\u{0}".to_owned(),
+                    "\u{0}\u{0}".into(),
                     Value::Sequence(vec![
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Boolean(false)),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -50,20 +50,20 @@ fn medium_change_backend() -> Backend {
                     ]),
                 ),
                 (
-                    "\u{2}".to_owned(),
+                    "\u{2}".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (
-                    "\u{0}".to_owned(),
+                    "\u{0}".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -76,7 +76,7 @@ fn medium_change_backend() -> Backend {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Timestamp(0)),
@@ -84,11 +84,11 @@ fn medium_change_backend() -> Backend {
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::F32(0.0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (
-                    "".to_owned(),
+                    "".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
@@ -99,7 +99,7 @@ fn medium_change_backend() -> Backend {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::F64(0.0)),
                         Value::Primitive(Primitive::Timestamp(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Boolean(false)),
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -112,9 +112,9 @@ fn medium_change_backend() -> Backend {
                     ]),
                 ),
                 (
-                    "\u{1}".to_owned(),
+                    "\u{1}".into(),
                     Value::Table(
-                        vec![("".to_owned(), Value::Primitive(Primitive::F64(0.0)))]
+                        vec![("".into(), Value::Primitive(Primitive::F64(0.0)))]
                             .into_iter()
                             .collect(),
                     ),

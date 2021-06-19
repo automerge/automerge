@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 
 use crate::{
     expanded_op::ExpandedOp,
@@ -13,7 +14,7 @@ pub(crate) struct ActorMap(Vec<amp::ActorId>);
 impl ActorMap {
     pub fn import_key(&mut self, key: &amp::Key) -> Key {
         match key {
-            amp::Key::Map(string) => Key::Map(string.to_string()),
+            amp::Key::Map(string) => Key::Map(string.clone()),
             amp::Key::Seq(eid) => Key::Seq(self.import_element_id(eid)),
         }
     }
@@ -94,18 +95,22 @@ impl ActorMap {
         }
     }
 
-    pub fn opid_to_string(&self, id: &OpId) -> String {
-        format!("{}@{}", id.0, self.export_actor(id.1).to_hex_string())
+    pub fn opid_to_string(&self, id: &OpId) -> SmolStr {
+        SmolStr::new(format!(
+            "{}@{}",
+            id.0,
+            self.export_actor(id.1).to_hex_string()
+        ))
     }
 
-    pub fn elementid_to_string(&self, eid: &ElementId) -> String {
+    pub fn elementid_to_string(&self, eid: &ElementId) -> SmolStr {
         match eid {
             ElementId::Head => "_head".into(),
             ElementId::Id(id) => self.opid_to_string(id),
         }
     }
 
-    pub fn key_to_string(&self, key: &Key) -> String {
+    pub fn key_to_string(&self, key: &Key) -> SmolStr {
         match &key {
             Key::Map(s) => s.clone(),
             Key::Seq(eid) => self.elementid_to_string(eid),

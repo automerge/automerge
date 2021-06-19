@@ -7,6 +7,7 @@ use std::{
 
 use automerge_protocol as amp;
 use flate2::{bufread::DeflateEncoder, Compression};
+use smol_str::SmolStr;
 
 use crate::columnar::COLUMN_TYPE_DEFLATE;
 
@@ -252,6 +253,15 @@ pub(crate) trait Encodable {
     }
 
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize>;
+}
+
+impl Encodable for SmolStr {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let bytes = self.as_bytes();
+        let head = bytes.len().encode(buf)?;
+        buf.write_all(bytes)?;
+        Ok(head + bytes.len())
+    }
 }
 
 impl Encodable for String {

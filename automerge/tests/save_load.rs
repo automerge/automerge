@@ -17,11 +17,11 @@ fn missing_object_error_flaky_null_rle_decoding() {
         Value::Map(
             vec![
                 (
-                    "\u{0}\u{0}".to_owned(),
+                    "\u{0}\u{0}".into(),
                     Value::Sequence(vec![
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Boolean(false)),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -39,20 +39,20 @@ fn missing_object_error_flaky_null_rle_decoding() {
                     ]),
                 ),
                 (
-                    "\u{2}".to_owned(),
+                    "\u{2}".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (
-                    "\u{0}".to_owned(),
+                    "\u{0}".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Counter(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -65,7 +65,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Timestamp(0)),
                         Value::Primitive(Primitive::Timestamp(0)),
@@ -73,11 +73,11 @@ fn missing_object_error_flaky_null_rle_decoding() {
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::F32(0.0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (
-                    "".to_owned(),
+                    "".into(),
                     Value::Sequence(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
@@ -88,7 +88,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::F64(0.0)),
                         Value::Primitive(Primitive::Timestamp(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Boolean(false)),
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Int(0)),
@@ -101,9 +101,9 @@ fn missing_object_error_flaky_null_rle_decoding() {
                     ]),
                 ),
                 (
-                    "\u{1}".to_owned(),
+                    "\u{1}".into(),
                     Value::Table(
-                        vec![("".to_owned(), Value::Primitive(Primitive::F64(0.0)))]
+                        vec![("".into(), Value::Primitive(Primitive::F64(0.0)))]
                             .into_iter()
                             .collect(),
                     ),
@@ -199,7 +199,7 @@ fn missing_object_error_null_rle_decoding() {
             Op {
                 action: OpType::Make(ObjType::List),
                 obj: ObjectId::Root,
-                key: Key::Map("b".to_owned()),
+                key: Key::Map("b".into()),
                 pred: vec![],
                 insert: false,
             },
@@ -311,7 +311,7 @@ fn missing_object_error_null_rle_decoding() {
             Op {
                 action: OpType::Make(ObjType::List),
                 obj: ObjectId::Root,
-                key: Key::Map("\u{0}".to_owned()),
+                key: Key::Map("\u{0}".into()),
                 pred: vec![],
                 insert: false,
             },
@@ -661,14 +661,14 @@ fn missing_object_error_null_rle_decoding() {
             Op {
                 action: OpType::Make(ObjType::Map),
                 obj: ObjectId::Root,
-                key: Key::Map("\u{1}".to_owned()),
+                key: Key::Map("\u{1}".into()),
                 pred: vec![],
                 insert: false,
             },
             Op {
                 action: OpType::Set(ScalarValue::Null),
                 obj: ObjectId::Id(OpId(67, actor_id.clone())),
-                key: Key::Map("a".to_owned()),
+                key: Key::Map("a".into()),
                 pred: vec![],
                 insert: false,
             },
@@ -678,7 +678,7 @@ fn missing_object_error_null_rle_decoding() {
         seq: 1,
         start_op: 1,
         time: 0,
-        message: Some("".to_owned()),
+        message: Some("".into()),
         deps: vec![],
         extra_bytes: vec![],
     };

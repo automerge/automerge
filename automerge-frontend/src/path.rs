@@ -1,8 +1,10 @@
 use std::fmt;
 
+use smol_str::SmolStr;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum PathElement {
-    Key(String),
+    Key(SmolStr),
     Index(u32),
 }
 
@@ -19,7 +21,7 @@ impl Path {
         self
     }
 
-    pub fn key<S: Into<String>>(mut self, key: S) -> Path {
+    pub fn key<S: Into<SmolStr>>(mut self, key: S) -> Path {
         self.0.push(PathElement::Key(key.into()));
         self
     }

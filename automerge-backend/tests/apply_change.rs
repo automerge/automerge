@@ -996,7 +996,7 @@ fn test_handle_changes_within_conflicted_lists() {
                                 value: Diff::Map(MapDiff{
                                     object_id: actor1.op_id_at(3).into(),
                                     props: hashmap!{
-                                        "done".to_string() => hashmap!{
+                                        "done".into() => hashmap!{
                                             actor1.op_id_at(6) => Diff::Value(true.into())
                                         }
                                     }

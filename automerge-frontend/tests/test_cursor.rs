@@ -51,7 +51,7 @@ fn test_allow_cursor_on_text_element() {
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+                Value::Text("123".graphemes(true).map(|s| s.into()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -90,7 +90,7 @@ fn test_do_not_allow_index_past_end_of_list() {
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+                Value::Text("123".graphemes(true).map(|s| s.into()).collect()),
             ))?;
             let cursor = d.cursor_to_path(&Path::root().key("list").index(10));
             assert_eq!(cursor, None);
@@ -106,7 +106,7 @@ fn test_do_not_allow_index_past_end_of_list() {
 //         .change::<_, _, InvalidChangeRequest>(None, |d| {
 //             d.add_change(LocalChange::set(
 //                 Path::root().key("list"),
-//                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+//                 Value::Text("123".graphemes(true).map(|s| s.into()).collect()),
 //             ))?;
 //             let cursor = d
 //                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -121,7 +121,7 @@ fn test_do_not_allow_index_past_end_of_list() {
 
 //             d.add_change(LocalChange::insert(
 //                 Path::root().key("list").index(0),
-//                 Value::Primitive(Primitive::Str("0".to_string())),
+//                 Value::Primitive(Primitive::Str("0".into())),
 //             ))?;
 //             let cursor_the_third = d.value_at_path(&Path::root().key("cursor"));
 //             if let Some(Value::Primitive(Primitive::Cursor(c))) = cursor_the_third {
@@ -147,7 +147,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
-                "list".to_string() => hashmap!{
+                "list".into() => hashmap!{
                     actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(1).into(),
                         edits: vec![
@@ -166,7 +166,7 @@ fn test_set_cursor_to_new_element_in_diff() {
                         ],
                     }),
                 },
-                "cursor".to_string() => hashmap!{
+                "cursor".into() => hashmap!{
                     actor.op_id_at(4) => amp::Diff::Cursor(amp::CursorDiff{
                         elem_id: actor.op_id_at(3),
                         index: 1,
@@ -187,7 +187,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
-                "cursor".to_string() => hashmap!{
+                "cursor".into() => hashmap!{
                     actor.op_id_at(4) => amp::Diff::Cursor(amp::CursorDiff{
                         elem_id: actor.op_id_at(2),
                         index: 0,
@@ -222,7 +222,7 @@ fn test_set_cursor_to_new_element_in_diff() {
 //         .change::<_, _, InvalidChangeRequest>(None, |d| {
 //             d.add_change(LocalChange::set(
 //                 Path::root().key("list"),
-//                 Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+//                 Value::Text("123".graphemes(true).map(|s| s.into()).collect()),
 //             ))?;
 //             let cursor = d
 //                 .cursor_to_path(&Path::root().key("list").index(1))
@@ -237,11 +237,11 @@ fn test_set_cursor_to_new_element_in_diff() {
 
 //             d.add_change(LocalChange::insert(
 //                 Path::root().key("list").index(0),
-//                 Value::Primitive(Primitive::Str("0".to_string())),
+//                 Value::Primitive(Primitive::Str("0".into())),
 //             ))?;
 //             d.add_change(LocalChange::insert(
 //                 Path::root().key("list").index(0),
-//                 Value::Primitive(Primitive::Str("1".to_string())),
+//                 Value::Primitive(Primitive::Str("1".into())),
 //             ))?;
 //             let cursor = d
 //                 .cursor_to_path(&Path::root().key("list").index(2))
@@ -268,7 +268,7 @@ fn test_delete_cursor_and_adding_again() {
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
                 Path::root().key("list"),
-                Value::Text("123".graphemes(true).map(|s| s.to_owned()).collect()),
+                Value::Text("123".graphemes(true).map(|s| s.into()).collect()),
             ))?;
             let cursor = d
                 .cursor_to_path(&Path::root().key("list").index(1))

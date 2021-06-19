@@ -1,4 +1,5 @@
 use automerge_protocol as amp;
+use smol_str::SmolStr;
 
 use crate::{
     internal::{Key, ObjectId, OpId},
@@ -14,7 +15,7 @@ use crate::{
 /// building of the patch. It's just where some tools to make the patch can be
 /// found
 pub(crate) trait PatchWorkshop {
-    fn key_to_string(&self, key: &Key) -> String;
+    fn key_to_string(&self, key: &Key) -> SmolStr;
     fn find_cursor(&self, opid: &amp::OpId) -> Option<amp::CursorDiff>;
     fn get_obj(&self, object_id: &ObjectId) -> Option<&ObjState>;
     fn make_external_objid(&self, object_id: &ObjectId) -> amp::ObjectId;

@@ -3,6 +3,7 @@ use std::{collections::HashMap, convert::TryInto, default::Default};
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{thread_rng, Rng};
+use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub fn b1_1(c: &mut Criterion) {
@@ -100,15 +101,12 @@ pub fn b1_2(c: &mut Criterion) {
                     .unwrap();
                 doc2.apply_patch(patch2).unwrap();
 
-                let random_string: String = thread_rng()
+                let random_string: SmolStr = thread_rng()
                     .sample_iter(&rand::distributions::Alphanumeric)
                     .take(6000)
                     .map(char::from)
                     .collect();
-                let chars: Vec<_> = random_string
-                    .graphemes(true)
-                    .map(|s| s.to_owned())
-                    .collect();
+                let chars: Vec<_> = random_string.graphemes(true).map(|s| s.into()).collect();
                 let text = Value::Text(chars);
                 (doc1, backend1, doc2, backend2, text)
             },

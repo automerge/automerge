@@ -1,4 +1,5 @@
 use serde::{de, Deserialize, Deserializer};
+use smol_str::SmolStr;
 
 use crate::ScalarValue;
 
@@ -47,7 +48,7 @@ impl<'de> Deserialize<'de> for ScalarValue {
             where
                 E: de::Error,
             {
-                Ok(ScalarValue::Str(value.to_string()))
+                Ok(ScalarValue::Str(SmolStr::new(value)))
             }
 
             fn visit_none<E>(self) -> Result<ScalarValue, E>
