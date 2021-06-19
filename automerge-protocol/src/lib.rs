@@ -379,6 +379,16 @@ impl<T: Ord> FromIterator<T> for SortedVec<T> {
     }
 }
 
+impl<T> IntoIterator for SortedVec<T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
