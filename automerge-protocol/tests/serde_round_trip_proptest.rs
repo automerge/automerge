@@ -1,6 +1,7 @@
 extern crate automerge_protocol as amp;
 use std::num::NonZeroU32;
 
+use amp::SortedVec;
 use proptest::prelude::*;
 
 fn arb_objtype() -> impl Strategy<Value = amp::ObjType> {
@@ -81,7 +82,7 @@ prop_compose! {
                 action,
                 obj,
                 key,
-                pred,
+                pred: SortedVec::from(pred),
                 insert,
             }
     }

@@ -1,7 +1,7 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{collections::HashMap, convert::TryFrom, fmt, num::NonZeroU32};
+use std::{collections::HashMap, convert::TryFrom, fmt, iter::FromIterator, num::NonZeroU32};
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -331,12 +331,70 @@ pub enum OpType {
     MultiSet(Vec<ScalarValue>),
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SortedVec<T>(Vec<T>);
+
+impl<T> SortedVec<T> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.0.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.0.get_mut(index)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+}
+
+impl<T: Ord> From<Vec<T>> for SortedVec<T> {
+    fn from(mut other: Vec<T>) -> Self {
+        other.sort_unstable();
+        Self(other)
+    }
+}
+
+impl<T: Ord> FromIterator<T> for SortedVec<T> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: std::iter::IntoIterator<Item = T>,
+    {
+        let mut inner: Vec<T> = iter.into_iter().collect();
+        inner.sort_unstable();
+        Self(inner)
+    }
+}
+
+impl<T> IntoIterator for SortedVec<T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
     pub obj: ObjectId,
     pub key: Key,
-    pub pred: Vec<OpId>,
+    pub pred: SortedVec<OpId>,
     pub insert: bool,
 }
 

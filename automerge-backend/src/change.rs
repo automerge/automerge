@@ -9,7 +9,7 @@ use std::{
     str,
 };
 
-use amp::OpType;
+use amp::{OpType, SortedVec};
 use automerge_protocol as amp;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -652,7 +652,7 @@ fn group_doc_change_and_doc_ops(
     Ok(())
 }
 
-fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorId]) -> Vec<amp::OpId> {
+fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorId]) -> SortedVec<amp::OpId> {
     pred.iter()
         .map(|(ctr, actor)| amp::OpId(*ctr, actors[*actor].clone()))
         .collect()
@@ -1029,77 +1029,77 @@ mod tests {
                     key: key1,
                     obj: obj1.clone(),
                     insert,
-                    pred: vec![opid1.clone(), opid2.clone()],
+                    pred: vec![opid1.clone(), opid2.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Counter(-11)),
                     key: key2.clone(),
                     obj: obj1.clone(),
                     insert,
-                    pred: vec![opid1.clone(), opid2.clone()],
+                    pred: vec![opid1.clone(), opid2.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Timestamp(20)),
                     key: key3,
                     obj: obj1,
                     insert,
-                    pred: vec![opid1.clone(), opid2],
+                    pred: vec![opid1.clone(), opid2].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("some value".into())),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
-                    pred: vec![opid3.clone(), opid4.clone()],
+                    pred: vec![opid3.clone(), opid4.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Make(amp::ObjType::Map),
                     key: key2.clone(),
                     obj: obj2.clone(),
                     insert,
-                    pred: vec![opid3.clone(), opid4.clone()],
+                    pred: vec![opid3.clone(), opid4.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("val1".into())),
                     key: head.clone(),
                     obj: obj3.clone(),
                     insert: true,
-                    pred: vec![opid3, opid4.clone()],
+                    pred: vec![opid3, opid4.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("val2".into())),
                     key: head,
                     obj: obj3.clone(),
                     insert: true,
-                    pred: vec![opid4.clone(), opid5.clone()],
+                    pred: vec![opid4.clone(), opid5.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Inc(10),
                     key: key2,
                     obj: obj2,
                     insert,
-                    pred: vec![opid1.clone(), opid5.clone()],
+                    pred: vec![opid1.clone(), opid5.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                     obj: obj3.clone(),
                     key: keyseq1,
                     insert: true,
-                    pred: vec![opid4.clone(), opid5.clone()],
+                    pred: vec![opid4.clone(), opid5.clone()].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
                     obj: obj3.clone(),
                     key: keyseq2,
                     insert: true,
-                    pred: vec![opid4, opid5],
+                    pred: vec![opid4, opid5].into(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Cursor(opid1)),
                     obj: obj3,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
             ],
             extra_bytes: vec![1, 2, 3],
@@ -1127,7 +1127,7 @@ mod tests {
                 key: amp::ElementId::Head.into(),
                 obj: actor1.op_id_at(10).into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         };
@@ -1155,28 +1155,28 @@ mod tests {
                     obj: amp::ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::Make(amp::ObjType::List),
                     obj: amp::ObjectId::Root,
                     key: "somelist".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("elem".into())),
                     obj: actor.op_id_at(2).into(),
                     key: amp::ElementId::Head.into(),
                     insert: true,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Cursor(actor.op_id_at(3))),
                     obj: amp::ObjectId::Root,
                     key: "cursor".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
             ],
             extra_bytes: vec![1, 2, 3],
@@ -1198,14 +1198,14 @@ mod tests {
                     obj: amp::ObjectId::Root,
                     key: "someotherkey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
                 amp::Op {
                     action: amp::OpType::MultiSet(vec![1.into(), 2.into(), 3.into()]),
                     obj: actor.op_id_at(2).into(),
                     key: amp::ElementId::Head.into(),
                     insert: true,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 },
             ],
             extra_bytes: vec![],
@@ -1249,7 +1249,7 @@ mod tests {
                 obj: amp::ObjectId::Root,
                 key: "somelist".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: vec![1, 2, 3],
         };
@@ -1260,7 +1260,7 @@ mod tests {
                 obj: actor.op_id_at(1).into(),
                 key: last_elem_id,
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             });
             last_elem_id = actor.op_id_at(i + 2).into();
         }

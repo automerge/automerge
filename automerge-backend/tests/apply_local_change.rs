@@ -1,7 +1,7 @@
 extern crate automerge_backend;
 use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
 
-use amp::RootDiff;
+use amp::{RootDiff, SortedVec};
 use automerge_backend::{Backend, Change};
 use automerge_protocol as amp;
 use automerge_protocol::{
@@ -25,7 +25,7 @@ fn test_apply_local_change() {
             key: "bird".into(),
             obj: ObjectId::Root,
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -46,7 +46,7 @@ fn test_apply_local_change() {
             action: OpType::Set("magpie".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
-            pred: Vec::new(),
+            pred: SortedVec::new(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -91,7 +91,7 @@ fn test_error_on_duplicate_requests() {
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -109,7 +109,7 @@ fn test_error_on_duplicate_requests() {
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -136,7 +136,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -154,7 +154,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
-            pred: vec![actor.op_id_at(1)],
+            pred: vec![actor.op_id_at(1)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -171,7 +171,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             action: amp::OpType::Set("goldfish".into()),
             obj: ObjectId::Root,
             key: "fish".into(),
-            pred: Vec::new(),
+            pred: SortedVec::new(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -191,7 +191,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
-            pred: Vec::new(),
+            pred: SortedVec::new(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -209,7 +209,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             action: amp::OpType::Set("goldfish".into()),
             key: "fish".into(),
             obj: ObjectId::Root,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -227,7 +227,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
-            pred: vec![actor.op_id_at(1)],
+            pred: vec![actor.op_id_at(1)].into(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -274,7 +274,7 @@ fn test_transform_list_indexes_into_element_ids() {
             action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             obj: ObjectId::Root,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -295,7 +295,7 @@ fn test_transform_list_indexes_into_element_ids() {
             obj: ObjectId::from(remote_actor.op_id_at(1)),
             key: ElementId::Head.into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     }
@@ -315,7 +315,7 @@ fn test_transform_list_indexes_into_element_ids() {
             action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -332,7 +332,7 @@ fn test_transform_list_indexes_into_element_ids() {
             action: amp::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -351,14 +351,14 @@ fn test_transform_list_indexes_into_element_ids() {
                 action: amp::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
                 insert: false,
-                pred: vec![remote_actor.op_id_at(2)],
+                pred: vec![remote_actor.op_id_at(2)].into(),
             },
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: amp::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
-                pred: vec![actor.op_id_at(2)],
+                pred: vec![actor.op_id_at(2)].into(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -377,7 +377,7 @@ fn test_transform_list_indexes_into_element_ids() {
             action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -394,7 +394,7 @@ fn test_transform_list_indexes_into_element_ids() {
             action: amp::OpType::Set("wagtail".into()),
             key: actor.op_id_at(2).into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -411,14 +411,14 @@ fn test_transform_list_indexes_into_element_ids() {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: amp::OpType::Set("Magpie".into()),
                 key: remote_actor.op_id_at(2).into(),
-                pred: vec![remote_actor.op_id_at(2)],
+                pred: vec![remote_actor.op_id_at(2)].into(),
                 insert: false,
             },
             Op {
                 obj: ObjectId::from(remote_actor.op_id_at(1)),
                 action: amp::OpType::Set("Goldfinch".into()),
                 key: actor.op_id_at(2).into(),
-                pred: vec![actor.op_id_at(2)],
+                pred: vec![actor.op_id_at(2)].into(),
                 insert: false,
             },
         ],
@@ -470,7 +470,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -489,14 +489,14 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                 action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
                 action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
                 insert: false,
-                pred: vec![actor.op_id_at(2)],
+                pred: vec![actor.op_id_at(2)].into(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -555,7 +555,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
             action: amp::OpType::Make(ObjType::List),
             key: "birds".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     }
@@ -576,13 +576,13 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                 action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             Op {
                 obj: ObjectId::from(actor.op_id_at(1)),
                 action: OpType::Del(NonZeroU32::new(1).unwrap()),
                 key: actor.op_id_at(2).into(),
-                pred: vec![actor.op_id_at(2)],
+                pred: vec![actor.op_id_at(2)].into(),
                 insert: false,
             },
         ],

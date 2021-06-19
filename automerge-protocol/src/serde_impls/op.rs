@@ -7,7 +7,7 @@ use serde::{
 };
 
 use super::read_field;
-use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue};
+use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, SortedVec};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -145,7 +145,7 @@ impl<'de> Deserialize<'de> for Op {
                 let mut action: Option<RawOpType> = None;
                 let mut obj: Option<ObjectId> = None;
                 let mut key: Option<Key> = None;
-                let mut pred: Option<Vec<OpId>> = None;
+                let mut pred: Option<SortedVec<OpId>> = None;
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
@@ -281,7 +281,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -298,7 +298,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -315,7 +315,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -332,7 +332,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -349,7 +349,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -378,7 +378,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -426,7 +426,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -443,7 +443,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -470,7 +470,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -488,7 +488,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -531,7 +531,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 }),
             },
             Scenario {
@@ -623,7 +623,7 @@ mod tests {
             obj: ObjectId::Root,
             key: "somekey".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         };
         let json = serde_json::to_value(map_key).unwrap();
         let expected: serde_json::Value = "somekey".into();
@@ -636,7 +636,7 @@ mod tests {
                 .unwrap()
                 .into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         };
         let json = serde_json::to_value(elemid_key).unwrap();
         let expected: serde_json::Value = "1@7ef48769b04d47e9a88e98a134d62716".into();
@@ -651,28 +651,28 @@ mod tests {
                 obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             Op {
                 action: OpType::Inc(12),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             Op {
                 action: OpType::Set(ScalarValue::Uint(12)),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
-                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
+                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()].into(),
             },
             Op {
                 action: OpType::Inc(12),
                 obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             Op {
                 action: OpType::Set("seomthing".into()),
@@ -681,7 +681,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 insert: false,
-                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()],
+                pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()].into(),
             },
             Op {
                 action: OpType::MultiSet(vec!["one".into(), "two".into()]),
@@ -690,7 +690,7 @@ mod tests {
                     .unwrap()
                     .into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
         ];
         for (testcase_num, testcase) in testcases.iter().enumerate() {

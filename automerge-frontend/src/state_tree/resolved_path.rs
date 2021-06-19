@@ -1,5 +1,6 @@
 use std::{convert::TryInto, num::NonZeroU32};
 
+use amp::SortedVec;
 use automerge_protocol as amp;
 use smol_str::SmolStr;
 
@@ -295,8 +296,8 @@ impl<'a> ResolvedRootMut<'a> {
             pred: self
                 .root
                 .get(&key)
-                .map(|mv| vec![mv.default_opid()])
-                .unwrap_or_else(Vec::new),
+                .map(|mv| vec![mv.default_opid()].into())
+                .unwrap_or_else(SortedVec::new),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         let old = self.root.root_props.insert(key, multivalue);
@@ -306,8 +307,8 @@ impl<'a> ResolvedRootMut<'a> {
     pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
         let existing_value = self.root.get(key);
         let pred = existing_value
-            .map(|v| vec![v.default_opid()])
-            .unwrap_or_else(Vec::new);
+            .map(|v| vec![v.default_opid()].into())
+            .unwrap_or_else(SortedVec::new);
         let old = self
             .root
             .remove(key)
@@ -367,7 +368,7 @@ impl<'a> ResolvedCounterMut<'a> {
                 obj: self.containing_object_id.clone(),
                 key: self.key_in_container.clone(),
                 insert: false,
-                pred: vec![self.multivalue.default_opid()],
+                pred: vec![self.multivalue.default_opid()].into(),
             }],
         }
     }
@@ -580,7 +581,7 @@ impl<'a> ResolvedTextMut<'a> {
                 obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
         })
     }
@@ -623,7 +624,7 @@ impl<'a> ResolvedTextMut<'a> {
                 obj: state_tree_text.object_id.clone(),
                 key: current_elemid.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
         })
     }
@@ -790,7 +791,7 @@ impl<'a> ResolvedListMut<'a> {
             parent_obj: &state_tree_list.object_id,
             key: current_elemid.into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
         state_tree_list.insert(index as usize, multivalue)?;
@@ -828,7 +829,7 @@ impl<'a> ResolvedListMut<'a> {
                 parent_obj: &state_tree_list.object_id,
                 key: last_elemid.clone().into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             });
             last_elemid = amp::OpId::new(op_num, payload.actor).into();
             op_num = newvalue.max_op() + 1;
@@ -940,18 +941,18 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
     if let Some(v) = op_iter.next() {
         if let Some(prim) = prim_from_op_action(&v.action) {
             prim_vals.push(prim);
-            preds.extend(v.pred.clone());
+            preds.extend(v.pred.iter());
         }
         for o in op_iter {
             if let Some(prim) = prim_from_op_action(&o.action) {
                 prim_vals.push(prim);
-                preds.extend(o.pred.clone());
+                preds.extend(o.pred.iter());
             }
         }
         if prim_vals.len() == ops.len() {
             vec![amp::Op {
                 action: amp::OpType::MultiSet(prim_vals),
-                pred: preds,
+                pred: preds.into_iter().cloned().collect(),
                 insert: true,
                 key: v.key.clone(),
                 obj: v.obj.clone(),

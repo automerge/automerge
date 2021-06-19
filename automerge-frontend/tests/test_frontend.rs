@@ -1,5 +1,6 @@
 use std::{convert::TryInto, num::NonZeroU32};
 
+use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -74,7 +75,7 @@ fn test_set_root_object_properties() {
             obj: "_root".try_into().unwrap(),
             key: "bird".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -112,7 +113,7 @@ fn test_set_bytes() {
             obj: "_root".try_into().unwrap(),
             key: "bird".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -160,14 +161,14 @@ fn it_should_create_nested_maps() {
                 obj: amp::ObjectId::Root,
                 key: "birds".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::F64(3.0)),
                 obj: birds_id,
                 key: "wrens".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -235,7 +236,7 @@ fn apply_updates_inside_nested_maps() {
             obj: birds_id,
             key: "sparrows".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -294,7 +295,7 @@ fn delete_keys_in_a_map() {
             obj: amp::ObjectId::Root,
             key: "magpies".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)],
+            pred: vec![doc.actor_id.op_id_at(1)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -352,14 +353,14 @@ fn create_lists() {
                 key: "birds".into(),
                 obj: amp::ObjectId::Root,
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             amp::Op {
                 action: amp::OpType::Set("chaffinch".into()),
                 obj: birds_id,
                 key: amp::ElementId::Head.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -417,7 +418,7 @@ fn apply_updates_inside_lists() {
             obj: birds_id,
             key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)],
+            pred: vec![doc.actor_id.op_id_at(2)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -471,7 +472,7 @@ fn delete_list_elements() {
             obj: birds_id,
             key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)],
+            pred: vec![doc.actor_id.op_id_at(2)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -532,7 +533,7 @@ fn handle_counters_inside_maps() {
             obj: amp::ObjectId::Root,
             key: "wrens".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -551,7 +552,7 @@ fn handle_counters_inside_maps() {
             obj: amp::ObjectId::Root,
             key: "wrens".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)],
+            pred: vec![doc.actor_id.op_id_at(1)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -617,14 +618,14 @@ fn handle_counters_inside_lists() {
                 obj: amp::ObjectId::Root,
                 key: "counts".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Counter(1)),
                 obj: counts_id.clone(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -644,7 +645,7 @@ fn handle_counters_inside_lists() {
             obj: counts_id,
             key: doc.actor_id.op_id_at(2).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)],
+            pred: vec![doc.actor_id.op_id_at(2)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -719,7 +720,7 @@ fn test_sets_characters_in_text() {
             obj: text_id,
             key: doc.actor_id.op_id_at(3).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(3)],
+            pred: vec![doc.actor_id.op_id_at(3)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -773,7 +774,7 @@ fn test_inserts_characters_in_text() {
             obj: text_id,
             key: doc.actor_id.op_id_at(2).into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -827,7 +828,7 @@ fn test_inserts_characters_at_start_of_text() {
             obj: text_id,
             key: amp::ElementId::Head.into(),
             insert: true,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -886,14 +887,14 @@ fn test_inserts_at_end_of_lists() {
                 obj: list_id.clone(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str("bullfinch".into())),
                 obj: list_id,
                 key: doc.actor_id.op_id_at(2).into(),
                 insert: true,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             },
         ],
         extra_bytes: Vec::new(),

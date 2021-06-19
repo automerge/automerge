@@ -9,6 +9,7 @@ use std::{
     str,
 };
 
+use amp::SortedVec;
 use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
 use smol_str::SmolStr;
@@ -130,12 +131,6 @@ impl<'a> Iterator for OperationIterator<'a> {
         let obj = self.objs.next()?;
         let key = self.keys.next()?;
         let pred = self.pred.next()?;
-        #[cfg(debug_assertions)]
-        {
-            let mut pred_sorted = pred.clone();
-            pred_sorted.sort();
-            debug_assert_eq!(pred, pred_sorted, "pred should be sorted");
-        }
         let value = self.value.next()?;
         let action = match action {
             Action::Set => InternalOpType::Set(value),
@@ -361,8 +356,8 @@ impl<'a> Iterator for ExtraIterator<'a> {
 }
 
 impl<'a> Iterator for PredIterator<'a> {
-    type Item = Vec<amp::OpId>;
-    fn next(&mut self) -> Option<Vec<amp::OpId>> {
+    type Item = SortedVec<amp::OpId>;
+    fn next(&mut self) -> Option<SortedVec<amp::OpId>> {
         let num = self.pred_num.next()??;
         let mut p = Vec::with_capacity(num);
         for _ in 0..num {
@@ -372,7 +367,7 @@ impl<'a> Iterator for PredIterator<'a> {
             let op_id = amp::OpId::new(ctr, &actor_id);
             p.push(op_id)
         }
-        Some(p)
+        Some(SortedVec::from(p))
     }
 }
 
@@ -732,7 +727,7 @@ impl PredEncoder {
         }
     }
 
-    fn append(&mut self, pred: &[amp::OpId], actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<amp::ActorId>) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
@@ -1004,7 +999,7 @@ struct ColumnOp<'a> {
     action: InternalOpType,
     obj: Cow<'a, amp::ObjectId>,
     key: Cow<'a, amp::Key>,
-    pred: Vec<amp::OpId>,
+    pred: Cow<'a, SortedVec<amp::OpId>>,
     insert: bool,
 }
 
@@ -1030,7 +1025,7 @@ impl ColumnEncoder {
             obj: o.obj,
             key: o.key,
             action: o.action,
-            pred: o.pred.into_owned(),
+            pred: o.pred,
             insert: o.insert,
         });
         e.encode(colops, actors);
@@ -1062,7 +1057,6 @@ impl ColumnEncoder {
         self.key.append(&op.key, actors);
         self.insert.append(op.insert);
 
-        op.pred.sort();
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
             InternalOpType::Set(value) => {
@@ -1349,7 +1343,7 @@ mod tests {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
-            pred: vec![actor.op_id_at(1), actor2.op_id_at(1)],
+            pred: Cow::Owned(vec![actor.op_id_at(1), actor2.op_id_at(1)].into()),
             insert: false,
         };
 
@@ -1361,7 +1355,7 @@ mod tests {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
-            pred: vec![actor2.op_id_at(1), actor.op_id_at(1)],
+            pred: Cow::Owned(vec![actor2.op_id_at(1), actor.op_id_at(1)].into()),
             insert: false,
         };
 

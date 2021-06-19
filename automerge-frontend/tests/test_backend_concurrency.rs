@@ -1,4 +1,4 @@
-use amp::RootDiff;
+use amp::{RootDiff, SortedVec};
 use automerge_backend::Backend;
 use automerge_frontend::{
     Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Primitive, Value,
@@ -69,7 +69,7 @@ fn use_version_and_sequence_number_from_backend() {
             obj: amp::ObjectId::Root,
             key: "partridges".into(),
             insert: false,
-            pred: Vec::new(),
+            pred: SortedVec::new(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -510,7 +510,7 @@ fn allow_interleaving_of_patches_and_changes() {
                 obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -531,7 +531,7 @@ fn allow_interleaving_of_patches_and_changes() {
                 obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
-                pred: vec![doc.actor_id.op_id_at(1)],
+                pred: vec![doc.actor_id.op_id_at(1)].into(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -568,7 +568,7 @@ fn allow_interleaving_of_patches_and_changes() {
                 obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
-                pred: vec![doc.actor_id.op_id_at(2)],
+                pred: vec![doc.actor_id.op_id_at(2)].into(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -663,7 +663,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)],
+            pred: vec![doc.actor_id.op_id_at(1)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -682,7 +682,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc2.actor_id.op_id_at(2)],
+            pred: vec![doc2.actor_id.op_id_at(2)].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -724,7 +724,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc2.actor_id.op_id_at(3)],
+            pred: vec![doc2.actor_id.op_id_at(3)].into(),
         }],
         extra_bytes: Vec::new(),
     };

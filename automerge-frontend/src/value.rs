@@ -1,5 +1,6 @@
 use std::{borrow::Cow, collections::HashMap};
 
+use amp::SortedVec;
 use automerge_protocol as amp;
 use serde::Serialize;
 use smol_str::SmolStr;
@@ -281,7 +282,7 @@ pub(crate) fn value_to_op_requests(
                 obj: parent_object,
                 key: key.clone(),
                 insert,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             };
             let mut op_num = start_op + 1;
             let mut result = vec![make_op];
@@ -308,7 +309,7 @@ pub(crate) fn value_to_op_requests(
                 obj: parent_object,
                 key: key.clone(),
                 insert,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             };
             let mut insert_ops: Vec<amp::Op> = Vec::new();
             let mut last_elemid = amp::ElementId::Head;
@@ -319,7 +320,7 @@ pub(crate) fn value_to_op_requests(
                     obj: amp::ObjectId::from(make_text_op.clone()),
                     key: last_elemid.clone().into(),
                     insert: true,
-                    pred: Vec::new(),
+                    pred: SortedVec::new(),
                 });
                 last_elemid = amp::OpId::new(op_num, actor).into();
                 op_num += 1;
@@ -335,7 +336,7 @@ pub(crate) fn value_to_op_requests(
                 obj: parent_object,
                 key: key.clone(),
                 insert,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             };
             let mut op_num = start_op + 1;
             let mut result = vec![make_op];
@@ -360,7 +361,7 @@ pub(crate) fn value_to_op_requests(
                 obj: parent_object,
                 key: key.clone(),
                 insert,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             };
             let mut op_num = start_op + 1;
             let mut result = vec![make_op];
@@ -384,7 +385,7 @@ pub(crate) fn value_to_op_requests(
                 obj: parent_object,
                 key: key.clone(),
                 insert,
-                pred: Vec::new(),
+                pred: SortedVec::new(),
             }];
             (ops, start_op + 1)
         }
