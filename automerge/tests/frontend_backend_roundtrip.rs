@@ -214,3 +214,33 @@ fn test_frontend_doesnt_wait_for_empty_changes() {
         }
     }
 }
+
+#[test]
+fn test_delete_key_in_map() {
+    let new = Value::Map(hashmap! {"".into()=> Value::Map(hashmap!{})});
+    let old = Value::Map(
+        hashmap! {"".into()=> Value::Map(hashmap!{"".into()=> Value::Primitive(Primitive::Null)})},
+    );
+    let change = LocalChange::delete(Path::root().key("").key(""));
+
+    let mut b = automerge::Backend::new();
+    // new with old value
+    let (mut f, c) = automerge::Frontend::new_with_initial_state(old).unwrap();
+    let (p, _) = b.apply_local_change(c).unwrap();
+    f.apply_patch(p).unwrap();
+
+    // apply changes to reach new value
+    let ((), c) = f
+        .change::<_, _, InvalidChangeRequest>(None, |d| {
+            d.add_change(change.clone())?;
+            Ok(())
+        })
+        .unwrap();
+    if let Some(c) = c {
+        let (p, _) = b.apply_local_change(c).unwrap();
+        f.apply_patch(p).unwrap();
+    }
+
+    let val = f.get_value(&Path::root()).unwrap();
+    assert_eq!(val, new);
+}

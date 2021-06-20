@@ -421,22 +421,20 @@ impl<'a> ResolvedMapMut<'a> {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
         };
+        let op_result = LocalOperationResult {
+            new_ops: vec![amp::Op {
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                obj: state_tree_map.object_id.clone(),
+                key: key.into(),
+                insert: false,
+                pred: state_tree_map.pred_for_key(key),
+            }],
+        };
         let old = state_tree_map
             .props
             .remove(key)
             .expect("Removing non existent key from map");
-        (
-            old,
-            LocalOperationResult {
-                new_ops: vec![amp::Op {
-                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                    obj: state_tree_map.object_id.clone(),
-                    key: key.into(),
-                    insert: false,
-                    pred: state_tree_map.pred_for_key(key),
-                }],
-            },
-        )
+        (old, op_result)
     }
 
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
@@ -502,22 +500,20 @@ impl<'a> ResolvedTableMut<'a> {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
         };
+        let op_result = LocalOperationResult {
+            new_ops: vec![amp::Op {
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                obj: state_tree_table.object_id.clone(),
+                key: key.into(),
+                insert: false,
+                pred: state_tree_table.pred_for_key(key),
+            }],
+        };
         let old = state_tree_table
             .props
             .remove(key)
             .expect("Removing non existent key from table");
-        (
-            old,
-            LocalOperationResult {
-                new_ops: vec![amp::Op {
-                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                    obj: state_tree_table.object_id.clone(),
-                    key: key.into(),
-                    insert: false,
-                    pred: state_tree_table.pred_for_key(key),
-                }],
-            },
-        )
+        (old, op_result)
     }
 
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
