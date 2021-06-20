@@ -241,10 +241,10 @@ impl StateTreeComposite {
             (amp::Diff::Value(..), _) => unreachable!(),
             // TODO throw an error
             (amp::Diff::Cursor(..), _) => unreachable!(),
-            (
-                amp::Diff::Map(_) | amp::Diff::Table(_) | amp::Diff::List(_) | amp::Diff::Text(_),
-                _,
-            ) => Err(error::InvalidPatch::MismatchingObjectType {
+            (amp::Diff::Map(_), _)
+            | (amp::Diff::Table(_), _)
+            | (amp::Diff::List(_), _)
+            | (amp::Diff::Text(_), _) => Err(error::InvalidPatch::MismatchingObjectType {
                 object_id: self.object_id(),
                 patch_expected_type: diff.object_type(),
                 actual_type: Some(self.obj_type()),
@@ -286,10 +286,10 @@ impl StateTreeComposite {
             (amp::Diff::Value(..), _) => unreachable!(),
             // TODO throw an error
             (amp::Diff::Cursor(..), _) => unreachable!(),
-            (
-                amp::Diff::Map(_) | amp::Diff::Table(_) | amp::Diff::List(_) | amp::Diff::Text(_),
-                _,
-            ) => unreachable!(),
+            (amp::Diff::Map(_), _)
+            | (amp::Diff::Table(_), _)
+            | (amp::Diff::List(_), _)
+            | (amp::Diff::Text(_), _) => unreachable!(),
         }
     }
 

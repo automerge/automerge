@@ -79,6 +79,16 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "automerge-c-v2" = rec {
+      packageId = "automerge-c-v2";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "automerge-c-v2";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "automerge-cli" = rec {
       packageId = "automerge-cli";
       build = internal.buildRustCrateWithFeatures {
@@ -99,10 +109,30 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
+    "automerge-fuzz" = rec {
+      packageId = "automerge-fuzz";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "automerge-fuzz";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
     "automerge-protocol" = rec {
       packageId = "automerge-protocol";
       build = internal.buildRustCrateWithFeatures {
         packageId = "automerge-protocol";
+      };
+
+      # Debug support which might change between releases.
+      # File a bug if you depend on any for non-debug work!
+      debug = internal.debugCrate { inherit packageId; };
+    };
+    "perf" = rec {
+      packageId = "perf";
+      build = internal.buildRustCrateWithFeatures {
+        packageId = "perf";
       };
 
       # Debug support which might change between releases.
@@ -214,9 +244,9 @@ rec {
       };
       "anyhow" = rec {
         crateName = "anyhow";
-        version = "1.0.40";
+        version = "1.0.38";
         edition = "2018";
-        sha256 = "0fq6qxlzp3bwrjbs3wp4i470k8vsvlkpx3q2wpl79gawvf9cvci8";
+        sha256 = "1c8ls4w26bjwvjvb6a3s4bpk28raljy3a2pmwrvby3d843szgpdg";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -224,6 +254,31 @@ rec {
           "default" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "arbitrary" = rec {
+        crateName = "arbitrary";
+        version = "1.0.1";
+        edition = "2018";
+        sha256 = "14a6r7q9b1kf1m7810p8bcl51q11mrwc5z7fjkz0lx6kdvyk0x13";
+        authors = [
+          "The Rust-Fuzz Project Developers"
+          "Nick Fitzgerald <fitzgen@gmail.com>"
+          "Manish Goregaokar <manishsmail@gmail.com>"
+          "Simonas Kazlauskas <arbitrary@kazlauskas.me>"
+          "Brian L. Troutwine <brian@troutwine.us>"
+          "Corey Farwell <coreyf@rwell.org>"
+        ];
+        dependencies = [
+          {
+            name = "derive_arbitrary";
+            packageId = "derive_arbitrary";
+            optional = true;
+          }
+        ];
+        features = {
+          "derive" = [ "derive_arbitrary" ];
+        };
+        resolvedDefaultFeatures = [ "derive" "derive_arbitrary" ];
       };
       "atty" = rec {
         crateName = "atty";
@@ -314,12 +369,20 @@ rec {
             packageId = "hex";
           }
           {
+            name = "maplit";
+            packageId = "maplit";
+          }
+          {
             name = "pretty_assertions";
             packageId = "pretty_assertions";
           }
           {
             name = "rand";
             packageId = "rand 0.8.3";
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
           }
           {
             name = "test-env-log";
@@ -385,6 +448,10 @@ rec {
             packageId = "maplit";
           }
           {
+            name = "nonzero_ext";
+            packageId = "nonzero_ext";
+          }
+          {
             name = "rand";
             packageId = "rand 0.7.3";
             features = [ "small_rng" ];
@@ -401,6 +468,10 @@ rec {
           {
             name = "sha2";
             packageId = "sha2";
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
           }
           {
             name = "thiserror";
@@ -425,6 +496,10 @@ rec {
           {
             name = "env_logger";
             packageId = "env_logger";
+          }
+          {
+            name = "pretty_assertions";
+            packageId = "pretty_assertions";
           }
           {
             name = "test-env-log";
@@ -564,6 +639,60 @@ rec {
         ];
 
       };
+      "automerge-c-v2" = rec {
+        crateName = "automerge-c-v2";
+        version = "0.1.0";
+        edition = "2018";
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./automerge-c-v2; };type = [ "cdylib" "staticlib" ];
+        authors = [
+          "Orion Henry <orion.henry@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "automerge-backend";
+            packageId = "automerge-backend";
+          }
+          {
+            name = "automerge-protocol";
+            packageId = "automerge-protocol";
+          }
+          {
+            name = "errno";
+            packageId = "errno";
+          }
+          {
+            name = "libc";
+            packageId = "libc";
+          }
+          {
+            name = "rmp";
+            packageId = "rmp";
+          }
+          {
+            name = "rmp-serde";
+            packageId = "rmp-serde";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "thiserror";
+            packageId = "thiserror";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cbindgen";
+            packageId = "cbindgen";
+          }
+        ];
+
+      };
       "automerge-cli" = rec {
         crateName = "automerge-cli";
         version = "0.1.0";
@@ -639,12 +768,18 @@ rec {
         ];
         dependencies = [
           {
+            name = "arbitrary";
+            packageId = "arbitrary";
+            optional = true;
+            features = [ "derive" ];
+          }
+          {
             name = "automerge-protocol";
             packageId = "automerge-protocol";
           }
           {
             name = "futures";
-            packageId = "futures 0.3.14";
+            packageId = "futures 0.3.13";
           }
           {
             name = "getrandom";
@@ -668,6 +803,10 @@ rec {
           {
             name = "serde_json";
             packageId = "serde_json";
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
           }
           {
             name = "thiserror";
@@ -707,6 +846,10 @@ rec {
             packageId = "log";
           }
           {
+            name = "pretty_assertions";
+            packageId = "pretty_assertions";
+          }
+          {
             name = "rand";
             packageId = "rand 0.8.3";
           }
@@ -717,8 +860,32 @@ rec {
         ];
         features = {
           "default" = [ "std" ];
+          "derive-arbitrary" = [ "arbitrary" ];
         };
-        resolvedDefaultFeatures = [ "default" "std" ];
+        resolvedDefaultFeatures = [ "arbitrary" "default" "derive-arbitrary" "std" ];
+      };
+      "automerge-fuzz" = rec {
+        crateName = "automerge-fuzz";
+        version = "0.0.0";
+        edition = "2018";
+        crateBin = [
+          { name = "backend_load"; path = "src/backend_load.rs"; }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./fuzz; };
+        authors = [
+          "Automatically generated"
+        ];
+        dependencies = [
+          {
+            name = "automerge-backend";
+            packageId = "automerge-backend";
+          }
+          {
+            name = "libfuzzer-sys";
+            packageId = "libfuzzer-sys";
+          }
+        ];
+
       };
       "automerge-protocol" = rec {
         crateName = "automerge-protocol";
@@ -730,6 +897,12 @@ rec {
         ];
         dependencies = [
           {
+            name = "arbitrary";
+            packageId = "arbitrary";
+            optional = true;
+            features = [ "derive" ];
+          }
+          {
             name = "hex";
             packageId = "hex";
           }
@@ -737,6 +910,11 @@ rec {
             name = "serde";
             packageId = "serde";
             features = [ "derive" ];
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+            features = [ "serde" ];
           }
           {
             name = "thiserror";
@@ -758,12 +936,23 @@ rec {
             packageId = "proptest";
           }
           {
+            name = "rmp";
+            packageId = "rmp";
+          }
+          {
+            name = "rmp-serde";
+            packageId = "rmp-serde";
+          }
+          {
             name = "serde_json";
             packageId = "serde_json";
             features = [ "float_roundtrip" ];
           }
         ];
-
+        features = {
+          "derive-arbitrary" = [ "arbitrary" ];
+        };
+        resolvedDefaultFeatures = [ "arbitrary" "derive-arbitrary" ];
       };
       "bit-set" = rec {
         crateName = "bit-set";
@@ -969,9 +1158,9 @@ rec {
       };
       "cast" = rec {
         crateName = "cast";
-        version = "0.2.5";
-        edition = "2018";
-        sha256 = "0xdbmxf2wz6b263bg8fzpiv1rpa01y129fqi81349r6ppy2w6f6c";
+        version = "0.2.3";
+        edition = "2015";
+        sha256 = "1c5z7zryj0zwnhdgs6rw5dfvnlwc1vm19jzrlgx5055alnwk952b";
         authors = [
           "Jorge Aparicio <jorge@japaric.io>"
         ];
@@ -1048,6 +1237,19 @@ rec {
           "default" = [ "clap" ];
         };
         resolvedDefaultFeatures = [ "clap" "default" ];
+      };
+      "cc" = rec {
+        crateName = "cc";
+        version = "1.0.68";
+        edition = "2018";
+        crateBin = [];
+        sha256 = "11ypa8b7iwhjf5fg5j3hvbn2116h9g8v67vyd9s7ljgzq52c4wja";
+        authors = [
+          "Alex Crichton <alex@alexcrichton.com>"
+        ];
+        features = {
+          "parallel" = [ "jobserver" ];
+        };
       };
       "cfg-if 0.1.10" = rec {
         crateName = "cfg-if";
@@ -1520,9 +1722,9 @@ rec {
       };
       "crossbeam-channel" = rec {
         crateName = "crossbeam-channel";
-        version = "0.5.1";
+        version = "0.5.0";
         edition = "2018";
-        sha256 = "1d1dnp61g51gnmc45cb4vpjsr5n62wz22an2y3q6avgifzhjgv86";
+        sha256 = "0xfplw54pskl3kyf2q6kw8y2phnq6wn8pqxx003n8qfkz3hnx8nw";
         authors = [
           "The Crossbeam Project Developers"
         ];
@@ -1727,6 +1929,36 @@ rec {
             packageId = "syn";
             usesDefaultFeatures = false;
             features = [ "full" "parsing" "printing" "proc-macro" ];
+          }
+        ];
+
+      };
+      "derive_arbitrary" = rec {
+        crateName = "derive_arbitrary";
+        version = "1.0.1";
+        edition = "2018";
+        sha256 = "0nig0iydva7a9h9i9qyi6an9w5qjafmn3qlzvdqqiw0x2kp824jz";
+        procMacro = true;
+        authors = [
+          "The Rust-Fuzz Project Developers"
+          "Nick Fitzgerald <fitzgen@gmail.com>"
+          "Manish Goregaokar <manishsmail@gmail.com>"
+          "Andre Bogus <bogusandre@gmail.com>"
+          "Corey Farwell <coreyf@rwell.org>"
+        ];
+        dependencies = [
+          {
+            name = "proc-macro2";
+            packageId = "proc-macro2";
+          }
+          {
+            name = "quote";
+            packageId = "quote";
+          }
+          {
+            name = "syn";
+            packageId = "syn";
+            features = [ "derive" ];
           }
         ];
 
@@ -1986,11 +2218,11 @@ rec {
         };
         resolvedDefaultFeatures = [ "default" "use_std" "with-deprecated" ];
       };
-      "futures 0.3.14" = rec {
+      "futures 0.3.13" = rec {
         crateName = "futures";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "0lyjglxqdm91wdy646x9qrys9wfpk9g93ydzl4yasng48lsq3md9";
+        sha256 = "1h8lx9iz3k43lwr63gn49nsfph09qkvnlh3nm0xmj78i35rncmbz";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2053,9 +2285,9 @@ rec {
       };
       "futures-channel" = rec {
         crateName = "futures-channel";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "09gc57djz490yljh3ihvgxfwx3v81v7y0q9h06k3g4995ajwcyff";
+        sha256 = "0f99mnrg7p66gn0f4zwkh53ri0cc7s7rsb4wnsddnmwvhggx4bcc";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2084,9 +2316,9 @@ rec {
       };
       "futures-core" = rec {
         crateName = "futures-core";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "058qmyvpvhzkw9aykm6ls20k3dsy4jaafdqs1xjh3jm6vp3d3309";
+        sha256 = "151c26lzgmk3y67bl407vlhr4hl76ydaa4fzqfyn43mzz9r6lj8m";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2098,9 +2330,9 @@ rec {
       };
       "futures-executor" = rec {
         crateName = "futures-executor";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "17acz5vpbgg850wfn1z5gscl4d5rlh50ilmi9400z87d89qcpxhh";
+        sha256 = "1l8akjf64yf8lbm4q49ccspfwpfn5mikfajb1105jkfqjrxln6l9";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2130,9 +2362,9 @@ rec {
       };
       "futures-io" = rec {
         crateName = "futures-io";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "016b6pfcsaavwcpx22psh6n36s13ymc23nqghcxc188fncgilnin";
+        sha256 = "0ndshyr6vgnx0z421h2asd7jkhy2cwqj5ha1a8pw613pqmjjq76p";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2143,9 +2375,9 @@ rec {
       };
       "futures-macro" = rec {
         crateName = "futures-macro";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "12xvq5rsgi6jyynbxkrvbf1j620jy8xvmrqx9zmpvkc2l4rng336";
+        sha256 = "1dxzgz1sb0qin9nqsdrqc1aky52j3n9fnarcz2db77qkllb5hh7a";
         procMacro = true;
         authors = [
           "Taylor Cramer <cramertj@google.com>"
@@ -2174,9 +2406,9 @@ rec {
       };
       "futures-sink" = rec {
         crateName = "futures-sink";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "08vc88majhvizpxpr44h0c240k2ag7is99v153cf6pam7i1jjmjw";
+        sha256 = "1cwbbd9dik0p54d53v4kd28lgj2a9bxgprp8ypabfhaqk2c4sxc5";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2188,9 +2420,9 @@ rec {
       };
       "futures-task" = rec {
         crateName = "futures-task";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "1g41ymlqvfjm7l1x4w2xamgwcpnh9gvh5xx1v6k3nvq7jl8aayms";
+        sha256 = "106zr4rvl3w2h9iibljh4ba0g7pxq7hwyvvscq1fcpn127r9w67s";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2202,9 +2434,9 @@ rec {
       };
       "futures-util" = rec {
         crateName = "futures-util";
-        version = "0.3.14";
+        version = "0.3.13";
         edition = "2018";
-        sha256 = "09f0x4nisa9m9rgdcnh09yv7h4i7whbdidm6y0kkkwk09pall51w";
+        sha256 = "1lcn7nbar6gb47a2lvmjdarw5g6d78jf2hqsf3rddy7diamwf4hq";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
         ];
@@ -2667,9 +2899,9 @@ rec {
       };
       "libc" = rec {
         crateName = "libc";
-        version = "0.2.93";
+        version = "0.2.89";
         edition = "2015";
-        sha256 = "0hcd6xzln31gmi8bpydrbikgq3pj7s9cnqaslqd28nqhyrmzd1ck";
+        sha256 = "1iiqm470z1nfrd6i4602i1lf3qr0jakw8y40vpbwvx46alp0k32k";
         authors = [
           "The Rust Project Developers"
         ];
@@ -2679,6 +2911,30 @@ rec {
           "use_std" = [ "std" ];
         };
         resolvedDefaultFeatures = [ "default" "std" ];
+      };
+      "libfuzzer-sys" = rec {
+        crateName = "libfuzzer-sys";
+        version = "0.4.1";
+        edition = "2018";
+        sha256 = "0nqgxy5r8gg2frp01yij75j9p65dgyjdaqv591vavf04crawd7ca";
+        authors = [
+          "The rust-fuzz Project Developers"
+        ];
+        dependencies = [
+          {
+            name = "arbitrary";
+            packageId = "arbitrary";
+          }
+        ];
+        buildDependencies = [
+          {
+            name = "cc";
+            packageId = "cc";
+          }
+        ];
+        features = {
+          "arbitrary-derive" = [ "arbitrary/derive" ];
+        };
       };
       "log" = rec {
         crateName = "log";
@@ -2745,9 +3001,9 @@ rec {
       };
       "memoffset" = rec {
         crateName = "memoffset";
-        version = "0.6.3";
+        version = "0.6.1";
         edition = "2015";
-        sha256 = "079nahsp9sr5dhahd173i6a8k0sl82w6s4awsigzilcf3rcbcgzq";
+        sha256 = "11yxgw330cf8g4wy0fnb20ag8gg1b33fsnfmg2g8z6h5wc444yqm";
         authors = [
           "Gilad Naaman <gilad.naaman@gmail.com>"
         ];
@@ -2786,6 +3042,19 @@ rec {
         features = {
           "rustc-dep-of-std" = [ "core" "alloc" "compiler_builtins" "adler/rustc-dep-of-std" ];
         };
+      };
+      "nonzero_ext" = rec {
+        crateName = "nonzero_ext";
+        version = "0.2.0";
+        edition = "2015";
+        sha256 = "0i7lhlzfv62756q2zwsqiqr3wdh37yy0rbv0x9ivmfpak43jk8a4";
+        authors = [
+          "Andreas Fuchs <asf@boinkor.net>"
+        ];
+        features = {
+          "default" = [ "std" ];
+        };
+        resolvedDefaultFeatures = [ "default" "std" ];
       };
       "num-integer" = rec {
         crateName = "num-integer";
@@ -2938,6 +3207,54 @@ rec {
             name = "winapi";
             packageId = "winapi";
             features = [ "winuser" "winbase" "consoleapi" "processenv" ];
+          }
+        ];
+
+      };
+      "perf" = rec {
+        crateName = "perf";
+        version = "0.1.0";
+        edition = "2018";
+        crateBin = [
+          { name = "perf"; path = "src/main.rs"; }
+        ];
+        src = lib.cleanSourceWith { filter = sourceFilter;  src = ./perf; };
+        dependencies = [
+          {
+            name = "automerge";
+            packageId = "automerge";
+          }
+          {
+            name = "automerge-frontend";
+            packageId = "automerge-frontend";
+          }
+          {
+            name = "automerge-protocol";
+            packageId = "automerge-protocol";
+          }
+          {
+            name = "maplit";
+            packageId = "maplit";
+          }
+          {
+            name = "rand";
+            packageId = "rand 0.8.3";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+          {
+            name = "serde_json";
+            packageId = "serde_json";
+          }
+          {
+            name = "smol_str";
+            packageId = "smol_str";
+          }
+          {
+            name = "unicode-segmentation";
+            packageId = "unicode-segmentation";
           }
         ];
 
@@ -3172,9 +3489,9 @@ rec {
       };
       "proc-macro2" = rec {
         crateName = "proc-macro2";
-        version = "1.0.26";
+        version = "1.0.24";
         edition = "2018";
-        sha256 = "1v4w5jchgsssr727iyv986r8jaw6z80bzlhqgrbp78nw2lr02lm1";
+        sha256 = "0wcabxzrddcjmryndw8fpyxcq6rw63m701vx86xxf03y3bp081qy";
         authors = [
           "Alex Crichton <alex@alexcrichton.com>"
           "David Tolnay <dtolnay@gmail.com>"
@@ -3675,9 +3992,9 @@ rec {
       };
       "redox_syscall" = rec {
         crateName = "redox_syscall";
-        version = "0.2.6";
+        version = "0.2.5";
         edition = "2018";
-        sha256 = "0hchadrvdfvsrxg7zxz808nj521bnzq552apgs753sycbi5k2w42";
+        sha256 = "1n878lpw577avdr5dzbkil02xwbx0a57mr2r3dcnnkz28i71wd4l";
         libName = "syscall";
         authors = [
           "Jeremy Soller <jackpot51@gmail.com>"
@@ -3790,6 +4107,51 @@ rec {
           }
         ];
 
+      };
+      "rmp" = rec {
+        crateName = "rmp";
+        version = "0.8.10";
+        edition = "2018";
+        sha256 = "1mksma1b18yps1s64qx2f4bhg4z19wmfvbjx3zfxbi262kxfamag";
+        authors = [
+          "Evgeny Safronov <division494@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "byteorder";
+            packageId = "byteorder";
+          }
+          {
+            name = "num-traits";
+            packageId = "num-traits";
+          }
+        ];
+
+      };
+      "rmp-serde" = rec {
+        crateName = "rmp-serde";
+        version = "0.15.4";
+        edition = "2018";
+        sha256 = "091r62bl3askz2z6d7zcr3jz44qsksr8l8y9himvjz85agprb4w3";
+        authors = [
+          "Evgeny Safronov <division494@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "byteorder";
+            packageId = "byteorder";
+          }
+          {
+            name = "rmp";
+            packageId = "rmp";
+          }
+          {
+            name = "serde";
+            packageId = "serde";
+          }
+        ];
+        features = {
+        };
       };
       "rustc_version" = rec {
         crateName = "rustc_version";
@@ -3922,9 +4284,9 @@ rec {
       };
       "serde" = rec {
         crateName = "serde";
-        version = "1.0.125";
+        version = "1.0.126";
         edition = "2015";
-        sha256 = "0w8i0f4wsq4zd9vz1k6lq00066rjrgzlxkm25h8sfpss387cb3am";
+        sha256 = "00vdk7y3j8h2xv28a2i2ad1d19g5iwrdknbq8yp79v6axamhaxgc";
         authors = [
           "Erick Tryzelaar <erick.tryzelaar@gmail.com>"
           "David Tolnay <dtolnay@gmail.com>"
@@ -4035,9 +4397,9 @@ rec {
       };
       "serde_derive" = rec {
         crateName = "serde_derive";
-        version = "1.0.125";
+        version = "1.0.126";
         edition = "2015";
-        sha256 = "0vfhndim4sa1i1x38dyvrxyq5v8zxjs0av05ldfkn82qpfibg4xh";
+        sha256 = "0hsdh39qj0g187nwndfzg67q4qajbm5g6x0fr5xarblmk2y7sfln";
         procMacro = true;
         authors = [
           "Erick Tryzelaar <erick.tryzelaar@gmail.com>"
@@ -4219,6 +4581,33 @@ rec {
         features = {
         };
       };
+      "smol_str" = rec {
+        crateName = "smol_str";
+        version = "0.1.17";
+        edition = "2018";
+        sha256 = "1srj7gd14cllfwh55jwmid425rz2idpvbw7ly08448r97b7gg83c";
+        authors = [
+          "Aleksey Kladov <aleksey.kladov@gmail.com>"
+        ];
+        dependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            optional = true;
+            usesDefaultFeatures = false;
+            features = [ "std" ];
+          }
+        ];
+        devDependencies = [
+          {
+            name = "serde";
+            packageId = "serde";
+            features = [ "derive" ];
+          }
+        ];
+
+        resolvedDefaultFeatures = [ "serde" ];
+      };
       "strsim 0.10.0" = rec {
         crateName = "strsim";
         version = "0.10.0";
@@ -4241,9 +4630,9 @@ rec {
       };
       "syn" = rec {
         crateName = "syn";
-        version = "1.0.69";
+        version = "1.0.67";
         edition = "2018";
-        sha256 = "1ywgmchw8cxsafmpvb415j89v46y88c0gk0bi4vcc74bpp39kzj8";
+        sha256 = "00p76llpkhq8g9dbcqhgnk7b8s23cx66j39drj8iz1s2qgpsk634";
         authors = [
           "David Tolnay <dtolnay@gmail.com>"
         ];
@@ -4334,9 +4723,9 @@ rec {
       };
       "test-env-log" = rec {
         crateName = "test-env-log";
-        version = "0.2.7";
+        version = "0.2.6";
         edition = "2018";
-        sha256 = "0i151j7r14j65lrv753s138g7pkslq6l1jyg0q6qmk1hlqrb3r5k";
+        sha256 = "1bg6cwj700w0i3z3x4nj4snzsca7w4lvkk3cj7jqaa9bjmv826z6";
         procMacro = true;
         authors = [
           "Daniel Mueller <deso@posteo.net>"
@@ -4905,9 +5294,9 @@ rec {
       };
       "walkdir" = rec {
         crateName = "walkdir";
-        version = "2.3.2";
+        version = "2.3.1";
         edition = "2018";
-        sha256 = "0mnszy33685v8y9js8mw6x2p3iddqs8vfj7n2dhqddnlbirz5340";
+        sha256 = "0z9g39f49cycdm9vzjf8hnfh3f1csxgd65kmlphj8r2vffy84wbp";
         authors = [
           "Andrew Gallant <jamslam@gmail.com>"
         ];
@@ -5239,9 +5628,9 @@ rec {
       };
       "web-sys" = rec {
         crateName = "web-sys";
-        version = "0.3.50";
+        version = "0.3.48";
         edition = "2018";
-        sha256 = "1gl1akzrzprc3hc16h1lcai2f3dm1xkr6cvd8ihqiv4g91zda1d9";
+        sha256 = "0ayrqjk57bvs16rxfhvgc7pizkvdfnk0lanyvz74ha9v48k0nq7c";
         authors = [
           "The wasm-bindgen Developers"
         ];
