@@ -47,6 +47,10 @@ intptr_t automerge_apply_changes(Backend *backend, Buffer *buffs, const uint8_t 
  */
 intptr_t automerge_apply_local_change(Backend *backend, Buffer *buffs, const uint8_t *request, uintptr_t len);
 
+const uint8_t *automerge_buff_get_data(Buffer *buff);
+
+uintptr_t automerge_buff_get_len(Buffer *buff);
+
 /**
  * # Safety
  * This should be called with a valid pointer to a `Backend`
@@ -56,7 +60,7 @@ intptr_t automerge_clone(Backend *backend, Backend **new_);
 /**
  * Create a `Buffers` struct to store return values
  */
-Buffer automerge_create_buff(void);
+Buffer *automerge_create_buff(void);
 
 /**
  * # Safety
@@ -99,7 +103,7 @@ void automerge_free(Backend *backend);
 
 /**
  * # Safety
- * Must point to a valid `Buffers` struct
+ * Must  point to a valid `Buffers` struct
  * Free the memory a `Buffers` struct points to
  */
 intptr_t automerge_free_buff(Buffer *buffs);

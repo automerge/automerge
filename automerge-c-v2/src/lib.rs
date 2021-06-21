@@ -54,7 +54,6 @@ macro_rules! get_data_vec {
     }};
 }
 
-/// Turn a `*const CBuffers` into a `&CBuffers`
 macro_rules! write_to_buff_epilogue {
     ($buff:expr, $vec:expr) => {{
         $buff.cap = $vec.capacity();
@@ -111,7 +110,6 @@ macro_rules! call_automerge {
     };
 }
 
-/// Get a `Vec<Change>` from a `*const CBuffers`
 /// Using a macro instead of a method so we can return if there is an error
 macro_rules! get_changes {
     ($backend:expr, $changes:expr, $len:expr) => {{
@@ -138,8 +136,6 @@ pub enum CError {
     NullBackend,
     #[error("Invalid pointer to Buffers")]
     NullBuffers,
-    #[error("Invalid pointer to CBuffers")]
-    NullCBuffers,
     #[error("Invalid pointer to change")]
     NullChange,
     #[error("Invalid byte buffer of hashes: `{0}`")]
@@ -155,7 +151,7 @@ pub enum CError {
     #[error(transparent)]
     Automerge(#[from] AutomergeError),
     #[error(transparent)]
-    InvalidActorid(#[from] InvalidActorId),
+    InvalidActorId(#[from] InvalidActorId),
 }
 
 impl CError {
@@ -169,15 +165,14 @@ impl CError {
         let code = match self {
             CError::NullBackend => BASE,
             CError::NullBuffers => BASE + 1,
-            CError::NullCBuffers => BASE + 2,
-            CError::NullChange => BASE + 3,
-            CError::InvalidHashes(_) => BASE + 4,
-            CError::ToMessagePack(_) => BASE + 5,
-            CError::FromMessagePack(_) => BASE + 6,
-            CError::FromUtf8(_) => BASE + 7,
-            CError::InvalidActorid(_) => BASE + 8,
-            CError::NoLocalChange => BASE + 9,
-            CError::Automerge(_) => BASE + 10,
+            CError::NullChange => BASE + 2,
+            CError::InvalidHashes(_) => BASE + 3,
+            CError::ToMessagePack(_) => BASE + 4,
+            CError::FromMessagePack(_) => BASE + 5,
+            CError::FromUtf8(_) => BASE + 6,
+            CError::InvalidActorId(_) => BASE + 7,
+            CError::NoLocalChange => BASE + 8,
+            CError::Automerge(_) => BASE + 9,
         };
         -code
     }
@@ -260,6 +255,16 @@ impl From<Backend> for *mut Backend {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn automerge_buff_get_data(buff: *mut Buffer) -> *const u8 {
+    (*buff).data
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn automerge_buff_get_len(buff: *mut Buffer) -> usize {
+    (*buff).len
+}
+
+#[no_mangle]
 pub extern "C" fn automerge_init() -> *mut Backend {
     Backend::init(automerge_backend::Backend::new()).into()
 }
@@ -269,30 +274,37 @@ pub extern "C" fn automerge_init() -> *mut Backend {
 #[no_mangle]
 pub unsafe extern "C" fn automerge_free(backend: *mut Backend) {
     // TODO: Can we do a null pointer check here by using `get_backend_mut`
-    let backend: Backend = *Box::from_raw(backend);
-    drop(backend)
+    Box::from_raw(backend);
 }
 
 /// Create a `Buffers` struct to store return values
 #[no_mangle]
-pub extern "C" fn automerge_create_buff() -> Buffer {
+pub extern "C" fn automerge_create_buff() -> *mut Buffer {
     // Don't drop the vectors so their underlying buffers aren't de-allocated
     let mut data = ManuallyDrop::new(Vec::new());
-    Buffer {
+    Box::into_raw(Box::new(Buffer {
         data: data.as_mut_ptr(),
         len: data.len(),
         cap: data.capacity(),
-    }
+    }))
 }
 
 /// # Safety
-/// Must point to a valid `Buffers` struct
+/// Must  point to a valid `Buffers` struct
 /// Free the memory a `Buffers` struct points to
 #[no_mangle]
 pub unsafe extern "C" fn automerge_free_buff(buffs: *mut Buffer) -> isize {
-    let buff = get_buff_mut!(buffs);
-    // We construct the vec & drop it at the end of this function
-    get_data_vec!(buff);
+    {
+        let buff = get_buff_mut!(buffs);
+        // We construct the vec & drop it the end of this block
+        // I don't think order matters but still...
+        get_data_vec!(buff);
+    }
+
+    {
+        // Create a box & drop it
+        Box::from_raw(buffs);
+    }
     0
 }
 
@@ -454,7 +466,7 @@ pub unsafe extern "C" fn automerge_get_changes_for_actor(
     let actor = from_cstr(actor);
     let actor_id: ActorId = match actor.as_ref().try_into() {
         Ok(id) => id,
-        Err(e) => return backend.handle_error(CError::InvalidActorid(e)),
+        Err(e) => return backend.handle_error(CError::InvalidActorId(e)),
     };
     let changes = call_automerge!(backend, backend.get_changes_for_actor_id(&actor_id));
     let bytes: Vec<_> = changes
