@@ -12,6 +12,3 @@ members = [
     "fuzz",
     "perf",
 ]
-
-[profile.release]
-debug = true
