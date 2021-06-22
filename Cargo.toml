@@ -12,3 +12,6 @@ members = [
     "fuzz",
     "perf",
 ]
+
+[profile.release]
+lto = true
