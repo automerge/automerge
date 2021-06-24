@@ -54,8 +54,6 @@ impl From<&amp::Change> for Change {
 }
 
 fn encode(change: &amp::Change) -> Change {
-    let mut hasher = Sha256::new();
-
     let mut deps = change.deps.clone();
     deps.sort_unstable();
 
@@ -78,8 +76,7 @@ fn encode(change: &amp::Change) -> Change {
 
     bytes.extend(&chunk.bytes);
 
-    hasher.input(&bytes[CHUNK_START..bytes.len()]);
-    let hash_result = hasher.result();
+    let hash_result = Sha256::digest(&bytes[CHUNK_START..bytes.len()]);
     let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
@@ -359,9 +356,7 @@ pub(crate) struct Document {
 fn decode_header(bytes: &[u8]) -> Result<(u8, amp::ChangeHash, Range<usize>), decoding::Error> {
     let (chunktype, body) = decode_header_without_hash(bytes)?;
 
-    let mut hasher = Sha256::new();
-    hasher.input(&bytes[PREAMBLE_BYTES..]);
-    let calculated_hash = hasher.result();
+    let calculated_hash = Sha256::digest(&bytes[PREAMBLE_BYTES..]);
 
     let checksum = &bytes[4..8];
     if checksum != &calculated_hash[0..4] {
@@ -908,7 +903,6 @@ fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
 #[instrument(level = "debug", skip(changes))]
 pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encoding::Error> {
     let mut bytes: Vec<u8> = Vec::new();
-    let mut hasher = Sha256::new();
 
     let heads = get_heads(changes);
 
@@ -955,9 +949,7 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
 
     bytes.extend(&chunk);
 
-    hasher.input(&bytes[CHUNK_START..bytes.len()]);
-    let hash_result = hasher.result();
-    //let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
+    let hash_result = Sha256::digest(&bytes[CHUNK_START..bytes.len()]);
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 
