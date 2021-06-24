@@ -869,7 +869,7 @@ impl ChangeEncoder {
             self.extra_len.finish(DOC_EXTRA_LEN),
             ColData::new(DOC_EXTRA_RAW, self.extra_raw),
         ];
-        coldata.sort_by(|a, b| a.col.cmp(&b.col));
+        coldata.sort_unstable_by(|a, b| a.col.cmp(&b.col));
 
         let mut data = Vec::new();
         let mut info = Vec::new();
@@ -980,7 +980,7 @@ impl DocOpEncoder {
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());
         coldata.extend(self.succ.finish());
-        coldata.sort_by(|a, b| a.col.cmp(&b.col));
+        coldata.sort_unstable_by(|a, b| a.col.cmp(&b.col));
 
         let mut info = Vec::new();
         let mut data = Vec::new();
@@ -1106,7 +1106,7 @@ impl ColumnEncoder {
         coldata.extend(self.key.finish());
         coldata.extend(self.val.finish());
         coldata.extend(self.pred.finish());
-        coldata.sort_by(|a, b| a.col.cmp(&b.col));
+        coldata.sort_unstable_by(|a, b| a.col.cmp(&b.col));
 
         let non_empty_column_count = coldata.iter().filter(|&d| !d.data.is_empty()).count();
         let data_len: usize = coldata.iter().map(|d| d.data.len()).sum();
