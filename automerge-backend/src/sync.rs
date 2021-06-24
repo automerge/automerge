@@ -261,7 +261,8 @@ impl SyncMessage {
         }
 
         (self.changes.len() as u32).encode(&mut buf)?;
-        for change in self.changes {
+        for mut change in self.changes {
+            change.compress();
             change.raw_bytes().encode(&mut buf)?;
         }
 
