@@ -69,6 +69,8 @@ fn encode(change: &amp::Change) -> Change {
 
     leb128::write::unsigned(&mut bytes, chunk.bytes.len() as u64).unwrap();
 
+    let body_start = bytes.len();
+
     increment_range(&mut chunk.body, bytes.len());
     increment_range(&mut chunk.message, bytes.len());
     increment_range(&mut chunk.extra_bytes, bytes.len());
@@ -88,25 +90,11 @@ fn encode(change: &amp::Change) -> Change {
     // std::assert_eq!(c1, c0);
     // perhaps we should add something like this to the test suite
 
-    let bytes = if bytes.len() > DEFLATE_MIN_SIZE {
-        let mut result = Vec::with_capacity(bytes.len());
-        result.extend(&bytes[0..8]);
-        result.push(BLOCK_TYPE_DEFLATE);
-        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::default());
-        let mut deflated = Vec::new();
-        let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
-        leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
-        result.extend(&deflated[..]);
-        ChangeBytes::Compressed {
-            compressed: result,
-            uncompressed: bytes,
-        }
-    } else {
-        ChangeBytes::Uncompressed(bytes)
-    };
+    let bytes = ChangeBytes::Uncompressed(bytes);
 
     Change {
         bytes,
+        body_start,
         hash,
         seq: change.seq,
         start_op: change.start_op,
@@ -200,6 +188,29 @@ impl ChangeBytes {
         }
     }
 
+    fn compress(&mut self, body_start: usize) {
+        match self {
+            ChangeBytes::Compressed { .. } => {}
+            ChangeBytes::Uncompressed(uncompressed) => {
+                if uncompressed.len() > DEFLATE_MIN_SIZE {
+                    let mut result = Vec::with_capacity(uncompressed.len());
+                    result.extend(&uncompressed[0..8]);
+                    result.push(BLOCK_TYPE_DEFLATE);
+                    let mut deflater =
+                        DeflateEncoder::new(&uncompressed[body_start..], Compression::default());
+                    let mut deflated = Vec::new();
+                    let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
+                    leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
+                    result.extend(&deflated[..]);
+                    *self = ChangeBytes::Compressed {
+                        compressed: result,
+                        uncompressed: std::mem::take(uncompressed),
+                    }
+                }
+            }
+        }
+    }
+
     fn raw(&self) -> &[u8] {
         match self {
             ChangeBytes::Compressed { compressed, .. } => &compressed[..],
@@ -211,6 +222,7 @@ impl ChangeBytes {
 #[derive(PartialEq, Debug, Clone)]
 pub struct Change {
     bytes: ChangeBytes,
+    body_start: usize,
     pub hash: amp::ChangeHash,
     pub seq: u64,
     pub start_op: u64,
@@ -285,6 +297,10 @@ impl Change {
 
     pub fn extra_bytes(&self) -> &[u8] {
         &self.bytes.uncompressed()[self.extra_bytes.clone()]
+    }
+
+    pub fn compress(&mut self) {
+        self.bytes.compress(self.body_start);
     }
 
     pub fn raw_bytes(&self) -> &[u8] {
@@ -510,6 +526,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
         });
     }
 
+    let body_start = body.start;
     let mut cursor = body;
 
     let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
@@ -528,6 +545,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
 
     Ok(Change {
         bytes,
+        body_start,
         hash,
         seq,
         start_op,
