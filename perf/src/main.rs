@@ -16,21 +16,39 @@ fn f() {
 
     let start = Instant::now();
 
-    let m = hashmap! {
-        "a".into() =>
+    let mut m = hashmap! {
+        "arstarstoien".into() =>
         Value::Map(hashmap!{
-            "b".into()=>
+            "aboairentssroien".into()=>
             Value::Map(
                 hashmap! {
-                    "abc".into() => Value::Primitive(Primitive::Str("hello world".into()))
+                    "arostnaritsnabc".into() => Value::Primitive(Primitive::Str("hello world".into()))
                 },
             ),
-            "d".into() => Value::Primitive(Primitive::Uint(20)),
+            "arsotind".into() => Value::Primitive(Primitive::Uint(20)),
         },)
     };
 
+    for _ in 0..10 {
+        let random_key: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(10)
+            .map(char::from)
+            .collect();
+        let random_value: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(50)
+            .map(char::from)
+            .collect();
+        m.insert(
+            random_key.into(),
+            Value::Primitive(Primitive::Str(random_value.into())),
+        );
+    }
+
     let mut changes = Vec::new();
-    let mut applys = Vec::new();
+    let mut apply_changes = Vec::new();
+    let mut apply_patches = Vec::new();
 
     let iterations = 10_000;
     for _ in 0..iterations {
@@ -51,10 +69,12 @@ fn f() {
             .1
             .unwrap();
         changes.push(a.elapsed());
+        let a = Instant::now();
         let (patch, _) = backend.apply_local_change(change).unwrap();
+        apply_changes.push(a.elapsed());
         let a = Instant::now();
         doc.apply_patch(patch).unwrap();
-        applys.push(a.elapsed());
+        apply_patches.push(a.elapsed());
     }
 
     let save = Instant::now();
@@ -65,11 +85,12 @@ fn f() {
     let load = load.elapsed();
 
     println!(
-        "maps x{} total:{:?} change:{:?} apply:{:?} save:{:?} load:{:?}",
+        "maps x{} total:{:?} change:{:?} apply_change:{:?} apply_patch:{:?} save:{:?} load:{:?}",
         iterations,
         start.elapsed(),
         changes.iter().sum::<Duration>(),
-        applys.iter().sum::<Duration>(),
+        apply_changes.iter().sum::<Duration>(),
+        apply_patches.iter().sum::<Duration>(),
         save,
         load,
     );
