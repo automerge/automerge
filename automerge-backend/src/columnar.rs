@@ -1003,14 +1003,6 @@ impl DocOpEncoder {
 
 //pub(crate) encode_cols(a) -> (Vec<u8>, HashMap<u32, Range<usize>>) { }
 
-struct ColumnOp<'a> {
-    action: InternalOpType,
-    obj: Cow<'a, amp::ObjectId>,
-    key: Cow<'a, amp::Key>,
-    pred: Cow<'a, SortedVec<amp::OpId>>,
-    insert: bool,
-}
-
 pub(crate) struct ColumnEncoder {
     obj: ObjEncoder,
     key: KeyEncoder,
@@ -1029,14 +1021,7 @@ impl ColumnEncoder {
         I: IntoIterator<Item = ExpandedOp<'b>>,
     {
         let mut e = Self::new();
-        let colops = ops.into_iter().map(|o| ColumnOp {
-            obj: o.obj,
-            key: o.key,
-            action: o.action,
-            pred: o.pred,
-            insert: o.insert,
-        });
-        e.encode(colops, actors);
+        e.encode(ops, actors);
         e.finish()
     }
 
@@ -1053,14 +1038,14 @@ impl ColumnEncoder {
 
     fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
     where
-        I: IntoIterator<Item = ColumnOp<'c>>,
+        I: IntoIterator<Item = ExpandedOp<'c>>,
     {
         for op in ops {
             self.append(op, actors)
         }
     }
 
-    fn append<'a>(&mut self, op: ColumnOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &mut Vec<amp::ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(op.key.into_owned(), actors);
         self.insert.append(op.insert);
@@ -1353,7 +1338,7 @@ mod tests {
         let mut actors = vec![actor.clone(), actor2.clone()];
         actors.sort();
 
-        let col_op = ColumnOp {
+        let col_op = ExpandedOp {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
@@ -1365,7 +1350,7 @@ mod tests {
         column_encoder.encode(vec![col_op], &mut actors);
         let (bytes, _) = column_encoder.finish();
 
-        let col_op2 = ColumnOp {
+        let col_op2 = ExpandedOp {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
