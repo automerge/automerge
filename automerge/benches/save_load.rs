@@ -82,7 +82,7 @@ fn medium_change_backend() -> Backend {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (
