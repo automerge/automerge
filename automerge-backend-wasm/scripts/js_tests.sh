@@ -3,18 +3,19 @@ set -e
 
 ORIGINAL_PWD=$PWD
 if [[ -z $AUTOMERGE_JS_DIR ]]; then
-    COMMIT_HASH=14e01eebdcc7677a2316df5326ca104823c23183
+    COMMIT_HASH=ee09eead68d572725b344bd7ab94bfa3d6d29889
     AUTOMERGE_JS_DIR="./automerge-js-temp"
     echo "'AUTOMERGE_JS_DIR' var not set. Using temporary dir: $AUTOMERGE_JS_DIR & commit hash: $COMMIT_HASH"
     if [[ -d $AUTOMERGE_JS_DIR ]]; then
         echo "Dir found, skipping clone"
         cd $AUTOMERGE_JS_DIR
+        git fetch --all
         if ! git cat-file -e $COMMIT_HASH; then
             echo "Commit hash: $COMMIT_HASH not found in $AUTOMERGE_JS_DIR"
             exit 1
         fi
     else
-        git clone https://github.com/orionz/automerge.git $AUTOMERGE_JS_DIR
+        git clone https://github.com/automerge/automerge.git $AUTOMERGE_JS_DIR
     fi
     cd $ORIGINAL_PWD
     cd $AUTOMERGE_JS_DIR
