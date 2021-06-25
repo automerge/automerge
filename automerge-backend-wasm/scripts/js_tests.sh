@@ -3,7 +3,7 @@ set -e
 
 ORIGINAL_PWD=$PWD
 if [[ -z $AUTOMERGE_JS_DIR ]]; then
-    COMMIT_HASH=ee09eead68d572725b344bd7ab94bfa3d6d29889
+    COMMIT_HASH=14e01eebdcc7677a2316df5326ca104823c23183
     AUTOMERGE_JS_DIR="./automerge-js-temp"
     echo "'AUTOMERGE_JS_DIR' var not set. Using temporary dir: $AUTOMERGE_JS_DIR & commit hash: $COMMIT_HASH"
     if [[ -d $AUTOMERGE_JS_DIR ]]; then
