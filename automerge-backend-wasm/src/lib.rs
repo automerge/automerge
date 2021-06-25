@@ -126,7 +126,9 @@ pub fn free(input: Object) -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = applyLocalChange)]
 pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsValue> {
     get_mut_input(input, |state| {
-        let change: amp::Change = change.into_serde().map_err(json_to_err)?;
+        let change: amp::Change = change
+            .into_serde()
+            .map_err(|_| AutomergeError::DecodeFailed)?;
         let (patch, change) = state.0.apply_local_change(change)?;
         let result = Array::new();
         let change_bytes = types::BinaryChange(change.raw_bytes().to_vec());
@@ -391,10 +393,6 @@ where
             Err(to_js_err(err))
         }
     }
-}
-
-fn json_to_err<T: Display>(_err: T) -> AutomergeError {
-    AutomergeError::DecodeFailed
 }
 
 fn to_js_err<T: Display>(err: T) -> JsValue {
