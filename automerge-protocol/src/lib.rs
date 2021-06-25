@@ -1,14 +1,13 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use smol_str::SmolStr;
 use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
     fmt,
+    iter::FromIterator,
     num::NonZeroU32,
     slice::Iter,
-    iter::FromIterator,
 };
 
 use error::InvalidScalarValues;
@@ -16,6 +15,7 @@ use serde::{
     de::{Error, MapAccess, Unexpected},
     Deserialize, Serialize,
 };
+use smol_str::SmolStr;
 use strum::EnumDiscriminants;
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
