@@ -933,13 +933,14 @@ pub struct ResolvedPrimitiveMut<'a> {
 }
 
 fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
-    // nothing to condense
     if ops.len() == 1 {
+        // nothing to condense
         return ops;
     }
+    let ops_len = ops.len();
     let mut op_iter = ops.into_iter();
     if let Some(v) = op_iter.next() {
-        let mut new_ops = vec![];
+        let mut new_ops = Vec::with_capacity(ops_len);
         let mut key = v.key.clone();
         let mut obj = v.obj.clone();
         let mut insert_if_not_condensed = false;
