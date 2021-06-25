@@ -961,7 +961,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                     action: amp::OpType::MultiSet(vals.try_into().unwrap()),
                     obj: obj.clone(),
                     key: key.clone(),
-                    pred: preds,
+                    pred: preds.into(),
                     insert: true,
                 })
             } else if let Some(scalar) = vals.pop() {
@@ -969,7 +969,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                     action: amp::OpType::Set(scalar),
                     obj: obj.clone(),
                     key: key.clone(),
-                    pred: preds,
+                    pred: preds.into(),
                     insert: not_condensed_insert,
                 })
             }

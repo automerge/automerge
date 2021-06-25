@@ -71,7 +71,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Uint(0)),
-                        Value::Primitive(Primitive::Str("".to_owned())),
+                        Value::Primitive(Primitive::Str("".into())),
                     ]),
                 ),
                 (

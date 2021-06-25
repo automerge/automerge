@@ -137,9 +137,8 @@ impl<'a> ExpandedOpIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::TryInto;
-    use std::num::NonZeroU32;
     use std::{convert::TryInto, num::NonZeroU32};
+
     use amp::{ObjectId, Op, OpType, ScalarValue, SortedVec};
     use pretty_assertions::assert_eq;
 
@@ -252,7 +251,7 @@ mod tests {
                     insert: true
                 },
                 ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("hi ".into())),
+                    action: InternalOpType::Set(ScalarValue::Str("hi".into())),
                     obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
                     key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
                     pred: Cow::Owned(SortedVec::new()),

@@ -7,7 +7,9 @@ use serde::{
 };
 
 use super::read_field;
-use crate::{DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, ScalarValues, SortedVec};
+use crate::{
+    DataType, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue, ScalarValues, SortedVec,
+};
 
 impl Serialize for Op {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -319,7 +321,7 @@ mod tests {
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
-                    pred: Vec::new(),
+                    pred: Vec::new().into(),
                 }),
             },
             Scenario {

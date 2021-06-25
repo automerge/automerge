@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+
 use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
 use automerge_protocol as amp;
