@@ -93,7 +93,7 @@ where
         is_head: bool,
     ) {
         if new_level > self.level && !is_head {
-            panic!("Cannot increase the level of a non-head node")
+            panic!("Cannot increase the level of a non-head node");
         }
         self.level = max(self.level, new_level);
 
@@ -126,7 +126,7 @@ where
         distance: usize,
     ) {
         if new_level > self.level {
-            panic!("Cannot increase the level on insert_node_before")
+            panic!("Cannot increase the level on insert_node_before");
         }
         for level in from_level..self.level {
             if level < new_level {
@@ -199,14 +199,14 @@ where
         let mut count = 0;
         loop {
             while count + node.links[level].next.count > target {
-                level -= 1
+                level -= 1;
             }
             count += node.links[level].next.count;
             let k = node.links[level].next.key.as_ref();
             if count == target {
                 return k;
             }
-            node = self.get_node(k)
+            node = self.get_node(k);
         }
     }
 
@@ -551,7 +551,7 @@ where
         let rand: u32 = self.rng.gen();
         let mut level = 1;
         while rand < 1 << (32 - 2 * level) && level < 16 {
-            level += 1
+            level += 1;
         }
         level
     }

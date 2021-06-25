@@ -251,7 +251,7 @@ impl<'de> Deserialize<'de> for Op {
                 })
             }
         }
-        deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
+        deserializer.deserialize_struct("Operation", FIELDS, OperationVisitor)
     }
 }
 

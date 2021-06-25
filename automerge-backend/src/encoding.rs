@@ -138,7 +138,7 @@ where
             // this covers `only_nulls`
             RleState::NullRun(size) => {
                 if !self.buf.is_empty() {
-                    self.flush_null_run(size)
+                    self.flush_null_run(size);
                 }
             }
             RleState::LoneVal(value) => self.flush_lit_run(vec![value]),

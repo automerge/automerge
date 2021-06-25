@@ -116,7 +116,7 @@ impl Backend {
         if change.seq > 1 {
             let last_hash = self.get_hash(&change.actor_id, change.seq - 1)?;
             if !change.deps.contains(&last_hash) {
-                change.deps.push(last_hash)
+                change.deps.push(last_hash);
             }
         }
 
@@ -225,7 +225,7 @@ impl Backend {
             {
                 return Some(self.queue.swap_remove(index));
             }
-            index += 1
+            index += 1;
         }
         None
     }
@@ -439,9 +439,9 @@ impl Backend {
                 // When we don't remove anything it is less likely that there is something down
                 // that chain so delay it.
                 if removed {
-                    queue.push_front(dep)
+                    queue.push_front(dep);
                 } else {
-                    queue.push_back(dep)
+                    queue.push_back(dep);
                 }
             }
         }

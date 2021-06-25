@@ -122,14 +122,14 @@ impl Backend {
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
                 &sync_state.shared_heads,
-            )
+            );
         }
 
         // trim down the sent hashes to those that we know they haven't seen
         self.filter_changes(&message_heads, &mut sync_state.sent_hashes);
 
         if changes_is_empty && message_heads == before_heads {
-            sync_state.last_sent_heads = Some(message_heads.clone())
+            sync_state.last_sent_heads = Some(message_heads.clone());
         }
 
         let known_heads = message_heads
@@ -137,7 +137,7 @@ impl Backend {
             .filter(|head| self.get_change_by_hash(head).is_some())
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
-            sync_state.shared_heads = message_heads.clone()
+            sync_state.shared_heads = message_heads.clone();
         } else {
             sync_state.shared_heads = sync_state
                 .shared_heads
@@ -183,7 +183,7 @@ impl Backend {
                 for hash in last_sync {
                     last_sync_hashes.insert(hash);
                 }
-                bloom_filters.push(bloom)
+                bloom_filters.push(bloom);
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
@@ -213,7 +213,7 @@ impl Backend {
                 if let Some(deps) = dependents.get(&hash) {
                     for dep in deps {
                         if hashes_to_send.insert(*dep) {
-                            stack.push(*dep)
+                            stack.push(*dep);
                         }
                     }
                 }
@@ -225,14 +225,14 @@ impl Backend {
                 if !change_hashes.contains(hash) {
                     let change = self.get_change_by_hash(hash);
                     if let Some(change) = change {
-                        changes_to_send.push(change)
+                        changes_to_send.push(change);
                     }
                 }
             }
 
             for change in changes {
                 if hashes_to_send.contains(&change.hash) {
-                    changes_to_send.push(change)
+                    changes_to_send.push(change);
                 }
             }
             changes_to_send
@@ -321,7 +321,7 @@ impl Encodable for &[ChangeHash] {
         let mut body = 0;
         for hash in self.iter() {
             buf.write_all(&hash.0)?;
-            body += hash.0.len()
+            body += hash.0.len();
         }
         Ok(head + body)
     }

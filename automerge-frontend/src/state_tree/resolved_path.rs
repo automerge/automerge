@@ -253,21 +253,6 @@ impl<'a> ResolvedPathMut<'a> {
     pub(super) fn new_character(c: &'a mut MultiGrapheme) -> ResolvedPathMut<'a> {
         ResolvedPathMut::Character(ResolvedCharMut { multivalue: c })
     }
-
-    pub fn default_value(&self) -> Value {
-        match &self {
-            ResolvedPathMut::Map(maptarget) => maptarget.multivalue.default_value(),
-            ResolvedPathMut::Root(root) => root.root.value(),
-            ResolvedPathMut::Table(tabletarget) => tabletarget.multivalue.default_value(),
-            ResolvedPathMut::List(listtarget) => listtarget.multivalue.default_value(),
-            ResolvedPathMut::Text(texttarget) => texttarget.multivalue.default_value(),
-            ResolvedPathMut::Counter(countertarget) => countertarget.multivalue.default_value(),
-            ResolvedPathMut::Primitive(p) => p.multivalue.default_value(),
-            ResolvedPathMut::Character(ctarget) => Value::Primitive(Primitive::Str(
-                ctarget.multivalue.default_grapheme().clone(),
-            )),
-        }
-    }
 }
 
 pub(crate) struct SetOrInsertPayload<'a, T> {
