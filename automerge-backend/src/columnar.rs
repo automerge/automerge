@@ -628,8 +628,8 @@ impl ValEncoder {
         self.len.append_value(VALUE_TYPE_NULL)
     }
 
-    fn finish(self) -> [ColData; Self::COLUMNS] {
-        [
+    fn finish(self) -> Vec<ColData> {
+        vec![
             self.ref_counter.finish(COL_REF_CTR),
             self.ref_actor.finish(COL_REF_ACTOR),
             self.len.finish(COL_VAL_LEN),
@@ -675,8 +675,8 @@ impl KeyEncoder {
         }
     }
 
-    fn finish(self) -> [ColData; Self::COLUMNS] {
-        [
+    fn finish(self) -> Vec<ColData> {
+        vec![
             self.actor.finish(COL_KEY_ACTOR),
             self.ctr.finish(COL_KEY_CTR),
             self.str.finish(COL_KEY_STR),
@@ -741,8 +741,8 @@ impl PredEncoder {
         }
     }
 
-    fn finish(self) -> [ColData; Self::COLUMNS] {
-        [
+    fn finish(self) -> Vec<ColData> {
+        vec![
             self.num.finish(COL_PRED_NUM),
             self.actor.finish(COL_PRED_ACTOR),
             self.ctr.finish(COL_PRED_CTR),
@@ -778,8 +778,8 @@ impl ObjEncoder {
         }
     }
 
-    fn finish(self) -> [ColData; Self::COLUMNS] {
-        [
+    fn finish(self) -> Vec<ColData> {
+        vec![
             self.actor.finish(COL_OBJ_ACTOR),
             self.ctr.finish(COL_OBJ_CTR),
         ]
