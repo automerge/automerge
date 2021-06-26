@@ -27,13 +27,42 @@ impl<'de> Deserialize<'de> for RootDiff {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "camelCase")]
+        // NOTE: If you want to implement
         enum Field {
             ObjectId,
-            #[serde(rename = "type")]
             ObjectType,
             Props,
+        }
+
+        impl<'de> Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                struct FieldVisitor;
+
+                impl<'de> Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                        formatter.write_str("`objectId`, `type` or `props`")
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Field, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            "objectId" => Ok(Field::ObjectId),
+                            "type" => Ok(Field::ObjectType),
+                            "props" => Ok(Field::Props),
+                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
         }
 
         struct RootDiffVisitor;

@@ -6,16 +6,20 @@ use serde::{
 mod actor_id;
 mod change_hash;
 mod cursor_diff;
+mod data_type;
 mod diff;
 mod element_id;
 mod key;
+mod map_type;
 mod multi_element_insert;
+mod obj_type;
 mod object_id;
 mod op;
 mod op_type;
 mod opid;
 mod root_diff;
 mod scalar_value;
+mod seq_type;
 
 // Helper method for use in custom deserialize impls
 pub(crate) fn read_field<'de, T, M>(

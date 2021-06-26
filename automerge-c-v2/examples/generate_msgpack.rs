@@ -9,7 +9,14 @@ fn main() {
     let file_path = Path::new(file!()).parent().unwrap();
     let cwd = std::env::current_dir().unwrap();
     let root = cwd.join(file_path).join("example-data/");
-    let names = ["change1", "change2", "patch1", "patch2", "patch_small"];
+    let names = [
+        "change1",
+        "change2",
+        "patch1",
+        "patch2",
+        "patch_small",
+        "multi_element_insert",
+    ];
     for name in names {
         let json_name = root.join(format!("{}.json", name));
         let msgpack_name = root.join(format!("{}.mpk", name));
@@ -29,6 +36,9 @@ fn main() {
         if name.contains("change") {
             let change: amp::Change = serde_json::from_str(&json).unwrap();
             change.serialize(&mut serializer).unwrap();
+        } else if name.contains("multi_element_insert") {
+            let multi: amp::DiffEdit = serde_json::from_str(&json).unwrap();
+            multi.serialize(&mut serializer).unwrap();
         } else {
             let patch: amp::Patch = serde_json::from_str(&json).unwrap();
             // println!("{:?}", patch);

@@ -1,5 +1,3 @@
-use std::convert::TryInto;
-
 use serde::{
     de::{Error, MapAccess, Visitor},
     ser::{SerializeStruct, Serializer},
@@ -15,10 +13,9 @@ impl Serialize for MultiElementInsert {
     where
         S: Serializer,
     {
-        //serializer.serialize_newtype_variant("foo", 0, "bar", value)
         let datatype = self.values.as_numerical_datatype();
         let mut ss =
-            serializer.serialize_struct("MultiElementInsert", datatype.map_or(4, |_| 5))?;
+            serializer.serialize_struct("MultiElementInsert", datatype.map_or(3, |_| 4))?;
         ss.serialize_field("index", &self.index)?;
         ss.serialize_field("elemId", &self.elem_id)?;
         if let Some(datatype) = datatype {
@@ -30,7 +27,7 @@ impl Serialize for MultiElementInsert {
 }
 
 impl<'de> Deserialize<'de> for MultiElementInsert {
-    fn deserialize<D>(_: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -74,11 +71,6 @@ impl<'de> Deserialize<'de> for MultiElementInsert {
                 formatter.write_str("A MultiElementInsert")
             }
         }
-
-        Ok(MultiElementInsert {
-            index: 0,
-            elem_id: crate::ElementId::Head,
-            values: vec![ScalarValue::Str("one".into())].try_into().unwrap(),
-        })
+        deserializer.deserialize_struct("MultiElementInsert", &FIELDS, MultiElementInsertVisitor)
     }
 }
