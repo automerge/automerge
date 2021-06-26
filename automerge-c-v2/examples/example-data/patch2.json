@@ -1,0 +1,78 @@
+{
+  "clock": { "8c8a54b01ce24c3a8dd9e05af04c862a": 2 },
+  "deps": ["495d0eee85b2a0b8ade2e712a4af90abf0e2e271c8ae1af79e6c11c457821859"],
+  "diffs": {
+    "objectId": "_root",
+    "type": "map",
+    "props": {
+      "list2": {
+        "8@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "list",
+          "edits": [
+            { "action": "remove", "index": 5, "count": 1 },
+            {
+              "action": "insert",
+              "index": 5,
+              "elemId": "21@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "opId": "21@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": { "type": "value", "value": 100, "datatype": "int" }
+            },
+            { "action": "remove", "index": 0, "count": 1 },
+            {
+              "action": "insert",
+              "index": 0,
+              "elemId": "23@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "opId": "23@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": { "type": "value", "value": -1, "datatype": "int" }
+            },
+            {
+              "action": "update",
+              "index": 1,
+              "opId": "24@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": { "type": "value", "value": "one" }
+            },
+            {
+              "action": "multi-insert",
+              "index": 2,
+              "elemId": "25@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "datatype": "int",
+              "values": [99, 99, 99, 99]
+            }
+          ]
+        }
+      },
+      "map": {
+        "15@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "15@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "map",
+          "props": {
+            "submap": {
+              "16@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                "objectId": "16@8c8a54b01ce24c3a8dd9e05af04c862a",
+                "type": "map",
+                "props": {
+                  "value": {
+                    "29@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                      "type": "value",
+                      "value": "otherval"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "counter": {
+        "18@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "type": "value",
+          "value": 101,
+          "datatype": "counter"
+        }
+      }
+    }
+  },
+  "maxOp": 30,
+  "pendingChanges": 0
+}

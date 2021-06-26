@@ -20,5 +20,8 @@ thiserror = "1.0.16"
 rmp = "0.8.10"
 rmp-serde = "0.15.4"
 
+[dev-dependencies]
+rmpv = "0.4.7"
+
 [build-dependencies]
 cbindgen = "^0.14"

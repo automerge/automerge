@@ -1,0 +1,43 @@
+{
+  "clock": { "8c8a54b01ce24c3a8dd9e05af04c862a": 2 },
+  "deps": [],
+  "diffs": {
+    "objectId": "_root",
+    "type": "map",
+    "props": {
+      "list2": {
+        "8@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "list",
+          "edits": [
+            { "action": "remove", "index": 5, "count": 1 }
+          ]
+        }
+      },
+      "map": {
+        "15@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "15@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "map",
+          "props": {
+            "submap": {
+              "16@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                "objectId": "16@8c8a54b01ce24c3a8dd9e05af04c862a",
+                "type": "map",
+                "props": {
+                  "value": {
+                    "29@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                      "type": "value",
+                      "value": "otherval"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "maxOp": 30,
+  "pendingChanges": 0
+}

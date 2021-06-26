@@ -1,0 +1,104 @@
+{
+  "actor": "8c8a54b01ce24c3a8dd9e05af04c862a",
+  "seq": 2,
+  "startOp": 20,
+  "time": 1624295515,
+  "message": "",
+  "deps": ["9013fe6e020884f6fc44934cfc553e4e698e8aa5a1b04512a8b230f28057c8db"],
+  "hash": "495d0eee85b2a0b8ade2e712a4af90abf0e2e271c8ae1af79e6c11c457821859",
+  "ops": [
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "14@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "del",
+      "insert": false,
+      "pred": ["14@8c8a54b01ce24c3a8dd9e05af04c862a"]
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "13@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 100,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "9@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "del",
+      "insert": false,
+      "pred": ["9@8c8a54b01ce24c3a8dd9e05af04c862a"]
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "_head",
+      "action": "set",
+      "insert": true,
+      "value": -1,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "10@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": false,
+      "value": "one",
+      "pred": ["10@8c8a54b01ce24c3a8dd9e05af04c862a"]
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "10@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 99,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "25@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 99,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "26@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 99,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "27@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 99,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "16@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "key": "value",
+      "action": "set",
+      "insert": false,
+      "value": "otherval",
+      "pred": ["17@8c8a54b01ce24c3a8dd9e05af04c862a"]
+    },
+    {
+      "obj": "_root",
+      "key": "counter",
+      "action": "inc",
+      "insert": false,
+      "value": 1,
+      "datatype": "int",
+      "pred": ["18@8c8a54b01ce24c3a8dd9e05af04c862a"]
+    }
+  ]
+}

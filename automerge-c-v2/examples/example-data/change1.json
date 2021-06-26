@@ -1,0 +1,169 @@
+{
+  "actor": "8c8a54b01ce24c3a8dd9e05af04c862a",
+  "seq": 1,
+  "startOp": 1,
+  "time": 1624295515,
+  "message": "Initialization",
+  "deps": [],
+  "hash": "9013fe6e020884f6fc44934cfc553e4e698e8aa5a1b04512a8b230f28057c8db",
+  "ops": [
+    {
+      "obj": "_root",
+      "key": "hello",
+      "action": "set",
+      "insert": false,
+      "value": "world",
+      "pred": []
+    },
+    {
+      "obj": "_root",
+      "key": "list1",
+      "action": "makeList",
+      "insert": false,
+      "pred": []
+    },
+    {
+      "obj": "2@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "_head",
+      "action": "set",
+      "insert": true,
+      "value": 1,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "2@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "3@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 2.2,
+      "datatype": "float64",
+      "pred": []
+    },
+    {
+      "obj": "2@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "4@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "makeMap",
+      "insert": true,
+      "pred": []
+    },
+    {
+      "obj": "5@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "key": "n",
+      "action": "set",
+      "insert": false,
+      "value": -1,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "5@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "key": "v",
+      "action": "set",
+      "insert": false,
+      "value": "three",
+      "pred": []
+    },
+    {
+      "obj": "_root",
+      "key": "list2",
+      "action": "makeList",
+      "insert": false,
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "_head",
+      "action": "set",
+      "insert": true,
+      "value": 0,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "9@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 1,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "10@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 2,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "11@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 3,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "12@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 4,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "elemId": "13@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "action": "set",
+      "insert": true,
+      "value": 5,
+      "datatype": "int",
+      "pred": []
+    },
+    {
+      "obj": "_root",
+      "key": "map",
+      "action": "makeMap",
+      "insert": false,
+      "pred": []
+    },
+    {
+      "obj": "15@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "key": "submap",
+      "action": "makeMap",
+      "insert": false,
+      "pred": []
+    },
+    {
+      "obj": "16@8c8a54b01ce24c3a8dd9e05af04c862a",
+      "key": "value",
+      "action": "set",
+      "insert": false,
+      "value": "value",
+      "pred": []
+    },
+    {
+      "obj": "_root",
+      "key": "counter",
+      "action": "set",
+      "insert": false,
+      "value": 100,
+      "datatype": "counter",
+      "pred": []
+    },
+    {
+      "obj": "_root",
+      "key": "time",
+      "action": "set",
+      "insert": false,
+      "value": 1624294015745,
+      "datatype": "timestamp",
+      "pred": []
+    }
+  ]
+}

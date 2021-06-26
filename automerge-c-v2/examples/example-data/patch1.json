@@ -1,0 +1,116 @@
+{
+  "clock": { "8c8a54b01ce24c3a8dd9e05af04c862a": 1 },
+  "deps": ["9013fe6e020884f6fc44934cfc553e4e698e8aa5a1b04512a8b230f28057c8db"],
+  "diffs": {
+    "objectId": "_root",
+    "type": "map",
+    "props": {
+      "hello": {
+        "1@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "type": "value",
+          "value": "world"
+        }
+      },
+      "list1": {
+        "2@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "2@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "list",
+          "edits": [
+            {
+              "action": "insert",
+              "index": 0,
+              "elemId": "3@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "opId": "3@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": { "type": "value", "value": 1, "datatype": "int" }
+            },
+            {
+              "action": "insert",
+              "index": 1,
+              "elemId": "4@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "opId": "4@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": { "type": "value", "value": 2.2, "datatype": "float64" }
+            },
+            {
+              "action": "insert",
+              "index": 2,
+              "elemId": "5@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "opId": "5@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "value": {
+                "objectId": "5@8c8a54b01ce24c3a8dd9e05af04c862a",
+                "type": "map",
+                "props": {
+                  "n": {
+                    "6@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                      "type": "value",
+                      "value": -1,
+                      "datatype": "int"
+                    }
+                  },
+                  "v": {
+                    "7@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                      "type": "value",
+                      "value": "three"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "list2": {
+        "8@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "8@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "list",
+          "edits": [
+            {
+              "action": "multi-insert",
+              "index": 0,
+              "elemId": "9@8c8a54b01ce24c3a8dd9e05af04c862a",
+              "datatype": "int",
+              "values": [0, 1, 2, 3, 4, 5]
+            }
+          ]
+        }
+      },
+      "map": {
+        "15@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "objectId": "15@8c8a54b01ce24c3a8dd9e05af04c862a",
+          "type": "map",
+          "props": {
+            "submap": {
+              "16@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                "objectId": "16@8c8a54b01ce24c3a8dd9e05af04c862a",
+                "type": "map",
+                "props": {
+                  "value": {
+                    "17@8c8a54b01ce24c3a8dd9e05af04c862a": {
+                      "type": "value",
+                      "value": "value"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "counter": {
+        "18@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "type": "value",
+          "value": 100,
+          "datatype": "counter"
+        }
+      },
+      "time": {
+        "19@8c8a54b01ce24c3a8dd9e05af04c862a": {
+          "type": "value",
+          "value": 1624294015745,
+          "datatype": "timestamp"
+        }
+      }
+    }
+  },
+  "maxOp": 19,
+  "pendingChanges": 0
+}
