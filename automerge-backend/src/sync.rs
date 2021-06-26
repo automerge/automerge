@@ -77,7 +77,7 @@ impl Backend {
             false
         };
 
-        if heads_unchanged && heads_equal && changes_to_send.is_empty() && our_need.is_empty() {
+        if heads_unchanged && heads_equal && changes_to_send.is_empty() {
             return None;
         }
 
