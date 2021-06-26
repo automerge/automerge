@@ -22,6 +22,3 @@ serde_json = { version = "^1.0.61", features=["float_roundtrip"], default-featur
 proptest = "0.10.1"
 rmp = "0.8.10"
 rmp-serde = "0.15.4"
-
-[features]
-derive-arbitrary = ["arbitrary"]

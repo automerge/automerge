@@ -44,5 +44,4 @@ harness = false
 
 [features]
 default = ["std"]
-derive-arbitrary = ["arbitrary"]
 std = []
