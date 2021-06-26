@@ -27,7 +27,11 @@ impl<'de> Deserialize<'de> for RootDiff {
     where
         D: Deserializer<'de>,
     {
-        // NOTE: If you want to implement
+        // Normally we could just implement this with
+        //    #[serde(field_identifier, rename_all = "lowercase")]
+        //    and a #[serde(rename = "type")]
+        // but the messagepack library we use is broken (doesn't properly deserialize
+        // enums), so we need to manually implement this
         enum Field {
             ObjectId,
             ObjectType,
