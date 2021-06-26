@@ -5,17 +5,17 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ExamineError {
     #[error("Error reading change file: {:?}", source)]
-    ErrReadingChanges {
+    ReadingChanges {
         #[source]
         source: std::io::Error,
     },
     #[error("Error loading changes: {:?}", source)]
-    ErrApplyingInitialChanges {
+    ApplyingInitialChanges {
         #[source]
         source: amb::AutomergeError,
     },
     #[error("Error writing to output: {:?}", source)]
-    ErrWritingToOutput {
+    WritingToOutput {
         #[source]
         source: std::io::Error,
     },
@@ -29,9 +29,9 @@ pub fn examine(
     let mut buf: Vec<u8> = Vec::new();
     input
         .read_to_end(&mut buf)
-        .map_err(|e| ExamineError::ErrReadingChanges { source: e })?;
+        .map_err(|e| ExamineError::ReadingChanges { source: e })?;
     let changes = amb::Change::load_document(&buf)
-        .map_err(|e| ExamineError::ErrApplyingInitialChanges { source: e })?;
+        .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
     let uncompressed_changes: Vec<amp::Change> = changes.iter().map(|c| c.decode()).collect();
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
@@ -40,7 +40,7 @@ pub fn examine(
         let json_changes = serde_json::to_string_pretty(&uncompressed_changes).unwrap();
         output
             .write_all(&json_changes.into_bytes())
-            .map_err(|e| ExamineError::ErrWritingToOutput { source: e })?;
+            .map_err(|e| ExamineError::WritingToOutput { source: e })?;
     }
     Ok(())
 }
