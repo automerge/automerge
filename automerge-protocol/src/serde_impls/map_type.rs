@@ -1,13 +1,7 @@
 // By default, msgpack-rust serializes enums
 // as maps with a single K/V pair. This is unnecessary,
-// so we override that decision and manually serialize
-// to a string
-
-// The downside of this is that we cannot deserialize data structures
-// that use this enum b/c the msgpack deserializer will expect
-// enums to be encoded as a map with a single K/V pair
-// Luckily, we don't need to deserialize data structures
-// that use this enum
+// so we override that decision and manually serialize/deserialize
+// to/from a string
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 
 use crate::MapType;

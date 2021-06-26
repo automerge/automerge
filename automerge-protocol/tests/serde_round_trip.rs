@@ -25,9 +25,6 @@ fn test_msgpack_roundtrip_change() {
     assert_eq!(c, deserialized);
 }
 
-// Update: See comment in map_type.rs for
-// why this test is disabled
-// This was not caught in the proptests
 #[test]
 fn test_msgpack_roundtrip_diff() {
     let actor = amp::ActorId::from_bytes("bd1850df21004038a8141a98473ff142".as_bytes());
