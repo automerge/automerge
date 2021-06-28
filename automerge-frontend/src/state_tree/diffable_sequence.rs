@@ -406,18 +406,6 @@ where
             .insert(index, SequenceElement::original(value))
     }
 
-    pub(super) fn mutate<F>(&mut self, index: usize, f: F)
-    where
-        F: FnOnce(&T) -> T,
-    {
-        if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = SequenceElement {
-                opid: entry.opid.clone(),
-                value: SequenceValue::Original(f(entry.value.get())),
-            };
-        }
-    }
-
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
         self.underlying.iter().map(|i| i.value.get())
@@ -469,41 +457,6 @@ where
         match self {
             SequenceValue::Original(v) => v,
             _ => unreachable!(),
-        }
-    }
-
-    fn check_diff(
-        &self,
-        opid: &amp::OpId,
-        diff: &amp::Diff,
-        parent_object_id: &amp::ObjectId,
-    ) -> Result<(), InvalidPatch> {
-        match self {
-            SequenceValue::Original(v) | SequenceValue::New(v) => {
-                if let Some(existing) = v.only_for_opid(opid.clone()) {
-                    existing.check_diff(opid, diff, parent_object_id)?;
-                } else {
-                    T::check_construct(opid, diff, parent_object_id)?
-                };
-                Ok(())
-            }
-            SequenceValue::Updated { original, updates } => {
-                if let Some(update) = updates
-                    .get(1..)
-                    .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
-                {
-                    update.check_diff(opid, diff, parent_object_id)?;
-                } else if let Some(initial) =
-                    updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
-                {
-                    initial.check_diff(opid, diff, parent_object_id)?;
-                } else if let Some(original) = original.only_for_opid(opid.clone()) {
-                    original.check_diff(opid, diff, parent_object_id)?;
-                } else {
-                    T::check_construct(opid, diff, parent_object_id)?
-                };
-                Ok(())
-            }
         }
     }
 

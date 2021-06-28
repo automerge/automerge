@@ -277,7 +277,7 @@ impl<'de> Deserialize<'de> for Diff {
                 }
             }
         }
-        deserializer.deserialize_struct("Diff", &FIELDS, DiffVisitor)
+        deserializer.deserialize_struct("Diff", FIELDS, DiffVisitor)
     }
 }
 

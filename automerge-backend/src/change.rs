@@ -337,7 +337,7 @@ fn increment_range(range: &mut Range<usize>, len: usize) {
 
 fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
     for range in ranges.values_mut() {
-        increment_range(range, len)
+        increment_range(range, len);
     }
 }
 
@@ -429,7 +429,7 @@ fn decode_actors(
     let num_actors: usize = read_slice(bytes, cursor)?;
     let mut actors = Vec::with_capacity(num_actors + 1);
     if let Some(actor) = first {
-        actors.push(actor)
+        actors.push(actor);
     }
     for _ in 0..num_actors {
         actors.push(amp::ActorId::from(
@@ -602,7 +602,7 @@ fn group_doc_change_and_doc_ops(
                                  //op_by_id.insert(id, i);
         for succ in &op.succ {
             if let Some(index) = op_by_id.get(succ) {
-                ops[*index].pred.push((op.ctr, op.actor))
+                ops[*index].pred.push((op.ctr, op.actor));
             } else {
                 let key = if op.insert {
                     amp::OpId(op.ctr, actors[op.actor].clone()).into()
@@ -633,9 +633,9 @@ fn group_doc_change_and_doc_ops(
         while left < right {
             let seq = (left + right) / 2;
             if changes[actor_change_index[seq]].max_op < op.ctr {
-                left = seq + 1
+                left = seq + 1;
             } else {
-                right = seq
+                right = seq;
             }
         }
         if left >= actor_change_index.len() {
@@ -643,7 +643,7 @@ fn group_doc_change_and_doc_ops(
                 "Doc MaxOp Invalid".into(),
             ));
         }
-        changes[actor_change_index[left]].ops.push(op)
+        changes[actor_change_index[left]].ops.push(op);
     }
 
     changes
@@ -778,7 +778,7 @@ fn compress_doc_changes(
     for i in 0..doc_changes.len() {
         let deps = &mut uncompressed_changes.get_mut(i)?.deps;
         for idx in &doc_changes.get(i)?.deps {
-            deps.push(changes.get(*idx)?.hash)
+            deps.push(changes.get(*idx)?.hash);
         }
         changes.push(uncompressed_changes.get(i)?.into());
     }
@@ -858,7 +858,7 @@ fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp>
             let mut stack = vec![amp::ElementId::Head];
             while let Some(key) = stack.pop() {
                 if key != amp::ElementId::Head {
-                    keys.push(amp::Key::Seq(key.clone()))
+                    keys.push(amp::Key::Seq(key.clone()));
                 }
                 for opid in by_ref
                     .entry(objid.clone())
@@ -868,14 +868,14 @@ fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp>
                     .iter()
                     .sorted()
                 {
-                    stack.push(opid.into())
+                    stack.push(opid.into());
                 }
             }
         } else {
             keys = by_obj_id
                 .get(objid)
                 .map(|d| d.keys().sorted().cloned().collect())
-                .unwrap_or_default()
+                .unwrap_or_default();
         }
 
         for key in keys {
@@ -1327,13 +1327,13 @@ mod tests {
                 panic!(
                     "expected invalid checksum error with hash {:?} but found one with hash {:?}",
                     calculated, hash
-                )
+                );
             }
         } else {
             panic!(
                 "expected invalid checksum error but found {:?}",
                 decode_result
-            )
+            );
         }
     }
 }

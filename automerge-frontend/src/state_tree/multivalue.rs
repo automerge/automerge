@@ -188,13 +188,6 @@ impl MultiValue {
         self.winning_value.0.clone()
     }
 
-    pub(super) fn update_default(&self, val: StateTreeValue) -> MultiValue {
-        MultiValue {
-            winning_value: (self.winning_value.0.clone(), val),
-            conflicts: self.conflicts.clone(),
-        }
-    }
-
     fn iter(&self) -> impl std::iter::Iterator<Item = (&amp::OpId, &StateTreeValue)> {
         std::iter::once((&(self.winning_value).0, &(self.winning_value.1)))
             .chain(self.conflicts.iter())
@@ -278,14 +271,6 @@ impl MultiValue {
             return composite.resolve_path_mut(path);
         }
         None
-    }
-
-    pub(super) fn opids(&self) -> impl Iterator<Item = &amp::OpId> {
-        std::iter::once(&self.winning_value.0).chain(self.conflicts.keys())
-    }
-
-    pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
-        self.opids().any(|o| o == opid)
     }
 
     pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiValue> {
@@ -486,10 +471,6 @@ impl MultiGrapheme {
         self.iter()
             .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
             .collect()
-    }
-
-    pub(super) fn has_opid(&self, opid: &amp::OpId) -> bool {
-        self.winning_value.0 == *opid || self.conflicts.keys().any(|o| o == opid)
     }
 
     pub(super) fn only_for_opid(&self, opid: amp::OpId) -> Option<MultiGrapheme> {

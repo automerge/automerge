@@ -57,7 +57,7 @@ impl IncrementalPatch {
     }
 
     pub(crate) fn record_set(&mut self, oid: &ObjectId, op: OpHandle) {
-        self.append_diff(oid, PendingDiff::Set(op))
+        self.append_diff(oid, PendingDiff::Set(op));
     }
 
     pub(crate) fn record_cursor_change(&mut self, oid: &ObjectId, key: Key) {
@@ -109,7 +109,7 @@ impl IncrementalPatch {
                         _ => {}
                     }
                 }
-                new_diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id))
+                new_diffs.push(PendingDiff::SeqUpdate(op.clone(), index, op.id));
             }
         }
         new_diffs.sort_by_key(|d| {
@@ -124,7 +124,7 @@ impl IncrementalPatch {
     }
 
     pub(crate) fn record_seq_remove(&mut self, oid: &ObjectId, op: OpHandle, index: usize) {
-        self.append_diff(oid, PendingDiff::SeqRemove(op, index))
+        self.append_diff(oid, PendingDiff::SeqRemove(op, index));
     }
 
     fn append_diff(&mut self, oid: &ObjectId, diff: PendingDiff) {
@@ -132,7 +132,7 @@ impl IncrementalPatch {
     }
 
     fn append_diffs(&mut self, oid: &ObjectId, mut diffs: Vec<PendingDiff>) {
-        self.0.entry(*oid).or_default().append(&mut diffs)
+        self.0.entry(*oid).or_default().append(&mut diffs);
     }
 
     pub(crate) fn changed_object_ids(&self) -> impl Iterator<Item = &ObjectId> {
@@ -279,7 +279,7 @@ impl IncrementalPatch {
                     edits.append_edit(amp::DiffEdit::Remove {
                         index: (*index) as u64,
                         count: 1,
-                    })
+                    });
                 }
                 PendingDiff::Set(op) => {
                     for op in obj.conflicts(&op.operation_key()) {
@@ -298,12 +298,12 @@ impl IncrementalPatch {
                                 index: obj.index_of(op.id).unwrap_or(0) as u64,
                                 op_id: workshop.make_external_opid(&op.id),
                                 value,
-                            })
+                            });
                         }
                     }
                 }
                 PendingDiff::CursorChange(_) => {
-                    panic!("found cursor change pending diff while generating sequence diff")
+                    panic!("found cursor change pending diff while generating sequence diff");
                 }
             }
         }
@@ -363,7 +363,7 @@ impl IncrementalPatch {
                     edits.append_edit(amp::DiffEdit::Remove {
                         index: (*index) as u64,
                         count: 1,
-                    })
+                    });
                 }
                 PendingDiff::Set(op) => {
                     for op in obj.conflicts(&op.operation_key()) {
@@ -382,12 +382,12 @@ impl IncrementalPatch {
                                 index: obj.index_of(op.id).unwrap_or(0) as u64,
                                 op_id: workshop.make_external_opid(&op.id),
                                 value,
-                            })
+                            });
                         }
                     }
                 }
                 PendingDiff::CursorChange(_) => {
-                    panic!("found cursor change pending diff while generating sequence diff")
+                    panic!("found cursor change pending diff while generating sequence diff");
                 }
             }
         }

@@ -7,7 +7,7 @@ use diffable_sequence::DiffableSequence;
 use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
-use crate::{error, Cursor, Path, PathElement, Primitive, Value};
+use crate::{error, Path, PathElement, Primitive, Value};
 
 mod diffable_sequence;
 mod multivalue;
@@ -97,30 +97,6 @@ impl StateTree {
                 }
             }
         }
-    }
-
-    fn update_cursors(&mut self) {
-        // TODO: get cursors working again
-        // for cursor in self.cursors.iter_mut() {
-        //     if let Some(referred_object) = self.objects.get(&cursor.referred_object_id) {
-        //         match referred_object {
-        //             StateTreeComposite::List(l) => {
-        //                 if let Some(index) = l.index_of(&cursor.referred_opid) {
-        //                     cursor.index = index;
-        //                 }
-        //             }
-        //             StateTreeComposite::Text(t) => {
-        //                 if let Some(index) = t.index_of(&cursor.referred_opid) {
-        //                     cursor.index = index;
-        //                 }
-        //             }
-        //             _ => {}
-        //         }
-        //     }
-        //     if let Some(referring_object) = self.objects.get_mut(&cursor.referring_object_id) {
-        //         referring_object.mutably_update_cursor(cursor);
-        //     }
-        // }
     }
 
     fn remove(&mut self, k: &str) -> Option<MultiValue> {
@@ -337,26 +313,6 @@ impl StateTreeComposite {
         }
     }
 
-    fn mutably_update_cursor(&mut self, cursor: &CursorState) {
-        let cursor_value = Primitive::Cursor(Cursor::new(
-            cursor.index as u32,
-            cursor.referred_object_id.clone(),
-            cursor.referred_opid.clone(),
-        ));
-        match (self, &cursor.referring_key) {
-            (StateTreeComposite::Map(m), amp::Key::Map(k)) => {
-                m.mutably_update_cursor(&k, cursor_value);
-            }
-            (StateTreeComposite::Table(t), amp::Key::Map(k)) => {
-                t.mutably_update_cursor(&k, cursor_value);
-            }
-            (StateTreeComposite::List(l), amp::Key::Seq(elem_id)) => {
-                l.mutably_update_cursor(&elem_id, cursor_value);
-            }
-            _ => {}
-        }
-    }
-
     fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
         match self {
             Self::Map(map) => map.resolve_path(path),
@@ -527,16 +483,6 @@ impl StateTreeMap {
             .unwrap_or_else(SortedVec::new)
     }
 
-    pub fn mutably_update_cursor(&mut self, key: &str, cursor: Primitive) {
-        let new_mv = self
-            .props
-            .get(key)
-            .map(|mv| mv.update_default(StateTreeValue::Leaf(cursor)));
-        if let Some(new_mv) = new_mv {
-            self.props.insert(key.into(), new_mv);
-        }
-    }
-
     pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Key(key)) = path.pop() {
             self.props
@@ -625,16 +571,6 @@ impl StateTreeTable {
             .get(key)
             .map(|v| vec![v.default_opid()].into())
             .unwrap_or_else(SortedVec::new)
-    }
-
-    pub fn mutably_update_cursor(&mut self, key: &SmolStr, cursor: Primitive) {
-        let new_mv = self
-            .props
-            .get(key)
-            .map(|mv| mv.update_default(StateTreeValue::Leaf(cursor)));
-        if let Some(new_mv) = new_mv {
-            self.props.insert(key.clone(), new_mv);
-        }
     }
 
     pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
@@ -752,10 +688,6 @@ impl StateTreeText {
             .unwrap_or_else(SortedVec::new)
     }
 
-    pub(crate) fn index_of(&self, opid: &amp::OpId) -> Option<usize> {
-        self.graphemes.iter().position(|e| e.has_opid(opid))
-    }
-
     pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Index(i)) = path.pop() {
             if path.is_empty() {
@@ -867,32 +799,6 @@ impl StateTreeList {
             })
     }
 
-    pub(crate) fn elem_at_mut(
-        &mut self,
-        index: usize,
-    ) -> Result<(&mut amp::OpId, &mut MultiValue), error::MissingIndexError> {
-        let len = self.elements.len();
-        self.elements
-            .get_mut(index)
-            .ok_or(error::MissingIndexError {
-                missing_index: index,
-                size_of_collection: len,
-            })
-    }
-
-    pub(crate) fn index_of(&self, opid: &amp::OpId) -> Option<usize> {
-        self.elements.iter().position(|e| e.has_opid(opid))
-    }
-
-    fn mutably_update_cursor(&mut self, key: &amp::ElementId, cursor: Primitive) {
-        if let amp::ElementId::Id(oid) = key {
-            if let Some(index) = self.index_of(oid) {
-                self.elements
-                    .mutate(index, |m| m.update_default(StateTreeValue::Leaf(cursor)))
-            }
-        }
-    }
-
     pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
         if let Some(PathElement::Index(i)) = path.pop() {
             let elem_id = self
@@ -966,9 +872,5 @@ impl Cursors {
                 self.0.insert(k, v);
             }
         }
-    }
-
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut CursorState> {
-        self.0.iter_mut().flat_map(|e| e.1)
     }
 }
