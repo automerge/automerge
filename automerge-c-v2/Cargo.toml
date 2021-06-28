@@ -8,6 +8,7 @@ edition = "2018"
 name = "automerge"
 crate-type = ["cdylib", "staticlib"]
 bench = false
+doc = false
 
 [dependencies]
 automerge-backend = { path = "../automerge-backend" }
