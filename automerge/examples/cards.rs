@@ -1,5 +1,3 @@
-// This is how you load Automerge in Node. In a browser, simply including the
-// script tag will set up the Automerge object.
 use anyhow::Result;
 use automerge::{
     Backend, Change, Frontend, InvalidChangeRequest, LocalChange, MutableDocument, Path, Primitive,
@@ -56,21 +54,19 @@ fn main() -> Result<()> {
     // Let's say doc1 is the application state on device 1.
     // Further down we'll simulate a second device.
     // We initialize the document to initially contain an empty list of cards.
-    let mut automerge = Automerge::new();
-    automerge.change("Initial state", |doc| {
+    let mut doc1 = Automerge::new();
+    doc1.change("Initial state", |doc| {
         doc.add_change(LocalChange::set(
             Path::root(),
             Value::from_json(&json!({ "cards": [] })),
         ))
     })?;
 
-    // The doc1 object is treated as immutable -- you must never change it
-    // directly. To change it, you need to call Automerge.change() with a callback
-    // in which you can mutate the state. You can also include a human-readable
-    // description of the change, like a commit message, which is stored in the
-    // change history (see below).
+    // To change it, you need to call `change` with a callback in which you can
+    // mutate the state. You can also include a human-readable description of the
+    // change, like a commit message, which is stored in the change history (see below).
 
-    automerge.change("Add card", |doc| {
+    doc1.change("Add card", |doc| {
         doc.add_change(LocalChange::insert(
             Path::root().key("cards").index(0),
             Value::from_json(&json!({ "title": "Rewrite everything in Clojure", "done": false })),
@@ -80,9 +76,7 @@ fn main() -> Result<()> {
     // Now the state of doc1 is:
     // { cards: [ { title: 'Rewrite everything in Clojure', done: false } ] }
 
-    // Automerge also defines an insertAt() method for inserting a new element at
-    // a particular position in a list. Or you could use splice(), if you prefer.
-    automerge.change("Add another card", |doc| {
+    doc1.change("Add another card", |doc| {
         doc.add_change(LocalChange::insert(
             Path::root().key("cards").index(0),
             Value::from_json(&json!({ "title": "Rewrite everything in Haskell", "done": false })),
@@ -97,12 +91,12 @@ fn main() -> Result<()> {
     // initialise it separately, and merge doc1 into it. After merging, doc2 has
     // a copy of all the cards in doc1.
 
-    let mut automerge2 = Automerge::new();
+    let mut doc2 = Automerge::new();
 
-    automerge2.apply_changes(automerge.changes())?;
+    doc2.apply_changes(doc1.changes())?;
 
     // Now make a change on device 1:
-    automerge.change("Mark card as done", |doc| {
+    doc1.change("Mark card as done", |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("cards").index(0).key("done"),
             Value::Primitive(Primitive::Boolean(true)),
@@ -114,7 +108,7 @@ fn main() -> Result<()> {
     //      { title: 'Rewrite everything in Clojure', done: false } ] }
 
     // And, unbeknownst to device 1, also make a change on device 2:
-    automerge2.change("Delete card", |doc| {
+    doc2.change("Delete card", |doc| {
         doc.add_change(LocalChange::delete(Path::root().key("cards").index(1)))
     })?;
 
@@ -126,24 +120,10 @@ fn main() -> Result<()> {
     // Haskell' was set to true, and that 'Rewrite everything in Clojure' was
     // deleted:
 
-    automerge.apply_changes(automerge2.changes())?;
+    doc1.apply_changes(doc2.changes())?;
 
     // { cards: [ { title: 'Rewrite everything in Haskell', done: true } ] }
-    println!("{}", automerge.state().to_json());
-
-    // As our final trick, we can inspect the change history. Automerge
-    // automatically keeps track of every change, along with the "commit message"
-    // that you passed to change(). When you query that history, it includes both
-    // changes you made locally, and also changes that came from other devices. You
-    // can also see a snapshot of the application state at any moment in time in the
-    // past. For example, we can count how many cards there were at each point:
-
-    //Automerge.getHistory(finalDoc).map(state => [state.change.message, state.snapshot.cards.length])
-    // [ [ 'Initialization', 0 ],
-    //   [ 'Add card', 1 ],
-    //   [ 'Add another card', 2 ],
-    //   [ 'Mark card as done', 2 ],
-    //   [ 'Delete card', 1 ] ]
+    println!("{}", doc1.state().to_json());
 
     Ok(())
 }
