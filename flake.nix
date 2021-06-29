@@ -18,19 +18,21 @@
             overlays = [ rust-overlay.overlay ];
             inherit system;
           };
+          lib = pkgs.lib;
           rust = pkgs.rust-bin.nightly.latest.rust;
-          cargoNix = pkgs.callPackage ./Cargo.nix { };
+          cargoNix = pkgs.callPackage ./Cargo.nix {
+            inherit pkgs;
+            release = true;
+          };
+          debugCargoNix = pkgs.callPackage ./Cargo.nix {
+            inherit pkgs;
+            release = false;
+          };
         in
         {
-          packages = {
-            automerge = cargoNix.workspaceMembers.automerge.build;
-            automerge-protocol = cargoNix.workspaceMembers.automerge-protocol.build;
-            automerge-backend = cargoNix.workspaceMembers.automerge-backend.build;
-            automerge-backend-wasm = cargoNix.workspaceMembers.automerge-backend-wasm.build;
-            automerge-frontend = cargoNix.workspaceMembers.automerge-frontend.build;
-            automerge-c = cargoNix.workspaceMembers.automerge-c.build;
-            automerge-cli = cargoNix.workspaceMembers.automerge-cli.build;
-          };
+          packages = lib.attrsets.mapAttrs
+            (name: value: value.build)
+            cargoNix.workspaceMembers;
 
           defaultPackage = self.packages.${system}.automerge;
 
@@ -41,29 +43,27 @@
             };
           };
 
-          checks = {
-            automerge = cargoNix.workspaceMembers.automerge.build.override {
+          checks = lib.attrsets.mapAttrs
+            (name: value: value.build.override {
               runTests = true;
-            };
-            automerge-protocol = cargoNix.workspaceMembers.automerge-protocol.build.override {
-              runTests = true;
-            };
-            automerge-backend = cargoNix.workspaceMembers.automerge-backend.build.override {
-              runTests = true;
-            };
-            automerge-backend-wasm = cargoNix.workspaceMembers.automerge-backend-wasm.build.override {
-              runTests = true;
-            };
-            automerge-frontend = cargoNix.workspaceMembers.automerge-frontend.build.override {
-              runTests = true;
-            };
-            automerge-c = cargoNix.workspaceMembers.automerge-c.build.override {
-              runTests = true;
-            };
-            automerge-cli = cargoNix.workspaceMembers.automerge-cli.build.override {
-              # FIXME(jeffas): issues with 'environment variable `CARGO_BIN_EXE_automerge` not defined'
-              runTests = false;
-            };
+            })
+            debugCargoNix.workspaceMembers //
+          {
+            automerge-cli =
+              cargoNix.workspaceMembers.automerge-cli.build.override {
+                # FIXME(jeffas): issues with 'environment variable
+                # `CARGO_BIN_EXE_automerge` not defined'
+                runTests = false;
+              };
+
+            automerge-fuzz =
+              cargoNix.workspaceMembers.automerge-fuzz.build.override {
+                # FIXME(jeffas): tests shouldn't be run directly but invoked
+                # with cargo fuzz, I thought test=false in the Cargo.toml for
+                # this would have some effect but clearly not. Ideally fix this
+                # in the Cargo.toml or in crate2nix.
+                runTests = false;
+              };
 
             format = pkgs.runCommand "format"
               {
@@ -92,7 +92,6 @@
                 wasm-pack
                 pkgconfig
                 openssl
-                valgrind
 
                 nodejs
                 yarn
