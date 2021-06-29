@@ -31,7 +31,7 @@ test-wasm:
 
 .PHONY: test-js
 test-js:
-	cd automerge-backend-wasm && yarn release && yarn test:js
+	cd automerge-backend-wasm && yarn dev && yarn test:js
 
 .PHONY: ci
 ci: fmt clippy doc build test

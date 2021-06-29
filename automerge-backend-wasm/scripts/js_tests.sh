@@ -34,7 +34,7 @@ cd $AUTOMERGE_JS_DIR
 
 WASM_BACKEND_PATH="$ORIGINAL_PWD/build"
 if [[ ! -d $WASM_BACKEND_PATH ]]; then
-    echo "$WASM_BACKEND_PATH does not exist. Run 'yarn release' to build WASM backend"
+    echo "$WASM_BACKEND_PATH does not exist. Run 'yarn dev' or 'yarn release' to build WASM backend"
     exit 1
 fi
 yarn install
