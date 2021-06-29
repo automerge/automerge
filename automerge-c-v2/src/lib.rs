@@ -118,7 +118,8 @@ macro_rules! get_changes {
         let raws: Vec<Vec<u8>> = from_msgpack!($backend, $changes, $len);
         let mut changes = vec![];
         for raw in raws {
-            let change = call_automerge!($backend, Change::from_bytes(raw));
+            let mut change = call_automerge!($backend, Change::from_bytes(raw));
+            change.compress();
             changes.push(change);
         }
         changes
@@ -333,7 +334,8 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let backend = get_backend_mut!(backend);
     let buffs = get_buff_mut!(buffs);
     let request: amp::Change = from_msgpack!(backend, request, len);
-    let (patch, change) = call_automerge!(backend, backend.apply_local_change(request));
+    let (patch, mut change) = call_automerge!(backend, backend.apply_local_change(request));
+    change.compress();
     backend.last_local_change = Some(change.raw_bytes().to_vec());
     backend.write_msgpack(&patch, buffs)
 }
@@ -476,7 +478,8 @@ pub unsafe extern "C" fn automerge_decode_change(
     let backend = get_backend_mut!(backend);
     let buffs = get_buff_mut!(buffs);
     let bytes = std::slice::from_raw_parts(change, len);
-    let change = call_automerge!(backend, Change::from_bytes(bytes.to_vec()));
+    let mut change = call_automerge!(backend, Change::from_bytes(bytes.to_vec()));
+    change.compress();
     backend.write_msgpack(&change.decode(), buffs);
     0
 }
@@ -494,7 +497,8 @@ pub unsafe extern "C" fn automerge_encode_change(
     let buff = get_buff_mut!(buffs);
     let uncomp: amp::Change = from_msgpack!(backend, change, len);
     // This should never panic?
-    let change: Change = uncomp.try_into().unwrap();
+    let mut change: Change = uncomp.try_into().unwrap();
+    change.compress();
     write_bin_to_buff(change.raw_bytes(), buff);
     0
 }
@@ -526,7 +530,11 @@ pub unsafe extern "C" fn automerge_get_changes(
     let changes = backend.get_changes(&hashes);
     let bytes: Vec<_> = changes
         .into_iter()
-        .map(|c| c.raw_bytes().to_vec())
+        .map(|c| {
+            let mut c = c.clone();
+            c.compress();
+            c.raw_bytes().to_vec()
+        })
         .collect();
     backend.write_msgpack(&bytes, buffs)
 }
