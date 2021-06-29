@@ -17,6 +17,10 @@ doc:
 build:
 	cargo build --all-targets --workspace
 
+.PHONY: build-wasm
+build-wasm:
+	cd automerge-backend-wasm && yarn dev
+
 .PHONY: test
 test: test-rust test-wasm test-js
 	cargo test --workspace
@@ -30,8 +34,8 @@ test-wasm:
 	wasm-pack test automerge-frontend --node
 
 .PHONY: test-js
-test-js:
-	cd automerge-backend-wasm && yarn dev && yarn test:js
+test-js: build-wasm
+	cd automerge-backend-wasm && yarn test:js
 
 .PHONY: ci
 ci: fmt clippy doc build test
