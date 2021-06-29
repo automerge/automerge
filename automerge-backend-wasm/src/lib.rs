@@ -129,7 +129,8 @@ pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsV
         let change: amp::Change = change
             .into_serde()
             .map_err(|_| AutomergeError::DecodeFailed)?;
-        let (patch, change) = state.0.apply_local_change(change)?;
+        let (patch, mut change) = state.0.apply_local_change(change)?;
+        change.compress();
         let result = Array::new();
         let change_bytes = types::BinaryChange(change.raw_bytes().to_vec());
         // FIXME unwrap
@@ -230,7 +231,9 @@ fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
     let mut ch = Vec::with_capacity(changes.length() as usize);
     for c in changes.iter() {
         let change_bytes: types::BinaryChange = serde_wasm_bindgen::from_value(c).unwrap();
-        ch.push(Change::from_bytes(change_bytes.0)?);
+        let mut c = Change::from_bytes(change_bytes.0)?;
+        c.compress();
+        ch.push(c);
     }
     Ok(ch)
 }
@@ -238,6 +241,8 @@ fn import_changes(changes: &Array) -> Result<Vec<Change>, AutomergeError> {
 fn export_changes(changes: Vec<&Change>) -> Array {
     let result = Array::new();
     for c in changes {
+        let mut c = c.clone();
+        c.compress();
         let change_bytes = BinaryChange(c.raw_bytes().to_vec());
         result.push(&serde_wasm_bindgen::to_value(&change_bytes).unwrap());
     }
