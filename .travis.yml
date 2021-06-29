@@ -32,7 +32,7 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js
 
     - name: Beta - Format, Clippy and Docs
@@ -51,7 +51,7 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js
 
     - name: Nightly - Format, Clippy and Docs
@@ -70,5 +70,5 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js
