@@ -268,21 +268,19 @@ pub extern "C" fn automerge_init() -> *mut Backend {
 /// This must be called with a valid backend pointer
 #[no_mangle]
 pub unsafe extern "C" fn automerge_free(backend: *mut Backend) {
-    // TODO: Can we do a null pointer check here by using `get_backend_mut`
-    let backend: Backend = *Box::from_raw(backend);
-    drop(backend)
+    Box::from_raw(backend);
 }
 
 /// Create a `Buffers` struct to store return values
 #[no_mangle]
-pub extern "C" fn automerge_create_buff() -> Buffer {
+pub extern "C" fn automerge_create_buff() -> *mut Buffer {
     // Don't drop the vectors so their underlying buffers aren't de-allocated
     let mut data = ManuallyDrop::new(Vec::new());
-    Buffer {
+    Box::into_raw(Box::new(Buffer {
         data: data.as_mut_ptr(),
         len: data.len(),
         cap: data.capacity(),
-    }
+    }))
 }
 
 /// # Safety

@@ -56,7 +56,7 @@ intptr_t automerge_clone(Backend *backend, Backend **new_);
 /**
  * Create a `Buffers` struct to store return values
  */
-Buffer automerge_create_buff(void);
+Buffer *automerge_create_buff(void);
 
 /**
  * # Safety
