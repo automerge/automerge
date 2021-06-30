@@ -52,7 +52,10 @@ impl EventHandlers {
 }
 
 /// A handler for changes.
+#[cfg(feature = "send")]
 pub struct ChangeEventHandler(pub Box<dyn FnMut(&Change) + Send>);
+#[cfg(not(feature = "send"))]
+pub struct ChangeEventHandler(pub Box<dyn FnMut(&Change)>);
 
 /// An general event handler.
 pub enum EventHandler {

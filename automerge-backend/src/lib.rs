@@ -57,6 +57,7 @@ pub use event_handlers::{ChangeEventHandler, EventHandler, EventHandlerId};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
+#[cfg(feature = "send")]
 mod tests {
     use std::{
         sync::{Arc, Mutex},

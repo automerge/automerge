@@ -38,3 +38,7 @@ test-env-log = "0.2.6"
 env_logger = "*"
 tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}
 pretty_assertions = "0.7.1"
+
+[features]
+default = ["send"]
+send = []
