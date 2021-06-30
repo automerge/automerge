@@ -36,7 +36,6 @@ maplit = "^1.0.2"
 smol_str = "0.1.17"
 
 [features]
-default = ["send"]
 send = ["automerge-backend/send"]
 
 [[bench]]
