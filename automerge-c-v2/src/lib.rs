@@ -207,6 +207,16 @@ pub struct Buffer {
     cap: usize,
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn automerge_buff_get_data(buf: *const Buffer) -> *const u8 {
+    (*buf).data
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn automerge_buff_get_len(buf: *const Buffer) -> usize {
+    (*buf).len
+}
+
 impl Backend {
     fn init(handle: automerge_backend::Backend) -> Backend {
         Backend {
@@ -409,10 +419,8 @@ pub unsafe extern "C" fn automerge_save(backend: *mut Backend, buffs: *mut Buffe
 /// # Safety
 /// This should be called with a valid pointer to a `Backend`
 #[no_mangle]
-pub unsafe extern "C" fn automerge_clone(backend: *mut Backend, new: *mut *mut Backend) -> isize {
-    let backend = get_backend_mut!(backend);
-    (*new) = backend.clone().into();
-    0
+pub unsafe extern "C" fn automerge_clone(backend: *mut Backend) -> *mut Backend {
+    (*backend).clone().into()
 }
 
 /// # Safety
@@ -642,13 +650,16 @@ pub unsafe extern "C" fn automerge_sync_state_free(sync_state: *mut SyncState) {
 /// Must be called with a pointer to a valid Backend, sync_state, and buffs
 #[no_mangle]
 pub unsafe extern "C" fn automerge_encode_sync_state(
-    backend: *mut Backend,
     buffs: *mut Buffer,
     sync_state: &mut SyncState,
 ) -> isize {
-    let backend = get_backend_mut!(backend);
     let buffs = get_buff_mut!(buffs);
-    let encoded = call_automerge!(backend, sync_state.handle.encode());
+    let encoded = match sync_state.handle.encode() {
+        Ok(x) => x,
+        Err(e) => {
+            return CError::Automerge(AutomergeError::from(e)).error_code();
+        }
+    };
     write_bin_to_buff(&encoded, buffs);
     0
 }
@@ -657,19 +668,23 @@ pub unsafe extern "C" fn automerge_encode_sync_state(
 /// `encoded_state_[ptr|len]` must be the address & length of a byte array
 #[no_mangle]
 pub unsafe extern "C" fn automerge_decode_sync_state(
-    backend: *mut Backend,
     encoded_state_ptr: *const u8,
     encoded_state_len: usize,
-    sync_state: *mut *mut SyncState,
-) -> isize {
-    let backend = get_backend_mut!(backend);
+    error_code: *mut isize,
+) -> *mut SyncState {
     let slice = std::slice::from_raw_parts(encoded_state_ptr, encoded_state_len);
-    let decoded_state = call_automerge!(backend, automerge_backend::SyncState::decode(slice));
+    let decoded_state = match automerge_backend::SyncState::decode(slice) {
+        Ok(x) => x,
+        Err(e) => {
+            *error_code = CError::Automerge(AutomergeError::from(e)).error_code();
+            return std::ptr::null_mut();
+        }
+    };
     let state = SyncState {
         handle: decoded_state,
     };
-    (*sync_state) = state.into();
-    0
+    *error_code = 0;
+    state.into()
 }
 
 /// # Safety
