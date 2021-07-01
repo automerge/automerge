@@ -51,6 +51,10 @@ impl Automerge {
 }
 
 fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     // Let's say doc1 is the application state on device 1.
     // Further down we'll simulate a second device.
     // We initialize the document to initially contain an empty list of cards.
