@@ -527,3 +527,85 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use amp::{ActorId, Diff, DiffEdit, MultiElementInsert, ObjectId, ScalarValue, ScalarValues};
+
+    use super::*;
+
+    #[test]
+    fn insert_single() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(1, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn insert_many() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        let mut values = ScalarValues::new(amp::ScalarValueKind::Null);
+        values.append(ScalarValue::Null);
+        values.append(ScalarValue::Null);
+
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::MultiElementInsert(MultiElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Id(OpId(0, ActorId::random())),
+                    values: values.clone(),
+                }),
+                DiffEdit::MultiElementInsert(MultiElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Id(OpId(1, ActorId::random())),
+                    values,
+                }),
+            ],
+        )
+    }
+
+    #[test]
+    fn remove() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::SingleElementInsert {
+                    index: 1,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::Remove { index: 0, count: 1 },
+            ],
+        )
+    }
+}
