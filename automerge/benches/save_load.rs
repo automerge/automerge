@@ -130,7 +130,8 @@ fn medium_change_backend() -> Backend {
     ];
 
     let mut backend = Backend::new();
-    let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
+    let mut frontend =
+        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
@@ -147,7 +148,8 @@ fn medium_change_backend() -> Backend {
         backend.apply_local_change(change).unwrap();
     }
 
-    let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
+    let mut frontend =
+        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
