@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{collections::HashMap, convert::TryInto};
 
 use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
@@ -176,4 +176,36 @@ fn test_multiple_non_primitive_inserts() {
             ]
         }
     );
+}
+
+#[test]
+fn test_delete_non_existent_root_key() {
+    let mut frontend = Frontend::new();
+    let path = Path::root().key("missing");
+    let cr = frontend
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::delete(path.clone()))?;
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert_eq!(cr, InvalidChangeRequest::NoSuchPathError { path })
+}
+
+#[test]
+fn test_delete_non_existent_map_key() {
+    let mut frontend = Frontend::new();
+    let path = Path::root().key("a").key("missing");
+    let cr = frontend
+        .change::<_, _, InvalidChangeRequest>(None, |doc| {
+            doc.add_change(LocalChange::set(
+                Path::root().key("a"),
+                Value::Map(HashMap::new()),
+            ))?;
+            doc.add_change(LocalChange::delete(path.clone()))?;
+            Ok(())
+        })
+        .unwrap_err();
+
+    assert_eq!(cr, InvalidChangeRequest::NoSuchPathError { path })
 }
