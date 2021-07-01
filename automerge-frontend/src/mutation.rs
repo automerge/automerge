@@ -586,7 +586,11 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             ResolvedPathMut::Map(mut m) => match name {
                                 PathElement::Key(k) => {
-                                    let (old, res) = m.delete_key(k);
+                                    let (old, res) = m.delete_key(k).ok_or_else(|| {
+                                        InvalidChangeRequest::NoSuchPathError {
+                                            path: change.path.clone(),
+                                        }
+                                    })?;
                                     (LocalOperationForRollback::Delete { old }, res)
                                 }
                                 _ => {
@@ -597,7 +601,11 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             },
                             ResolvedPathMut::Table(mut t) => match name {
                                 PathElement::Key(k) => {
-                                    let (old, res) = t.delete_key(k);
+                                    let (old, res) = t.delete_key(k).ok_or_else(|| {
+                                        InvalidChangeRequest::NoSuchPathError {
+                                            path: change.path.clone(),
+                                        }
+                                    })?;
                                     (LocalOperationForRollback::Delete { old }, res)
                                 }
                                 _ => {
@@ -613,7 +621,11 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             ResolvedPathMut::Root(mut r) => match name {
                                 PathElement::Key(k) => {
-                                    let (old, res) = r.delete_key(k);
+                                    let (old, res) = r.delete_key(k).ok_or_else(|| {
+                                        InvalidChangeRequest::NoSuchPathError {
+                                            path: change.path.clone(),
+                                        }
+                                    })?;
                                     (LocalOperationForRollback::Delete { old }, res)
                                 }
                                 _ => {
