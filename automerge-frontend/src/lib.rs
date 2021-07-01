@@ -363,7 +363,7 @@ impl Frontend {
     }
 
     #[cfg(feature = "std")]
-    pub fn new_with_actor_id(actor_id: uuid::Uuid) -> Self {
+    pub fn new_with_actor_id(actor_id: &[u8]) -> Self {
         let system_time = || {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -374,16 +374,16 @@ impl Frontend {
     }
 
     pub fn new_with_timestamper(t: Box<dyn Fn() -> Option<i64>>) -> Self {
-        Self::new_with_timestamper_and_actor_id(t, uuid::Uuid::new_v4())
+        Self::new_with_timestamper_and_actor_id(t, uuid::Uuid::new_v4().as_bytes())
     }
 
     pub fn new_with_timestamper_and_actor_id(
         t: Box<dyn Fn() -> Option<i64>>,
-        actor_id: uuid::Uuid,
+        actor_id: &[u8],
     ) -> Self {
         let root_state = state_tree::StateTree::new();
         Frontend {
-            actor_id: ActorId::from_bytes(actor_id.as_bytes()),
+            actor_id: ActorId::from_bytes(actor_id),
             seq: 0,
             state: FrontendState::Reconciled {
                 reconciled_root_state: root_state.clone(),
