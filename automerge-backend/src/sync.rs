@@ -9,7 +9,8 @@ use std::{
 use automerge_protocol::{ChangeHash, Patch};
 
 use crate::{
-    decoding, decoding::Decoder, encoding, encoding::Encodable, AutomergeError, Backend, Change,
+    backend::GenericBackend, decoding, decoding::Decoder, encoding, encoding::Encodable,
+    event_handlers::EventHandler, AutomergeError, Change,
 };
 
 mod bloom;
@@ -21,7 +22,7 @@ pub use state::{SyncHave, SyncState};
 const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
-impl Backend {
+impl<H: EventHandler> GenericBackend<H> {
     pub fn generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
         let our_heads = self.get_heads();
 

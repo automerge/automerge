@@ -48,12 +48,12 @@ mod ordered_set;
 mod patches;
 mod sync;
 
-pub use backend::Backend;
+pub use backend::{Backend, GenericBackend, SendableBackend};
 pub use change::Change;
 pub use decoding::Error as DecodingError;
 pub use encoding::Error as EncodingError;
 pub use error::AutomergeError;
-pub use event_handlers::{ChangeEventHandler, EventHandler, EventHandlerId};
+pub use event_handlers::{EventHandlerId, SendableEventHandler, UnsendableEventHandler};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn sync_and_send_backend() {
-        let b = crate::Backend::new();
+        let b = crate::SendableBackend::new();
         let mb = Arc::new(Mutex::new(b));
         thread::spawn(move || {
             let b = mb.lock().unwrap();

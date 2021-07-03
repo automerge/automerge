@@ -2,6 +2,7 @@ use core::cmp::max;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
+    ops::{Deref, DerefMut},
 };
 
 use amp::ChangeHash;
@@ -11,26 +12,118 @@ use crate::{
     actor_map::ActorMap,
     change::encode_document,
     error::AutomergeError,
-    event_handlers::{EventHandlerId, EventHandlers},
+    event_handlers::{
+        EventHandler, EventHandlerId, EventHandlers, SendableEventHandler, UnsendableEventHandler,
+    },
     op_handle::OpHandle,
     op_set::OpSet,
     patches::{generate_from_scratch_diff, IncrementalPatch},
-    Change, EventHandler,
+    Change,
 };
 
+/// An automerge Backend.
+///
+/// This struct does not implement Send, if you need Send functionality switch to a
+/// [`SendableBackend`] instead.
 #[derive(Debug, Default, Clone)]
-pub struct Backend {
+pub struct Backend(GenericBackend<UnsendableEventHandler>);
+
+impl Backend {
+    pub fn new() -> Self {
+        Self(GenericBackend::new())
+    }
+
+    pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
+        Ok(Self(GenericBackend::load(data)?))
+    }
+}
+
+impl Deref for Backend {
+    type Target = GenericBackend<UnsendableEventHandler>;
+
+    fn deref(&self) -> &<Self as Deref>::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Backend {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// An automerge Backend that implements Send.
+#[derive(Debug, Default, Clone)]
+pub struct SendableBackend(GenericBackend<SendableEventHandler>);
+
+impl SendableBackend {
+    pub fn new() -> Self {
+        Self(GenericBackend::new())
+    }
+
+    pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
+        Ok(Self(GenericBackend::load(data)?))
+    }
+}
+
+impl Deref for SendableBackend {
+    type Target = GenericBackend<SendableEventHandler>;
+
+    fn deref(&self) -> &<Self as Deref>::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for SendableBackend {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// An automerge backend that is generic over the event handler it uses.
+///
+/// This is to enable both sendable and non-sendable backends to exist.
+#[derive(Debug)]
+pub struct GenericBackend<H: EventHandler> {
     queue: Vec<Change>,
     op_set: OpSet,
     states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
-    event_handlers: EventHandlers,
+    event_handlers: EventHandlers<H>,
 }
 
-impl Backend {
-    pub fn new() -> Self {
+impl<H: EventHandler> Default for GenericBackend<H> {
+    fn default() -> Self {
+        Self {
+            queue: Vec::default(),
+            op_set: OpSet::default(),
+            states: HashMap::default(),
+            actors: ActorMap::default(),
+            history: Vec::default(),
+            history_index: HashMap::default(),
+            event_handlers: EventHandlers::default(),
+        }
+    }
+}
+
+impl<H: EventHandler> Clone for GenericBackend<H> {
+    fn clone(&self) -> Self {
+        Self {
+            queue: self.queue.clone(),
+            op_set: self.op_set.clone(),
+            states: self.states.clone(),
+            actors: self.actors.clone(),
+            history: self.history.clone(),
+            history_index: self.history_index.clone(),
+            event_handlers: self.event_handlers.clone(),
+        }
+    }
+}
+
+impl<H: EventHandler> GenericBackend<H> {
+    fn new() -> Self {
         Self::default()
     }
 
@@ -318,7 +411,7 @@ impl Backend {
 
     // allow this for API reasons
     #[allow(clippy::needless_pass_by_value)]
-    pub fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
+    fn load(data: Vec<u8>) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(&data)?;
         let mut backend = Self::new();
         backend.load_changes(changes)?;
@@ -448,7 +541,7 @@ impl Backend {
     }
 
     /// Adds the event handler and returns the id of the handler.
-    pub fn add_event_handler(&mut self, handler: EventHandler) -> EventHandlerId {
+    pub fn add_event_handler(&mut self, handler: H) -> EventHandlerId {
         self.event_handlers.add_handler(handler)
     }
 
