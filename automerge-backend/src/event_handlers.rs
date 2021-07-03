@@ -53,7 +53,14 @@ impl<H: EventHandler> EventHandlers<H> {
     }
 }
 
-pub trait EventHandler {
+mod private {
+    pub trait Sealed {}
+
+    impl Sealed for super::UnsendableEventHandler {}
+    impl Sealed for super::SendableEventHandler {}
+}
+
+pub trait EventHandler: private::Sealed {
     fn before_apply_change(&mut self, change: &Change);
 
     fn after_apply_change(&mut self, change: &Change);
