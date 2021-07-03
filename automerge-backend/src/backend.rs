@@ -20,7 +20,6 @@ use crate::{
 
 #[derive(Debug, Default, Clone)]
 pub struct Backend {
-    queue: Vec<Change>,
     op_set: OpSet,
     states: HashMap<amp::ActorId, Vec<usize>>,
     actors: ActorMap,
@@ -87,8 +86,20 @@ impl Backend {
     ) -> Result<amp::Patch, AutomergeError> {
         let mut patch = IncrementalPatch::new();
 
+        // check all dependencies exist for these changes, if not then we don't want to apply any
+        // of them
+        let mut seen_hashes = HashSet::new();
+        for change in &changes {
+            for dep in &change.deps {
+                if !self.history_index.contains_key(dep) && !seen_hashes.contains(dep) {
+                    return Err(AutomergeError::MissingChangeDependencies);
+                }
+            }
+            seen_hashes.insert(change.hash);
+        }
+
         for change in changes {
-            self.add_change(change, actor.is_some(), &mut patch)?;
+            self.apply_change(change, &mut patch)?;
         }
 
         let workshop = self.op_set.patch_workshop(&self.actors);
@@ -142,27 +153,6 @@ impl Backend {
         Ok(())
     }
 
-    fn add_change(
-        &mut self,
-        change: Change,
-        local: bool,
-        diffs: &mut IncrementalPatch,
-    ) -> Result<(), AutomergeError> {
-        if local {
-            self.apply_change(change, diffs)
-        } else {
-            self.queue.push(change);
-            self.apply_queued_ops(diffs)
-        }
-    }
-
-    fn apply_queued_ops(&mut self, diffs: &mut IncrementalPatch) -> Result<(), AutomergeError> {
-        while let Some(next_change) = self.pop_next_causally_ready_change() {
-            self.apply_change(next_change, diffs)?;
-        }
-        Ok(())
-    }
-
     fn apply_change(
         &mut self,
         change: Change,
@@ -212,22 +202,6 @@ impl Backend {
         self.history.push(change);
 
         history_index
-    }
-
-    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
-        let mut index = 0;
-        while index < self.queue.len() {
-            let change = self.queue.get(index).unwrap();
-            if change
-                .deps
-                .iter()
-                .all(|d| self.history_index.contains_key(d))
-            {
-                return Some(self.queue.swap_remove(index));
-            }
-            index += 1;
-        }
-        None
     }
 
     pub fn get_patch(&self) -> Result<amp::Patch, AutomergeError> {
@@ -326,14 +300,7 @@ impl Backend {
     }
 
     pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
-        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
-
-        for head in self.queue.iter().flat_map(|change| &change.deps) {
-            if !self.history_index.contains_key(head) {
-                missing.insert(head);
-            }
-        }
 
         for head in heads {
             if !self.history_index.contains_key(head) {
@@ -341,11 +308,7 @@ impl Backend {
             }
         }
 
-        let mut missing = missing
-            .into_iter()
-            .filter(|hash| !in_queue.contains(hash))
-            .copied()
-            .collect::<Vec<_>>();
+        let mut missing = missing.into_iter().copied().collect::<Vec<_>>();
         missing.sort();
         missing
     }
