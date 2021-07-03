@@ -53,7 +53,9 @@ pub use change::Change;
 pub use decoding::Error as DecodingError;
 pub use encoding::Error as EncodingError;
 pub use error::AutomergeError;
-pub use event_handlers::{EventHandlerId, SendableEventHandler, UnsendableEventHandler};
+pub use event_handlers::{
+    EventHandler, EventHandlerId, SendableEventHandler, UnsendableEventHandler,
+};
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
