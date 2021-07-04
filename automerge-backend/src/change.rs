@@ -746,9 +746,8 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
     }
 
     let actors = decode_actors(bytes, &mut cursor, None)?;
-    // FIXME
-    // I should calculate the deads generated on decode and confirm they match these
-    let _heads = decode_hashes(bytes, &mut cursor)?;
+
+    let heads = decode_hashes(bytes, &mut cursor)?;
 
     let changes_info = decode_column_info(bytes, &mut cursor, true)?;
     let ops_info = decode_column_info(bytes, &mut cursor, true)?;
@@ -763,8 +762,22 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
 
     let mut uncompressed_changes = doc_changes_to_uncompressed_changes(&doc_changes, &actors);
 
-    compress_doc_changes(&mut uncompressed_changes, &doc_changes)
-        .ok_or(decoding::Error::NoDocChanges)
+    let changes = compress_doc_changes(&mut uncompressed_changes, &doc_changes)
+        .ok_or(decoding::Error::NoDocChanges)?;
+
+    let mut calculated_heads = HashSet::new();
+    for change in &changes {
+        for dep in &change.deps {
+            calculated_heads.remove(dep);
+        }
+        calculated_heads.insert(change.hash);
+    }
+
+    if calculated_heads != heads.into_iter().collect::<HashSet<_>>() {
+        return Err(decoding::Error::MismatchedHeads);
+    }
+
+    Ok(changes)
 }
 
 fn compress_doc_changes(
