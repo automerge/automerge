@@ -56,18 +56,7 @@ pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        sync::{Arc, Mutex},
-        thread,
-    };
+    use static_assertions::assert_impl_all;
 
-    #[test]
-    fn sync_and_send_backend() {
-        let b = crate::Backend::new();
-        let mb = Arc::new(Mutex::new(b));
-        thread::spawn(move || {
-            let b = mb.lock().unwrap();
-            b.get_changes(&[]);
-        });
-    }
+    assert_impl_all!(crate::Backend: Send, Sync);
 }
