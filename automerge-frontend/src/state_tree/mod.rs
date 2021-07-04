@@ -13,6 +13,7 @@ mod diffable_sequence;
 mod multivalue;
 mod optimistic;
 mod resolved_path;
+mod sequence_tree;
 
 pub use multivalue::{MultiGrapheme, MultiValue};
 pub(crate) use optimistic::{LocalOperationForRollback, OptimisticStateTree};
