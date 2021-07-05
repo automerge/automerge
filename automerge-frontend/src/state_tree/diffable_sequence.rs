@@ -168,7 +168,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<SequenceElement<T>>>,
+    underlying: Box<im_rc::Vector<Box<SequenceElement<T>>>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -188,7 +188,12 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().map(SequenceElement::original).collect()),
+            underlying: Box::new(
+                i.into_iter()
+                    .map(SequenceElement::original)
+                    .map(Box::new)
+                    .collect(),
+            ),
         }
     }
 
@@ -304,10 +309,11 @@ where
                 } => {
                     let node = T::construct(op_id, value);
                     if (index as usize) == self.underlying.len() {
-                        self.underlying.push_back(SequenceElement::new(node));
+                        self.underlying
+                            .push_back(Box::new(SequenceElement::new(node)));
                     } else {
                         self.underlying
-                            .insert(index as usize, SequenceElement::new(node));
+                            .insert(index as usize, Box::new(SequenceElement::new(node)));
                     };
                     changed_indices.insert(index);
                 }
@@ -325,7 +331,7 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()));
-                        intermediate.push_back(SequenceElement::new(mv));
+                        intermediate.push_back(Box::new(SequenceElement::new(mv)));
                     }
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
@@ -381,10 +387,10 @@ where
         self.underlying
             .set(
                 index,
-                SequenceElement {
+                Box::new(SequenceElement {
                     opid: elem_id,
                     value: SequenceValue::Original(value),
-                },
+                }),
             )
             .value
             .get()
@@ -403,7 +409,7 @@ where
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
         self.underlying
-            .insert(index, SequenceElement::original(value))
+            .insert(index, Box::new(SequenceElement::original(value)))
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
