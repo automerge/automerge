@@ -67,8 +67,20 @@ impl Backend {
         })
     }
 
+    /// This loads changes into the backend but does not produce a patch and does not go through
+    /// the queue.
+    ///
+    /// Generating the patch can itself be expensive and not always required, for instance when
+    /// loading a new backend from bytes.
+    ///
+    /// The changes should be in causal order as per the document's binary format.
     pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
-        self.apply_without_patch(changes)?;
+        let mut patch = IncrementalPatch::new();
+
+        for change in changes {
+            self.apply_change(change, &mut patch)?;
+        }
+
         Ok(())
     }
 
@@ -94,20 +106,6 @@ impl Backend {
         let workshop = self.op_set.patch_workshop(&self.actors);
         let diffs = patch.finalize(&workshop);
         self.make_patch(diffs, actor)
-    }
-
-    /// This applies the changes to the backend but does not produce a patch.
-    ///
-    /// Generating the patch can itself be expensive and not always required, for instance when
-    /// loading a new backend from bytes.
-    fn apply_without_patch(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
-        let mut patch = IncrementalPatch::new();
-
-        for change in changes {
-            self.add_change(change, false, &mut patch)?;
-        }
-
-        Ok(())
     }
 
     fn get_hash(&self, actor: &amp::ActorId, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
