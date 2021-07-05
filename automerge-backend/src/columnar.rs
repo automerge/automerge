@@ -239,7 +239,6 @@ pub(crate) struct ChangeIterator<'a> {
     pub(crate) max_op: DeltaDecoder<'a>,
     pub(crate) time: DeltaDecoder<'a>,
     pub(crate) message: RleDecoder<'a, String>,
-    pub(crate) deps: DepsIterator<'a>,
     pub(crate) extra: ExtraIterator<'a>,
 }
 
@@ -251,10 +250,6 @@ impl<'a> ChangeIterator<'a> {
             max_op: col_iter(bytes, ops, DOC_MAX_OP),
             time: col_iter(bytes, ops, DOC_TIME),
             message: col_iter(bytes, ops, DOC_MESSAGE),
-            deps: DepsIterator {
-                num: col_iter(bytes, ops, DOC_DEPS_NUM),
-                dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
-            },
             extra: ExtraIterator {
                 len: col_iter(bytes, ops, DOC_EXTRA_LEN),
                 extra: col_iter(bytes, ops, DOC_EXTRA_RAW),
@@ -271,7 +266,6 @@ impl<'a> Iterator for ChangeIterator<'a> {
         let max_op = self.max_op.next()??;
         let time = self.time.next()?? as i64;
         let message = self.message.next()?;
-        let deps = self.deps.next()?;
         let extra_bytes = self.extra.next().unwrap_or_else(Vec::new);
         Some(DocChange {
             actor,
@@ -279,7 +273,6 @@ impl<'a> Iterator for ChangeIterator<'a> {
             max_op,
             time,
             message,
-            deps,
             extra_bytes,
             ops: Vec::new(),
         })
@@ -296,6 +289,15 @@ pub struct ObjIterator<'a> {
 pub struct DepsIterator<'a> {
     pub(crate) num: RleDecoder<'a, usize>,
     pub(crate) dep: DeltaDecoder<'a>,
+}
+
+impl<'a> DepsIterator<'a> {
+    pub fn new(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>) -> Self {
+        Self {
+            num: col_iter(bytes, ops, DOC_DEPS_NUM),
+            dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
+        }
+    }
 }
 
 pub struct ExtraIterator<'a> {
@@ -505,7 +507,6 @@ pub(crate) struct DocChange {
     pub max_op: u64,
     pub time: i64,
     pub message: Option<String>,
-    pub deps: Vec<usize>,
     pub extra_bytes: Vec<u8>,
     pub ops: Vec<DocOp>,
 }

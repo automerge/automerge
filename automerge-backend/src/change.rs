@@ -22,7 +22,7 @@ use tracing::instrument;
 
 use crate::{
     columnar::{
-        ChangeEncoder, ChangeIterator, ColumnEncoder, DocChange, DocOp, DocOpEncoder,
+        ChangeEncoder, ChangeIterator, ColumnEncoder, DepsIterator, DocChange, DocOp, DocOpEncoder,
         DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
     },
     decoding,
@@ -653,42 +653,41 @@ fn group_doc_change_and_doc_ops(
     Ok(())
 }
 
-fn pred_into(pred: &[(u64, usize)], actors: &[amp::ActorId]) -> SortedVec<amp::OpId> {
-    pred.iter()
-        .map(|(ctr, actor)| amp::OpId(*ctr, actors[*actor].clone()))
+fn pred_into(
+    pred: impl Iterator<Item = (u64, usize)>,
+    actors: &[amp::ActorId],
+) -> SortedVec<amp::OpId> {
+    pred.map(|(ctr, actor)| amp::OpId(ctr, actors[actor].clone()))
         .collect()
 }
 
-fn doc_changes_to_uncompressed_changes(
-    changes: &[DocChange],
-    actors: &[amp::ActorId],
-) -> Vec<amp::Change> {
-    changes
-        .iter()
-        .map(|change| amp::Change {
-            // we've already confirmed that all change.actor's are valid
-            actor_id: actors[change.actor].clone(),
-            seq: change.seq,
-            time: change.time,
-            start_op: change.max_op - change.ops.len() as u64 + 1,
-            hash: None,
-            message: change.message.clone(),
-            operations: change
-                .ops
-                .iter()
-                .map(|op| amp::Op {
-                    action: (&op.action).into(),
-                    insert: op.insert,
-                    key: op.key.clone(),
-                    obj: op.obj.clone(),
-                    // we've already confirmed that all op.actor's are valid
-                    pred: pred_into(&op.pred, actors),
-                })
-                .collect(),
-            deps: Vec::new(),
-            extra_bytes: change.extra_bytes.clone(),
-        })
-        .collect()
+fn doc_changes_to_uncompressed_changes<'a>(
+    changes: impl Iterator<Item = DocChange> + 'a,
+    actors: &'a [amp::ActorId],
+) -> impl Iterator<Item = amp::Change> + 'a {
+    changes.map(move |change| amp::Change {
+        // we've already confirmed that all change.actor's are valid
+        actor_id: actors[change.actor].clone(),
+        seq: change.seq,
+        time: change.time,
+        start_op: change.max_op - change.ops.len() as u64 + 1,
+        hash: None,
+        message: change.message,
+        operations: change
+            .ops
+            .into_iter()
+            .map(|op| amp::Op {
+                action: (&op.action).into(),
+                insert: op.insert,
+                key: op.key,
+                obj: op.obj,
+                // we've already confirmed that all op.actor's are valid
+                pred: pred_into(op.pred.into_iter(), actors),
+            })
+            .collect(),
+        deps: Vec::new(),
+        extra_bytes: change.extra_bytes,
+    })
 }
 
 fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
@@ -753,16 +752,20 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
     let ops_info = decode_column_info(bytes, &mut cursor, true)?;
 
     let changes_data = decode_columns(&mut cursor, &changes_info);
-    let mut doc_changes: Vec<_> = ChangeIterator::new(bytes, &changes_data).collect();
+    let mut doc_changes = ChangeIterator::new(bytes, &changes_data).collect::<Vec<_>>();
+    let doc_changes_deps = DepsIterator::new(bytes, &changes_data);
+
+    let doc_changes_len = doc_changes.len();
 
     let ops_data = decode_columns(&mut cursor, &ops_info);
     let doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
 
     group_doc_change_and_doc_ops(&mut doc_changes, doc_ops, &actors)?;
 
-    let mut uncompressed_changes = doc_changes_to_uncompressed_changes(&doc_changes, &actors);
+    let uncompressed_changes =
+        doc_changes_to_uncompressed_changes(doc_changes.into_iter(), &actors);
 
-    let changes = compress_doc_changes(&mut uncompressed_changes, &doc_changes)
+    let changes = compress_doc_changes(uncompressed_changes, doc_changes_deps, doc_changes_len)
         .ok_or(decoding::Error::NoDocChanges)?;
 
     let mut calculated_heads = HashSet::new();
@@ -781,19 +784,18 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
 }
 
 fn compress_doc_changes(
-    uncompressed_changes: &mut [amp::Change],
-    doc_changes: &[DocChange],
+    uncompressed_changes: impl Iterator<Item = amp::Change>,
+    doc_changes_deps: impl Iterator<Item = Vec<usize>>,
+    num_changes: usize,
 ) -> Option<Vec<Change>> {
-    let mut changes: Vec<Change> = Vec::with_capacity(doc_changes.len());
+    let mut changes: Vec<Change> = Vec::with_capacity(num_changes);
 
     // fill out the hashes as we go
-
-    for i in 0..doc_changes.len() {
-        let deps = &mut uncompressed_changes.get_mut(i)?.deps;
-        for idx in &doc_changes.get(i)?.deps {
-            deps.push(changes.get(*idx)?.hash);
+    for (deps, mut uncompressed_change) in doc_changes_deps.zip_eq(uncompressed_changes) {
+        for idx in deps {
+            uncompressed_change.deps.push(changes.get(idx)?.hash);
         }
-        changes.push(uncompressed_changes.get(i)?.into());
+        changes.push(uncompressed_change.into());
     }
 
     Some(changes)
