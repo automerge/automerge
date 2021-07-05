@@ -5,6 +5,7 @@ use automerge::{
 };
 use serde_json::json;
 
+#[derive(Default)]
 pub struct Automerge {
     backend: Backend,
     frontend: Frontend,
@@ -12,14 +13,6 @@ pub struct Automerge {
 }
 
 impl Automerge {
-    pub fn new() -> Self {
-        Self {
-            backend: Backend::new(),
-            frontend: Frontend::new(),
-            stream: vec![],
-        }
-    }
-
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<()> {
         for change in changes {
             let patch = self.backend.apply_changes(vec![change.clone()])?;
@@ -58,7 +51,7 @@ fn main() -> Result<()> {
     // Let's say doc1 is the application state on device 1.
     // Further down we'll simulate a second device.
     // We initialize the document to initially contain an empty list of cards.
-    let mut doc1 = Automerge::new();
+    let mut doc1 = Automerge::default();
     doc1.change("Initial state", |doc| {
         doc.add_change(LocalChange::set(
             Path::root(),
@@ -95,7 +88,7 @@ fn main() -> Result<()> {
     // initialise it separately, and merge doc1 into it. After merging, doc2 has
     // a copy of all the cards in doc1.
 
-    let mut doc2 = Automerge::new();
+    let mut doc2 = Automerge::default();
 
     doc2.apply_changes(doc1.changes())?;
 
