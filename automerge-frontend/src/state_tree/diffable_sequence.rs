@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use amp::{ActorId, OpId};
 use automerge_protocol as amp;
 use smol_str::SmolStr;
 
-use super::{MultiGrapheme, MultiValue, StateTreeValue};
+use super::{sequence_tree::SequenceTree, MultiGrapheme, MultiValue, StateTreeValue};
 use crate::error::InvalidPatch;
 
 pub(crate) trait DiffableValue: Sized {
@@ -160,6 +160,7 @@ where
     T: DiffableValue,
     T: Clone,
     T: PartialEq,
+    T: Debug,
 {
     opid: OpId,
     value: SequenceValue<T>,
@@ -170,6 +171,7 @@ where
     T: Clone,
     T: DiffableValue,
     T: PartialEq,
+    T: Debug,
 {
     fn original(value: T) -> Self {
         Self {
@@ -192,9 +194,10 @@ where
     T: DiffableValue,
     T: Clone,
     T: PartialEq,
+    T: Debug,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<Box<SequenceElement<T>>>>,
+    underlying: Box<SequenceTree<SequenceElement<T>>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -202,10 +205,11 @@ where
     T: Clone,
     T: DiffableValue,
     T: PartialEq,
+    T: Debug,
 {
     pub fn new() -> DiffableSequence<T> {
         DiffableSequence {
-            underlying: Box::new(im_rc::Vector::new()),
+            underlying: Box::new(SequenceTree::new()),
         }
     }
 
@@ -213,13 +217,12 @@ where
     where
         I: IntoIterator<Item = T>,
     {
+        let mut s = SequenceTree::new();
+        for i in i {
+            s.push_back(i.default_opid(), SequenceElement::original(i))
+        }
         DiffableSequence {
-            underlying: Box::new(
-                i.into_iter()
-                    .map(SequenceElement::original)
-                    .map(Box::new)
-                    .collect(),
-            ),
+            underlying: Box::new(s),
         }
     }
 
@@ -312,7 +315,9 @@ where
                 amp::DiffEdit::Remove { index, count } => {
                     let index = index as usize;
                     let count = count as usize;
-                    self.underlying.slice(index..(index + count));
+                    for i in index..(index + count) {
+                        self.underlying.remove(index);
+                    }
 
                     let mut i = 0;
                     while i < changed_indices.len() {
@@ -337,10 +342,13 @@ where
                     let node = T::construct(op_id, value);
                     if (index as usize) == self.underlying.len() {
                         self.underlying
-                            .push_back(Box::new(SequenceElement::new(node)));
+                            .push_back(node.default_opid(), SequenceElement::new(node));
                     } else {
-                        self.underlying
-                            .insert(index as usize, Box::new(SequenceElement::new(node)));
+                        self.underlying.insert(
+                            index as usize,
+                            node.default_opid(),
+                            SequenceElement::new(node),
+                        );
 
                         for changed_index in changed_indices.iter_mut() {
                             if *changed_index >= index as u64 {
@@ -360,15 +368,12 @@ where
                     // TODO: only do this if there are a certain (to be worked out) number of
                     // values
                     // TODO: if all inserts are at the end then use push_back
-                    let mut intermediate = im_rc::Vector::new();
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
-                        let mv = T::construct(opid, amp::Diff::Value(value.clone()));
-                        intermediate.push_back(Box::new(SequenceElement::new(mv)));
+                        let mv = T::construct(opid.clone(), amp::Diff::Value(value.clone()));
+                        self.underlying
+                            .insert(index + i, opid, SequenceElement::new(mv))
                     }
-                    let right = self.underlying.split_off(index);
-                    self.underlying.append(intermediate);
-                    self.underlying.append(right);
 
                     for changed_index in changed_indices.iter_mut() {
                         if *changed_index >= index as u64 {
@@ -385,7 +390,7 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some(v) = self.underlying.get_mut(index as usize) {
+                    if let Some((opid, v)) = self.underlying.get_mut(index as usize) {
                         v.value.apply_diff(op_id, value);
                     }
                     changed_indices.push(index);
@@ -394,17 +399,17 @@ where
         }
 
         for i in changed_indices {
-            if let Some(u) = self.underlying.get_mut(i as usize) {
+            if let Some((_, u)) = self.underlying.get_mut(i as usize) {
                 u.value.finish()
             }
         }
 
-        debug_assert!(
-            self.underlying
-                .iter()
-                .all(|u| matches!(u.value, SequenceValue::Original(_))),
-            "diffable sequence apply_diff_iter didn't call finish on all values"
-        );
+        // debug_assert!(
+        //     self.underlying
+        //         .iter()
+        //         .all(|u| matches!(u.value, SequenceValue::Original(_))),
+        //     "diffable sequence apply_diff_iter didn't call finish on all values"
+        // );
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -426,15 +431,15 @@ where
         let elem_id = self
             .underlying
             .get(index)
-            .map(|existing| existing.opid.clone())
+            .map(|(opid, existing)| existing.opid.clone())
             .expect("Failed to get existing index in set");
         self.underlying
             .set(
                 index,
-                Box::new(SequenceElement {
+                SequenceElement {
                     opid: elem_id,
                     value: SequenceValue::Original(value),
-                }),
+                },
             )
             .value
             .get()
@@ -442,23 +447,29 @@ where
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
-        self.underlying.get(index).map(|e| (&e.opid, e.value.get()))
+        self.underlying
+            .get(index)
+            .map(|(opid, e)| (&e.opid, e.value.get()))
     }
 
-    pub(super) fn get_mut(&mut self, index: usize) -> Option<(&mut OpId, &mut T)> {
+    pub(crate) fn get_mut(&mut self, index: usize) -> Option<(&mut OpId, &mut T)> {
         self.underlying
             .get_mut(index)
-            .map(|e| (&mut e.opid, e.value.get_mut()))
+            .map(|(opid, e)| (&mut e.opid, e.value.get_mut()))
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
-        self.underlying
-            .insert(index, Box::new(SequenceElement::original(value)))
+        self.underlying.insert(
+            index,
+            value.default_opid(),
+            SequenceElement::original(value),
+        )
     }
 
     pub(crate) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
-        self.underlying.iter().map(|i| i.value.get())
+        // self.underlying.iter().map(|i| i.value.get())
+        std::iter::empty()
     }
 }
 
