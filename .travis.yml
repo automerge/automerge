@@ -9,18 +9,19 @@ install:
 - rustup component add clippy
 - rustup component add rustfmt
 - curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-- nvm install 10
+- nvm install 12
 
 jobs:
   allow_failures:
   - rust: nightly
   fast_finish: true
   include:
-    - name: Stable - Format and Clippy
+    - name: Stable - Format, Clippy and Docs
       rust: stable
       script:
       - cargo fmt --all -- --check
       - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo doc --workspace --all-features
     - name: Stable - Build and Test
       rust: stable
       script:
@@ -31,14 +32,15 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js
 
-    - name: Beta - Format and Clippy
+    - name: Beta - Format, Clippy and Docs
       rust: beta
       script:
       - cargo fmt --all -- --check
       - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo doc --workspace --all-features
     - name: Beta - Build and Test
       rust: beta
       script:
@@ -49,14 +51,15 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js
 
-    - name: Nightly - Format and Clippy
+    - name: Nightly - Format, Clippy and Docs
       rust: nightly
       script:
       - cargo fmt --all -- --check
       - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo doc --workspace --all-features
     - name: Nightly - Build and Test
       rust: nightly
       script:
@@ -67,5 +70,5 @@ jobs:
       script:
       - wasm-pack test automerge-frontend --node
       - cd automerge-backend-wasm
-      - yarn release
+      - yarn dev
       - yarn test:js

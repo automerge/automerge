@@ -17,7 +17,7 @@ fn main() {
         "patch_small",
         "multi_element_insert",
     ];
-    for name in names {
+    for name in &names {
         let json_name = root.join(format!("{}.json", name));
         let msgpack_name = root.join(format!("{}.mpk", name));
 

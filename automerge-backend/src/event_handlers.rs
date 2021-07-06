@@ -21,7 +21,7 @@ impl EventHandlers {
     pub(crate) fn before_apply_change(&mut self, change: &Change) {
         for handler in &mut self.0 {
             if let EventHandler::BeforeApplyChange(f) = handler {
-                f.0(change)
+                f.0(change);
             }
         }
     }
@@ -29,7 +29,7 @@ impl EventHandlers {
     pub(crate) fn after_apply_change(&mut self, change: &Change) {
         for handler in &mut self.0 {
             if let EventHandler::AfterApplyChange(f) = handler {
-                f.0(change)
+                f.0(change);
             }
         }
     }

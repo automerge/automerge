@@ -9,7 +9,6 @@ mod cursor_diff;
 mod data_type;
 mod diff;
 mod element_id;
-mod key;
 mod map_type;
 mod multi_element_insert;
 mod obj_type;

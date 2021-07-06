@@ -158,8 +158,20 @@ impl<'de> Deserialize<'de> for Op {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
                         "obj" => read_field("obj", &mut obj, &mut map)?,
-                        "key" => read_field("key", &mut key, &mut map)?,
-                        "elemId" => read_field("elemId", &mut key, &mut map)?,
+                        "key" => {
+                            if key.is_some() {
+                                return Err(Error::duplicate_field("key"));
+                            } else {
+                                key = Some(Key::Map(map.next_value()?));
+                            }
+                        }
+                        "elemId" => {
+                            if key.is_some() {
+                                return Err(Error::duplicate_field("elemId"));
+                            } else {
+                                key = Some(Key::Seq(map.next_value()?))
+                            }
+                        }
                         "pred" => read_field("pred", &mut pred, &mut map)?,
                         "insert" => read_field("insert", &mut insert, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
@@ -251,7 +263,7 @@ impl<'de> Deserialize<'de> for Op {
                 })
             }
         }
-        deserializer.deserialize_struct("Operation", &FIELDS, OperationVisitor)
+        deserializer.deserialize_struct("Operation", FIELDS, OperationVisitor)
     }
 }
 

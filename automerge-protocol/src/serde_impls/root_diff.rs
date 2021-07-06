@@ -131,6 +131,6 @@ impl<'de> Deserialize<'de> for RootDiff {
             }
         }
 
-        deserializer.deserialize_struct("RootDiff", &FIELDS, RootDiffVisitor)
+        deserializer.deserialize_struct("RootDiff", FIELDS, RootDiffVisitor)
     }
 }

@@ -239,7 +239,6 @@ pub(crate) struct ChangeIterator<'a> {
     pub(crate) max_op: DeltaDecoder<'a>,
     pub(crate) time: DeltaDecoder<'a>,
     pub(crate) message: RleDecoder<'a, String>,
-    pub(crate) deps: DepsIterator<'a>,
     pub(crate) extra: ExtraIterator<'a>,
 }
 
@@ -251,10 +250,6 @@ impl<'a> ChangeIterator<'a> {
             max_op: col_iter(bytes, ops, DOC_MAX_OP),
             time: col_iter(bytes, ops, DOC_TIME),
             message: col_iter(bytes, ops, DOC_MESSAGE),
-            deps: DepsIterator {
-                num: col_iter(bytes, ops, DOC_DEPS_NUM),
-                dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
-            },
             extra: ExtraIterator {
                 len: col_iter(bytes, ops, DOC_EXTRA_LEN),
                 extra: col_iter(bytes, ops, DOC_EXTRA_RAW),
@@ -271,7 +266,6 @@ impl<'a> Iterator for ChangeIterator<'a> {
         let max_op = self.max_op.next()??;
         let time = self.time.next()?? as i64;
         let message = self.message.next()?;
-        let deps = self.deps.next()?;
         let extra_bytes = self.extra.next().unwrap_or_else(Vec::new);
         Some(DocChange {
             actor,
@@ -279,7 +273,6 @@ impl<'a> Iterator for ChangeIterator<'a> {
             max_op,
             time,
             message,
-            deps,
             extra_bytes,
             ops: Vec::new(),
         })
@@ -296,6 +289,15 @@ pub struct ObjIterator<'a> {
 pub struct DepsIterator<'a> {
     pub(crate) num: RleDecoder<'a, usize>,
     pub(crate) dep: DeltaDecoder<'a>,
+}
+
+impl<'a> DepsIterator<'a> {
+    pub fn new(bytes: &'a [u8], ops: &'a HashMap<u32, Range<usize>>) -> Self {
+        Self {
+            num: col_iter(bytes, ops, DOC_DEPS_NUM),
+            dep: col_iter(bytes, ops, DOC_DEPS_INDEX),
+        }
+    }
 }
 
 pub struct ExtraIterator<'a> {
@@ -365,7 +367,7 @@ impl<'a> Iterator for PredIterator<'a> {
             let ctr = self.pred_ctr.next()??;
             let actor_id = self.actors.get(actor)?.clone();
             let op_id = amp::OpId::new(ctr, &actor_id);
-            p.push(op_id)
+            p.push(op_id);
         }
         Some(SortedVec::from(p))
     }
@@ -379,7 +381,7 @@ impl<'a> Iterator for SuccIterator<'a> {
         for _ in 0..num {
             let actor = self.succ_actor.next()??;
             let ctr = self.succ_ctr.next()??;
-            p.push((ctr, actor))
+            p.push((ctr, actor));
         }
         Some(p)
     }
@@ -505,7 +507,6 @@ pub(crate) struct DocChange {
     pub max_op: u64,
     pub time: i64,
     pub message: Option<String>,
-    pub deps: Vec<usize>,
     pub extra_bytes: Vec<u8>,
     pub ops: Vec<DocOp>,
 }
@@ -576,33 +577,33 @@ impl ValEncoder {
             amp::ScalarValue::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
-                self.len.append_value(len << 4 | VALUE_TYPE_BYTES)
+                self.len.append_value(len << 4 | VALUE_TYPE_BYTES);
             }
             amp::ScalarValue::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
-                self.len.append_value(len << 4 | VALUE_TYPE_UTF8)
+                self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
             amp::ScalarValue::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_COUNTER)
+                self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
             amp::ScalarValue::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP)
+                self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP);
             }
             amp::ScalarValue::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT)
+                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT);
             }
             amp::ScalarValue::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT)
+                self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT);
             }
             amp::ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
-                self.len.append_value(len << 4 | VALUE_TYPE_IEEE754)
+                self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
             }
             amp::ScalarValue::Cursor(opid) => {
                 // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
@@ -617,7 +618,7 @@ impl ValEncoder {
     fn append_null(&mut self) {
         self.ref_counter.append_null();
         self.ref_actor.append_null();
-        self.len.append_value(VALUE_TYPE_NULL)
+        self.len.append_value(VALUE_TYPE_NULL);
     }
 
     fn finish(self) -> Vec<ColData> {
@@ -834,7 +835,7 @@ impl ChangeEncoder {
             self.deps_num.append_value(change.deps.len());
             for dep in &change.deps {
                 if let Some(dep_index) = index_by_hash.get(dep) {
-                    self.deps_index.append_value(*dep_index as u64)
+                    self.deps_index.append_value(*dep_index as u64);
                 } else {
                     // FIXME This relies on the changes being in causal order, which they may not
                     // be, we could probably do something cleverer like accumulate the values to
@@ -1033,7 +1034,7 @@ impl ColumnEncoder {
         I: IntoIterator<Item = ExpandedOp<'c>>,
     {
         for op in ops {
-            self.append(op, actors)
+            self.append(op, actors);
         }
     }
 
@@ -1307,9 +1308,9 @@ mod tests {
         let mut encoder = RleEncoder::new();
         for op in &ops {
             if let Some(v) = op {
-                encoder.append_value(v.clone())
+                encoder.append_value(v.clone());
             } else {
-                encoder.append_null()
+                encoder.append_null();
             }
         }
         let encoded = encoder.finish(0).data;

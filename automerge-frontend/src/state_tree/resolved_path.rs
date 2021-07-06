@@ -253,21 +253,6 @@ impl<'a> ResolvedPathMut<'a> {
     pub(super) fn new_character(c: &'a mut MultiGrapheme) -> ResolvedPathMut<'a> {
         ResolvedPathMut::Character(ResolvedCharMut { multivalue: c })
     }
-
-    pub fn default_value(&self) -> Value {
-        match &self {
-            ResolvedPathMut::Map(maptarget) => maptarget.multivalue.default_value(),
-            ResolvedPathMut::Root(root) => root.root.value(),
-            ResolvedPathMut::Table(tabletarget) => tabletarget.multivalue.default_value(),
-            ResolvedPathMut::List(listtarget) => listtarget.multivalue.default_value(),
-            ResolvedPathMut::Text(texttarget) => texttarget.multivalue.default_value(),
-            ResolvedPathMut::Counter(countertarget) => countertarget.multivalue.default_value(),
-            ResolvedPathMut::Primitive(p) => p.multivalue.default_value(),
-            ResolvedPathMut::Character(ctarget) => Value::Primitive(Primitive::Str(
-                ctarget.multivalue.default_grapheme().clone(),
-            )),
-        }
-    }
 }
 
 pub(crate) struct SetOrInsertPayload<'a, T> {
@@ -308,27 +293,21 @@ impl<'a> ResolvedRootMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> Option<(MultiValue, LocalOperationResult)> {
         let existing_value = self.root.get(key);
         let pred = existing_value
             .map(|v| vec![v.default_opid()].into())
             .unwrap_or_else(SortedVec::new);
-        let old = self
-            .root
-            .remove(key)
-            .expect("Removing non existent key from map");
-        (
-            old,
-            LocalOperationResult {
-                new_ops: vec![amp::Op {
-                    action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                    obj: amp::ObjectId::Root,
-                    key: key.into(),
-                    insert: false,
-                    pred,
-                }],
-            },
-        )
+        let op_result = LocalOperationResult {
+            new_ops: vec![amp::Op {
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                obj: amp::ObjectId::Root,
+                key: key.into(),
+                insert: false,
+                pred,
+            }],
+        };
+        self.root.remove(key).map(|old| (old, op_result))
     }
 
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
@@ -420,7 +399,7 @@ impl<'a> ResolvedMapMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> Option<(MultiValue, LocalOperationResult)> {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
             _ => unreachable!(),
@@ -434,11 +413,7 @@ impl<'a> ResolvedMapMut<'a> {
                 pred: state_tree_map.pred_for_key(key),
             }],
         };
-        let old = state_tree_map
-            .props
-            .remove(key)
-            .expect("Removing non existent key from map");
-        (old, op_result)
+        state_tree_map.props.remove(key).map(|old| (old, op_result))
     }
 
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
@@ -499,7 +474,7 @@ impl<'a> ResolvedTableMut<'a> {
         (old, LocalOperationResult { new_ops })
     }
 
-    pub(crate) fn delete_key(&mut self, key: &str) -> (MultiValue, LocalOperationResult) {
+    pub(crate) fn delete_key(&mut self, key: &str) -> Option<(MultiValue, LocalOperationResult)> {
         let state_tree_table = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Table(map)) => map,
             _ => unreachable!(),
@@ -513,11 +488,10 @@ impl<'a> ResolvedTableMut<'a> {
                 pred: state_tree_table.pred_for_key(key),
             }],
         };
-        let old = state_tree_table
+        state_tree_table
             .props
             .remove(key)
-            .expect("Removing non existent key from table");
-        (old, op_result)
+            .map(|old| (old, op_result))
     }
 
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {

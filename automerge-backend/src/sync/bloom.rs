@@ -56,13 +56,13 @@ impl BloomFilter {
 
     fn add_hash(&mut self, hash: &ChangeHash) {
         for probe in self.get_probes(hash) {
-            self.set_bit(probe as usize)
+            self.set_bit(probe as usize);
         }
     }
 
     fn set_bit(&mut self, probe: usize) {
         if let Some(byte) = self.bits.get_mut(probe >> 3) {
-            *byte |= 1 << (probe & 7)
+            *byte |= 1 << (probe & 7);
         }
     }
 
@@ -106,7 +106,7 @@ impl From<&[ChangeHash]> for BloomFilter {
             bits,
         };
         for hash in hashes {
-            filter.add_hash(hash)
+            filter.add_hash(hash);
         }
         filter
     }

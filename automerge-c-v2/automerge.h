@@ -47,8 +47,16 @@ intptr_t automerge_apply_changes(Backend *backend, Buffer *buffs, const uint8_t 
  */
 intptr_t automerge_apply_local_change(Backend *backend, Buffer *buffs, const uint8_t *request, uintptr_t len);
 
+/**
+ * # Safety
+ * This should be called with a valid pointer to a `Buffer`
+ */
 const uint8_t *automerge_buff_get_data(const Buffer *buf);
 
+/**
+ * # Safety
+ * This should be called with a valid pointer to a `Buffer`
+ */
 uintptr_t automerge_buff_get_len(const Buffer *buf);
 
 /**

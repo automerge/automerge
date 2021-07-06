@@ -207,11 +207,15 @@ pub struct Buffer {
     cap: usize,
 }
 
+/// # Safety
+/// This should be called with a valid pointer to a `Buffer`
 #[no_mangle]
 pub unsafe extern "C" fn automerge_buff_get_data(buf: *const Buffer) -> *const u8 {
     (*buf).data
 }
 
+/// # Safety
+/// This should be called with a valid pointer to a `Buffer`
 #[no_mangle]
 pub unsafe extern "C" fn automerge_buff_get_len(buf: *const Buffer) -> usize {
     (*buf).len

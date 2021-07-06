@@ -168,7 +168,7 @@ where
     T: PartialEq,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<im_rc::Vector<SequenceElement<T>>>,
+    underlying: Box<im_rc::Vector<Box<SequenceElement<T>>>>,
 }
 
 impl<T> DiffableSequence<T>
@@ -188,7 +188,12 @@ where
         I: IntoIterator<Item = T>,
     {
         DiffableSequence {
-            underlying: Box::new(i.into_iter().map(SequenceElement::original).collect()),
+            underlying: Box::new(
+                i.into_iter()
+                    .map(SequenceElement::original)
+                    .map(Box::new)
+                    .collect(),
+            ),
         }
     }
 
@@ -304,10 +309,11 @@ where
                 } => {
                     let node = T::construct(op_id, value);
                     if (index as usize) == self.underlying.len() {
-                        self.underlying.push_back(SequenceElement::new(node));
+                        self.underlying
+                            .push_back(Box::new(SequenceElement::new(node)));
                     } else {
                         self.underlying
-                            .insert(index as usize, SequenceElement::new(node));
+                            .insert(index as usize, Box::new(SequenceElement::new(node)));
                     };
                     changed_indices.insert(index);
                 }
@@ -325,7 +331,7 @@ where
                     for (i, value) in values.iter().enumerate() {
                         let opid = elem_id.as_opid().unwrap().increment_by(i as u64);
                         let mv = T::construct(opid, amp::Diff::Value(value.clone()));
-                        intermediate.push_back(SequenceElement::new(mv));
+                        intermediate.push_back(Box::new(SequenceElement::new(mv)));
                     }
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
@@ -381,10 +387,10 @@ where
         self.underlying
             .set(
                 index,
-                SequenceElement {
+                Box::new(SequenceElement {
                     opid: elem_id,
                     value: SequenceValue::Original(value),
-                },
+                }),
             )
             .value
             .get()
@@ -403,19 +409,7 @@ where
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
         self.underlying
-            .insert(index, SequenceElement::original(value))
-    }
-
-    pub(super) fn mutate<F>(&mut self, index: usize, f: F)
-    where
-        F: FnOnce(&T) -> T,
-    {
-        if let Some(entry) = self.underlying.get_mut(index) {
-            *entry = SequenceElement {
-                opid: entry.opid.clone(),
-                value: SequenceValue::Original(f(entry.value.get())),
-            };
-        }
+            .insert(index, Box::new(SequenceElement::original(value)))
     }
 
     pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
@@ -469,41 +463,6 @@ where
         match self {
             SequenceValue::Original(v) => v,
             _ => unreachable!(),
-        }
-    }
-
-    fn check_diff(
-        &self,
-        opid: &amp::OpId,
-        diff: &amp::Diff,
-        parent_object_id: &amp::ObjectId,
-    ) -> Result<(), InvalidPatch> {
-        match self {
-            SequenceValue::Original(v) | SequenceValue::New(v) => {
-                if let Some(existing) = v.only_for_opid(opid.clone()) {
-                    existing.check_diff(opid, diff, parent_object_id)?;
-                } else {
-                    T::check_construct(opid, diff, parent_object_id)?
-                };
-                Ok(())
-            }
-            SequenceValue::Updated { original, updates } => {
-                if let Some(update) = updates
-                    .get(1..)
-                    .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
-                {
-                    update.check_diff(opid, diff, parent_object_id)?;
-                } else if let Some(initial) =
-                    updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
-                {
-                    initial.check_diff(opid, diff, parent_object_id)?;
-                } else if let Some(original) = original.only_for_opid(opid.clone()) {
-                    original.check_diff(opid, diff, parent_object_id)?;
-                } else {
-                    T::check_construct(opid, diff, parent_object_id)?
-                };
-                Ok(())
-            }
         }
     }
 

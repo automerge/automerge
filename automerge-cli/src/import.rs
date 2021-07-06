@@ -3,7 +3,7 @@ use automerge_backend::Backend;
 use automerge_frontend::{Frontend, Value};
 
 fn initialize_from_json(json_value: &serde_json::Value) -> Result<Vec<u8>> {
-    let value: Value = Value::from_json(&json_value);
+    let value: Value = Value::from_json(json_value);
 
     let (_, initial_change) = Frontend::new_with_initial_state(value)?;
     let mut backend = Backend::new();

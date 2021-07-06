@@ -119,7 +119,8 @@ fn missing_object_error_flaky_null_rle_decoding() {
     ];
 
     let mut backend = Backend::new();
-    let mut frontend = Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
+    let mut frontend =
+        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
@@ -156,7 +157,7 @@ fn missing_object_error_flaky_null_rle_decoding() {
         }
         Ok(mut backend) => {
             let mut frontend =
-                Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id);
+                Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
             let patch = backend.get_patch().unwrap();
             frontend.apply_patch(patch).unwrap();
 

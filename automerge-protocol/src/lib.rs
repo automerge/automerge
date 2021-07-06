@@ -489,7 +489,7 @@ pub enum OpType {
     MultiSet(ScalarValues),
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SortedVec<T>(Vec<T>);
 
@@ -544,6 +544,20 @@ impl<T> IntoIterator for SortedVec<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
+    }
+}
+
+impl<'de, T> serde::Deserialize<'de> for SortedVec<T>
+where
+    T: serde::Deserialize<'de> + Ord,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut v = Vec::deserialize(deserializer)?;
+        v.sort_unstable();
+        Ok(Self(v))
     }
 }
 

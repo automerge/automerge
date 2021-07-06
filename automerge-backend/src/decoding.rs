@@ -41,6 +41,8 @@ pub enum Error {
     NoDocChanges,
     #[error("An overflow would have occurred, the data may be corrupt")]
     Overflow,
+    #[error("Calculated heads differed from actual heads")]
+    MismatchedHeads,
     #[error("Failed to read leb128 number {0}")]
     Leb128(#[from] leb128::read::Error),
     #[error(transparent)]

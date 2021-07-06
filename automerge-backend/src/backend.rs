@@ -68,7 +68,7 @@ impl Backend {
     }
 
     pub fn load_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
-        self.apply(changes, None)?;
+        self.apply_without_patch(changes)?;
         Ok(())
     }
 
@@ -96,6 +96,20 @@ impl Backend {
         self.make_patch(diffs, actor)
     }
 
+    /// This applies the changes to the backend but does not produce a patch.
+    ///
+    /// Generating the patch can itself be expensive and not always required, for instance when
+    /// loading a new backend from bytes.
+    fn apply_without_patch(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+        let mut patch = IncrementalPatch::new();
+
+        for change in changes {
+            self.add_change(change, false, &mut patch)?;
+        }
+
+        Ok(())
+    }
+
     fn get_hash(&self, actor: &amp::ActorId, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
         self.states
             .get(actor)
@@ -116,7 +130,7 @@ impl Backend {
         if change.seq > 1 {
             let last_hash = self.get_hash(&change.actor_id, change.seq - 1)?;
             if !change.deps.contains(&last_hash) {
-                change.deps.push(last_hash)
+                change.deps.push(last_hash);
             }
         }
 
@@ -225,7 +239,7 @@ impl Backend {
             {
                 return Some(self.queue.swap_remove(index));
             }
-            index += 1
+            index += 1;
         }
         None
     }
@@ -439,9 +453,9 @@ impl Backend {
                 // When we don't remove anything it is less likely that there is something down
                 // that chain so delay it.
                 if removed {
-                    queue.push_front(dep)
+                    queue.push_front(dep);
                 } else {
-                    queue.push_back(dep)
+                    queue.push_back(dep);
                 }
             }
         }

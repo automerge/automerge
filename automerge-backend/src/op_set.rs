@@ -244,14 +244,14 @@ impl OpSet {
                         cursor_changes
                             .entry(cursor.internal_referring_object_id)
                             .or_default()
-                            .push(cursor.key.clone())
+                            .push(cursor.key.clone());
                     }
                 }
             }
         }
         for (obj_id, keys) in cursor_changes {
             for key in keys {
-                patch.record_cursor_change(&obj_id, key)
+                patch.record_cursor_change(&obj_id, key);
             }
         }
     }

@@ -88,7 +88,7 @@ impl Edits {
                 (_, edit) => self.0.push(edit),
             }
         } else {
-            self.0.push(edit)
+            self.0.push(edit);
         }
     }
 
