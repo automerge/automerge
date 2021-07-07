@@ -16,6 +16,7 @@ pub use error::{
 pub use mutation::{LocalChange, MutableDocument};
 pub use path::Path;
 use path::PathElement;
+pub use proxy::{MapProxy, ValueProxy};
 use state_tree::ResolvedPath;
 pub use value::{Conflicts, Cursor, Primitive, Value};
 
