@@ -4,6 +4,7 @@ use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
 mod error;
 mod mutation;
 mod path;
+mod proxy;
 mod state_tree;
 mod value;
 
