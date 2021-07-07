@@ -12,7 +12,7 @@ pub use text::TextProxy;
 
 use crate::{
     state_tree::{StateTreeComposite, StateTreeValue},
-    Primitive,
+    Primitive, Value,
 };
 
 /// A ValueProxy represents a way to interact with the frontend's state lazily rather than creating
@@ -77,6 +77,16 @@ impl<'a> ValueProxy<'a> {
         match self {
             Self::Primitive(p) => Some(p),
             _ => None,
+        }
+    }
+
+    pub fn value(&self) -> Value {
+        match self {
+            ValueProxy::Primitive(p) => Value::from((*p).clone()),
+            ValueProxy::Map(m) => m.value(),
+            ValueProxy::Table(t) => t.value(),
+            ValueProxy::List(l) => l.value(),
+            ValueProxy::Text(t) => t.value(),
         }
     }
 }
