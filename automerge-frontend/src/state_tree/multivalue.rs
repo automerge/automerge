@@ -180,7 +180,7 @@ impl MultiValue {
         &mut self.winning_value.1
     }
 
-    pub(super) fn default_value(&self) -> Value {
+    pub(crate) fn default_value(&self) -> Value {
         self.winning_value.1.realise_value()
     }
 

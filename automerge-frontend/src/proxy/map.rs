@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use smol_str::SmolStr;
 
-use crate::{proxy::ValueProxy, state_tree::StateTreeMap};
+use crate::{proxy::ValueProxy, state_tree::StateTreeMap, Value};
 
 #[derive(Clone, Debug)]
 pub struct MapProxy<'a> {
@@ -47,5 +49,13 @@ impl<'a> MapProxy<'a> {
             .props
             .iter()
             .map(|(k, v)| (k, ValueProxy::new(v.default_statetree_value())))
+    }
+
+    pub fn value(&self) -> Value {
+        let mut m = HashMap::new();
+        for (k, v) in &self.stm.props {
+            m.insert(k.clone(), v.default_value());
+        }
+        Value::Map(m)
     }
 }

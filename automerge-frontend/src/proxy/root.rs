@@ -1,7 +1,7 @@
 use smol_str::SmolStr;
 
 use super::ValueProxy;
-use crate::state_tree::StateTree;
+use crate::{state_tree::StateTree, Value};
 
 #[derive(Clone, Debug)]
 pub struct RootProxy<'a> {
@@ -48,5 +48,9 @@ impl<'a> RootProxy<'a> {
             .root_props
             .iter()
             .map(|(k, v)| (k, ValueProxy::new(v.default_statetree_value())))
+    }
+
+    pub fn value(&self) -> Value {
+        self.st.value()
     }
 }

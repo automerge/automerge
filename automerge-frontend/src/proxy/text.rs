@@ -1,6 +1,6 @@
 use smol_str::SmolStr;
 
-use crate::state_tree::StateTreeText;
+use crate::{state_tree::StateTreeText, Value};
 
 #[derive(Clone, Debug)]
 pub struct TextProxy<'a> {
@@ -29,5 +29,13 @@ impl<'a> TextProxy<'a> {
 
     pub fn iter(&self) -> impl Iterator<Item = &SmolStr> {
         self.stt.graphemes.iter().map(|mg| mg.default_grapheme())
+    }
+
+    pub fn value(&self) -> Value {
+        let mut v = Vec::new();
+        for e in self.stt.graphemes.iter() {
+            v.push(e.default_grapheme().clone())
+        }
+        Value::Text(v)
     }
 }

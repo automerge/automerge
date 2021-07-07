@@ -1,4 +1,4 @@
-use crate::{proxy::ValueProxy, state_tree::StateTreeList};
+use crate::{proxy::ValueProxy, state_tree::StateTreeList, Value};
 
 #[derive(Clone, Debug)]
 pub struct ListProxy<'a> {
@@ -30,5 +30,13 @@ impl<'a> ListProxy<'a> {
             .elements
             .iter()
             .map(|mv| ValueProxy::new(mv.default_statetree_value()))
+    }
+
+    pub fn value(&self) -> Value {
+        let mut v = Vec::new();
+        for e in self.stl.elements.iter() {
+            v.push(e.default_value())
+        }
+        Value::Sequence(v)
     }
 }
