@@ -1,5 +1,6 @@
 use crate::{proxy::ValueProxy, state_tree::StateTreeList};
 
+#[derive(Clone, Debug)]
 pub struct ListProxy<'a> {
     stl: &'a StateTreeList,
 }

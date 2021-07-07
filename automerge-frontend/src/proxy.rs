@@ -22,6 +22,8 @@ use crate::{
 ///
 /// A `ValueProxy` can be obtained from the [`proxy`](crate::Frontend::proxy) method on a
 /// [`Frontend`](crate::Frontend).
+
+#[derive(Clone, Debug)]
 pub enum ValueProxy<'a> {
     Primitive(&'a Primitive),
     Map(MapProxy<'a>),

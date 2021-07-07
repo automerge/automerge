@@ -2,6 +2,7 @@ use smol_str::SmolStr;
 
 use crate::{proxy::ValueProxy, state_tree::StateTreeTable};
 
+#[derive(Clone, Debug)]
 pub struct TableProxy<'a> {
     stt: &'a StateTreeTable,
 }

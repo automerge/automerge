@@ -2,6 +2,7 @@ use smol_str::SmolStr;
 
 use crate::state_tree::StateTreeText;
 
+#[derive(Clone, Debug)]
 pub struct TextProxy<'a> {
     stt: &'a StateTreeText,
 }
