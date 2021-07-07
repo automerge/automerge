@@ -3,6 +3,7 @@ use smol_str::SmolStr;
 use super::ValueProxy;
 use crate::state_tree::StateTree;
 
+#[derive(Clone, Debug)]
 pub struct RootProxy<'a> {
     st: &'a StateTree,
 }
