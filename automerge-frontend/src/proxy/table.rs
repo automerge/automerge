@@ -11,7 +11,7 @@ impl<'a> TableProxy<'a> {
         Self { stt }
     }
 
-    pub fn contains_key(&self, key: &SmolStr) -> bool {
+    pub fn contains_key(&self, key: &str) -> bool {
         self.stt.props.contains_key(key)
     }
 
@@ -23,7 +23,7 @@ impl<'a> TableProxy<'a> {
         self.stt.props.is_empty()
     }
 
-    pub fn get(&self, key: &SmolStr) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, key: &str) -> Option<ValueProxy<'a>> {
         self.stt
             .props
             .get(key)

@@ -12,7 +12,7 @@ impl<'a> RootProxy<'a> {
         Self { st }
     }
 
-    pub fn contains_key(&self, key: &SmolStr) -> bool {
+    pub fn contains_key(&self, key: &str) -> bool {
         self.st.root_props.contains_key(key)
     }
 
@@ -24,7 +24,7 @@ impl<'a> RootProxy<'a> {
         self.st.root_props.is_empty()
     }
 
-    pub fn get(&self, key: &SmolStr) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, key: &str) -> Option<ValueProxy<'a>> {
         self.st
             .root_props
             .get(key)

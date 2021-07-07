@@ -11,7 +11,7 @@ impl<'a> MapProxy<'a> {
         Self { stm }
     }
 
-    pub fn contains_key(&self, key: &SmolStr) -> bool {
+    pub fn contains_key(&self, key: &str) -> bool {
         self.stm.props.contains_key(key)
     }
 
@@ -23,7 +23,7 @@ impl<'a> MapProxy<'a> {
         self.stm.props.is_empty()
     }
 
-    pub fn get(&self, key: &SmolStr) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, key: &str) -> Option<ValueProxy<'a>> {
         self.stm
             .props
             .get(key)
