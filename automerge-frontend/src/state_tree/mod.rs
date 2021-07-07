@@ -157,7 +157,7 @@ impl StateTree {
 /// A node in the state tree is either a leaf node containing a scalarvalue,
 /// or an internal composite type (e.g a Map or a List)
 #[derive(Debug, Clone, PartialEq)]
-enum StateTreeValue {
+pub(crate) enum StateTreeValue {
     Leaf(Primitive),
     Composite(StateTreeComposite),
 }
@@ -169,7 +169,7 @@ impl Default for StateTreeValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum StateTreeComposite {
+pub(crate) enum StateTreeComposite {
     Map(StateTreeMap),
     Table(StateTreeTable),
     Text(StateTreeText),
@@ -420,9 +420,9 @@ impl StateTreeValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct StateTreeMap {
+pub(crate) struct StateTreeMap {
     object_id: amp::ObjectId,
-    props: HashMap<SmolStr, MultiValue>,
+    pub(crate) props: HashMap<SmolStr, MultiValue>,
 }
 
 impl StateTreeMap {
@@ -510,9 +510,9 @@ impl StateTreeMap {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct StateTreeTable {
+pub(crate) struct StateTreeTable {
     object_id: amp::ObjectId,
-    props: HashMap<SmolStr, MultiValue>,
+    pub(crate) props: HashMap<SmolStr, MultiValue>,
 }
 
 impl StateTreeTable {
@@ -600,9 +600,9 @@ impl StateTreeTable {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct StateTreeText {
+pub(crate) struct StateTreeText {
     object_id: amp::ObjectId,
-    graphemes: DiffableSequence<MultiGrapheme>,
+    pub(crate) graphemes: DiffableSequence<MultiGrapheme>,
 }
 
 impl StateTreeText {
@@ -717,7 +717,7 @@ impl StateTreeText {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct StateTreeList {
+pub(crate) struct StateTreeList {
     object_id: amp::ObjectId,
     elements: DiffableSequence<MultiValue>,
 }

@@ -4,7 +4,7 @@ use automerge_protocol as amp;
 use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
-pub(super) trait DiffableValue: Sized + Default {
+pub(crate) trait DiffableValue: Sized + Default {
     fn check_construct(
         opid: &amp::OpId,
         diff: &amp::Diff,
@@ -159,7 +159,7 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct DiffableSequence<T>
+pub(crate) struct DiffableSequence<T>
 where
     T: DiffableValue,
     T: Clone,

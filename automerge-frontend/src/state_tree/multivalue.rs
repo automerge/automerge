@@ -172,7 +172,7 @@ impl MultiValue {
         }
     }
 
-    pub(super) fn default_statetree_value(&self) -> &StateTreeValue {
+    pub(crate) fn default_statetree_value(&self) -> &StateTreeValue {
         &self.winning_value.1
     }
 
