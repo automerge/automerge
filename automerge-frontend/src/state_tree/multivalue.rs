@@ -454,7 +454,7 @@ impl MultiGrapheme {
         }
     }
 
-    pub(super) fn default_grapheme(&self) -> &SmolStr {
+    pub(crate) fn default_grapheme(&self) -> &SmolStr {
         &self.winning_value.1
     }
 

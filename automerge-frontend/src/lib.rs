@@ -1,10 +1,11 @@
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
+use proxy::RootProxy;
 
 mod error;
 mod mutation;
 mod path;
-mod proxy;
+pub mod proxy;
 mod state_tree;
 mod value;
 
@@ -16,7 +17,6 @@ pub use error::{
 pub use mutation::{LocalChange, MutableDocument};
 pub use path::Path;
 use path::PathElement;
-pub use proxy::{MapProxy, ValueProxy};
 use state_tree::ResolvedPath;
 pub use value::{Conflicts, Cursor, Primitive, Value};
 
@@ -310,6 +310,19 @@ impl FrontendState {
             } => reconciled_root_state.value(),
         }
     }
+
+    fn proxy(&self) -> RootProxy {
+        match self {
+            FrontendState::WaitingForInFlightRequests {
+                optimistically_updated_root_state,
+                ..
+            } => optimistically_updated_root_state.proxy(),
+            FrontendState::Reconciled {
+                reconciled_root_state,
+                ..
+            } => reconciled_root_state.proxy(),
+        }
+    }
 }
 
 pub struct Frontend {
@@ -452,6 +465,10 @@ impl Frontend {
             self.cached_value = Some(value);
             self.cached_value.as_ref().unwrap()
         }
+    }
+
+    pub fn proxy(&self) -> RootProxy {
+        self.state.proxy()
     }
 
     pub fn change<F, O, E>(

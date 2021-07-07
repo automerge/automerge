@@ -7,7 +7,7 @@ use diffable_sequence::DiffableSequence;
 use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
-use crate::{error, Path, PathElement, Primitive, Value};
+use crate::{error, Path, PathElement, Primitive, RootProxy, Value};
 
 mod diffable_sequence;
 mod multivalue;
@@ -29,7 +29,7 @@ pub(crate) struct LocalOperationResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
-    root_props: HashMap<SmolStr, MultiValue>,
+    pub(crate) root_props: HashMap<SmolStr, MultiValue>,
     cursors: Cursors,
 }
 
@@ -151,6 +151,10 @@ impl StateTree {
             m.insert(k.clone(), v.default_value());
         }
         Value::Map(m)
+    }
+
+    pub(crate) fn proxy(&self) -> RootProxy {
+        RootProxy::new(self)
     }
 }
 
@@ -719,7 +723,7 @@ impl StateTreeText {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTreeList {
     object_id: amp::ObjectId,
-    elements: DiffableSequence<MultiValue>,
+    pub(crate) elements: DiffableSequence<MultiValue>,
 }
 
 impl StateTreeList {
