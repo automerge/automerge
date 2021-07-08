@@ -92,6 +92,7 @@
                 wasm-pack
                 pkgconfig
                 openssl
+                mdbook
 
                 nodejs
                 yarn

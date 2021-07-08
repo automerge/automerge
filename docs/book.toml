@@ -1,0 +1,6 @@
+[book]
+authors = ["Andrew Jeffery"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Automerge"
