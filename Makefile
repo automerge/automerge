@@ -39,3 +39,7 @@ test-js: build-wasm
 
 .PHONY: ci
 ci: fmt clippy doc build test
+
+.PHONY: book
+book:
+	cd docs && mdbook serve
