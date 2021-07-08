@@ -3,30 +3,28 @@
 The binary format of an automerge document compresses the changes into a compact column-oriented representation.
 This makes the format very suitable for storing durably due to its compact size.
 
-TODO: causal order
-
 ## Format
 
-| Field        | Length (bytes)  | Description                                          |
-| ------------ | --------------- | ---------------------------------------------------- |
-| Magic Bytes  | 4               | Just some magic bytes                                |
-| Checksum     | 4               | First 4 bytes of the SHA256 of the encoded chunk     |
-| Block Type   | 1               | A marker byte to distinguish the bytes as a document |
-| Chunk length | Variable (uLEB) | The length of the following chunk bytes              |
-| Chunk        | Variable        | The actual bytes for the chunk                       |
+| Field                   | Length (bytes)  | Description                                          |
+| ----------------------- | --------------- | ---------------------------------------------------- |
+| Magic Bytes             | 4               | Just some magic bytes                                |
+| Checksum                | 4               | First 4 bytes of the SHA256 of the encoded chunk     |
+| Block Type              | 1               | A marker byte to distinguish the bytes as a document |
+| Chunk length            | Variable (uLEB) | The length of the following chunk bytes              |
+| [Chunk](.#chunk-format) | Variable        | The actual bytes for the chunk                       |
 
 ## Chunk format
 
-| Field            | Length (bytes)  | Description                                       |
-| ---------------- | --------------- | ------------------------------------------------- |
-| Actors length    | Variable (uLEB) | The number of following actors                    |
-| Actors           | Variable        | The actor IDs in sorted order                     |
-| Heads length     | Variable (uLEB) | The number of following heads hashes              |
-| Heads            | 32 \* number    | The head hashes of the hash graph in sorted order |
-| Change Info      | Variable        | The change columns information                    |
-| Operations Info  | Variable        | The operations columns information                |
-| Change bytes     | Variable        | The actual bytes for the changes                  |
-| Operations bytes | Variable        | The actual bytes for the operations               |
+| Field                                       | Length (bytes)  | Description                                       |
+| ------------------------------------------- | --------------- | ------------------------------------------------- |
+| Actors length                               | Variable (uLEB) | The number of following actors                    |
+| Actors                                      | Variable        | The actor IDs in sorted order                     |
+| Heads length                                | Variable (uLEB) | The number of following heads hashes              |
+| Heads                                       | 32 \* number    | The head hashes of the hash graph in sorted order |
+| [Change Info](.#change-information)         | Variable        | The change columns information                    |
+| [Operations Info](.#operations-information) | Variable        | The operations columns information                |
+| [Change bytes](.#change-bytes)              | Variable        | The actual bytes for the changes                  |
+| [Operations bytes](.#operations-bytes)      | Variable        | The actual bytes for the operations               |
 
 ## Change information
 
@@ -55,8 +53,8 @@ See [Change columns](.#change-columns) for the columns that may be included here
 | Message    | The message this change came with                               |
 | Deps num   | The number of dependencies this change has                      |
 | Deps index | The indices of the dependencies, as they appear in the document |
-| extra len  | Length of the extra bytes                                       |
-| extra raw  | The raw extra bytes                                             |
+| Extra len  | Length of the extra bytes                                       |
+| Extra raw  | The raw extra bytes                                             |
 
 ## Operations information
 
@@ -67,6 +65,8 @@ Objects are then sorted by their IDs to make them appear in causal order too.
 | ----------- | --------------- | ----------------------------------------- |
 | Column ID   | Variable (uLEB) | The ID of the column this data represents |
 | Data length | Variable (uLEB) | The length of the data in this column     |
+
+See [Operations columns](.#operations-columns) for the columns that may be included here.
 
 ## Operations bytes
 
@@ -102,8 +102,8 @@ Objects are then sorted by their IDs to make them appear in causal order too.
 | Message    | String RLE | 53  |
 | Deps num   | uLEB RLE   | 64  |
 | Deps index | Delta      | 67  |
-| extra len  | uLEB RLE   | 86  |
-| extra raw  | None       | 87  |
+| Extra len  | uLEB RLE   | 86  |
+| Extra raw  | None       | 87  |
 
 ### Operations columns
 
