@@ -1,4 +1,4 @@
-# Binary Format
+# Binary Document Format
 
 The binary format of an automerge document compresses the changes into a compact column-oriented representation.
 This makes the format very suitable for storing durably due to its compact size.
@@ -30,10 +30,10 @@ This makes the format very suitable for storing durably due to its compact size.
 
 Changes are encoded in causal order (a topological sort of the hash graph).
 
-Contains the column ids that are present in the encoding.
+The change information contains the column ids that are present in the encoding.
 Empty columns (those with no data) are not included.
 
-For each included column the following is included:
+For each included column the following is encoded:
 
 | Field       | Length (bytes)  | Description                               |
 | ----------- | --------------- | ----------------------------------------- |
@@ -43,6 +43,8 @@ For each included column the following is included:
 See [Change columns](.#change-columns) for the columns that may be included here.
 
 ## Change bytes
+
+For each change we encode its information in the following columns (note the absence of operations which are encoded separately):
 
 | Column     | Type of Data                                                    |
 | ---------- | --------------------------------------------------------------- |
@@ -61,6 +63,11 @@ See [Change columns](.#change-columns) for the columns that may be included here
 Operations are extracted from changes and grouped by the object that they manipulate.
 Objects are then sorted by their IDs to make them appear in causal order too.
 
+The operations informatino contains the column ids that are present in the encoding.
+Empty columns (those with no data) are not included.
+
+For each included column the following is encoded:
+
 | Field       | Length (bytes)  | Description                               |
 | ----------- | --------------- | ----------------------------------------- |
 | Column ID   | Variable (uLEB) | The ID of the column this data represents |
@@ -70,24 +77,26 @@ See [Operations columns](.#operations-columns) for the columns that may be inclu
 
 ## Operations bytes
 
-| Column             | Type of Data                                                     |
-| ------------------ | ---------------------------------------------------------------- |
-| Actor              | Position of the actor in the sorted actor list                   |
-| Counter            | The counter part of this OpID                                    |
-| Insert             | Whether this operation is an insert or not                       |
-| Action             | Action type that this operation performs                         |
-| Object ID actor    | The actor part of the object this operation manipulates          |
-| Object ID counter  | The counter part of the object this operation manipulates        |
-| Key actor          | The actor part of this key (if a sequence index)                 |
-| Key counter        | The counter part of this key (if a sequence index)               |
-| Key string         | The string part of this key (if a map key)                       |
-| Value ref counter  | The counter part of the OpID this cursor refers to (cursor only) |
-| Value ref actor    | The actor part of the OpID this cursor refers to (cursor only)   |
-| Value length       | The length of the encoded raw value in bytes                     |
-| Value raw          | The actual value                                                 |
-| Successors number  | The number of successors in this operation                       |
-| Successors actor   | The actor part of the successor                                  |
-| Successors counter | The counter part of the successor                                |
+For each expanded operation we encode its information in the following columns:
+
+| Column            | Type of Data                                                     |
+| ----------------- | ---------------------------------------------------------------- |
+| OpID Actor        | Position of the actor part of the OpID in the sorted actor list  |
+| OpID Counter      | The counter part of this OpID                                    |
+| Insert            | Whether this operation is an insert or not                       |
+| Action            | Action type that this operation performs                         |
+| Object ID actor   | The actor part of the object this operation manipulates          |
+| Object ID counter | The counter part of the object this operation manipulates        |
+| Key actor         | The actor part of this key (if a sequence index)                 |
+| Key counter       | The counter part of this key (if a sequence index)               |
+| Key string        | The string part of this key (if a map key)                       |
+| Value ref counter | The counter part of the OpID this cursor refers to (cursor only) |
+| Value ref actor   | The actor part of the OpID this cursor refers to (cursor only)   |
+| Value length      | The length of the encoded raw value in bytes                     |
+| Value raw         | The actual value                                                 |
+| Successors number | The number of successors in this operation                       |
+| Successor actor   | The actor part of the successor                                  |
+| Successor counter | The counter part of the successor                                |
 
 ## Columns
 
@@ -107,21 +116,21 @@ See [Operations columns](.#operations-columns) for the columns that may be inclu
 
 ### Operations columns
 
-| Name               | Encoding   | ID  |
-| ------------------ | ---------- | --- |
-| Actor              | uLEB RLE   | 33  |
-| Counter            | Delta      | 35  |
-| Insert             | Boolean    | 52  |
-| Action             | uLEB RLE   | 66  |
-| Object ID actor    | uLEB RLE   | 1   |
-| Object ID counter  | uLEB RLE   | 2   |
-| Key actor          | uLEB RLE   | 17  |
-| Key counter        | Delta      | 19  |
-| Key string         | String RLE | 21  |
-| Value ref counter  | uLEB RLE   | 98  |
-| Value ref actor    | uLEB RLE   | 97  |
-| Value length       | uLEB RLE   | 86  |
-| Value raw          | None       | 87  |
-| Successors number  | uLEB RLE   | 128 |
-| Successors actor   | uLEB RLE   | 129 |
-| Successors counter | Delta      | 131 |
+| Name              | Encoding   | ID  |
+| ----------------- | ---------- | --- |
+| OpID Actor        | uLEB RLE   | 33  |
+| OpID Counter      | Delta      | 35  |
+| Insert            | Boolean    | 52  |
+| Action            | uLEB RLE   | 66  |
+| Object ID actor   | uLEB RLE   | 1   |
+| Object ID counter | uLEB RLE   | 2   |
+| Key actor         | uLEB RLE   | 17  |
+| Key counter       | Delta      | 19  |
+| Key string        | String RLE | 21  |
+| Value ref counter | uLEB RLE   | 98  |
+| Value ref actor   | uLEB RLE   | 97  |
+| Value length      | uLEB RLE   | 86  |
+| Value raw         | None       | 87  |
+| Successors number | uLEB RLE   | 128 |
+| Successor actor   | uLEB RLE   | 129 |
+| Successor counter | Delta      | 131 |
