@@ -260,6 +260,13 @@ pub struct ScalarValues {
 }
 
 impl ScalarValues {
+    pub fn new(kind: ScalarValueKind) -> Self {
+        Self {
+            vec: Vec::new(),
+            kind,
+        }
+    }
+
     pub fn from_values_and_datatype<'de, V: MapAccess<'de>>(
         mut old_values: Vec<ScalarValue>,
         datatype: Option<DataType>,

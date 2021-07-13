@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use amp::OpId;
 use automerge_protocol as amp;
 
@@ -280,7 +278,7 @@ where
     }
 
     pub fn apply_diff(&mut self, _object_id: &amp::ObjectId, edits: Vec<amp::DiffEdit>) {
-        let mut changed_indices = HashSet::new();
+        let mut changed_indices = Vec::new();
         for edit in edits {
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
@@ -288,17 +286,18 @@ where
                     let count = count as usize;
                     self.underlying.slice(index..(index + count));
 
-                    for i in changed_indices.clone().iter() {
-                        // if the index is to the right of that being removed we need to shift it
-                        if *i >= index as u64 {
-                            // we don't need to keep the old value
-                            changed_indices.remove(i);
-                            // but if the value is not in the removed range then we need to add the
-                            // updated value in again
-                            if *i >= (index + count) as u64 {
-                                changed_indices.insert(*i - count as u64);
+                    let mut i = 0;
+                    while i < changed_indices.len() {
+                        let changed_index = changed_indices.get_mut(i).unwrap();
+                        if *changed_index >= index as u64 {
+                            if *changed_index >= (index + count) as u64 {
+                                *changed_index -= count as u64;
+                            } else {
+                                changed_indices.swap_remove(i);
+                                continue;
                             }
                         }
+                        i += 1;
                     }
                 }
                 amp::DiffEdit::SingleElementInsert {
@@ -314,8 +313,14 @@ where
                     } else {
                         self.underlying
                             .insert(index as usize, Box::new(SequenceElement::new(node)));
+
+                        for changed_index in changed_indices.iter_mut() {
+                            if *changed_index >= index as u64 {
+                                *changed_index += 1;
+                            }
+                        }
                     };
-                    changed_indices.insert(index);
+                    changed_indices.push(index);
                 }
                 amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                     elem_id,
@@ -336,8 +341,15 @@ where
                     let right = self.underlying.split_off(index);
                     self.underlying.append(intermediate);
                     self.underlying.append(right);
+
+                    for changed_index in changed_indices.iter_mut() {
+                        if *changed_index >= index as u64 {
+                            *changed_index += values.len() as u64;
+                        }
+                    }
+
                     for i in index..(index + values.len()) {
-                        changed_indices.insert(i as u64);
+                        changed_indices.push(i as u64);
                     }
                 }
                 amp::DiffEdit::Update {
@@ -348,7 +360,7 @@ where
                     if let Some(v) = self.underlying.get_mut(index as usize) {
                         v.value.apply_diff(op_id, value);
                     }
-                    changed_indices.insert(index);
+                    changed_indices.push(index);
                 }
             };
         }
@@ -513,5 +525,87 @@ where
                 updates.push(updated);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use amp::{ActorId, Diff, DiffEdit, MultiElementInsert, ObjectId, ScalarValue, ScalarValues};
+
+    use super::*;
+
+    #[test]
+    fn insert_single() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(1, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn insert_many() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        let mut values = ScalarValues::new(amp::ScalarValueKind::Null);
+        values.append(ScalarValue::Null);
+        values.append(ScalarValue::Null);
+
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::MultiElementInsert(MultiElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Id(OpId(0, ActorId::random())),
+                    values: values.clone(),
+                }),
+                DiffEdit::MultiElementInsert(MultiElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Id(OpId(1, ActorId::random())),
+                    values,
+                }),
+            ],
+        )
+    }
+
+    #[test]
+    fn remove() {
+        let mut ds = DiffableSequence::<MultiValue>::new();
+
+        let oid = ObjectId::Root;
+        ds.apply_diff(
+            &oid,
+            vec![
+                DiffEdit::SingleElementInsert {
+                    index: 0,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::SingleElementInsert {
+                    index: 1,
+                    elem_id: amp::ElementId::Head,
+                    op_id: OpId(0, ActorId::random()),
+                    value: Diff::Value(ScalarValue::Null),
+                },
+                DiffEdit::Remove { index: 0, count: 1 },
+            ],
+        )
     }
 }
