@@ -1,153 +1,105 @@
+mod conflicts;
+mod cursor;
+mod primitive;
+
 use std::{borrow::Cow, collections::HashMap};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
+pub use conflicts::Conflicts;
+pub use cursor::Cursor;
+pub use primitive::Primitive;
 use serde::Serialize;
 use smol_str::SmolStr;
 
 use crate::path::PathElement;
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
-pub struct Conflicts(HashMap<amp::OpId, Value>);
-
-impl From<HashMap<amp::OpId, Value>> for Conflicts {
-    fn from(hmap: HashMap<amp::OpId, Value>) -> Self {
-        Conflicts(hmap)
-    }
-}
-
+/// A composite value, composing maps, tables, sequences, text and primitives.
+///
+/// A `Value` is the general container type for objects in the document tree.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum Value {
+    /// A mapping from string keys to values.
     Map(HashMap<SmolStr, Value>),
+    /// A mapping from unique IDs to values.
     Table(HashMap<SmolStr, Value>),
+    /// An ordered sequence of values.
     Sequence(Vec<Value>),
-    /// Sequence of grapheme clusters
+    /// An ordered sequence of grapheme clusters.
     Text(Vec<SmolStr>),
+    /// A primitive value.
     Primitive(Primitive),
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Primitive {
-    Bytes(Vec<u8>),
-    Str(SmolStr),
-    Int(i64),
-    Uint(u64),
-    F64(f64),
-    Counter(i64),
-    Timestamp(i64),
-    Boolean(bool),
-    Cursor(Cursor),
-    Null,
-}
-
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Cursor {
-    pub index: u32,
-    pub(crate) object: amp::ObjectId,
-    pub(crate) elem_opid: amp::OpId,
-}
-
-impl Cursor {
-    pub fn new(index: u32, obj: amp::ObjectId, op: amp::OpId) -> Cursor {
-        Cursor {
-            index,
-            object: obj,
-            elem_opid: op,
-        }
-    }
-}
-
-impl From<Cursor> for Value {
-    fn from(c: Cursor) -> Self {
-        Value::Primitive(Primitive::Cursor(c))
-    }
-}
-
-impl From<&Primitive> for amp::ScalarValue {
-    fn from(p: &Primitive) -> Self {
-        match p {
-            Primitive::Bytes(b) => amp::ScalarValue::Bytes(b.clone()),
-            Primitive::Str(s) => amp::ScalarValue::Str(s.clone()),
-            Primitive::Int(i) => amp::ScalarValue::Int(*i),
-            Primitive::Uint(u) => amp::ScalarValue::Uint(*u),
-            Primitive::F64(f) => amp::ScalarValue::F64(*f),
-            Primitive::Counter(i) => amp::ScalarValue::Counter(*i),
-            Primitive::Timestamp(i) => amp::ScalarValue::Timestamp(*i),
-            Primitive::Boolean(b) => amp::ScalarValue::Boolean(*b),
-            Primitive::Null => amp::ScalarValue::Null,
-            Primitive::Cursor(c) => amp::ScalarValue::Cursor(c.elem_opid.clone()),
-        }
-    }
-}
-
-impl From<Primitive> for Value {
-    fn from(p: Primitive) -> Self {
-        Value::Primitive(p)
-    }
-}
-
-impl From<&str> for Value {
-    fn from(s: &str) -> Self {
-        Value::Primitive(Primitive::Str(SmolStr::new(s)))
-    }
-}
-
-impl From<&amp::CursorDiff> for Primitive {
-    fn from(diff: &amp::CursorDiff) -> Self {
-        Primitive::Cursor(Cursor {
-            index: diff.index,
-            object: diff.object_id.clone(),
-            elem_opid: diff.elem_id.clone(),
-        })
-    }
-}
-
-impl From<char> for Value {
-    fn from(c: char) -> Value {
-        Value::Primitive(Primitive::Str(SmolStr::new(c.to_string())))
-    }
-}
-
-impl<T> From<Vec<T>> for Value
-where
-    T: Into<Value>,
-{
-    fn from(v: Vec<T>) -> Self {
-        Value::Sequence(v.into_iter().map(|t| t.into()).collect())
-    }
-}
-
-impl From<i64> for Value {
-    fn from(v: i64) -> Self {
-        Value::Primitive(Primitive::Int(v))
-    }
-}
-
-impl<T, K> From<HashMap<K, T>> for Value
-where
-    T: Into<Value>,
-    K: AsRef<str>,
-{
-    fn from(h: HashMap<K, T>) -> Self {
-        Value::Map(
-            h.into_iter()
-                .map(|(k, v)| (SmolStr::new(k), v.into()))
-                .collect(),
-        )
-    }
-}
-
-impl AsRef<Value> for Value {
-    fn as_ref(&self) -> &Value {
-        self
-    }
-}
-
 impl Value {
+    /// Return whether the [`Value`] is a map.
+    pub fn is_map(&self) -> bool {
+        matches!(self, Self::Map(_))
+    }
+
+    /// Extract the inner map in this [`Value`] if it represents a map.
+    pub fn map(&self) -> Option<&HashMap<SmolStr, Value>> {
+        match self {
+            Self::Map(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Return whether the [`Value`] is a table.
+    pub fn is_table(&self) -> bool {
+        matches!(self, Self::Table(_))
+    }
+
+    /// Extract the inner map in this [`Value`] if it represents a table.
+    pub fn table(&self) -> Option<&HashMap<SmolStr, Value>> {
+        match self {
+            Self::Table(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Return whether the [`Value`] is a sequence.
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Self::Sequence(_))
+    }
+
+    /// Extract the elements in this [`Value`] if it represents a sequence.
+    pub fn sequence(&self) -> Option<&[Value]> {
+        match self {
+            Self::Sequence(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Return whether the [`Value`] is text.
+    pub fn is_text(&self) -> bool {
+        matches!(self, Self::Text(_))
+    }
+
+    /// Extract the graphemes in this [`Value`] if it represents text.
+    pub fn text(&self) -> Option<&[SmolStr]> {
+        match self {
+            Self::Text(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Return whether the [`Value`] is a primitive.
+    pub fn is_primitive(&self) -> bool {
+        matches!(self, Self::Primitive(_))
+    }
+
+    /// Extract the [`Primitive`] in this [`Value`] if it represents a primitive.
+    pub fn primitive(&self) -> Option<&Primitive> {
+        match self {
+            Self::Primitive(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Convert a JSON object into a [`Value`].
     pub fn from_json(json: &serde_json::Value) -> Value {
         match json {
             serde_json::Value::Object(kvs) => {
@@ -169,6 +121,7 @@ impl Value {
         }
     }
 
+    /// Convert this [`Value`] into a JSON object.
     pub fn to_json(&self) -> serde_json::Value {
         match self {
             Value::Map(map) => {
@@ -212,6 +165,7 @@ impl Value {
         }
     }
 
+    /// Get the [`Value`] at the given path, if one exists.
     pub fn get_value(&self, path: crate::Path) -> Option<Cow<'_, Self>> {
         let mut path_elements = path.elements();
         path_elements.reverse();
@@ -243,6 +197,65 @@ impl Value {
         } else {
             Some(Cow::Borrowed(self))
         }
+    }
+}
+
+impl From<Cursor> for Value {
+    fn from(c: Cursor) -> Self {
+        Value::Primitive(Primitive::Cursor(c))
+    }
+}
+
+impl From<Primitive> for Value {
+    fn from(p: Primitive) -> Self {
+        Value::Primitive(p)
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Primitive(Primitive::Str(SmolStr::new(s)))
+    }
+}
+
+impl From<char> for Value {
+    fn from(c: char) -> Value {
+        Value::Primitive(Primitive::Str(SmolStr::new(c.to_string())))
+    }
+}
+
+impl<T> From<Vec<T>> for Value
+where
+    T: Into<Value>,
+{
+    fn from(v: Vec<T>) -> Self {
+        Value::Sequence(v.into_iter().map(|t| t.into()).collect())
+    }
+}
+
+impl From<i64> for Value {
+    fn from(v: i64) -> Self {
+        Value::Primitive(Primitive::Int(v))
+    }
+}
+
+impl<T, K> From<HashMap<K, T>> for Value
+where
+    T: Into<Value>,
+    K: AsRef<str>,
+{
+    fn from(h: HashMap<K, T>) -> Self {
+        Value::Map(
+            h.into_iter()
+                .map(|(k, v)| (SmolStr::new(k), v.into()))
+                .collect(),
+        )
+    }
+}
+
+impl AsRef<Value> for Value {
+    fn as_ref(&self) -> &Value {
+        self
     }
 }
 
