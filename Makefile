@@ -31,7 +31,7 @@ test-rust:
 
 .PHONY: test-wasm
 test-wasm:
-	wasm-pack test automerge-frontend --node
+	wasm-pack test --node automerge-frontend
 
 .PHONY: test-js
 test-js: build-wasm

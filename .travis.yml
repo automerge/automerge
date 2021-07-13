@@ -30,7 +30,7 @@ jobs:
     - name: Stable - Wasm and Interop
       rust: stable
       script:
-      - wasm-pack test automerge-frontend --node
+      - wasm-pack test --node automerge-frontend
       - cd automerge-backend-wasm
       - yarn dev
       - yarn test:js
@@ -49,7 +49,7 @@ jobs:
     - name: Beta - Wasm and Interop
       rust: beta
       script:
-      - wasm-pack test automerge-frontend --node
+      - wasm-pack test --node automerge-frontend
       - cd automerge-backend-wasm
       - yarn dev
       - yarn test:js
@@ -68,7 +68,7 @@ jobs:
     - name: Nightly - Wasm and Interop
       rust: nightly
       script:
-      - wasm-pack test automerge-frontend --node
+      - wasm-pack test --node automerge-frontend
       - cd automerge-backend-wasm
       - yarn dev
       - yarn test:js
