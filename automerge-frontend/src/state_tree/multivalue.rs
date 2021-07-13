@@ -543,7 +543,7 @@ where
         match value {
             Value::Map(props) => self.new_map_or_table(props, amp::MapType::Map),
             Value::Table(props) => self.new_map_or_table(props, amp::MapType::Table),
-            Value::Sequence(values) => self.new_list(values),
+            Value::List(values) => self.new_list(values),
             Value::Text(graphemes) => self.new_text(graphemes),
             Value::Primitive(p) => self.new_primitive(p),
         }

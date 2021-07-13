@@ -14,7 +14,7 @@ fn test_frontend_uses_correct_elem_ids() {
     let mut hm = HashMap::new();
     hm.insert(
         "a".into(),
-        automerge::Value::Sequence(vec![automerge::Value::Primitive(Primitive::Null)]),
+        automerge::Value::List(vec![automerge::Value::Primitive(Primitive::Null)]),
     );
     let mut backend = automerge::Backend::new();
 
@@ -45,7 +45,7 @@ fn test_frontend_uses_correct_elem_ids() {
     let mut ehm = HashMap::new();
     ehm.insert(
         "a".into(),
-        automerge::Value::Sequence(vec![
+        automerge::Value::List(vec![
             automerge::Value::Primitive(automerge::Primitive::Int(0)),
             automerge::Value::Primitive(automerge::Primitive::Boolean(false)),
         ]),
@@ -112,9 +112,9 @@ fn test_multi_insert_expands_to_correct_indices() {
     };
 
     let val = Value::Map(hashmap! {
-        "a".into() => Value::Sequence(
+        "a".into() => Value::List(
             vec![
-                Value::Sequence(
+                Value::List(
                     vec![],
                 ),
                 Value::Primitive(
@@ -135,8 +135,8 @@ fn test_multi_insert_expands_to_correct_indices() {
         .change::<_, _, InvalidChangeRequest>(None, |old| {
             old.add_change(LocalChange::set(
                 Path::root().key("a"),
-                Value::Sequence(vec![
-                    Value::Sequence(vec![]),
+                Value::List(vec![
+                    Value::List(vec![]),
                     Value::Primitive(Primitive::Null),
                     Value::Primitive(Primitive::Uint(0)),
                 ]),

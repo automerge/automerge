@@ -6,7 +6,7 @@ fn test_simple_frontend_change_with_set_sequence() {
     f.change::<_, _, automerge_frontend::InvalidChangeRequest>(None, |doc| {
         doc.add_change(automerge_frontend::LocalChange::set(
             automerge_frontend::Path::root().key(""),
-            automerge_frontend::Value::Sequence(vec![]),
+            automerge_frontend::Value::List(vec![]),
         ))
         .unwrap();
         Ok(())

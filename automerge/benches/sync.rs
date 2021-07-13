@@ -51,10 +51,7 @@ fn sync_per_change(count: u32, sync_interval: u32) {
 
     let change = f1
         .change::<_, _, InvalidChangeRequest>(None, |d| {
-            d.add_change(LocalChange::set(
-                Path::root().key("n"),
-                Value::Sequence(vec![]),
-            ))?;
+            d.add_change(LocalChange::set(Path::root().key("n"), Value::List(vec![])))?;
             Ok(())
         })
         .unwrap()
