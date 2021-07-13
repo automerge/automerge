@@ -54,8 +54,6 @@ impl From<&amp::Change> for Change {
 }
 
 fn encode(change: &amp::Change) -> Change {
-    let mut hasher = Sha256::new();
-
     let mut deps = change.deps.clone();
     deps.sort_unstable();
 
@@ -71,6 +69,8 @@ fn encode(change: &amp::Change) -> Change {
 
     leb128::write::unsigned(&mut bytes, chunk.bytes.len() as u64).unwrap();
 
+    let body_start = bytes.len();
+
     increment_range(&mut chunk.body, bytes.len());
     increment_range(&mut chunk.message, bytes.len());
     increment_range(&mut chunk.extra_bytes, bytes.len());
@@ -78,8 +78,7 @@ fn encode(change: &amp::Change) -> Change {
 
     bytes.extend(&chunk.bytes);
 
-    hasher.input(&bytes[CHUNK_START..bytes.len()]);
-    let hash_result = hasher.result();
+    let hash_result = Sha256::digest(&bytes[CHUNK_START..bytes.len()]);
     let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
@@ -91,25 +90,11 @@ fn encode(change: &amp::Change) -> Change {
     // std::assert_eq!(c1, c0);
     // perhaps we should add something like this to the test suite
 
-    let bytes = if bytes.len() > DEFLATE_MIN_SIZE {
-        let mut result = Vec::with_capacity(bytes.len());
-        result.extend(&bytes[0..8]);
-        result.push(BLOCK_TYPE_DEFLATE);
-        let mut deflater = DeflateEncoder::new(&chunk.bytes[..], Compression::default());
-        let mut deflated = Vec::new();
-        let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
-        leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
-        result.extend(&deflated[..]);
-        ChangeBytes::Compressed {
-            compressed: result,
-            uncompressed: bytes,
-        }
-    } else {
-        ChangeBytes::Uncompressed(bytes)
-    };
+    let bytes = ChangeBytes::Uncompressed(bytes);
 
     Change {
         bytes,
+        body_start,
         hash,
         seq: change.seq,
         start_op: change.start_op,
@@ -203,6 +188,29 @@ impl ChangeBytes {
         }
     }
 
+    fn compress(&mut self, body_start: usize) {
+        match self {
+            ChangeBytes::Compressed { .. } => {}
+            ChangeBytes::Uncompressed(uncompressed) => {
+                if uncompressed.len() > DEFLATE_MIN_SIZE {
+                    let mut result = Vec::with_capacity(uncompressed.len());
+                    result.extend(&uncompressed[0..8]);
+                    result.push(BLOCK_TYPE_DEFLATE);
+                    let mut deflater =
+                        DeflateEncoder::new(&uncompressed[body_start..], Compression::default());
+                    let mut deflated = Vec::new();
+                    let deflated_len = deflater.read_to_end(&mut deflated).unwrap();
+                    leb128::write::unsigned(&mut result, deflated_len as u64).unwrap();
+                    result.extend(&deflated[..]);
+                    *self = ChangeBytes::Compressed {
+                        compressed: result,
+                        uncompressed: std::mem::take(uncompressed),
+                    }
+                }
+            }
+        }
+    }
+
     fn raw(&self) -> &[u8] {
         match self {
             ChangeBytes::Compressed { compressed, .. } => &compressed[..],
@@ -214,6 +222,7 @@ impl ChangeBytes {
 #[derive(PartialEq, Debug, Clone)]
 pub struct Change {
     bytes: ChangeBytes,
+    body_start: usize,
     pub hash: amp::ChangeHash,
     pub seq: u64,
     pub start_op: u64,
@@ -290,6 +299,10 @@ impl Change {
         &self.bytes.uncompressed()[self.extra_bytes.clone()]
     }
 
+    pub fn compress(&mut self) {
+        self.bytes.compress(self.body_start);
+    }
+
     pub fn raw_bytes(&self) -> &[u8] {
         self.bytes.raw()
     }
@@ -359,9 +372,7 @@ pub(crate) struct Document {
 fn decode_header(bytes: &[u8]) -> Result<(u8, amp::ChangeHash, Range<usize>), decoding::Error> {
     let (chunktype, body) = decode_header_without_hash(bytes)?;
 
-    let mut hasher = Sha256::new();
-    hasher.input(&bytes[PREAMBLE_BYTES..]);
-    let calculated_hash = hasher.result();
+    let calculated_hash = Sha256::digest(&bytes[PREAMBLE_BYTES..]);
 
     let checksum = &bytes[4..8];
     if checksum != &calculated_hash[0..4] {
@@ -515,6 +526,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
         });
     }
 
+    let body_start = body.start;
     let mut cursor = body;
 
     let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
@@ -533,6 +545,7 @@ fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
 
     Ok(Change {
         bytes,
+        body_start,
         hash,
         seq,
         start_op,
@@ -923,7 +936,6 @@ fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
 #[instrument(level = "debug", skip(changes))]
 pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encoding::Error> {
     let mut bytes: Vec<u8> = Vec::new();
-    let mut hasher = Sha256::new();
 
     let heads = get_heads(changes);
 
@@ -970,9 +982,7 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
 
     bytes.extend(&chunk);
 
-    hasher.input(&bytes[CHUNK_START..bytes.len()]);
-    let hash_result = hasher.result();
-    //let hash: amp::ChangeHash = hash_result[..].try_into().unwrap();
+    let hash_result = Sha256::digest(&bytes[CHUNK_START..bytes.len()]);
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 

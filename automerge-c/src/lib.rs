@@ -136,13 +136,29 @@ impl From<Backend> for *mut Backend {
 
 impl From<Vec<&Change>> for BinaryResults {
     fn from(changes: Vec<&Change>) -> Self {
-        BinaryResults(Ok(changes.iter().map(|b| b.raw_bytes().into()).collect()))
+        BinaryResults(Ok(changes
+            .iter()
+            .map(|b| {
+                let mut b = (*b).clone();
+                b.compress();
+                b.raw_bytes().into()
+            })
+            .collect()))
     }
 }
 
 impl From<Result<Vec<&Change>, AutomergeError>> for BinaryResults {
     fn from(result: Result<Vec<&Change>, AutomergeError>) -> Self {
-        BinaryResults(result.map(|changes| changes.iter().map(|b| b.raw_bytes().into()).collect()))
+        BinaryResults(result.map(|changes| {
+            changes
+                .iter()
+                .map(|b| {
+                    let mut b = (*b).clone();
+                    b.compress();
+                    b.raw_bytes().into()
+                })
+                .collect()
+        }))
     }
 }
 
@@ -195,7 +211,8 @@ pub unsafe extern "C" fn automerge_apply_local_change(
         Ok(request) => {
             let result = (*backend).apply_local_change(request);
             match result {
-                Ok((patch, change)) => {
+                Ok((patch, mut change)) => {
+                    change.compress();
                     (*backend).last_local_change = Some(change);
                     (*backend).generate_json(Ok(patch))
                 }
@@ -231,7 +248,11 @@ pub unsafe extern "C" fn automerge_apply_changes(backend: *mut Backend) -> isize
         Some(changes) => {
             let changes = changes
                 .iter()
-                .map(|c| Change::from_bytes(c.to_vec()).unwrap())
+                .map(|c| {
+                    let mut c = Change::from_bytes(c.to_vec()).unwrap();
+                    c.compress();
+                    c
+                })
                 .collect();
             let patch = (*backend).apply_changes(changes);
             (*backend).generate_json(patch)
@@ -255,7 +276,11 @@ pub unsafe extern "C" fn automerge_load_changes(backend: *mut Backend) -> isize 
     if let Some(changes) = (*backend).queue.take() {
         let changes = changes
             .iter()
-            .map(|c| Change::from_bytes(c.to_vec()).unwrap())
+            .map(|c| {
+                let mut c = Change::from_bytes(c.to_vec()).unwrap();
+                c.compress();
+                c
+            })
             .collect();
         if (*backend).load_changes(changes).is_ok() {
             return (*backend).handle_ok();
@@ -320,7 +345,8 @@ pub unsafe extern "C" fn automerge_decode_change(
     change: *const u8,
 ) -> isize {
     let bytes = from_buf_raw(change, len);
-    let change = Change::from_bytes(bytes).unwrap();
+    let mut change = Change::from_bytes(bytes).unwrap();
+    change.compress();
     (*backend).generate_json(Ok(change.decode()))
 }
 
@@ -334,7 +360,8 @@ pub unsafe extern "C" fn automerge_encode_change(
     let change: &CStr = CStr::from_ptr(change);
     let change = change.to_string_lossy();
     let uncomp_change: amp::Change = serde_json::from_str(&change).unwrap();
-    let change: Change = uncomp_change.try_into().unwrap();
+    let mut change: Change = uncomp_change.try_into().unwrap();
+    change.compress();
     (*backend).handle_binary(Ok(change.raw_bytes().into()))
 }
 
