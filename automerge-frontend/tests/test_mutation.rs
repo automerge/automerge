@@ -12,7 +12,7 @@ fn test_delete_index_in_mutation() {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("vals"),
-                Value::Sequence(Vec::new()),
+                Value::List(Vec::new()),
             ))?;
             Ok(())
         })
@@ -53,7 +53,7 @@ fn test_multiple_primitive_inserts() {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("vals"),
-                Value::Sequence(Vec::new()),
+                Value::List(Vec::new()),
             ))?;
             doc.add_change(LocalChange::insert_many(
                 Path::root().key("vals").index(0),
@@ -111,7 +111,7 @@ fn test_multiple_non_primitive_inserts() {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("vals"),
-                Value::Sequence(Vec::new()),
+                Value::List(Vec::new()),
             ))?;
             doc.add_change(LocalChange::insert_many(
                 Path::root().key("vals").index(0),

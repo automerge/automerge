@@ -29,7 +29,7 @@ fn medium_change_backend() -> Backend {
             vec![
                 (
                     "\u{0}\u{0}".into(),
-                    Value::Sequence(vec![
+                    Value::List(vec![
                         Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Str("".into())),
@@ -51,7 +51,7 @@ fn medium_change_backend() -> Backend {
                 ),
                 (
                     "\u{2}".into(),
-                    Value::Sequence(vec![
+                    Value::List(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Str("".into())),
@@ -61,7 +61,7 @@ fn medium_change_backend() -> Backend {
                 ),
                 (
                     "\u{0}".into(),
-                    Value::Sequence(vec![
+                    Value::List(vec![
                         Value::Primitive(Primitive::Counter(0)),
                         Value::Primitive(Primitive::Str("".into())),
                         Value::Primitive(Primitive::Uint(0)),
@@ -87,7 +87,7 @@ fn medium_change_backend() -> Backend {
                 ),
                 (
                     "".into(),
-                    Value::Sequence(vec![
+                    Value::List(vec![
                         Value::Primitive(Primitive::Null),
                         Value::Primitive(Primitive::Uint(0)),
                         Value::Primitive(Primitive::Int(0)),

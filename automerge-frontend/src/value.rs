@@ -14,7 +14,7 @@ use smol_str::SmolStr;
 
 use crate::path::PathElement;
 
-/// A composite value, composing maps, tables, sequences, text and primitives.
+/// A composite value, composing maps, tables, lists, text and primitives.
 ///
 /// A `Value` is the general container type for objects in the document tree.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -26,7 +26,7 @@ pub enum Value {
     /// A mapping from unique IDs to values.
     Table(HashMap<SmolStr, Value>),
     /// An ordered sequence of values.
-    Sequence(Vec<Value>),
+    List(Vec<Value>),
     /// An ordered sequence of grapheme clusters.
     Text(Vec<SmolStr>),
     /// A primitive value.
@@ -60,15 +60,15 @@ impl Value {
         }
     }
 
-    /// Return whether the [`Value`] is a sequence.
-    pub fn is_sequence(&self) -> bool {
-        matches!(self, Self::Sequence(_))
+    /// Return whether the [`Value`] is a list.
+    pub fn is_list(&self) -> bool {
+        matches!(self, Self::List(_))
     }
 
-    /// Extract the elements in this [`Value`] if it represents a sequence.
-    pub fn sequence(&self) -> Option<&[Value]> {
+    /// Extract the elements in this [`Value`] if it represents a list.
+    pub fn list(&self) -> Option<&[Value]> {
         match self {
-            Self::Sequence(m) => Some(m),
+            Self::List(m) => Some(m),
             _ => None,
         }
     }
@@ -109,9 +109,7 @@ impl Value {
                     .collect();
                 Value::Map(result)
             }
-            serde_json::Value::Array(vs) => {
-                Value::Sequence(vs.iter().map(Value::from_json).collect())
-            }
+            serde_json::Value::Array(vs) => Value::List(vs.iter().map(Value::from_json).collect()),
             serde_json::Value::String(s) => Value::Primitive(Primitive::Str(SmolStr::new(s))),
             serde_json::Value::Number(n) => {
                 Value::Primitive(Primitive::F64(n.as_f64().unwrap_or(0.0)))
@@ -138,7 +136,7 @@ impl Value {
                     .collect();
                 serde_json::Value::Object(result)
             }
-            Value::Sequence(elements) => {
+            Value::List(elements) => {
                 serde_json::Value::Array(elements.iter().map(|v| v.to_json()).collect())
             }
             Value::Text(graphemes) => serde_json::Value::String(graphemes.join("")),
@@ -181,7 +179,7 @@ impl Value {
                 (Value::Table(m), PathElement::Key(k)) => {
                     m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
                 }
-                (Value::Sequence(s), PathElement::Index(i)) => s
+                (Value::List(s), PathElement::Index(i)) => s
                     .get(i as usize)
                     .and_then(|v| v.get_value_rev_path(rev_path)),
                 (Value::Text(t), PathElement::Index(i)) => t
@@ -189,7 +187,7 @@ impl Value {
                     .map(|v| Cow::Owned(Value::Primitive(Primitive::Str(v.clone())))),
                 (Value::Map(_), PathElement::Index(_))
                 | (Value::Table(_), PathElement::Index(_))
-                | (Value::Sequence(_), PathElement::Key(_))
+                | (Value::List(_), PathElement::Key(_))
                 | (Value::Text(_), PathElement::Key(_))
                 | (Value::Primitive(_), PathElement::Key(_))
                 | (Value::Primitive(_), PathElement::Index(_)) => None,
@@ -229,7 +227,7 @@ where
     T: Into<Value>,
 {
     fn from(v: Vec<T>) -> Self {
-        Value::Sequence(v.into_iter().map(|t| t.into()).collect())
+        Value::List(v.into_iter().map(|t| t.into()).collect())
     }
 }
 
@@ -282,7 +280,7 @@ pub(crate) fn value_to_op_requests(
     insert: bool,
 ) -> (Vec<amp::Op>, u64) {
     match v {
-        Value::Sequence(vs) => {
+        Value::List(vs) => {
             let list_op = amp::OpId(start_op, actor.clone());
             let make_op = amp::Op {
                 action: amp::OpType::Make(amp::ObjType::List),
@@ -411,7 +409,7 @@ mod tests {
     fn get_value() {
         let v = Value::Map(hashmap! {
             "hello".into() => Value::Primitive(Primitive::Str("world".into())),
-            "again".into() => Value::Sequence(vec![Value::Primitive(Primitive::Int(2))])
+            "again".into() => Value::List(vec![Value::Primitive(Primitive::Int(2))])
         });
 
         assert_eq!(v.get_value(Path::root()), Some(Cow::Borrowed(&v)));
@@ -424,7 +422,7 @@ mod tests {
         assert_eq!(v.get_value(Path::root().index(0)), None);
         assert_eq!(
             v.get_value(Path::root().key("again")),
-            Some(Cow::Borrowed(&Value::Sequence(vec![Value::Primitive(
+            Some(Cow::Borrowed(&Value::List(vec![Value::Primitive(
                 Primitive::Int(2)
             )])))
         );

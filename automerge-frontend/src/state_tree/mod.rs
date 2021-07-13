@@ -303,7 +303,7 @@ impl StateTreeComposite {
             ),
             Self::List(StateTreeList {
                 elements: elems, ..
-            }) => Value::Sequence(elems.iter().map(|e| e.default_value()).collect()),
+            }) => Value::List(elems.iter().map(|e| e.default_value()).collect()),
             Self::Text(StateTreeText { graphemes, .. }) => Value::Text(
                 graphemes
                     .iter()

@@ -310,7 +310,7 @@ fn create_lists() {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()]),
+                Value::List(vec!["chaffinch".into()]),
             ))?;
             Ok(())
         })
@@ -376,7 +376,7 @@ fn apply_updates_inside_lists() {
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
                 Path::root().key("birds"),
-                Value::Sequence(vec!["chaffinch".into()]),
+                Value::List(vec!["chaffinch".into()]),
             ))?;
             Ok(())
         })
@@ -847,7 +847,7 @@ fn test_inserts_at_end_of_lists() {
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("birds"),
-            Value::Sequence(Vec::new()),
+            Value::List(Vec::new()),
         ))?;
         Ok(())
     })
@@ -903,7 +903,7 @@ fn test_inserts_at_end_of_lists() {
 
     let value = doc.get_value(&Path::root()).unwrap();
     let expected_value: Value = Value::Map(hashmap! {
-        "birds".into() => Value::Sequence(vec!["greenfinch".into(), "bullfinch".into()]),
+        "birds".into() => Value::List(vec!["greenfinch".into(), "bullfinch".into()]),
     });
     assert_eq!(value, expected_value);
 }
