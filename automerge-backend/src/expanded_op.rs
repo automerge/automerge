@@ -121,6 +121,10 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
             })
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.ops.len() - self.offset, None)
+    }
 }
 
 impl<'a> ExpandedOpIterator<'a> {
