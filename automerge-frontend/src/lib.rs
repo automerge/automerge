@@ -1,13 +1,13 @@
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
-use proxy::RootProxy;
+use value_ref::RootRef;
 
 mod error;
 mod mutation;
 mod path;
-pub mod proxy;
 mod state_tree;
 mod value;
+pub mod value_ref;
 
 use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug};
 
@@ -116,7 +116,8 @@ impl FrontendState {
                         is_local = true;
                         // unwrap should be fine here as `in_flight_requests` should never have zero length
                         // because we transition to reconciled state when that happens
-                        let (_, remaining_requests) = new_in_flight_requests.split_first().unwrap();
+                        let (_, remaining_requests) =
+                            new_in_flight_requests.split_first().unwrap();
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
@@ -311,16 +312,16 @@ impl FrontendState {
         }
     }
 
-    fn proxy(&self) -> RootProxy {
+    fn value_ref(&self) -> RootRef {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 optimistically_updated_root_state,
                 ..
-            } => optimistically_updated_root_state.proxy(),
+            } => optimistically_updated_root_state.value_ref(),
             FrontendState::Reconciled {
                 reconciled_root_state,
                 ..
-            } => reconciled_root_state.proxy(),
+            } => reconciled_root_state.value_ref(),
         }
     }
 }
@@ -467,8 +468,8 @@ impl Frontend {
         }
     }
 
-    pub fn proxy(&self) -> RootProxy {
-        self.state.proxy()
+    pub fn value_ref(&self) -> RootRef {
+        self.state.value_ref()
     }
 
     pub fn change<F, O, E>(
@@ -481,9 +482,11 @@ impl Frontend {
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
         let start_op = self.state.max_op() + 1;
-        let change_result =
-            self.state
-                .optimistically_apply_change(&self.actor_id, change_closure, self.seq + 1)?;
+        let change_result = self.state.optimistically_apply_change(
+            &self.actor_id,
+            change_closure,
+            self.seq + 1,
+        )?;
         self.cached_value = None;
         if !change_result.ops.is_empty() {
             self.seq += 1;

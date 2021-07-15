@@ -1,14 +1,14 @@
 use smol_str::SmolStr;
 
-use super::ValueProxy;
+use super::ValueRef;
 use crate::{state_tree::StateTree, Value};
 
 #[derive(Clone, Debug)]
-pub struct RootProxy<'a> {
+pub struct RootRef<'a> {
     st: &'a StateTree,
 }
 
-impl<'a> RootProxy<'a> {
+impl<'a> RootRef<'a> {
     pub(crate) fn new(st: &'a StateTree) -> Self {
         Self { st }
     }
@@ -25,29 +25,29 @@ impl<'a> RootProxy<'a> {
         self.st.root_props.is_empty()
     }
 
-    pub fn get(&self, key: &str) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, key: &str) -> Option<ValueRef<'a>> {
         self.st
             .root_props
             .get(key)
-            .map(|mv| ValueProxy::new(mv.default_statetree_value()))
+            .map(|mv| ValueRef::new(mv.default_statetree_value()))
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &SmolStr> {
         self.st.root_props.keys()
     }
 
-    pub fn values(&self) -> impl Iterator<Item = ValueProxy<'a>> {
+    pub fn values(&self) -> impl Iterator<Item = ValueRef<'a>> {
         self.st
             .root_props
             .values()
-            .map(|v| ValueProxy::new(v.default_statetree_value()))
+            .map(|v| ValueRef::new(v.default_statetree_value()))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SmolStr, ValueProxy<'a>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&SmolStr, ValueRef<'a>)> {
         self.st
             .root_props
             .iter()
-            .map(|(k, v)| (k, ValueProxy::new(v.default_statetree_value())))
+            .map(|(k, v)| (k, ValueRef::new(v.default_statetree_value())))
     }
 
     pub fn value(&self) -> Value {

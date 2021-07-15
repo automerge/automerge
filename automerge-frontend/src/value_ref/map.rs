@@ -2,14 +2,14 @@ use std::collections::HashMap;
 
 use smol_str::SmolStr;
 
-use crate::{proxy::ValueProxy, state_tree::StateTreeMap, Value};
+use crate::{state_tree::StateTreeMap, value_ref::ValueRef, Value};
 
 #[derive(Clone, Debug)]
-pub struct MapProxy<'a> {
+pub struct MapRef<'a> {
     stm: &'a StateTreeMap,
 }
 
-impl<'a> MapProxy<'a> {
+impl<'a> MapRef<'a> {
     pub(crate) fn new(stm: &'a StateTreeMap) -> Self {
         Self { stm }
     }
@@ -26,29 +26,29 @@ impl<'a> MapProxy<'a> {
         self.stm.props.is_empty()
     }
 
-    pub fn get(&self, key: &str) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, key: &str) -> Option<ValueRef<'a>> {
         self.stm
             .props
             .get(key)
-            .map(|mv| ValueProxy::new(mv.default_statetree_value()))
+            .map(|mv| ValueRef::new(mv.default_statetree_value()))
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &SmolStr> {
         self.stm.props.keys()
     }
 
-    pub fn values(&self) -> impl Iterator<Item = ValueProxy<'a>> {
+    pub fn values(&self) -> impl Iterator<Item = ValueRef<'a>> {
         self.stm
             .props
             .values()
-            .map(|v| ValueProxy::new(v.default_statetree_value()))
+            .map(|v| ValueRef::new(v.default_statetree_value()))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SmolStr, ValueProxy<'a>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&SmolStr, ValueRef<'a>)> {
         self.stm
             .props
             .iter()
-            .map(|(k, v)| (k, ValueProxy::new(v.default_statetree_value())))
+            .map(|(k, v)| (k, ValueRef::new(v.default_statetree_value())))
     }
 
     pub fn value(&self) -> Value {

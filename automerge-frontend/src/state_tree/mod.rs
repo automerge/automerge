@@ -7,7 +7,7 @@ use diffable_sequence::DiffableSequence;
 use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
-use crate::{error, Path, PathElement, Primitive, RootProxy, Value};
+use crate::{error, Path, PathElement, Primitive, RootRef, Value};
 
 mod diffable_sequence;
 mod multivalue;
@@ -153,8 +153,8 @@ impl StateTree {
         Value::Map(m)
     }
 
-    pub(crate) fn proxy(&self) -> RootProxy {
-        RootProxy::new(self)
+    pub(crate) fn value_ref(&self) -> RootRef {
+        RootRef::new(self)
     }
 }
 

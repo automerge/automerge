@@ -1,11 +1,11 @@
-use crate::{proxy::ValueProxy, state_tree::StateTreeList, Value};
+use crate::{state_tree::StateTreeList, value_ref::ValueRef, Value};
 
 #[derive(Clone, Debug)]
-pub struct ListProxy<'a> {
+pub struct ListRef<'a> {
     stl: &'a StateTreeList,
 }
 
-impl<'a> ListProxy<'a> {
+impl<'a> ListRef<'a> {
     pub(crate) fn new(stl: &'a StateTreeList) -> Self {
         Self { stl }
     }
@@ -18,18 +18,18 @@ impl<'a> ListProxy<'a> {
         self.stl.elements.is_empty()
     }
 
-    pub fn get(&self, index: usize) -> Option<ValueProxy<'a>> {
+    pub fn get(&self, index: usize) -> Option<ValueRef<'a>> {
         self.stl
             .elements
             .get(index)
-            .map(|(_, mv)| ValueProxy::new(mv.default_statetree_value()))
+            .map(|(_, mv)| ValueRef::new(mv.default_statetree_value()))
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = ValueProxy<'a>> {
+    pub fn iter(&self) -> impl Iterator<Item = ValueRef<'a>> {
         self.stl
             .elements
             .iter()
-            .map(|mv| ValueProxy::new(mv.default_statetree_value()))
+            .map(|mv| ValueRef::new(mv.default_statetree_value()))
     }
 
     pub fn value(&self) -> Value {

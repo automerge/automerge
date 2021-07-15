@@ -3,11 +3,11 @@ use smol_str::SmolStr;
 use crate::{state_tree::StateTreeText, Value};
 
 #[derive(Clone, Debug)]
-pub struct TextProxy<'a> {
+pub struct TextRef<'a> {
     stt: &'a StateTreeText,
 }
 
-impl<'a> TextProxy<'a> {
+impl<'a> TextRef<'a> {
     pub(crate) fn new(stt: &'a StateTreeText) -> Self {
         Self { stt }
     }
