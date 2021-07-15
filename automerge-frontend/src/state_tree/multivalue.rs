@@ -172,7 +172,7 @@ impl MultiValue {
         }
     }
 
-    pub(super) fn default_statetree_value(&self) -> &StateTreeValue {
+    pub(crate) fn default_statetree_value(&self) -> &StateTreeValue {
         &self.winning_value.1
     }
 
@@ -180,7 +180,7 @@ impl MultiValue {
         &mut self.winning_value.1
     }
 
-    pub(super) fn default_value(&self) -> Value {
+    pub(crate) fn default_value(&self) -> Value {
         self.winning_value.1.realise_value()
     }
 
@@ -454,7 +454,7 @@ impl MultiGrapheme {
         }
     }
 
-    pub(super) fn default_grapheme(&self) -> &SmolStr {
+    pub(crate) fn default_grapheme(&self) -> &SmolStr {
         &self.winning_value.1
     }
 

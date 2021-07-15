@@ -4,7 +4,7 @@ use automerge_protocol as amp;
 use super::{MultiGrapheme, MultiValue};
 use crate::error::InvalidPatch;
 
-pub(super) trait DiffableValue: Sized + Default {
+pub(crate) trait DiffableValue: Sized + Default {
     fn check_construct(
         opid: &amp::OpId,
         diff: &amp::Diff,
@@ -159,7 +159,7 @@ where
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct DiffableSequence<T>
+pub(crate) struct DiffableSequence<T>
 where
     T: DiffableValue,
     T: Clone,
@@ -386,8 +386,12 @@ where
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.underlying.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.underlying.is_empty()
     }
 
     pub(super) fn set(&mut self, index: usize, value: T) -> T {
@@ -409,7 +413,7 @@ where
             .clone()
     }
 
-    pub(super) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
+    pub(crate) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
         self.underlying.get(index).map(|e| (&e.opid, e.value.get()))
     }
 
@@ -424,7 +428,7 @@ where
             .insert(index, Box::new(SequenceElement::original(value)))
     }
 
-    pub(super) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
+    pub(crate) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
         // Making this unwrap safe is the entire point of this data structure
         self.underlying.iter().map(|i| i.value.get())
     }

@@ -1,11 +1,13 @@
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
+use value_ref::RootRef;
 
 mod error;
 mod mutation;
 mod path;
 mod state_tree;
 mod value;
+pub mod value_ref;
 
 use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug};
 
@@ -308,6 +310,19 @@ impl FrontendState {
             } => reconciled_root_state.value(),
         }
     }
+
+    fn value_ref(&self) -> RootRef {
+        match self {
+            FrontendState::WaitingForInFlightRequests {
+                optimistically_updated_root_state,
+                ..
+            } => optimistically_updated_root_state.value_ref(),
+            FrontendState::Reconciled {
+                reconciled_root_state,
+                ..
+            } => reconciled_root_state.value_ref(),
+        }
+    }
 }
 
 pub struct Frontend {
@@ -450,6 +465,10 @@ impl Frontend {
             self.cached_value = Some(value);
             self.cached_value.as_ref().unwrap()
         }
+    }
+
+    pub fn value_ref(&self) -> RootRef {
+        self.state.value_ref()
     }
 
     pub fn change<F, O, E>(
