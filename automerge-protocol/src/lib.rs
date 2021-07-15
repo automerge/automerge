@@ -17,10 +17,16 @@ use serde::{
 };
 use smol_str::SmolStr;
 use strum::EnumDiscriminants;
+use tinyvec::TinyVec;
 
+/// An actor id is a sequence of bytes. By default we use a uuid which can be nicely stack
+/// allocated.
+///
+/// In the event that users want to use their own type of identifier that is longer than a uuid
+/// then they will likely end up pushing it onto the heap which is still fine.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ActorId(Vec<u8>);
+pub struct ActorId(TinyVec<[u8; 16]>);
 
 impl fmt::Debug for ActorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -32,19 +38,11 @@ impl fmt::Debug for ActorId {
 
 impl ActorId {
     pub fn random() -> ActorId {
-        ActorId(uuid::Uuid::new_v4().as_bytes().to_vec())
+        ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.0.clone()
-    }
-
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.0
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> ActorId {
-        ActorId(bytes.to_vec())
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.0
     }
 
     pub fn to_hex_string(&self) -> String {

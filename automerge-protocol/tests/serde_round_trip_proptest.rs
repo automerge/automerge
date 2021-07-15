@@ -38,7 +38,7 @@ fn arb_optype() -> impl Strategy<Value = amp::OpType> {
 }
 
 fn arb_actorid() -> impl Strategy<Value = amp::ActorId> {
-    proptest::collection::vec(any::<u8>(), 32).prop_map(|bytes| amp::ActorId::from_bytes(&bytes))
+    proptest::collection::vec(any::<u8>(), 16).prop_map(|bytes| amp::ActorId::from(&bytes))
 }
 
 fn arb_opid() -> impl Strategy<Value = amp::OpId> {

@@ -68,7 +68,7 @@ fn test_frontend_uses_correct_elem_ids() {
 #[test]
 fn test_multi_insert_expands_to_correct_indices() {
     let uuid = uuid::Uuid::new_v4();
-    let actor = ActorId::from_bytes(uuid.as_bytes());
+    let actor = ActorId::from(uuid);
 
     let change = amp::Change {
         operations: vec![
