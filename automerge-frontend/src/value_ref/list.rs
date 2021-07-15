@@ -37,6 +37,6 @@ impl<'a> ListRef<'a> {
         for e in self.stl.elements.iter() {
             v.push(e.default_value())
         }
-        Value::Sequence(v)
+        Value::List(v)
     }
 }
