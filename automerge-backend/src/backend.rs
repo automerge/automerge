@@ -624,6 +624,8 @@ impl Backend {
                 }
             }
         }
+
+        println!("may_find length {}", may_find.len());
     }
 
     /// Adds the event handler and returns the id of the handler.
