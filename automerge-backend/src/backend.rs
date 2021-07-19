@@ -2,6 +2,7 @@ use core::cmp::max;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
+    sync::{Arc, Mutex},
 };
 
 use amp::ChangeHash;
@@ -26,6 +27,7 @@ pub struct Backend {
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
+    clocks_cache: Arc<Mutex<HashMap<amp::ChangeHash, HashMap<amp::ActorId, usize>>>>,
     event_handlers: EventHandlers,
 }
 
@@ -391,7 +393,7 @@ impl Backend {
     }
 
     /// Get the changes that have happpened since these hashes.
-    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<&amp::ActorId, usize> {
+    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<amp::ActorId, usize> {
         let mut clock = HashMap::new();
 
         for hash in heads {
@@ -408,13 +410,25 @@ impl Backend {
         clock
     }
 
-    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<&amp::ActorId, usize> {
+    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<amp::ActorId, usize> {
         let mut stack = vec![hash];
         let mut has_seen = HashSet::new();
 
-        let mut clock = HashMap::new();
+        let mut clock: HashMap<amp::ActorId, usize> = HashMap::new();
+        let mut clocks_cache = self.clocks_cache.lock().unwrap();
 
         while let Some(hash) = stack.pop() {
+            if let Some(cached_clock) = clocks_cache.get(hash) {
+                for (a, s) in cached_clock {
+                    if let Some(seq) = clock.get_mut(a) {
+                        *seq = max(*seq, *s);
+                    } else {
+                        clock.insert(a.clone(), *s);
+                    }
+                }
+                continue;
+            }
+
             if has_seen.contains(&hash) {
                 continue;
             }
@@ -425,8 +439,11 @@ impl Backend {
                 .and_then(|i| self.history.get(*i))
             {
                 stack.extend(change.deps.iter());
-                let seq = clock.entry(change.actor_id()).or_default();
-                *seq = max(*seq, change.seq as usize);
+                if let Some(seq) = clock.get_mut(change.actor_id()) {
+                    *seq = max(*seq, change.seq as usize);
+                } else {
+                    clock.insert(change.actor_id().clone(), change.seq as usize);
+                }
             }
 
             if clock.len() == self.states.len() {
@@ -436,6 +453,8 @@ impl Backend {
 
             has_seen.insert(hash);
         }
+
+        clocks_cache.insert(*hash, clock.clone());
 
         clock
     }
