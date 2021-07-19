@@ -347,11 +347,99 @@ impl Backend {
     }
 
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        if let Some(changes) = self.get_changes_fast(have_deps) {
-            changes
-        } else {
-            self.get_changes_slow(have_deps)
+        let vc = self.get_changes_vector_clock(have_deps);
+
+        // let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
+        //     changes
+        // } else {
+        //     self.get_changes_slow(have_deps)
+        // };
+
+        // use pretty_assertions::assert_eq;
+        // assert_eq!(
+        //     changes
+        //         .iter()
+        //         .map(|c| (c.hash, c.actor_id(), c.seq))
+        //         .collect::<Vec<_>>(),
+        //     vc.iter()
+        //         .map(|c| (c.hash, c.actor_id(), c.seq))
+        //         .collect::<Vec<_>>()
+        // );
+        vc
+    }
+
+    fn get_changes_vector_clock(&self, heads: &[amp::ChangeHash]) -> Vec<&Change> {
+        // dbg!(&heads);
+        let clock = self.get_vector_clock_at(heads);
+        // dbg!(&clock);
+        let mut change_indices = Vec::new();
+
+        for (actor, indices) in &self.states {
+            if let Some(index) = clock.get(actor) {
+                change_indices.extend(indices[*index..].iter().copied())
+            } else {
+                change_indices.extend(indices)
+            }
         }
+
+        change_indices.sort_unstable();
+
+        let mut changes = Vec::new();
+        for index in change_indices {
+            changes.push(self.history.get(index).unwrap())
+        }
+
+        changes
+    }
+
+    /// Get the changes that have happpened since these hashes.
+    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<amp::ActorId, usize> {
+        let mut clock = HashMap::new();
+
+        for hash in heads {
+            let found_clock = self.get_vector_clock_for_hash(hash);
+            for (a, s) in found_clock {
+                if let Some(seq) = clock.get_mut(&a) {
+                    *seq = max(*seq, s);
+                } else {
+                    clock.insert(a, s);
+                }
+            }
+        }
+
+        clock
+    }
+
+    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<amp::ActorId, usize> {
+        let mut stack = vec![hash];
+        let mut has_seen = HashSet::new();
+
+        let mut clock = HashMap::new();
+
+        while let Some(hash) = stack.pop() {
+            if has_seen.contains(&hash) {
+                continue;
+            }
+
+            if let Some(change) = self
+                .history_index
+                .get(hash)
+                .and_then(|i| self.history.get(*i))
+            {
+                stack.extend(change.deps.iter());
+                let seq = clock.entry(change.actor_id().clone()).or_default();
+                *seq = max(*seq, change.seq as usize);
+            }
+
+            if clock.len() == self.states.len() {
+                // we've found all the actors so can stop
+                break;
+            }
+
+            has_seen.insert(hash);
+        }
+
+        clock
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {

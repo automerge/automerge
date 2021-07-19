@@ -7,6 +7,7 @@ edition = "2018"
 
 [dependencies]
 automerge = { path = "../automerge" }
+automerge-backend = { path = "../automerge-backend" }
 automerge-frontend = { path = "../automerge-frontend" }
 automerge-protocol = { path = "../automerge-protocol" }
 rand = "0.8.2"

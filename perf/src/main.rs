@@ -7,7 +7,7 @@ use std::{
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive};
 use automerge_frontend::Value;
 use maplit::hashmap;
-use rand::Rng;
+use rand::{random, Rng};
 use smol_str::SmolStr;
 
 fn f() {
@@ -79,6 +79,135 @@ fn f() {
 
     let save = Instant::now();
     let bytes = backend.save().unwrap();
+    println!("len {}", bytes.len());
+    let save = save.elapsed();
+    let load = Instant::now();
+    Backend::load(bytes).unwrap();
+    let load = load.elapsed();
+
+    println!(
+        "maps x{} total:{:?} change:{:?} apply_change:{:?} apply_patch:{:?} save:{:?} load:{:?}",
+        iterations,
+        start.elapsed(),
+        changes.iter().sum::<Duration>(),
+        apply_changes.iter().sum::<Duration>(),
+        apply_patches.iter().sum::<Duration>(),
+        save,
+        load,
+    );
+}
+
+fn f_sync() {
+    let mut doc = Frontend::new();
+    let mut doc2 = Frontend::new();
+    let mut backend = Backend::new();
+    let mut backend2 = Backend::new();
+
+    let mut sync_state = automerge_backend::SyncState::default();
+    let mut sync_state2 = automerge_backend::SyncState::default();
+
+    let start = Instant::now();
+
+    let mut m = hashmap! {
+        "arstarstoien".into() =>
+        Value::Map(hashmap!{
+            "aboairentssroien".into()=>
+            Value::Map(
+                hashmap! {
+                    "arostnaritsnabc".into() => Value::Primitive(Primitive::Str("hello world".into()))
+                },
+            ),
+            "arsotind".into() => Value::Primitive(Primitive::Uint(20)),
+        },)
+    };
+
+    for _ in 0..10 {
+        let random_key: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(10)
+            .map(char::from)
+            .collect();
+        let random_value: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(50)
+            .map(char::from)
+            .collect();
+        m.insert(
+            random_key.into(),
+            Value::Primitive(Primitive::Str(random_value.into())),
+        );
+    }
+
+    let mut changes = Vec::new();
+    let mut apply_changes = Vec::new();
+    let mut apply_patches = Vec::new();
+
+    let iterations = 10_000;
+    for _ in 0..iterations {
+        let random_string: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(10)
+            .map(char::from)
+            .collect();
+        let a = Instant::now();
+
+        let (doc, b) = if random() {
+            (&mut doc, &mut backend)
+        } else {
+            (&mut doc2, &mut backend2)
+        };
+
+        let change = doc
+            .change::<_, _, InvalidChangeRequest>(None, |d| {
+                d.add_change(LocalChange::set(
+                    Path::root().key(random_string),
+                    Value::Map(m.clone()),
+                ))
+            })
+            .unwrap()
+            .1
+            .unwrap();
+        changes.push(a.elapsed());
+        let a = Instant::now();
+
+        let (patch, _) = b.apply_local_change(change).unwrap();
+        apply_changes.push(a.elapsed());
+        let a = Instant::now();
+        doc.apply_patch(patch).unwrap();
+        apply_patches.push(a.elapsed());
+
+        if random() {
+            if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
+                backend2
+                    .receive_sync_message(&mut sync_state2, msg)
+                    .unwrap();
+            }
+        }
+
+        if random() {
+            if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
+                backend.receive_sync_message(&mut sync_state, msg).unwrap();
+            }
+        }
+
+        if random() {
+            if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
+                backend2
+                    .receive_sync_message(&mut sync_state2, msg)
+                    .unwrap();
+            }
+        }
+
+        if random() {
+            if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
+                backend.receive_sync_message(&mut sync_state, msg).unwrap();
+            }
+        }
+    }
+
+    let save = Instant::now();
+    let bytes = backend.save().unwrap();
+    println!("len {}", bytes.len());
     let save = save.elapsed();
     let load = Instant::now();
     Backend::load(bytes).unwrap();
@@ -141,6 +270,7 @@ fn g() {
 
     let save = Instant::now();
     let bytes = backend.save().unwrap();
+    println!("len {}", bytes.len());
     let save = save.elapsed();
     let load = Instant::now();
     Backend::load(bytes).unwrap();
@@ -245,6 +375,7 @@ fn h() {
 
     let save = Instant::now();
     let bytes = backend1.save().unwrap();
+    println!("len {}", bytes.len());
     let save = save.elapsed();
     let load = Instant::now();
     Backend::load(bytes).unwrap();
@@ -324,6 +455,7 @@ fn trace(edits: Vec<(u32, u32, Option<String>)>) {
 
     let save = Instant::now();
     let bytes = backend.save().unwrap();
+    println!("len {}", bytes.len());
     let save = save.elapsed();
     let load = Instant::now();
     Backend::load(bytes).unwrap();
