@@ -1,6 +1,6 @@
 use core::cmp::max;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fmt::Debug,
     sync::{Arc, Mutex},
 };
