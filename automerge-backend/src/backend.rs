@@ -19,6 +19,9 @@ use crate::{
     Change, EventHandler,
 };
 
+/// A vector clock, mapping actor ids to the maximum sequence number of that actor.
+type VectorClock = HashMap<amp::ActorId, usize>;
+
 #[derive(Debug, Default, Clone)]
 pub struct Backend {
     queue: Vec<Change>,
@@ -27,7 +30,8 @@ pub struct Backend {
     actors: ActorMap,
     history: Vec<Change>,
     history_index: HashMap<amp::ChangeHash, usize>,
-    clocks_cache: Arc<Mutex<HashMap<amp::ChangeHash, HashMap<amp::ActorId, usize>>>>,
+    /// A cache of vector clocks for speeding up sync operations.
+    clocks_cache: Arc<Mutex<HashMap<amp::ChangeHash, VectorClock>>>,
     event_handlers: EventHandlers,
 }
 
@@ -293,6 +297,14 @@ impl Backend {
             .unwrap_or_default())
     }
 
+    /// Get the list of changes not covered by `have_deps`.
+    ///
+    /// This _fast_ variant makes use of the topological sort of the graph to handle cases where
+    /// there are either no concurrent changes since the `have_deps` or all of the concurrent
+    /// changes are to the right of them in the sort.
+    ///
+    /// This strategy avoids us having to do lots of work when we may be playing catchup (no
+    /// changes ourelves but just streaming them from someone else).
     fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&Change>> {
         if have_deps.is_empty() {
             return Some(self.history.iter().collect());
@@ -326,6 +338,10 @@ impl Backend {
         }
     }
 
+    /// Get the list of changes that are not transitive dependencies of `have_deps`.
+    ///
+    /// `have_deps` represents the heads of a graph and this function computes the changes that
+    /// exist in our graph but not in one with heads `have_deps`.
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
         if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
@@ -334,7 +350,15 @@ impl Backend {
         }
     }
 
+    /// Get the list of changes that are not transitive dependencies of `heads` using a vector
+    /// clock.
+    ///
+    /// This aims to be more predictable than versions that operate on the hash graph which
+    /// sometimes need to do big graph traversals.
     fn get_changes_vector_clock(&self, heads: &[amp::ChangeHash]) -> Vec<&Change> {
+        // get the vector clock representing the state of the graph with the given heads
+        //
+        // heads that are not in our graph do not contribute to the clock
         let clock = self.get_vector_clock_at(heads);
 
         let mut change_indices = Vec::new();
@@ -356,10 +380,11 @@ impl Backend {
             .collect()
     }
 
-    /// Get the changes that have happpened since these hashes.
-    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<amp::ActorId, usize> {
+    /// Get the vector clock for the state of the graph with these heads.
+    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> VectorClock {
         let mut clock = HashMap::new();
 
+        // get the clock for each head individually and combine them
         for hash in heads {
             let found_clock = self.get_vector_clock_for_hash(hash);
             for (a, s) in found_clock {
@@ -374,15 +399,23 @@ impl Backend {
         clock
     }
 
-    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<amp::ActorId, usize> {
+    /// Get the vector clock for the given hash.
+    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> VectorClock {
+        // we need to do a BFS through the hash graph to ensure we get nodes at the highest seq for
+        // each actor id
         let mut queue = VecDeque::new();
         queue.push_back(hash);
+
         let mut has_seen = HashSet::new();
 
         let mut clock: HashMap<amp::ActorId, usize> = HashMap::new();
+
+        // we'll be needing this for the duration so just lock it once
         let mut clocks_cache = self.clocks_cache.lock().unwrap();
 
         while let Some(hash) = queue.pop_front() {
+            // since the graph is immutable the vector clock will not be changing so we can use the
+            // cached clock of a hash to skip having to traverse its dependencies
             if let Some(cached_clock) = clocks_cache.get(hash) {
                 for (a, s) in cached_clock {
                     if let Some(seq) = clock.get_mut(a) {
@@ -391,10 +424,10 @@ impl Backend {
                         clock.insert(a.clone(), *s);
                     }
                 }
+                // don't add the changes dependencies to the queue as we already have the clock
+                // contribution from this subgraph
                 continue;
-            }
-
-            if has_seen.contains(&hash) {
+            } else if has_seen.contains(&hash) {
                 continue;
             }
 
@@ -413,12 +446,16 @@ impl Backend {
 
             if clock.len() == self.states.len() {
                 // we've found all the actors so can stop
+                //
+                // This prevents us from going down all the way to the root of the graph
+                // unnecessarily when we have clock entries for everyone
                 break;
             }
 
             has_seen.insert(hash);
         }
 
+        // cache the clock for this hash
         clocks_cache.insert(*hash, clock.clone());
 
         clock
