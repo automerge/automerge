@@ -326,52 +326,17 @@ impl Backend {
         }
     }
 
-    fn get_changes_slow(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        let mut stack: Vec<_> = have_deps.iter().collect();
-        let mut has_seen = HashSet::new();
-        while let Some(hash) = stack.pop() {
-            if has_seen.contains(&hash) {
-                continue;
-            }
-            if let Some(change) = self
-                .history_index
-                .get(hash)
-                .and_then(|i| self.history.get(*i))
-            {
-                stack.extend(change.deps.iter());
-            }
-            has_seen.insert(hash);
-        }
-        self.history
-            .iter()
-            .filter(|change| !has_seen.contains(&change.hash))
-            .collect()
-    }
-
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
+        if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
         } else {
             self.get_changes_vector_clock(have_deps)
-        };
-        changes
-
-        // use pretty_assertions::assert_eq;
-        // assert_eq!(
-        //     changes
-        //         .iter()
-        //         .map(|c| (c.hash, c.actor_id(), c.seq))
-        //         .collect::<Vec<_>>(),
-        //     vc.iter()
-        //         .map(|c| (c.hash, c.actor_id(), c.seq))
-        //         .collect::<Vec<_>>()
-        // );
+        }
     }
 
     fn get_changes_vector_clock(&self, heads: &[amp::ChangeHash]) -> Vec<&Change> {
-        // dbg!(&heads);
         let clock = self.get_vector_clock_at(heads);
-        // dbg!(&clock);
+
         let mut change_indices = Vec::new();
 
         for (actor, indices) in &self.states {
@@ -382,14 +347,13 @@ impl Backend {
             }
         }
 
+        // make them into topological sorted order
         change_indices.sort_unstable();
 
-        let mut changes = Vec::new();
-        for index in change_indices {
-            changes.push(self.history.get(index).unwrap())
-        }
-
-        changes
+        change_indices
+            .into_iter()
+            .map(|i| &self.history[i])
+            .collect()
     }
 
     /// Get the changes that have happpened since these hashes.
