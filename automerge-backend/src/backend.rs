@@ -361,7 +361,7 @@ impl Backend {
     }
 
     /// Get the changes that have happpened since these hashes.
-    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<amp::ActorId, usize> {
+    fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> HashMap<&amp::ActorId, usize> {
         let mut clock = HashMap::new();
 
         for hash in heads {
@@ -378,7 +378,7 @@ impl Backend {
         clock
     }
 
-    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<amp::ActorId, usize> {
+    fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<&amp::ActorId, usize> {
         let mut stack = vec![hash];
         let mut has_seen = HashSet::new();
 
@@ -395,7 +395,7 @@ impl Backend {
                 .and_then(|i| self.history.get(*i))
             {
                 stack.extend(change.deps.iter());
-                let seq = clock.entry(change.actor_id().clone()).or_default();
+                let seq = clock.entry(change.actor_id()).or_default();
                 *seq = max(*seq, change.seq as usize);
             }
 
