@@ -7,7 +7,7 @@ use std::{
 use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive};
 use automerge_frontend::Value;
 use maplit::hashmap;
-use rand::{random, Rng};
+use rand::{thread_rng, Rng};
 use smol_str::SmolStr;
 
 fn f() {
@@ -151,7 +151,7 @@ fn f_sync() {
             .collect();
         let a = Instant::now();
 
-        let (doc, b) = if random() {
+        let (doc, b) = if thread_rng().gen() {
             (&mut doc, &mut backend)
         } else {
             (&mut doc2, &mut backend2)
@@ -176,32 +176,24 @@ fn f_sync() {
         doc.apply_patch(patch).unwrap();
         apply_patches.push(a.elapsed());
 
-        if random() {
-            if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
-                backend2
-                    .receive_sync_message(&mut sync_state2, msg)
-                    .unwrap();
-            }
+        if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
+            backend2
+                .receive_sync_message(&mut sync_state2, msg)
+                .unwrap();
         }
 
-        if random() {
-            if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
-                backend.receive_sync_message(&mut sync_state, msg).unwrap();
-            }
+        if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
+            backend.receive_sync_message(&mut sync_state, msg).unwrap();
         }
 
-        if random() {
-            if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
-                backend2
-                    .receive_sync_message(&mut sync_state2, msg)
-                    .unwrap();
-            }
+        if let Some(msg) = backend.generate_sync_message(&mut sync_state) {
+            backend2
+                .receive_sync_message(&mut sync_state2, msg)
+                .unwrap();
         }
 
-        if random() {
-            if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
-                backend.receive_sync_message(&mut sync_state, msg).unwrap();
-            }
+        if let Some(msg) = backend2.generate_sync_message(&mut sync_state2) {
+            backend.receive_sync_message(&mut sync_state, msg).unwrap();
         }
     }
 
@@ -505,6 +497,9 @@ fn main() {
 
     for _ in 0..repeats {
         f()
+    }
+    for _ in 0..repeats {
+        f_sync()
     }
     for _ in 0..repeats {
         g()
