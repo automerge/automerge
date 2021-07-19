@@ -347,13 +347,12 @@ impl Backend {
     }
 
     pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&Change> {
-        let vc = self.get_changes_vector_clock(have_deps);
-
-        // let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
-        //     changes
-        // } else {
-        //     self.get_changes_slow(have_deps)
-        // };
+        let changes = if let Some(changes) = self.get_changes_fast(have_deps) {
+            changes
+        } else {
+            self.get_changes_vector_clock(have_deps)
+        };
+        changes
 
         // use pretty_assertions::assert_eq;
         // assert_eq!(
@@ -365,7 +364,6 @@ impl Backend {
         //         .map(|c| (c.hash, c.actor_id(), c.seq))
         //         .collect::<Vec<_>>()
         // );
-        vc
     }
 
     fn get_changes_vector_clock(&self, heads: &[amp::ChangeHash]) -> Vec<&Change> {
