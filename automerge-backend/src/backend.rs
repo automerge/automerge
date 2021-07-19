@@ -587,45 +587,6 @@ impl Backend {
                 }
             }
         }
-
-        if may_find.is_empty() {
-            return;
-        }
-
-        let mut queue: VecDeque<_> = heads.iter().collect();
-        let mut seen = HashSet::new();
-        while let Some(hash) = queue.pop_front() {
-            if seen.contains(hash) {
-                continue;
-            }
-            seen.insert(hash);
-
-            let removed = may_find.remove(hash);
-            changes.remove(hash);
-            if may_find.is_empty() {
-                break;
-            }
-
-            for dep in self
-                .history_index
-                .get(hash)
-                .and_then(|i| self.history.get(*i))
-                .map(|c| c.deps.as_slice())
-                .unwrap_or_default()
-            {
-                // if we just removed something from our hashes then it is likely there is more
-                // down here so do a quick inspection on the children.
-                // When we don't remove anything it is less likely that there is something down
-                // that chain so delay it.
-                if removed {
-                    queue.push_front(dep);
-                } else {
-                    queue.push_back(dep);
-                }
-            }
-        }
-
-        println!("may_find length {}", may_find.len());
     }
 
     /// Adds the event handler and returns the id of the handler.
