@@ -532,6 +532,22 @@ impl Backend {
             return;
         }
 
+        let clock = self.get_vector_clock_at(heads);
+        for hash in may_find.clone() {
+            if let Some(change) = self.get_change_by_hash(&hash) {
+                if let Some(s) = clock.get(change.actor_id()) {
+                    if change.seq as usize <= *s {
+                        may_find.remove(&hash);
+                        changes.remove(&hash);
+                    }
+                }
+            }
+        }
+
+        if may_find.is_empty() {
+            return;
+        }
+
         let mut queue: VecDeque<_> = heads.iter().collect();
         let mut seen = HashSet::new();
         while let Some(hash) = queue.pop_front() {
