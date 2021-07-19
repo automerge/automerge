@@ -1,6 +1,6 @@
 use core::cmp::max;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
     sync::{Arc, Mutex},
 };
@@ -375,13 +375,14 @@ impl Backend {
     }
 
     fn get_vector_clock_for_hash(&self, hash: &amp::ChangeHash) -> HashMap<amp::ActorId, usize> {
-        let mut stack = vec![hash];
+        let mut queue = VecDeque::new();
+        queue.push_back(hash);
         let mut has_seen = HashSet::new();
 
         let mut clock: HashMap<amp::ActorId, usize> = HashMap::new();
         let mut clocks_cache = self.clocks_cache.lock().unwrap();
 
-        while let Some(hash) = stack.pop() {
+        while let Some(hash) = queue.pop_front() {
             if let Some(cached_clock) = clocks_cache.get(hash) {
                 for (a, s) in cached_clock {
                     if let Some(seq) = clock.get_mut(a) {
@@ -402,7 +403,7 @@ impl Backend {
                 .get(hash)
                 .and_then(|i| self.history.get(*i))
             {
-                stack.extend(change.deps.iter());
+                queue.extend(change.deps.iter());
                 if let Some(seq) = clock.get_mut(change.actor_id()) {
                     *seq = max(*seq, change.seq as usize);
                 } else {
