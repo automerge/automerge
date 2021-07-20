@@ -16,11 +16,9 @@ use crate::{
     op_handle::OpHandle,
     op_set::OpSet,
     patches::{generate_from_scratch_diff, IncrementalPatch},
+    vector_clock::VectorClock,
     Change, EventHandler,
 };
-
-/// A vector clock, mapping actor ids to the maximum sequence number of that actor.
-type VectorClock = HashMap<amp::ActorId, usize>;
 
 #[derive(Debug, Default, Clone)]
 pub struct Backend {
@@ -334,8 +332,8 @@ impl Backend {
         let mut change_indices = Vec::new();
 
         for (actor, indices) in &self.states {
-            if let Some(index) = clock.get(actor) {
-                change_indices.extend(indices[*index..].iter().copied());
+            if let Some(index) = clock.get_seq(actor) {
+                change_indices.extend(indices[index as usize..].iter().copied());
             } else {
                 change_indices.extend(indices);
             }
@@ -352,18 +350,12 @@ impl Backend {
 
     /// Get the vector clock for the state of the graph with these heads.
     fn get_vector_clock_at(&self, heads: &[amp::ChangeHash]) -> VectorClock {
-        let mut clock = HashMap::new();
+        let mut clock = VectorClock::default();
 
         // get the clock for each head individually and combine them
         for hash in heads {
             let found_clock = self.get_vector_clock_for_hash(hash);
-            for (a, s) in found_clock {
-                if let Some(seq) = clock.get_mut(&a) {
-                    *seq = max(*seq, s);
-                } else {
-                    clock.insert(a, s);
-                }
-            }
+            clock += found_clock;
         }
 
         clock
@@ -378,7 +370,7 @@ impl Backend {
 
         let mut has_seen = HashSet::new();
 
-        let mut clock: HashMap<amp::ActorId, usize> = HashMap::new();
+        let mut clock = VectorClock::default();
 
         // we'll be needing this for the duration so just lock it once
         let mut clocks_cache = self.clocks_cache.lock().unwrap();
@@ -387,13 +379,7 @@ impl Backend {
             // since the graph is immutable the vector clock will not be changing so we can use the
             // cached clock of a hash to skip having to traverse its dependencies
             if let Some(cached_clock) = clocks_cache.get(hash) {
-                for (a, s) in cached_clock {
-                    if let Some(seq) = clock.get_mut(a) {
-                        *seq = max(*seq, *s);
-                    } else {
-                        clock.insert(a.clone(), *s);
-                    }
-                }
+                clock += cached_clock;
                 // don't add the changes dependencies to the queue as we already have the clock
                 // contribution from this subgraph
                 continue;
@@ -407,11 +393,7 @@ impl Backend {
                 .and_then(|i| self.history.get(*i))
             {
                 queue.extend(change.deps.iter());
-                if let Some(seq) = clock.get_mut(change.actor_id()) {
-                    *seq = max(*seq, change.seq as usize);
-                } else {
-                    clock.insert(change.actor_id().clone(), change.seq as usize);
-                }
+                clock.update(change.actor_id(), change.seq);
             }
 
             if clock.len() == self.states.len() {
@@ -521,7 +503,7 @@ impl Backend {
             .map(|h| self.history_index.get(h).unwrap_or(&0))
             .max()
             .unwrap_or(&0);
-        let mut may_find: HashSet<ChangeHash> = changes
+        let may_find: HashSet<ChangeHash> = changes
             .iter()
             .filter(|hash| {
                 let change_index = self.history_index.get(hash).unwrap_or(&0);
@@ -535,11 +517,10 @@ impl Backend {
         }
 
         let clock = self.get_vector_clock_at(heads);
-        for hash in may_find.clone() {
+        for hash in may_find {
             if let Some(change) = self.get_change_by_hash(&hash) {
-                if let Some(s) = clock.get(change.actor_id()) {
-                    if change.seq as usize <= *s {
-                        may_find.remove(&hash);
+                if let Some(s) = clock.get_seq(change.actor_id()) {
+                    if change.seq <= s {
                         changes.remove(&hash);
                     }
                 }
