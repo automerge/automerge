@@ -5,7 +5,7 @@ This makes the format very suitable for storing durably due to its compact size.
 
 ## Format
 
-| Field                   | Length (bytes)  | Description                                          |
+| Field                   | Byte Length     | Description                                          |
 | ----------------------- | --------------- | ---------------------------------------------------- |
 | Magic Bytes             | 4               | Just some magic bytes                                |
 | Checksum                | 4               | First 4 bytes of the SHA256 of the encoded chunk     |
@@ -15,7 +15,7 @@ This makes the format very suitable for storing durably due to its compact size.
 
 ## Chunk format
 
-| Field                                       | Length (bytes)  | Description                                       |
+| Field                                       | Byte Length     | Description                                       |
 | ------------------------------------------- | --------------- | ------------------------------------------------- |
 | Actors length                               | Variable (uLEB) | The number of following actors                    |
 | Actors                                      | Variable        | The actor IDs in sorted order                     |
@@ -35,7 +35,7 @@ Empty columns (those with no data) are not included.
 
 For each included column the following is encoded:
 
-| Field       | Length (bytes)  | Description                               |
+| Field       | Byte Length     | Description                               |
 | ----------- | --------------- | ----------------------------------------- |
 | Column ID   | Variable (uLEB) | The ID of the column this data represents |
 | Data length | Variable (uLEB) | The length of the data in this column     |
@@ -68,7 +68,7 @@ Empty columns (those with no data) are not included.
 
 For each included column the following is encoded:
 
-| Field       | Length (bytes)  | Description                               |
+| Field       | Byte Length     | Description                               |
 | ----------- | --------------- | ----------------------------------------- |
 | Column ID   | Variable (uLEB) | The ID of the column this data represents |
 | Data length | Variable (uLEB) | The length of the data in this column     |
@@ -97,6 +97,25 @@ For each expanded operation we encode its information in the following columns:
 | Successors number | The number of successors in this operation                       |
 | Successor actor   | The actor part of the successor                                  |
 | Successor counter | The counter part of the successor                                |
+
+## Encodings
+
+### uLEB
+
+uLEB is an unsigned [little endian base 128](https://en.wikipedia.org/wiki/LEB128) value.
+This is a variable length encoding to keep things compact when values are small.
+
+### RLE
+
+Run length encoding of raw values.
+
+### Delta
+
+Deltas between values are rle encoded.
+
+### Boolean
+
+Encodes the count of the same value with counts alternating false and true.
 
 ## Columns
 
