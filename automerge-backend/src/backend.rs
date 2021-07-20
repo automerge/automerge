@@ -365,9 +365,9 @@ impl Backend {
 
         for (actor, indices) in &self.states {
             if let Some(index) = clock.get(actor) {
-                change_indices.extend(indices[*index..].iter().copied())
+                change_indices.extend(indices[*index..].iter().copied());
             } else {
-                change_indices.extend(indices)
+                change_indices.extend(indices);
             }
         }
 
