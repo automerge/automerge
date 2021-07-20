@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["hook","A panic hook for use with `std::panic::set_hook` that logs panics into `console.error`."],["set_once","Set the `console.error` panic hook the first time this is called. Subsequent invocations do nothing."]]});

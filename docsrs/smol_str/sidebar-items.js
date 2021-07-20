@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["SmolStr","A `SmolStr` is a string type that has the following properties:"]]});

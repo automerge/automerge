@@ -1,0 +1,1 @@
+initSidebarItems({"macro":[["impl_opaque_debug","Macro for defining opaque `Debug` implementation."]]});

@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Bitmap","A compact array of bits."],["Iter","An iterator over the indices in a bitmap which are `true`."]],"trait":[["BitOps","A trait that defines generalised operations on a `Bits::Store` type."],["Bits","A type level number signifying the number of bits in a bitmap."]]});

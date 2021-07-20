@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["InvalidChangeRequest",""],["MapType",""],["ObjType",""],["Primitive",""],["ScalarValue",""],["SequenceType",""],["Value",""]],"struct":[["Backend",""],["Change",""],["Frontend",""],["LocalChange",""],["Path",""]],"trait":[["MutableDocument",""]]});

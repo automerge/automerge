@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["ArbitraryIter","Utility iterator produced by [`Unstructured::arbitrary_iter`]"],["ArbitraryTakeRestIter","Utility iterator produced by [`Unstructured::arbitrary_take_rest_iter`]"],["Unstructured","A source of unstructured data."]],"trait":[["Int","A trait that is implemented for all of the primitive integers:"]]});

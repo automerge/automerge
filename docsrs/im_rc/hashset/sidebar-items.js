@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["ConsumingIter","A consuming iterator over the elements of a set."],["HashSet","An unordered set."],["HashSetPool","A memory pool for the appropriate node type."],["Iter","An iterator over the elements of a set."]]});

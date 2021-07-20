@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Sized Chunks"><meta name="keywords" content="rust, rustlang, rust-lang, sized_chunks"><title>sized_chunks - Rust</title><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../light.css"  id="themeStyle"><link rel="stylesheet" type="text/css" href="../dark.css" disabled ><link rel="stylesheet" type="text/css" href="../ayu.css" disabled ><script id="default-settings"></script><script src="../storage.js"></script><script src="../crates.js"></script><noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="alternate icon" type="image/png" href="../favicon-16x16.png">
+<link rel="alternate icon" type="image/png" href="../favicon-32x32.png"><style type="text/css">#crate-search{background-image:url("../down-arrow.svg");}</style></head><body class="rustdoc mod"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="sidebar-menu" role="button">&#9776;</div><a href='../sized_chunks/index.html'><div class='logo-container rust-logo'><img src='../rust-logo.png' alt='logo'></div></a><p class="location">Crate sized_chunks</p><div class="block version"><p>Version 0.6.5</p></div><div class="sidebar-elems"><a id="all-types" href="all.html"><p>See all sized_chunks's items</p></a><div class="block items"><ul><li><a href="#reexports">Re-exports</a></li><li><a href="#modules">Modules</a></li></ul></div><p class="location"></p><div id="sidebar-vars" data-name="sized_chunks" data-ty="mod" data-relpath="../"></div></div></nav><div class="theme-picker"><button id="theme-picker" aria-label="Pick another theme!" aria-haspopup="menu"><img src="../brush.svg" width="18" height="18" alt="Pick another theme!"></button><div id="theme-choices" role="menu"></div></div><nav class="sub"><form class="search-form"><div class="search-container"><div><select id="crate-search"><option value="All crates">All crates</option></select><input class="search-input" name="search" disabled autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"></div><button type="button" class="help-button">?</button>
+                <a id="settings-menu" href="../settings.html"><img src="../wheel.svg" width="18" height="18" alt="Change settings"></a></div></form></nav><section id="main" class="content"><h1 class="fqn"><span class="in-band">Crate <a class="mod" href="">sized_chunks</a><button id="copy-path" onclick="copy_path(this)">⎘</button></span><span class="out-of-band"><span id="render-detail"><a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span><a class="srclink" href="../src/sized_chunks/lib.rs.html#5-126" title="goto source code">[src]</a></span></h1><div class="docblock"><h1 id="sized-chunks" class="section-header"><a href="#sized-chunks">Sized Chunks</a></h1>
+<p>This crate contains three fixed size low level array like data structures,
+primarily intended for use in <a href="https://immutable.rs/">immutable.rs</a>, but fully supported as a
+standalone crate.</p>
+<p>Their sizing information is encoded in the type using the
+<a href="https://docs.rs/typenum/"><code>typenum</code></a> crate, which you may want to take a look at before
+reading on, but usually all you need to know about it is that it provides
+types <code>U1</code> to <code>U128</code> to represent numbers, which the data types take as type
+parameters, eg. <code>SparseChunk&lt;A, U32&gt;</code> would give you a sparse array with
+room for 32 elements of type <code>A</code>. You can also omit the size, as they all
+default to a size of 64, so <code>SparseChunk&lt;A&gt;</code> would be a sparse array with a
+capacity of 64.</p>
+<p>All data structures always allocate the same amount of space, as determined
+by their capacity, regardless of how many elements they contain, and when
+they run out of space, they will panic.</p>
+<h2 id="data-structures" class="section-header"><a href="#data-structures">Data Structures</a></h2><table><thead><tr><th>Type</th><th>Description</th><th>Push</th><th>Pop</th><th>Deref to <code>&amp;[A]</code></th></tr></thead><tbody>
+<tr><td><a href="struct.Chunk.html"><code>Chunk</code></a></td><td>Contiguous array</td><td>O(1)/O(n)</td><td>O(1)</td><td>Yes</td></tr>
+<tr><td><a href="struct.RingBuffer.html"><code>RingBuffer</code></a></td><td>Non-contiguous array</td><td>O(1)</td><td>O(1)</td><td>No</td></tr>
+<tr><td><a href="struct.SparseChunk.html"><code>SparseChunk</code></a></td><td>Sparse array</td><td>N/A</td><td>N/A</td><td>No</td></tr>
+</tbody></table>
+<p>The <a href="struct.Chunk.html"><code>Chunk</code></a> and <a href="struct.RingBuffer.html"><code>RingBuffer</code></a> are very similar in
+practice, in that they both work like a plain array, except that you can
+push to either end with some expectation of performance. The difference is
+that <a href="struct.RingBuffer.html"><code>RingBuffer</code></a> always allows you to do this in constant
+time, but in order to give that guarantee, it doesn’t lay out its elements
+contiguously in memory, which means that you can’t dereference it to a slice
+<code>&amp;[A]</code>.</p>
+<p><a href="struct.Chunk.html"><code>Chunk</code></a>, on the other hand, will shift its contents around when
+necessary to accommodate a push to a full side, but is able to guarantee a
+contiguous memory layout in this way, so it can always be dereferenced into
+a slice. Performance wise, repeated pushes to the same side will always run
+in constant time, but a push to one side followed by a push to the other
+side will cause the latter to run in linear time if there’s no room (which
+there would only be if you’ve popped from that side).</p>
+<p>To choose between them, you can use the following rules:</p>
+<ul>
+<li>I only ever want to push to the back: you don’t need this crate, try
+<a href="https://docs.rs/arrayvec/"><code>ArrayVec</code></a>.</li>
+<li>I need to push to either side but probably not both on the same array: use
+<a href="struct.Chunk.html"><code>Chunk</code></a>.</li>
+<li>I need to push to both sides and I don’t need slices: use
+<a href="struct.RingBuffer.html"><code>RingBuffer</code></a>.</li>
+<li>I need to push to both sides but I do need slices: use <a href="struct.Chunk.html"><code>Chunk</code></a>.</li>
+</ul>
+<p>Finally, <a href="struct.SparseChunk.html"><code>SparseChunk</code></a> is a more efficient version of
+<code>Vec&lt;Option&lt;A&gt;&gt;</code>: each index is either inhabited or not, but instead of
+using the <code>Option</code> discriminant to decide which is which, it uses a compact
+bitmap. You can also think of <code>SparseChunk&lt;A, N&gt;</code> as a <code>BTreeMap&lt;usize, A&gt;</code>
+where the <code>usize</code> must be less than <code>N</code>, but without the performance
+overhead. Its API is also more consistent with a map than an array - there’s
+no push, pop, append, etc, just insert, remove and lookup.</p>
+<h1 id="inlinearray" class="section-header"><a href="#inlinearray"><code>InlineArray</code></a></h1>
+<p>Finally, there’s <a href="struct.InlineArray.html"><code>InlineArray</code></a>, which is a simple vector that’s
+sized to fit inside any <code>Sized</code> type that’s big enough to hold a size counter
+and at least one instance of the array element type. This can be a useful
+optimisation when implementing a list like data structure with a nontrivial
+set of pointers in its full form, where you could plausibly fit several
+elements inside the space allocated for the pointers. <code>im::Vector</code> is a
+good example of that, and the use case for which <a href="struct.InlineArray.html"><code>InlineArray</code></a>
+was implemented.</p>
+<h1 id="feature-flags" class="section-header"><a href="#feature-flags">Feature Flags</a></h1>
+<p>The following feature flags are available:</p>
+<table><thead><tr><th>Feature</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>arbitrary</code></td><td>Provides <a href="https://docs.rs/arbitrary/latest/arbitrary/trait.Arbitrary.html"><code>Arbitrary</code></a> implementations from the <a href="https://docs.rs/arbitrary"><code>arbitrary</code></a> crate. Requires the <code>std</code> flag.</td></tr>
+<tr><td><code>refpool</code></td><td>Provides <a href="https://docs.rs/refpool/latest/refpool/trait.PoolDefault.html"><code>PoolDefault</code></a> and <a href="https://docs.rs/refpool/latest/refpool/trait.PoolClone.html"><code>PoolClone</code></a> implemetations from the <a href="https://docs.rs/refpool"><code>refpool</code></a> crate.</td></tr>
+<tr><td><code>ringbuffer</code></td><td>Enables the <a href="struct.RingBuffer.html"><code>RingBuffer</code></a> data structure.</td></tr>
+<tr><td><code>std</code></td><td>Without this flag (enabled by default), the crate will be <code>no_std</code>, and absent traits relating to <code>std::collections</code> and <code>std::io</code>.</td></tr>
+</tbody></table>
+</div><h2 id="reexports" class="section-header"><a href="#reexports">Re-exports</a></h2>
+<table><tr class="import-item"><td><code>pub use crate::inline_array::<a class="struct" href="inline_array/struct.InlineArray.html" title="struct sized_chunks::inline_array::InlineArray">InlineArray</a>;</code></td><td class="docblock-short"></td></tr><tr class="import-item"><td><code>pub use crate::sized_chunk::<a class="struct" href="sized_chunk/struct.Chunk.html" title="struct sized_chunks::sized_chunk::Chunk">Chunk</a>;</code></td><td class="docblock-short"></td></tr><tr class="import-item"><td><code>pub use crate::sparse_chunk::<a class="struct" href="sparse_chunk/struct.SparseChunk.html" title="struct sized_chunks::sparse_chunk::SparseChunk">SparseChunk</a>;</code></td><td class="docblock-short"></td></tr></table><h2 id="modules" class="section-header"><a href="#modules">Modules</a></h2>
+<table><tr class="module-item"><td><a class="mod" href="inline_array/index.html" title="sized_chunks::inline_array mod">inline_array</a></td><td class="docblock-short"><p>A fixed capacity array sized to match some other type <code>T</code>.</p>
+</td></tr><tr class="module-item"><td><a class="mod" href="sized_chunk/index.html" title="sized_chunks::sized_chunk mod">sized_chunk</a></td><td class="docblock-short"><p>A fixed capacity smart array.</p>
+</td></tr><tr class="module-item"><td><a class="mod" href="sparse_chunk/index.html" title="sized_chunks::sparse_chunk mod">sparse_chunk</a></td><td class="docblock-short"><p>A fixed capacity sparse array.</p>
+</td></tr><tr class="module-item"><td><a class="mod" href="types/index.html" title="sized_chunks::types mod">types</a></td><td class="docblock-short"><p>Helper types for chunks.</p>
+</td></tr></table></section><section id="search" class="content hidden"></section><div id="rustdoc-vars" data-root-path="../" data-current-crate="sized_chunks" data-search-index-js="../search-index.js" data-search-js="../search.js"></div>
+    <script src="../main.js"></script></body></html>
