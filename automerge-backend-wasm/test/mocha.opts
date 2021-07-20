@@ -1,3 +1,0 @@
---use_strict
---watch-extensions js
-test/*test*.js

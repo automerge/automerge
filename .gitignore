@@ -1,8 +1,0 @@
-/target
-**/*.rs.bk
-Cargo.lock
-libtest.rmeta
-
-.direnv/
-result
-result-lib

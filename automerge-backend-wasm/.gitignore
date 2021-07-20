@@ -1,7 +1,0 @@
-node_modules
-/wasm-pack.log
-/build
-/dev
-
-# Used for js-interop tests
-/automerge-js-temp
