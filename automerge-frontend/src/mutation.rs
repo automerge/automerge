@@ -8,6 +8,7 @@ use crate::{
         SetOrInsertPayload, StateTree,
     },
     value::{Cursor, Primitive, Value},
+    value_ref::RootRef,
     Path, PathElement,
 };
 
@@ -83,6 +84,7 @@ impl LocalChange {
     }
 }
 
+#[derive(Clone, Debug)]
 enum LocalOperationForRollback {
     Set { old: Option<MultiValue> },
     SetList { old: MultiValue },
@@ -102,27 +104,48 @@ enum LocalOperationForRollback {
 /// a diff and immediately applies it to the `StateTree` it is constructed
 /// with. It also adds the change to a set of operations. This set of operations
 /// is used to generate a `ChangeRequest` once the closure is completed.
-pub struct MutationTracker<'a> {
-    state: &'a mut StateTree,
+#[derive(Clone, Debug)]
+pub struct MutationTracker {
+    state: StateTree,
     ops: Vec<amp::Op>,
     copies_for_rollback: Vec<(Path, LocalOperationForRollback)>,
+    rollback_start_index_for_this_change: usize,
     pub max_op: u64,
     actor_id: amp::ActorId,
 }
 
-impl<'a> MutationTracker<'a> {
-    pub(crate) fn new(state_tree: &'a mut StateTree, max_op: u64, actor_id: amp::ActorId) -> Self {
+impl MutationTracker {
+    pub(crate) fn new(state_tree: StateTree, max_op: u64, actor_id: amp::ActorId) -> Self {
         Self {
             state: state_tree,
             ops: Vec::new(),
             copies_for_rollback: Vec::new(),
+            rollback_start_index_for_this_change: 0,
             max_op,
             actor_id,
         }
     }
 
-    pub fn ops(self) -> Vec<amp::Op> {
-        self.ops
+    pub fn ops(&mut self) -> Vec<amp::Op> {
+        let ops = self
+            .ops
+            .get(self.rollback_start_index_for_this_change..)
+            .map(|v| v.to_vec())
+            .unwrap_or_default();
+        self.rollback_start_index_for_this_change = self.ops.len();
+        ops
+    }
+
+    pub(crate) fn state_tree(&self) -> &StateTree {
+        &self.state
+    }
+
+    pub fn value(&self) -> Value {
+        self.state.value()
+    }
+
+    pub fn value_ref(&self) -> RootRef {
+        self.state.value_ref()
     }
 
     /// If the `value` is a map, individually assign each k,v in it to a key in
@@ -213,11 +236,28 @@ impl<'a> MutationTracker<'a> {
         }
     }
 
+    pub(crate) fn state_mut(&mut self) -> &mut StateTree {
+        &mut self.state
+    }
+
+    pub fn rollback_all(&mut self) {
+        self.rollback(0)
+    }
+
+    pub(crate) fn rollback_change(&mut self) {
+        self.rollback(self.rollback_start_index_for_this_change)
+    }
+
     /// Undo the operations applied to this document.
     ///
     /// This is used in the case of an error to undo the already applied changes.
-    pub fn rollback(self) {
-        for (path, op) in self.copies_for_rollback.into_iter().rev() {
+    fn rollback(&mut self, starting_op_index: usize) {
+        for (path, op) in self
+            .copies_for_rollback
+            .drain(starting_op_index..)
+            .into_iter()
+            .rev()
+        {
             match op {
                 LocalOperationForRollback::Set { old } => {
                     if let Some(key) = path.name() {
@@ -427,7 +467,7 @@ impl<'a> MutationTracker<'a> {
     }
 }
 
-impl<'a> MutableDocument for MutationTracker<'a> {
+impl MutableDocument for MutationTracker {
     fn value_at_path(&self, path: &Path) -> Option<Value> {
         self.state.resolve_path(path).map(|r| r.default_value())
     }
