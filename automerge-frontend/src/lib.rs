@@ -57,7 +57,7 @@ enum FrontendState {
         /// The optimistic version of the root state that the user manipulates.
         optimistic_root_state: OptimisticStateTree,
         /// Queued patches to be applied when we have no more in-flight requests.
-        queued_patches: Vec<amp::Patch>,
+        queued_diffs: Vec<amp::RootDiff>,
         /// A flag to track whether this state has seen a patch from the backend that represented
         /// changes from another actor.
         ///
@@ -91,7 +91,7 @@ impl FrontendState {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
                 optimistic_root_state,
-                queued_patches,
+                queued_diffs,
                 seen_non_local_patch,
                 max_op: _,
             } => {
@@ -134,11 +134,14 @@ impl FrontendState {
                         // get the reconciled state back out
                         let mut reconciled_root_state = optimistic_root_state.take_state();
 
-                        queued_patches.push(patch);
+                        queued_diffs.push(patch.diffs);
 
                         // apply all the patches to the reconciled state
-                        for patch in queued_patches.drain(..) {
-                            let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
+                        //
+                        // TODO: maybe try and apply diffs to each other rather than queueing them
+                        // to compress them, then we only need to apply one
+                        for diff in queued_diffs.drain(..) {
+                            let checked_diff = reconciled_root_state.check_diff(diff)?;
 
                             reconciled_root_state.apply_diff(checked_diff);
                         }
@@ -154,7 +157,7 @@ impl FrontendState {
                         deps_of_last_received_patch,
                     }
                 } else {
-                    queued_patches.push(patch);
+                    queued_diffs.push(patch.diffs);
                     *in_flight_requests = new_in_flight_requests;
                     *seen_non_local_patch = *seen_non_local_patch || !is_local;
                     // don't update max_op as we have progressed since then
@@ -217,7 +220,7 @@ impl FrontendState {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
                 optimistic_root_state,
-                queued_patches: _,
+                queued_diffs: _,
                 seen_non_local_patch: _,
                 max_op,
             } => {
@@ -279,7 +282,7 @@ impl FrontendState {
                     *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
                         optimistic_root_state,
-                        queued_patches: Vec::new(),
+                        queued_diffs: Vec::new(),
                         seen_non_local_patch: false,
                         max_op: *max_op,
                     }
