@@ -1,5 +1,6 @@
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ChangeHash, ObjectId, Op, OpId, Patch};
+use mutation::MutationTracker;
 use value_ref::RootRef;
 
 mod error;
@@ -19,6 +20,8 @@ pub use path::Path;
 use path::PathElement;
 use state_tree::ResolvedPath;
 pub use value::{Conflicts, Cursor, Primitive, Value};
+
+use crate::state_tree::OptimisticStateTree;
 
 /// Tracks the possible states of the frontend
 ///
@@ -51,10 +54,10 @@ enum FrontendState {
     WaitingForInFlightRequests {
         /// The sequence numbers of in flight changes.
         in_flight_requests: Vec<u64>,
-        /// The root state that the backend tracks.
-        reconciled_root_state: state_tree::StateTree,
         /// The optimistic version of the root state that the user manipulates.
-        optimistically_updated_root_state: state_tree::StateTree,
+        optimistic_root_state: OptimisticStateTree,
+        /// Queued patches to be applied when we have no more in-flight requests.
+        queued_diffs: Vec<amp::RootDiff>,
         /// A flag to track whether this state has seen a patch from the backend that represented
         /// changes from another actor.
         ///
@@ -68,9 +71,6 @@ enum FrontendState {
     Reconciled {
         /// The root state that the backend tracks.
         reconciled_root_state: state_tree::StateTree,
-        /// A copy of the reconciled root state that we keep to be able to undo changes a user
-        /// makes when changing the state.
-        reconciled_root_state_copy_for_rollback: state_tree::StateTree,
         /// The maximum operation observed.
         max_op: u64,
         /// The dependencies of the last received patch.
@@ -85,15 +85,15 @@ impl FrontendState {
     fn apply_remote_patch(
         &mut self,
         self_actor: &ActorId,
-        patch: Patch,
+        mut patch: Patch,
     ) -> Result<(), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
-                reconciled_root_state,
-                optimistically_updated_root_state,
+                optimistic_root_state,
+                queued_diffs,
                 seen_non_local_patch,
-                max_op: _,
+                ..
             } => {
                 let mut new_in_flight_requests = in_flight_requests.clone();
                 // If the actor ID and seq exist then this patch corresponds
@@ -120,22 +120,44 @@ impl FrontendState {
                         new_in_flight_requests = remaining_requests.iter().copied().collect();
                     }
                 }
-                let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
 
-                reconciled_root_state.apply_diff(checked_diff);
                 if new_in_flight_requests.is_empty() {
-                    if *seen_non_local_patch {
-                        *optimistically_updated_root_state = reconciled_root_state.clone();
-                    }
+                    let max_op = patch.max_op;
+                    let deps_of_last_received_patch = std::mem::take(&mut patch.deps);
+
+                    let reconciled_root_state = if *seen_non_local_patch {
+                        // seen at least one patch that won't have changes in the optimistic state
+
+                        // Undo all of our changes
+                        optimistic_root_state.rollback_all();
+
+                        // get the reconciled state back out
+                        let mut reconciled_root_state = optimistic_root_state.take_state();
+
+                        queued_diffs.push(patch.diffs);
+
+                        // apply all the patches to the reconciled state
+                        //
+                        // TODO: maybe try and apply diffs to each other rather than queueing them
+                        // to compress them, then we only need to apply one
+                        for diff in queued_diffs.drain(..) {
+                            let checked_diff = reconciled_root_state.check_diff(diff)?;
+
+                            reconciled_root_state.apply_diff(checked_diff);
+                        }
+
+                        reconciled_root_state
+                    } else {
+                        optimistic_root_state.take_state()
+                    };
+
                     *self = FrontendState::Reconciled {
-                        reconciled_root_state: std::mem::take(reconciled_root_state),
-                        reconciled_root_state_copy_for_rollback: std::mem::take(
-                            optimistically_updated_root_state,
-                        ),
-                        max_op: patch.max_op,
-                        deps_of_last_received_patch: patch.deps,
+                        reconciled_root_state,
+                        max_op,
+                        deps_of_last_received_patch,
                     }
                 } else {
+                    queued_diffs.push(patch.diffs);
                     *in_flight_requests = new_in_flight_requests;
                     *seen_non_local_patch = *seen_non_local_patch || !is_local;
                     // don't update max_op as we have progressed since then
@@ -144,15 +166,13 @@ impl FrontendState {
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                reconciled_root_state_copy_for_rollback,
                 max_op,
                 deps_of_last_received_patch,
             } => {
                 let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
 
-                reconciled_root_state.apply_diff(checked_diff.clone());
-                // quicker and cheaper to apply the diff again than to clone the large root state
-                reconciled_root_state_copy_for_rollback.apply_diff(checked_diff);
+                reconciled_root_state.apply_diff(checked_diff);
+
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
@@ -171,9 +191,9 @@ impl FrontendState {
     fn resolve_path(&self, path: &Path) -> Option<ResolvedPath> {
         let root = match self {
             FrontendState::WaitingForInFlightRequests {
-                optimistically_updated_root_state,
+                optimistic_root_state,
                 ..
-            } => optimistically_updated_root_state,
+            } => optimistic_root_state,
             FrontendState::Reconciled {
                 reconciled_root_state,
                 ..
@@ -199,28 +219,24 @@ impl FrontendState {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
-                reconciled_root_state: _,
-                optimistically_updated_root_state,
-                seen_non_local_patch: _,
+                optimistic_root_state,
                 max_op,
+                ..
             } => {
-                let mut mutation_tracker = mutation::MutationTracker::new(
-                    optimistically_updated_root_state,
-                    *max_op,
-                    actor.clone(),
-                );
-                // TODO: somehow handle rolling back the optimistic state if the closure gives an
-                // error
+                let mut mutation_tracker =
+                    MutationTracker::new(optimistic_root_state, *max_op, actor.clone());
+
                 let result = match change_closure(&mut mutation_tracker) {
                     Ok(result) => result,
                     Err(e) => {
                         // reset the original state
-                        mutation_tracker.rollback();
+                        mutation_tracker.cancel();
                         return Err(e);
                     }
                 };
-                *max_op = mutation_tracker.max_op;
-                let ops = mutation_tracker.ops();
+
+                let (ops, mt_max_op) = mutation_tracker.commit();
+                *max_op = mt_max_op;
                 if !ops.is_empty() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
@@ -234,44 +250,45 @@ impl FrontendState {
             }
             FrontendState::Reconciled {
                 reconciled_root_state,
-                reconciled_root_state_copy_for_rollback,
                 max_op,
                 deps_of_last_received_patch,
             } => {
-                let mut mutation_tracker = mutation::MutationTracker::new(
-                    reconciled_root_state_copy_for_rollback,
-                    *max_op,
-                    actor.clone(),
-                );
+                let mut optimistic_root_state =
+                    OptimisticStateTree::new(std::mem::take(reconciled_root_state));
+
+                let mut mutation_tracker =
+                    MutationTracker::new(&mut optimistic_root_state, *max_op, actor.clone());
+
                 let result = match change_closure(&mut mutation_tracker) {
                     Ok(result) => result,
                     Err(e) => {
                         // reset the original state
-                        mutation_tracker.rollback();
+                        mutation_tracker.cancel();
+                        // ensure we reinstate the reconciled_root_state
+                        *reconciled_root_state = optimistic_root_state.take_state();
                         return Err(e);
                     }
                 };
-                *max_op = mutation_tracker.max_op;
-                let ops = mutation_tracker.ops();
+
+                let (ops, mt_max_op) = mutation_tracker.commit();
+                *max_op = mt_max_op;
+
                 let in_flight_requests = vec![seq];
                 let deps = deps_of_last_received_patch.clone();
+
                 if !ops.is_empty() {
                     *self = FrontendState::WaitingForInFlightRequests {
                         in_flight_requests,
-                        optimistically_updated_root_state: std::mem::take(
-                            reconciled_root_state_copy_for_rollback,
-                        ),
+                        optimistic_root_state,
+                        queued_diffs: Vec::new(),
                         seen_non_local_patch: false,
-                        reconciled_root_state: std::mem::take(reconciled_root_state),
                         max_op: *max_op,
                     }
                 } else {
-                    // the old and new states should be equal since we have no operations
-                    debug_assert_eq!(
-                        *reconciled_root_state_copy_for_rollback,
-                        *reconciled_root_state
-                    );
                     // we can remain in the reconciled frontend state since we didn't make a change
+
+                    // ensure we reinstate the reconciled_root_state
+                    *reconciled_root_state = optimistic_root_state.take_state();
                 };
                 Ok(OptimisticChangeResult {
                     ops,
@@ -301,9 +318,9 @@ impl FrontendState {
     fn value(&self) -> Value {
         match self {
             FrontendState::WaitingForInFlightRequests {
-                optimistically_updated_root_state,
+                optimistic_root_state,
                 ..
-            } => optimistically_updated_root_state.value(),
+            } => optimistic_root_state.value(),
             FrontendState::Reconciled {
                 reconciled_root_state,
                 ..
@@ -314,9 +331,9 @@ impl FrontendState {
     fn value_ref(&self) -> RootRef {
         match self {
             FrontendState::WaitingForInFlightRequests {
-                optimistically_updated_root_state,
+                optimistic_root_state,
                 ..
-            } => optimistically_updated_root_state.value_ref(),
+            } => optimistic_root_state.value_ref(),
             FrontendState::Reconciled {
                 reconciled_root_state,
                 ..
@@ -401,8 +418,7 @@ impl Frontend {
             actor_id: ActorId::from(actor_id),
             seq: 0,
             state: FrontendState::Reconciled {
-                reconciled_root_state: root_state.clone(),
-                reconciled_root_state_copy_for_rollback: root_state,
+                reconciled_root_state: root_state,
                 max_op: 0,
                 deps_of_last_received_patch: Vec::new(),
             },

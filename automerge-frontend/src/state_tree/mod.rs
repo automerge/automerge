@@ -11,9 +11,11 @@ use crate::{error, Path, PathElement, Primitive, RootRef, Value};
 
 mod diffable_sequence;
 mod multivalue;
+mod optimistic;
 mod resolved_path;
 
 pub use multivalue::{MultiGrapheme, MultiValue};
+pub(crate) use optimistic::{LocalOperationForRollback, OptimisticStateTree};
 pub(crate) use resolved_path::SetOrInsertPayload;
 pub use resolved_path::{ResolvedPath, ResolvedPathMut};
 
