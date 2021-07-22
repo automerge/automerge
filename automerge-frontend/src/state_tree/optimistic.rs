@@ -3,6 +3,7 @@ use std::ops::{Deref, DerefMut};
 use super::{MultiGrapheme, MultiValue, ResolvedPathMut, StateTree};
 use crate::{path::PathElement, Path};
 
+/// Contains the required data to undo an operation on the state tree.
 #[derive(Clone, Debug)]
 pub(crate) enum LocalOperationForRollback {
     Set { old: Option<MultiValue> },
@@ -15,6 +16,7 @@ pub(crate) enum LocalOperationForRollback {
     Increment { by: i64 },
 }
 
+/// Keeps track of the changes made to a state tree and allows rolling back changes.
 #[derive(Clone, Debug)]
 pub(crate) struct OptimisticStateTree {
     state: StateTree,
@@ -33,14 +35,17 @@ impl OptimisticStateTree {
         std::mem::take(&mut self.state)
     }
 
+    /// Commit the operations, making it possible to roll them back.
     pub(crate) fn commit_operations(&mut self, ops: Vec<(Path, LocalOperationForRollback)>) {
         self.copies_for_rollback.extend(ops)
     }
 
+    /// Rollback a list of operations that have been applied.
     pub(crate) fn rollback_operations(&mut self, ops: Vec<(Path, LocalOperationForRollback)>) {
         self.rollback(ops.into_iter())
     }
 
+    /// Rollback all applied operations.
     pub fn rollback_all(&mut self) {
         let rollback_ops = std::mem::take(&mut self.copies_for_rollback);
         self.rollback(rollback_ops.into_iter())

@@ -115,11 +115,13 @@ impl<'a> MutationTracker<'a> {
         }
     }
 
+    /// Commit the changes made in this trackers lifetime and return the operations performed.
     pub fn commit(self) -> (Vec<amp::Op>, u64) {
         self.state.commit_operations(self.copies_for_rollback);
         (self.ops, self.max_op)
     }
 
+    /// Cancel the changes made in this trackers lifetime.
     pub fn cancel(self) {
         self.state.rollback_operations(self.copies_for_rollback)
     }
