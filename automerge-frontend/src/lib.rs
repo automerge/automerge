@@ -93,7 +93,7 @@ impl FrontendState {
                 optimistic_root_state,
                 queued_diffs,
                 seen_non_local_patch,
-                max_op: _,
+                ..
             } => {
                 let mut new_in_flight_requests = in_flight_requests.clone();
                 // If the actor ID and seq exist then this patch corresponds
@@ -220,9 +220,8 @@ impl FrontendState {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests,
                 optimistic_root_state,
-                queued_diffs: _,
-                seen_non_local_patch: _,
                 max_op,
+                ..
             } => {
                 let mut mutation_tracker =
                     MutationTracker::new(optimistic_root_state, *max_op, actor.clone());
