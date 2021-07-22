@@ -92,6 +92,9 @@ impl LocalChange {
 /// a diff and immediately applies it to the `StateTree` it is constructed
 /// with. It also adds the change to a set of operations. This set of operations
 /// is used to generate a `ChangeRequest` once the closure is completed.
+///
+/// Internally this uses an `OptimisticStateTree` that handles the ability to undo operations,
+/// tracking them across multiple mutation tracker instantiations.
 pub struct MutationTracker<'a> {
     state: &'a mut OptimisticStateTree,
     ops: Vec<amp::Op>,

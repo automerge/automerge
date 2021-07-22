@@ -52,8 +52,6 @@ impl OptimisticStateTree {
     }
 
     /// Undo the operations applied to this document.
-    ///
-    /// This is used in the case of an error to undo the already applied changes.
     fn rollback(
         &mut self,
         ops: impl DoubleEndedIterator<Item = (Path, LocalOperationForRollback)>,
