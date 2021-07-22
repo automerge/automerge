@@ -265,9 +265,8 @@ impl FrontendState {
                     Err(e) => {
                         // reset the original state
                         mutation_tracker.cancel();
-                        let state = optimistic_root_state.take_state();
                         // ensure we reinstate the reconciled_root_state
-                        *reconciled_root_state = state;
+                        *reconciled_root_state = optimistic_root_state.take_state();
                         return Err(e);
                     }
                 };
@@ -288,6 +287,9 @@ impl FrontendState {
                     }
                 } else {
                     // we can remain in the reconciled frontend state since we didn't make a change
+
+                    // ensure we reinstate the reconciled_root_state
+                    *reconciled_root_state = optimistic_root_state.take_state();
                 };
                 Ok(OptimisticChangeResult {
                     ops,
