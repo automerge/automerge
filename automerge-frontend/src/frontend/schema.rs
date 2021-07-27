@@ -21,20 +21,24 @@ impl Schema {
     }
 
     /// All paths with the given prefix will use a sorted map rather than a normal map.
-    pub fn add_sorted_map_prefix(&mut self, prefix: Path) {
+    pub fn add_sorted_map_prefix(&mut self, prefix: Path) -> &mut Self {
         self.sorted_maps_prefixes.insert(prefix);
+        self
     }
 
-    pub fn remove_sorted_map_prefix(&mut self, prefix: &Path) {
+    pub fn remove_sorted_map_prefix(&mut self, prefix: &Path) -> &mut Self {
         self.sorted_maps_prefixes.remove(prefix);
+        self
     }
 
     /// Objects at this path will use a sorted map rather than a normal map.
-    pub fn add_sorted_map_exact(&mut self, path: Path) {
+    pub fn add_sorted_map_exact(&mut self, path: Path) -> &mut Self {
         self.sorted_maps_exact.insert(path);
+        self
     }
 
-    pub fn remove_sorted_map_exact(&mut self, path: &Path) {
+    pub fn remove_sorted_map_exact(&mut self, path: &Path) -> &mut Self {
         self.sorted_maps_exact.remove(path);
+        self
     }
 }
