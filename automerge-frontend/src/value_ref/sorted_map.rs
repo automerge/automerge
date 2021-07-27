@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::Borrow, collections::BTreeMap, ops::RangeBounds};
 
 use smol_str::SmolStr;
 
@@ -48,6 +48,18 @@ impl<'a> SortedMapRef<'a> {
         self.stm
             .props
             .iter()
+            .map(|(k, v)| (k, ValueRef::new(v.default_statetree_value())))
+    }
+
+    pub fn range<T, R>(&self, range: R) -> impl Iterator<Item = (&SmolStr, ValueRef<'a>)>
+    where
+        T: Ord + ?Sized,
+        R: RangeBounds<T>,
+        SmolStr: Borrow<T>,
+    {
+        self.stm
+            .props
+            .range(range)
             .map(|(k, v)| (k, ValueRef::new(v.default_statetree_value())))
     }
 
