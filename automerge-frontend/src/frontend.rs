@@ -92,7 +92,7 @@ impl<T> Frontend<T> {
         options: Options<T>,
     ) -> Result<(Self, amp::Change), InvalidInitialStateError>
     where
-        T: Fn() -> Option<i64>,
+        T: FnMut() -> Option<i64>,
     {
         match &initial_state {
             Value::Map(kvs) => {
@@ -158,7 +158,7 @@ impl<T> Frontend<T> {
     where
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
-        T: Fn() -> Option<i64>,
+        T: FnMut() -> Option<i64>,
     {
         let start_op = self.state.max_op() + 1;
         let change_result =
