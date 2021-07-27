@@ -19,10 +19,20 @@ use crate::{
     value_ref::RootRef,
 };
 
-#[derive(Debug, Clone)]
-struct Schema {
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Schema {
     sorted_maps_prefixes: HashSet<Path>,
     sorted_maps_exact: HashSet<Path>,
+}
+
+impl Schema {
+    pub(crate) fn is_sorted_map(&self, path: &Path) -> bool {
+        self.sorted_maps_exact.contains(path)
+            || self
+                .sorted_maps_prefixes
+                .iter()
+                .any(|prefix| path.has_prefix(prefix))
+    }
 }
 
 pub struct Frontend {
@@ -218,7 +228,8 @@ impl Frontend {
                 self.seq = *seq;
             }
         }
-        self.state.apply_remote_patch(&self.actor_id, patch)?;
+        self.state
+            .apply_remote_patch(&self.actor_id, patch, &self.schema)?;
         Ok(())
     }
 

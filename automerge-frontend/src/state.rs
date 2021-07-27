@@ -3,6 +3,7 @@ use std::error::Error;
 use automerge_protocol as amp;
 
 use crate::{
+    frontend::Schema,
     mutation::MutationTracker,
     state_tree::{OptimisticStateTree, ResolvedPath, StateTree},
     value_ref::RootRef,
@@ -72,6 +73,7 @@ impl FrontendState {
         &mut self,
         self_actor: &amp::ActorId,
         mut patch: amp::Patch,
+        schema: &Schema,
     ) -> Result<(), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
@@ -129,7 +131,7 @@ impl FrontendState {
                         for diff in queued_diffs.drain(..) {
                             let checked_diff = reconciled_root_state.check_diff(diff)?;
 
-                            reconciled_root_state.apply_diff(checked_diff);
+                            reconciled_root_state.apply_diff(checked_diff, schema);
                         }
 
                         reconciled_root_state
@@ -157,7 +159,7 @@ impl FrontendState {
             } => {
                 let checked_diff = reconciled_root_state.check_diff(patch.diffs)?;
 
-                reconciled_root_state.apply_diff(checked_diff);
+                reconciled_root_state.apply_diff(checked_diff, schema);
 
                 *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;

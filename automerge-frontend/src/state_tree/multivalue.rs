@@ -15,8 +15,10 @@ use super::{
 };
 use crate::{
     error,
+    frontend::Schema,
     path::PathElement,
     value::{Primitive, Value},
+    Path,
 };
 
 pub(crate) struct NewValueRequest<'a, 'c> {
@@ -44,8 +46,13 @@ impl MultiValue {
         StateTreeValue::check_new_from_diff(diff)
     }
 
-    pub fn new_from_diff(opid: amp::OpId, diff: amp::Diff) -> MultiValue {
-        let value = StateTreeValue::new_from_diff(diff);
+    pub(crate) fn new_from_diff(
+        opid: amp::OpId,
+        diff: amp::Diff,
+        schema: &Schema,
+        path: Path,
+    ) -> MultiValue {
+        let value = StateTreeValue::new_from_diff(diff, schema, path);
         MultiValue {
             winning_value: (opid, value),
             conflicts: HashMap::new(),
@@ -123,11 +130,17 @@ impl MultiValue {
         Ok(())
     }
 
-    pub(super) fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff) {
-        self.apply_diff_iter(&mut std::iter::once((opid, diff)))
+    pub(super) fn apply_diff(
+        &mut self,
+        opid: amp::OpId,
+        diff: amp::Diff,
+        schema: &Schema,
+        path: Path,
+    ) {
+        self.apply_diff_iter(&mut std::iter::once((opid, diff)), schema, path)
     }
 
-    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I)
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: &Schema, path: Path)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
@@ -135,15 +148,15 @@ impl MultiValue {
             if let Some(existing_value) = self.get_mut(&opid) {
                 match existing_value {
                     StateTreeValue::Leaf(_) => {
-                        let value = StateTreeValue::new_from_diff(subdiff);
+                        let value = StateTreeValue::new_from_diff(subdiff, schema, path.clone());
                         self.update(&opid, value)
                     }
                     StateTreeValue::Composite(composite) => {
-                        composite.apply_diff(subdiff);
+                        composite.apply_diff(subdiff, schema, path.clone());
                     }
                 }
             } else {
-                let value = StateTreeValue::new_from_diff(subdiff);
+                let value = StateTreeValue::new_from_diff(subdiff, schema, path.clone());
                 self.update(&opid, value)
             };
         }
