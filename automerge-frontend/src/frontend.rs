@@ -1,11 +1,7 @@
 mod options;
 mod schema;
 
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-    fmt::Debug,
-};
+use std::{collections::HashMap, error::Error, fmt::Debug};
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
@@ -80,10 +76,7 @@ impl<T> Frontend<T> {
             },
             cached_value: None,
             timestamper: options.timestamper,
-            schema: Schema {
-                sorted_maps_prefixes: HashSet::new(),
-                sorted_maps_exact: HashSet::new(),
-            },
+            schema: options.schema,
         }
     }
 
