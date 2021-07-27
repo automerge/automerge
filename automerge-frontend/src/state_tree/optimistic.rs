@@ -68,6 +68,9 @@ impl OptimisticStateTree {
                                 (PathElement::Key(key), ResolvedPathMut::Map(mut map)) => {
                                     map.rollback_set(key.clone(), old)
                                 }
+                                (PathElement::Key(key), ResolvedPathMut::SortedMap(mut map)) => {
+                                    map.rollback_set(key.clone(), old)
+                                }
                                 (PathElement::Key(key), ResolvedPathMut::Table(mut table)) => {
                                     table.rollback_set(key.clone(), old)
                                 }
@@ -82,6 +85,7 @@ impl OptimisticStateTree {
                                 | (PathElement::Index(_), ResolvedPathMut::Text(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Character(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Counter(_))
@@ -105,6 +109,7 @@ impl OptimisticStateTree {
                                 (PathElement::Index(_), ResolvedPathMut::Text(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Character(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Counter(_))
@@ -128,6 +133,7 @@ impl OptimisticStateTree {
                                 (PathElement::Index(_), ResolvedPathMut::List(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Character(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Counter(_))
@@ -148,6 +154,9 @@ impl OptimisticStateTree {
                                 (PathElement::Key(key), ResolvedPathMut::Map(mut map)) => {
                                     map.rollback_delete(key.clone(), old)
                                 }
+                                (PathElement::Key(key), ResolvedPathMut::SortedMap(mut map)) => {
+                                    map.rollback_delete(key.clone(), old)
+                                }
                                 (PathElement::Key(key), ResolvedPathMut::Table(mut table)) => {
                                     table.rollback_delete(key.clone(), old)
                                 }
@@ -164,6 +173,7 @@ impl OptimisticStateTree {
                                 (PathElement::Index(_), ResolvedPathMut::Text(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Character(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Counter(_))
@@ -180,6 +190,7 @@ impl OptimisticStateTree {
                             match (key, parent) {
                                 (PathElement::Key(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Key(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Key(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Key(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Key(_), ResolvedPathMut::List(_))
                                 | (PathElement::Key(_), ResolvedPathMut::Text(_))
@@ -194,6 +205,7 @@ impl OptimisticStateTree {
                                 (PathElement::Index(_), ResolvedPathMut::List(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Root(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Map(_))
+                                | (PathElement::Index(_), ResolvedPathMut::SortedMap(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Table(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Character(_))
                                 | (PathElement::Index(_), ResolvedPathMut::Counter(_))
@@ -216,6 +228,7 @@ impl OptimisticStateTree {
                                 }
                                 ResolvedPathMut::Root(_)
                                 | ResolvedPathMut::Map(_)
+                                | ResolvedPathMut::SortedMap(_)
                                 | ResolvedPathMut::Table(_)
                                 | ResolvedPathMut::Character(_)
                                 | ResolvedPathMut::Counter(_)
@@ -242,6 +255,7 @@ impl OptimisticStateTree {
                                 }
                                 ResolvedPathMut::Root(_)
                                 | ResolvedPathMut::Map(_)
+                                | ResolvedPathMut::SortedMap(_)
                                 | ResolvedPathMut::Table(_)
                                 | ResolvedPathMut::Character(_)
                                 | ResolvedPathMut::Counter(_)

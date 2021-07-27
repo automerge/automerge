@@ -1,12 +1,14 @@
 mod list;
 mod map;
 mod root;
+mod sorted_map;
 mod table;
 mod text;
 
 pub use list::ListRef;
 pub use map::MapRef;
 pub use root::RootRef;
+pub use sorted_map::SortedMapRef;
 pub use table::TableRef;
 pub use text::TextRef;
 
@@ -27,6 +29,7 @@ use crate::{
 pub enum ValueRef<'a> {
     Primitive(&'a Primitive),
     Map(MapRef<'a>),
+    SortedMap(SortedMapRef<'a>),
     Table(TableRef<'a>),
     List(ListRef<'a>),
     Text(TextRef<'a>),
@@ -37,6 +40,9 @@ impl<'a> ValueRef<'a> {
         match stv {
             StateTreeValue::Leaf(p) => Self::Primitive(p),
             StateTreeValue::Composite(StateTreeComposite::Map(m)) => Self::Map(MapRef::new(m)),
+            StateTreeValue::Composite(StateTreeComposite::SortedMap(m)) => {
+                Self::SortedMap(SortedMapRef::new(m))
+            }
             StateTreeValue::Composite(StateTreeComposite::Table(t)) => {
                 Self::Table(TableRef::new(t))
             }
@@ -84,6 +90,7 @@ impl<'a> ValueRef<'a> {
         match self {
             ValueRef::Primitive(p) => Value::from((*p).clone()),
             ValueRef::Map(m) => m.value(),
+            ValueRef::SortedMap(m) => m.value(),
             ValueRef::Table(t) => t.value(),
             ValueRef::List(l) => l.value(),
             ValueRef::Text(t) => t.value(),

@@ -17,6 +17,7 @@ use crate::{error, Cursor, Primitive, Value};
 pub enum ResolvedPath<'a> {
     Root(ResolvedRoot<'a>),
     Map(ResolvedMap<'a>),
+    SortedMap(ResolvedSortedMap<'a>),
     Table(ResolvedTable<'a>),
     List(ResolvedList<'a>),
     Text(ResolvedText<'a>),
@@ -31,6 +32,9 @@ impl<'a> std::fmt::Debug for ResolvedPath<'a> {
             ResolvedPath::Root(_) => write!(f, "Root"),
             ResolvedPath::Map(maptarget) => {
                 write!(f, "Map {:?}", maptarget.object_id)
+            }
+            ResolvedPath::SortedMap(maptarget) => {
+                write!(f, "SortedMap {:?}", maptarget.object_id)
             }
             ResolvedPath::Table(tabletarget) => {
                 write!(f, "Table {:?}", tabletarget.object_id)
@@ -59,6 +63,16 @@ impl<'a> ResolvedPath<'a> {
 
     pub(super) fn new_map(value: &'a MultiValue, object_id: amp::ObjectId) -> ResolvedPath<'a> {
         ResolvedPath::Map(ResolvedMap {
+            multivalue: value,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_sorted_map(
+        value: &'a MultiValue,
+        object_id: amp::ObjectId,
+    ) -> ResolvedPath<'a> {
+        ResolvedPath::SortedMap(ResolvedSortedMap {
             multivalue: value,
             object_id,
         })
@@ -107,8 +121,9 @@ impl<'a> ResolvedPath<'a> {
 
     pub fn default_value(&self) -> Value {
         match &self {
-            ResolvedPath::Map(maptarget) => maptarget.multivalue.default_value(),
             ResolvedPath::Root(root) => root.root.value(),
+            ResolvedPath::Map(maptarget) => maptarget.multivalue.default_value(),
+            ResolvedPath::SortedMap(maptarget) => maptarget.multivalue.default_value(),
             ResolvedPath::Table(tabletarget) => tabletarget.multivalue.default_value(),
             ResolvedPath::List(listtarget) => listtarget.multivalue.default_value(),
             ResolvedPath::Text(texttarget) => texttarget.multivalue.default_value(),
@@ -122,12 +137,13 @@ impl<'a> ResolvedPath<'a> {
 
     pub fn values(&self) -> std::collections::HashMap<amp::OpId, Value> {
         match &self {
-            ResolvedPath::Map(maptarget) => maptarget.multivalue.realise_values(),
             ResolvedPath::Root(root) => {
                 let mut result = std::collections::HashMap::new();
                 result.insert(random_op_id(), root.root.value());
                 result
             }
+            ResolvedPath::Map(maptarget) => maptarget.multivalue.realise_values(),
+            ResolvedPath::SortedMap(maptarget) => maptarget.multivalue.realise_values(),
             ResolvedPath::Table(tabletarget) => tabletarget.multivalue.realise_values(),
             ResolvedPath::List(listtarget) => listtarget.multivalue.realise_values(),
             ResolvedPath::Text(texttarget) => texttarget.multivalue.realise_values(),
@@ -139,8 +155,9 @@ impl<'a> ResolvedPath<'a> {
 
     pub fn object_id(&self) -> Option<amp::ObjectId> {
         match &self {
-            ResolvedPath::Map(maptarget) => Some(maptarget.object_id.clone()),
             ResolvedPath::Root(_) => Some(amp::ObjectId::Root),
+            ResolvedPath::Map(maptarget) => Some(maptarget.object_id.clone()),
+            ResolvedPath::SortedMap(maptarget) => Some(maptarget.object_id.clone()),
             ResolvedPath::Table(tabletarget) => Some(tabletarget.object_id.clone()),
             ResolvedPath::List(listtarget) => Some(listtarget.object_id.clone()),
             ResolvedPath::Text(texttarget) => Some(texttarget.object_id.clone()),
@@ -154,6 +171,7 @@ impl<'a> ResolvedPath<'a> {
 pub enum ResolvedPathMut<'a> {
     Root(ResolvedRootMut<'a>),
     Map(ResolvedMapMut<'a>),
+    SortedMap(ResolvedSortedMapMut<'a>),
     Table(ResolvedTableMut<'a>),
     List(ResolvedListMut<'a>),
     Text(ResolvedTextMut<'a>),
@@ -168,6 +186,9 @@ impl<'a> std::fmt::Debug for ResolvedPathMut<'a> {
             ResolvedPathMut::Root(_) => write!(f, "Root"),
             ResolvedPathMut::Map(maptarget) => {
                 write!(f, "Map {:?}", maptarget.object_id)
+            }
+            ResolvedPathMut::SortedMap(maptarget) => {
+                write!(f, "SortedMap {:?}", maptarget.object_id)
             }
             ResolvedPathMut::Table(tabletarget) => {
                 write!(f, "Table {:?}", tabletarget.object_id)
@@ -199,6 +220,16 @@ impl<'a> ResolvedPathMut<'a> {
         object_id: amp::ObjectId,
     ) -> ResolvedPathMut<'a> {
         ResolvedPathMut::Map(ResolvedMapMut {
+            multivalue: value,
+            object_id,
+        })
+    }
+
+    pub(super) fn new_sorted_map(
+        value: &'a mut MultiValue,
+        object_id: amp::ObjectId,
+    ) -> ResolvedPathMut<'a> {
+        ResolvedPathMut::SortedMap(ResolvedSortedMapMut {
             multivalue: value,
             object_id,
         })
@@ -434,6 +465,81 @@ impl<'a> ResolvedMapMut<'a> {
     pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
         let state_tree_map = match self.multivalue.default_statetree_value_mut() {
             StateTreeValue::Composite(StateTreeComposite::Map(map)) => map,
+            _ => unreachable!(),
+        };
+        state_tree_map.props.insert(key, value);
+    }
+}
+
+pub struct ResolvedSortedMap<'a> {
+    object_id: amp::ObjectId,
+    pub(super) multivalue: &'a MultiValue,
+}
+
+pub struct ResolvedSortedMapMut<'a> {
+    object_id: amp::ObjectId,
+    pub(super) multivalue: &'a mut MultiValue,
+}
+
+impl<'a> ResolvedSortedMapMut<'a> {
+    pub(crate) fn set_key(
+        &mut self,
+        key: SmolStr,
+        payload: SetOrInsertPayload<Value>,
+    ) -> (Option<MultiValue>, LocalOperationResult) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::SortedMap(map)) => map,
+            _ => unreachable!(),
+        };
+        let newvalue = MultiValue::new_from_value_2(NewValueRequest {
+            actor: payload.actor,
+            start_op: payload.start_op,
+            parent_obj: &state_tree_map.object_id,
+            key: amp::Key::Map(key.clone()),
+            value: payload.value,
+            insert: false,
+            pred: state_tree_map.pred_for_key(&key),
+        });
+        let (multivalue, new_ops, _new_cursors) = newvalue.finish();
+        let old = state_tree_map.props.insert(key, multivalue);
+        (old, LocalOperationResult { new_ops })
+    }
+
+    pub(crate) fn delete_key(&mut self, key: &str) -> Option<(MultiValue, LocalOperationResult)> {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::SortedMap(map)) => map,
+            _ => unreachable!(),
+        };
+        let op_result = LocalOperationResult {
+            new_ops: vec![amp::Op {
+                action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
+                obj: state_tree_map.object_id.clone(),
+                key: key.into(),
+                insert: false,
+                pred: state_tree_map.pred_for_key(key),
+            }],
+        };
+        state_tree_map.props.remove(key).map(|old| (old, op_result))
+    }
+
+    pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::SortedMap(map)) => map,
+            _ => unreachable!(),
+        };
+        match value {
+            Some(old) => {
+                state_tree_map.props.insert(key, old);
+            }
+            None => {
+                state_tree_map.props.remove(&key);
+            }
+        }
+    }
+
+    pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
+        let state_tree_map = match self.multivalue.default_statetree_value_mut() {
+            StateTreeValue::Composite(StateTreeComposite::SortedMap(map)) => map,
             _ => unreachable!(),
         };
         state_tree_map.props.insert(key, value);

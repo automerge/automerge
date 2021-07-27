@@ -1,4 +1,8 @@
-use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+    iter::Iterator,
+};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -7,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::{
     CursorState, Cursors, DiffableSequence, ResolvedPath, ResolvedPathMut, StateTreeComposite,
-    StateTreeList, StateTreeMap, StateTreeTable, StateTreeText, StateTreeValue,
+    StateTreeList, StateTreeMap, StateTreeSortedMap, StateTreeTable, StateTreeText, StateTreeValue,
 };
 use crate::{
     error,
@@ -217,6 +221,9 @@ impl MultiValue {
                     StateTreeComposite::Map(map) => {
                         return Some(ResolvedPath::new_map(self, map.object_id.clone()))
                     }
+                    StateTreeComposite::SortedMap(map) => {
+                        return Some(ResolvedPath::new_sorted_map(self, map.object_id.clone()))
+                    }
                     StateTreeComposite::Table(table) => {
                         return Some(ResolvedPath::new_table(self, table.object_id.clone()))
                     }
@@ -252,6 +259,10 @@ impl MultiValue {
                     StateTreeComposite::Map(map) => {
                         let oid = map.object_id.clone();
                         return Some(ResolvedPathMut::new_map(self, oid));
+                    }
+                    StateTreeComposite::SortedMap(map) => {
+                        let oid = map.object_id.clone();
+                        return Some(ResolvedPathMut::new_sorted_map(self, oid));
                     }
                     StateTreeComposite::Table(table) => {
                         let oid = table.object_id.clone();
@@ -542,6 +553,7 @@ where
     fn create(self, value: Value) -> NewValue {
         match value {
             Value::Map(props) => self.new_map_or_table(props, amp::MapType::Map),
+            Value::SortedMap(props) => self.new_sorted_map(props),
             Value::Table(props) => self.new_map_or_table(props, amp::MapType::Table),
             Value::List(values) => self.new_list(values),
             Value::Text(graphemes) => self.new_text(graphemes),
@@ -594,6 +606,51 @@ where
                 props: result_props,
             }),
         };
+        let value = StateTreeValue::Composite(map);
+        NewValue {
+            value,
+            opid: make_op_id,
+            max_op: current_max_op,
+            new_cursors: cursors,
+            ops,
+        }
+    }
+
+    fn new_sorted_map(self, props: std::collections::BTreeMap<SmolStr, Value>) -> NewValue {
+        let make_op_id = amp::OpId(self.start_op, self.actor.clone());
+        let make_op = amp::Op {
+            action: amp::OpType::Make(amp::ObjType::from(amp::MapType::Map)),
+            obj: self.parent_obj.clone().into(),
+            key: self.key.clone(),
+            insert: self.insert,
+            pred: self.pred,
+        };
+        // for each prop we add at least one op
+        let mut ops = Vec::with_capacity(props.len() + 1);
+        ops.push(make_op);
+        let mut current_max_op = self.start_op;
+        let mut cursors = Cursors::new();
+        let mut result_props: BTreeMap<SmolStr, MultiValue> = BTreeMap::new();
+        for (prop, value) in props {
+            let context = NewValueContext {
+                actor: self.actor,
+                parent_obj: &make_op_id,
+                start_op: current_max_op + 1,
+                key: amp::Key::Map(prop.clone()),
+                pred: SortedVec::new(),
+                insert: false,
+            };
+            let next_value = context.create(value);
+            current_max_op = next_value.max_op;
+            let (multivalue, new_ops, new_cursors) = next_value.finish();
+            cursors.extend(new_cursors);
+            ops.extend(new_ops);
+            result_props.insert(prop, multivalue);
+        }
+        let map = StateTreeComposite::SortedMap(StateTreeSortedMap {
+            object_id: make_op_id.clone().into(),
+            props: result_props,
+        });
         let value = StateTreeValue::Composite(map);
         NewValue {
             value,

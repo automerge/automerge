@@ -272,6 +272,18 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             (
                                 PathElement::Key(ref k),
+                                ResolvedPathMut::SortedMap(ref mut maptarget),
+                            ) => {
+                                let payload = SetOrInsertPayload {
+                                    start_op: self.max_op + 1,
+                                    actor: &self.actor_id.clone(),
+                                    value,
+                                };
+                                let (old, res) = maptarget.set_key(k.clone(), payload);
+                                Ok((LocalOperationForRollback::Set { old }, res))
+                            }
+                            (
+                                PathElement::Key(ref k),
                                 ResolvedPathMut::Table(ref mut tabletarget),
                             ) => {
                                 let payload = SetOrInsertPayload {
@@ -284,7 +296,11 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             // In this case we are trying to modify a key in something which is not
                             // an object or a table, so the path does not exist
-                            (PathElement::Key(_), _) => {
+                            (PathElement::Key(_), ResolvedPathMut::Primitive(_))
+                            | (PathElement::Key(_), ResolvedPathMut::Counter(_))
+                            | (PathElement::Key(_), ResolvedPathMut::Character(_))
+                            | (PathElement::Key(_), ResolvedPathMut::List(_))
+                            | (PathElement::Key(_), ResolvedPathMut::Text(_)) => {
                                 Err(InvalidChangeRequest::NoSuchPathError {
                                     path: change.path.clone(),
                                 })
@@ -376,6 +392,21 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 })
                             }
                             ResolvedPathMut::Map(mut m) => match name {
+                                PathElement::Key(k) => {
+                                    let (old, res) = m.delete_key(k).ok_or_else(|| {
+                                        InvalidChangeRequest::NoSuchPathError {
+                                            path: change.path.clone(),
+                                        }
+                                    })?;
+                                    (LocalOperationForRollback::Delete { old }, res)
+                                }
+                                _ => {
+                                    return Err(InvalidChangeRequest::NoSuchPathError {
+                                        path: change.path,
+                                    })
+                                }
+                            },
+                            ResolvedPathMut::SortedMap(mut m) => match name {
                                 PathElement::Key(k) => {
                                     let (old, res) = m.delete_key(k).ok_or_else(|| {
                                         InvalidChangeRequest::NoSuchPathError {

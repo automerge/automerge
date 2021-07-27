@@ -1,4 +1,9 @@
-use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    error::Error,
+    fmt::Debug,
+};
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
@@ -14,6 +19,12 @@ use crate::{
     value_ref::RootRef,
 };
 
+#[derive(Debug, Clone)]
+struct Schema {
+    sorted_maps_prefixes: HashSet<Path>,
+    sorted_maps_exact: HashSet<Path>,
+}
+
 pub struct Frontend {
     pub actor_id: ActorId,
     pub seq: u64,
@@ -25,6 +36,8 @@ pub struct Frontend {
     cached_value: Option<Value>,
     /// A function for generating timestamps
     timestamper: Box<dyn Fn() -> Option<i64>>,
+
+    schema: Schema,
 }
 
 impl Debug for Frontend {
@@ -35,6 +48,7 @@ impl Debug for Frontend {
             state,
             cached_value,
             timestamper: _,
+            schema,
         } = self;
         {
             let mut builder = f.debug_struct("Frontend");
@@ -42,6 +56,7 @@ impl Debug for Frontend {
             let _ = builder.field("seq", &seq);
             let _ = builder.field("state", &state);
             let _ = builder.field("cached_value", &cached_value);
+            let _ = builder.field("schema", &schema);
             builder.finish()
         }
     }
@@ -96,6 +111,10 @@ impl Frontend {
             },
             cached_value: None,
             timestamper: t,
+            schema: Schema {
+                sorted_maps_prefixes: HashSet::new(),
+                sorted_maps_exact: HashSet::new(),
+            },
         }
     }
 

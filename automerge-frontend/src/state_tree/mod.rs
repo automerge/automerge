@@ -1,4 +1,7 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::TryInto,
+};
 
 use amp::{ElementId, SortedVec};
 use automerge_protocol as amp;
@@ -177,6 +180,7 @@ impl Default for StateTreeValue {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum StateTreeComposite {
     Map(StateTreeMap),
+    SortedMap(StateTreeSortedMap),
     Table(StateTreeTable),
     Text(StateTreeText),
     List(StateTreeList),
@@ -197,6 +201,13 @@ impl StateTreeComposite {
                     object_id: _,
                 }),
                 StateTreeComposite::Map(map),
+            ) => map.check_diff(prop_diffs),
+            (
+                amp::Diff::Map(amp::MapDiff {
+                    props: prop_diffs,
+                    object_id: _,
+                }),
+                StateTreeComposite::SortedMap(map),
             ) => map.check_diff(prop_diffs),
             (
                 amp::Diff::Table(amp::TableDiff {
@@ -244,6 +255,13 @@ impl StateTreeComposite {
                 StateTreeComposite::Map(map),
             ) => map.apply_diff(prop_diffs),
             (
+                amp::Diff::Map(amp::MapDiff {
+                    props: prop_diffs,
+                    object_id: _,
+                }),
+                StateTreeComposite::SortedMap(map),
+            ) => map.apply_diff(prop_diffs),
+            (
                 amp::Diff::Table(amp::TableDiff {
                     props: prop_diffs,
                     object_id: _,
@@ -277,7 +295,7 @@ impl StateTreeComposite {
 
     fn obj_type(&self) -> amp::ObjType {
         match self {
-            Self::Map(..) => amp::ObjType::Map,
+            Self::Map(..) | Self::SortedMap(..) => amp::ObjType::Map,
             Self::Table(..) => amp::ObjType::Table,
             Self::Text(..) => amp::ObjType::Text,
             Self::List(..) => amp::ObjType::List,
@@ -286,7 +304,8 @@ impl StateTreeComposite {
 
     fn object_id(&self) -> amp::ObjectId {
         match self {
-            Self::Map(StateTreeMap { object_id, .. }) => object_id.clone(),
+            Self::Map(StateTreeMap { object_id, .. })
+            | Self::SortedMap(StateTreeSortedMap { object_id, .. }) => object_id.clone(),
             Self::Table(StateTreeTable { object_id, .. }) => object_id.clone(),
             Self::Text(StateTreeText { object_id, .. }) => object_id.clone(),
             Self::List(StateTreeList { object_id, .. }) => object_id.clone(),
@@ -296,6 +315,12 @@ impl StateTreeComposite {
     fn realise_value(&self) -> Value {
         match self {
             Self::Map(StateTreeMap { props, .. }) => Value::Map(
+                props
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.default_value()))
+                    .collect(),
+            ),
+            Self::SortedMap(StateTreeSortedMap { props, .. }) => Value::SortedMap(
                 props
                     .iter()
                     .map(|(k, v)| (k.clone(), v.default_value()))
@@ -322,6 +347,7 @@ impl StateTreeComposite {
     fn resolve_path(&self, path: Vec<PathElement>) -> Option<ResolvedPath> {
         match self {
             Self::Map(map) => map.resolve_path(path),
+            Self::SortedMap(map) => map.resolve_path(path),
             Self::Table(table) => table.resolve_path(path),
             Self::List(list) => list.resolve_path(path),
             Self::Text(text) => text.resolve_path(path),
@@ -331,6 +357,7 @@ impl StateTreeComposite {
     fn resolve_path_mut(&mut self, path: Vec<PathElement>) -> Option<ResolvedPathMut> {
         match self {
             Self::Map(map) => map.resolve_path_mut(path),
+            Self::SortedMap(map) => map.resolve_path_mut(path),
             Self::Table(table) => table.resolve_path_mut(path),
             Self::List(list) => list.resolve_path_mut(path),
             Self::Text(text) => text.resolve_path_mut(path),
@@ -432,6 +459,96 @@ pub(crate) struct StateTreeMap {
 }
 
 impl StateTreeMap {
+    fn check_diff(
+        &self,
+        prop_diffs: &HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
+    ) -> Result<(), error::InvalidPatch> {
+        for (prop, prop_diff) in prop_diffs {
+            let mut diff_iter = prop_diff.iter();
+            match diff_iter.next() {
+                None => {}
+                Some((opid, diff)) => {
+                    match self.props.get(prop) {
+                        Some(n) => n.check_diff(opid, diff)?,
+                        None => {
+                            MultiValue::check_new_from_diff(opid, diff)?;
+                        }
+                    };
+                    // TODO: get this working
+                    // self.props
+                    //     .get(prop)
+                    //     .unwrap()
+                    //     .check_diff_iter(&mut diff_iter)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_diff(&mut self, prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>) {
+        for (prop, prop_diff) in prop_diffs {
+            let mut diff_iter = prop_diff.into_iter();
+            match diff_iter.next() {
+                None => {
+                    self.props.remove(&prop);
+                }
+                Some((opid, diff)) => {
+                    match self.props.get_mut(&prop) {
+                        Some(n) => n.apply_diff(opid, diff),
+                        None => {
+                            let value = MultiValue::new_from_diff(opid.clone(), diff);
+                            self.props.insert(prop.clone(), value);
+                        }
+                    };
+                    self.props
+                        .get_mut(&prop)
+                        .unwrap()
+                        .apply_diff_iter(&mut diff_iter);
+                }
+            }
+        }
+    }
+
+    pub fn pred_for_key(&self, key: &str) -> SortedVec<amp::OpId> {
+        self.props
+            .get(key)
+            .map(|v| vec![v.default_opid()].into())
+            .unwrap_or_else(SortedVec::new)
+    }
+
+    pub(crate) fn resolve_path(&self, mut path: Vec<PathElement>) -> Option<ResolvedPath> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props
+                .get(&key)?
+                .resolve_path(path, self.object_id.clone(), amp::Key::Map(key))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn resolve_path_mut(
+        &mut self,
+        mut path: Vec<PathElement>,
+    ) -> Option<ResolvedPathMut> {
+        if let Some(PathElement::Key(key)) = path.pop() {
+            self.props.get_mut(&key)?.resolve_path_mut(
+                path,
+                self.object_id.clone(),
+                amp::Key::Map(key),
+            )
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StateTreeSortedMap {
+    object_id: amp::ObjectId,
+    pub(crate) props: BTreeMap<SmolStr, MultiValue>,
+}
+
+impl StateTreeSortedMap {
     fn check_diff(
         &self,
         prop_diffs: &HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,

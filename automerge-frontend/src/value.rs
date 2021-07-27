@@ -2,7 +2,10 @@ mod conflicts;
 mod cursor;
 mod primitive;
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -23,6 +26,8 @@ use crate::path::PathElement;
 pub enum Value {
     /// A mapping from string keys to values.
     Map(HashMap<SmolStr, Value>),
+    /// A mapping from string keys to values, using sorted keys.
+    SortedMap(BTreeMap<SmolStr, Value>),
     /// A mapping from unique IDs to values.
     Table(HashMap<SmolStr, Value>),
     /// An ordered sequence of values.
@@ -129,6 +134,13 @@ impl Value {
                     .collect();
                 serde_json::Value::Object(result)
             }
+            Value::SortedMap(map) => {
+                let result: serde_json::map::Map<String, serde_json::Value> = map
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_json()))
+                    .collect();
+                serde_json::Value::Object(result)
+            }
             Value::Table(map) => {
                 let result: serde_json::map::Map<String, serde_json::Value> = map
                     .iter()
@@ -176,6 +188,9 @@ impl Value {
                 (Value::Map(m), PathElement::Key(k)) => {
                     m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
                 }
+                (Value::SortedMap(m), PathElement::Key(k)) => {
+                    m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
+                }
                 (Value::Table(m), PathElement::Key(k)) => {
                     m.get(&k).and_then(|v| v.get_value_rev_path(rev_path))
                 }
@@ -186,6 +201,7 @@ impl Value {
                     .get(i as usize)
                     .map(|v| Cow::Owned(Value::Primitive(Primitive::Str(v.clone())))),
                 (Value::Map(_), PathElement::Index(_))
+                | (Value::SortedMap(_), PathElement::Index(_))
                 | (Value::Table(_), PathElement::Index(_))
                 | (Value::List(_), PathElement::Key(_))
                 | (Value::Text(_), PathElement::Key(_))
@@ -335,6 +351,31 @@ pub(crate) fn value_to_op_requests(
             (ops, op_num)
         }
         Value::Map(kvs) => {
+            let make_op_id = amp::OpId::new(start_op, actor);
+            let make_op = amp::Op {
+                action: amp::OpType::Make(amp::ObjType::Map),
+                obj: parent_object,
+                key: key.clone(),
+                insert,
+                pred: SortedVec::new(),
+            };
+            let mut op_num = start_op + 1;
+            let mut result = vec![make_op];
+            for (key, v) in kvs.iter() {
+                let (child_requests, new_op_num) = value_to_op_requests(
+                    actor,
+                    op_num,
+                    amp::ObjectId::from(make_op_id.clone()),
+                    &amp::Key::from(key.as_str()),
+                    v,
+                    false,
+                );
+                op_num = new_op_num;
+                result.extend(child_requests);
+            }
+            (result, op_num)
+        }
+        Value::SortedMap(kvs) => {
             let make_op_id = amp::OpId::new(start_op, actor);
             let make_op = amp::Op {
                 action: amp::OpType::Make(amp::ObjType::Map),
