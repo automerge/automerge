@@ -1,4 +1,5 @@
 mod options;
+mod schema;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -9,6 +10,7 @@ use std::{
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
 pub use options::{system_time, Options};
+pub use schema::Schema;
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},
@@ -20,22 +22,6 @@ use crate::{
     value::Value,
     value_ref::RootRef,
 };
-
-#[derive(Debug, Default, Clone)]
-pub struct Schema {
-    sorted_maps_prefixes: HashSet<Path>,
-    sorted_maps_exact: HashSet<Path>,
-}
-
-impl Schema {
-    pub(crate) fn is_sorted_map(&self, path: &Path) -> bool {
-        self.sorted_maps_exact.contains(path)
-            || self
-                .sorted_maps_prefixes
-                .iter()
-                .any(|prefix| path.has_prefix(prefix))
-    }
-}
 
 pub struct Frontend<T> {
     pub actor_id: ActorId,

@@ -7,8 +7,13 @@ use super::Schema;
 /// Options for building a [`Frontend`](crate::Frontend).
 #[derive(Debug, Clone)]
 pub struct Options<T> {
+    /// The schema for the frontend to use.
     pub schema: Schema,
+    /// The actor id to appear in changes from this frontend.
     pub actor_id: ActorId,
+    /// The timestamp function for this frontend.
+    ///
+    /// A sensible default is [`system_time`].
     pub timestamper: T,
 }
 
