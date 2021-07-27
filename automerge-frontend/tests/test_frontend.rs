@@ -1,8 +1,13 @@
-use std::{convert::TryInto, num::NonZeroU32};
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::TryInto,
+    num::NonZeroU32,
+};
 
-use amp::SortedVec;
+use amp::{ActorId, Diff, MapDiff, OpId, Patch, RootDiff, SortedVec};
 use automerge_frontend::{
-    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Value,
+    system_time, Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Schema,
+    Value,
 };
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -908,4 +913,363 @@ fn test_inserts_at_end_of_lists() {
         "birds".into() => Value::List(vec!["greenfinch".into(), "bullfinch".into()]),
     });
     assert_eq!(value, expected_value);
+}
+
+#[test]
+fn test_sorted_map() {
+    let mut doc = Frontend::default();
+
+    doc.change::<_, _, std::convert::Infallible>(None, |doc| {
+        doc.add_change(LocalChange::set(
+            Path::root().key("normal"),
+            Value::Map(HashMap::new()),
+        ))
+        .unwrap();
+        doc.add_change(LocalChange::set(
+            Path::root().key("sorted"),
+            Value::SortedMap(BTreeMap::new()),
+        ))
+        .unwrap();
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(
+        doc.value_ref().get("normal").unwrap().value(),
+        Value::Map(HashMap::new())
+    );
+    assert_eq!(
+        doc.value_ref().get("sorted").unwrap().value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+}
+
+#[test]
+fn test_schema_sorted_maps_exact_patch() {
+    let mut schema = Schema::default();
+    schema.add_sorted_map_exact(Path::root().key("sorted"));
+
+    let mut doc = Frontend::new(Options {
+        schema,
+        timestamper: system_time,
+        actor_id: ActorId::random(),
+    });
+
+    let patch_actor = ActorId::random();
+    doc.apply_patch(Patch {
+        actor: Some(patch_actor.clone()),
+        seq: Some(1),
+        clock: HashMap::new(),
+        deps: Vec::new(),
+        max_op: 3,
+        pending_changes: 0,
+        diffs: RootDiff {
+            props: hashmap! {
+                "normal".into() => hashmap! {
+                    OpId(1, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(1, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sorted".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor).into(),
+                        props : hashmap!{},
+                    })
+                }
+            },
+        },
+    })
+    .unwrap();
+
+    dbg!(doc.state());
+
+    assert_eq!(
+        doc.value_ref().get("normal").unwrap().value(),
+        Value::Map(HashMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref().get("sorted").unwrap().value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+}
+
+#[test]
+fn test_schema_sorted_maps_exact_patch_multiple() {
+    let mut schema = Schema::default();
+    schema.add_sorted_map_exact(Path::root().key("sorteda"));
+    schema.add_sorted_map_exact(Path::root().key("sortedb"));
+
+    let mut doc = Frontend::new(Options {
+        schema,
+        timestamper: system_time,
+        actor_id: ActorId::random(),
+    });
+
+    let patch_actor = ActorId::random();
+    doc.apply_patch(Patch {
+        actor: Some(patch_actor.clone()),
+        seq: Some(1),
+        clock: HashMap::new(),
+        deps: Vec::new(),
+        max_op: 3,
+        pending_changes: 0,
+        diffs: RootDiff {
+            props: hashmap! {
+                "normal".into() => hashmap! {
+                    OpId(1, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(1, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sorteda".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sortedb".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor).into(),
+                        props : hashmap!{},
+                    })
+                }
+            },
+        },
+    })
+    .unwrap();
+
+    dbg!(doc.state());
+
+    assert_eq!(
+        doc.value_ref().get("normal").unwrap().value(),
+        Value::Map(HashMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref().get("sorteda").unwrap().value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref().get("sortedb").unwrap().value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+}
+
+#[test]
+fn test_schema_sorted_maps_prefix_patch() {
+    let mut schema = Schema::default();
+    schema.add_sorted_map_prefix(Path::root().key("sorted"));
+
+    let mut doc = Frontend::new(Options {
+        schema,
+        timestamper: system_time,
+        actor_id: ActorId::random(),
+    });
+
+    let patch_actor = ActorId::random();
+    doc.apply_patch(Patch {
+        actor: Some(patch_actor.clone()),
+        seq: Some(1),
+        clock: HashMap::new(),
+        deps: Vec::new(),
+        max_op: 3,
+        pending_changes: 0,
+        diffs: RootDiff {
+            props: hashmap! {
+                "normal".into() => hashmap! {
+                    OpId(1, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(1, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sorted".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor.clone()).into(),
+                        props : hashmap!{
+                            "a".into() => hashmap! {
+                                OpId(3, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(3, patch_actor.clone()).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            },
+                            "b".into() => hashmap! {
+                                OpId(4, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(4, patch_actor).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            }
+                        },
+                    })
+                }
+            },
+        },
+    })
+    .unwrap();
+
+    dbg!(doc.state());
+
+    assert_eq!(
+        doc.value_ref().get("normal").unwrap().value(),
+        Value::Map(HashMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sorted")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("a")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sorted")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("b")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+}
+
+#[test]
+fn test_schema_sorted_maps_prefix_patch_multiple() {
+    let mut schema = Schema::default();
+    schema.add_sorted_map_prefix(Path::root().key("sorteda"));
+    schema.add_sorted_map_prefix(Path::root().key("sortedb"));
+
+    let mut doc = Frontend::new(Options {
+        schema,
+        timestamper: system_time,
+        actor_id: ActorId::random(),
+    });
+
+    let patch_actor = ActorId::random();
+    doc.apply_patch(Patch {
+        actor: Some(patch_actor.clone()),
+        seq: Some(1),
+        clock: HashMap::new(),
+        deps: Vec::new(),
+        max_op: 3,
+        pending_changes: 0,
+        diffs: RootDiff {
+            props: hashmap! {
+                "normal".into() => hashmap! {
+                    OpId(1, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(1, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sorteda".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor.clone()).into(),
+                        props : hashmap!{
+                            "a".into() => hashmap! {
+                                OpId(3, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(3, patch_actor.clone()).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            },
+                            "b".into() => hashmap! {
+                                OpId(4, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(4, patch_actor.clone()).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            }
+                        },
+                    })
+                },
+                "sortedb".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor.clone()).into(),
+                        props : hashmap!{
+                            "a".into() => hashmap! {
+                                OpId(3, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(3, patch_actor.clone()).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            },
+                            "b".into() => hashmap! {
+                                OpId(4, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(4, patch_actor).into(),
+                                    props : hashmap!{
+                                    },
+                                })
+                            }
+                        },
+                    })
+                }
+            },
+        },
+    })
+    .unwrap();
+
+    dbg!(doc.state());
+
+    assert_eq!(
+        doc.value_ref().get("normal").unwrap().value(),
+        Value::Map(HashMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sorteda")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("a")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sorteda")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("b")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sortedb")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("a")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .get("sortedb")
+            .unwrap()
+            .sorted_map()
+            .unwrap()
+            .get("b")
+            .unwrap()
+            .value(),
+        Value::SortedMap(BTreeMap::new())
+    );
 }
