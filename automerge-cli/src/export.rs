@@ -5,7 +5,7 @@ fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
     let changes = automerge_backend::Change::load_document(&input_data)?;
     let patch = backend.apply_changes(changes)?;
 
-    let mut frontend = automerge_frontend::Frontend::new();
+    let mut frontend = automerge_frontend::Frontend::default();
     frontend.apply_patch(patch)?;
 
     Ok(frontend.state().to_json())
@@ -34,6 +34,8 @@ pub fn export_json(
 
 #[cfg(test)]
 mod tests {
+    use automerge_frontend::Options;
+
     use super::*;
 
     #[test]
@@ -49,7 +51,8 @@ mod tests {
             automerge_frontend::Value::from_json(&initial_state_json);
 
         let (_, initial_change) =
-            automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
+            automerge_frontend::Frontend::new_with_initial_state(value, Options::default())
+                .unwrap();
         let mut backend = automerge_backend::Backend::new();
         backend.apply_local_change(initial_change).unwrap();
 
@@ -75,7 +78,8 @@ mod tests {
             automerge_frontend::Value::from_json(&initial_state_json);
 
         let (_, initial_change) =
-            automerge_frontend::Frontend::new_with_initial_state(value).unwrap();
+            automerge_frontend::Frontend::new_with_initial_state(value, Options::default())
+                .unwrap();
         let mut backend = automerge_backend::Backend::new();
         backend.apply_local_change(initial_change).unwrap();
 

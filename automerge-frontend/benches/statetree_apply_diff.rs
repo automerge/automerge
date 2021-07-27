@@ -57,7 +57,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         move |b| {
             b.iter_batched(
                 || {
-                    let doc = Frontend::new();
+                    let doc = Frontend::default();
                     (doc, patches.clone())
                 },
                 |(mut doc, patches)| {
@@ -115,7 +115,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
                 |patch| {
                     #[allow(clippy::unit_arg)]
                     black_box({
-                        let mut doc = Frontend::new();
+                        let mut doc = Frontend::default();
                         doc.apply_patch(patch).unwrap()
                     })
                 },

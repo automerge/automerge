@@ -8,7 +8,7 @@ use serde_json::json;
 #[derive(Default)]
 pub struct Automerge {
     backend: Backend,
-    frontend: Frontend,
+    frontend: Frontend<fn() -> Option<i64>>,
     stream: Vec<Change>,
 }
 

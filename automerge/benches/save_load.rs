@@ -1,8 +1,11 @@
-use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
+use automerge::{
+    Backend, Frontend, FrontendOptions, InvalidChangeRequest, LocalChange, Path, Primitive, Schema,
+    Value,
+};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn small_change_backend() -> Backend {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let mut backend = Backend::new();
     let (_, change) = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
@@ -130,8 +133,11 @@ fn medium_change_backend() -> Backend {
     ];
 
     let mut backend = Backend::new();
-    let mut frontend =
-        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
+    let mut frontend = Frontend::new(FrontendOptions {
+        timestamper: || None,
+        actor_id: actor_id.into(),
+        schema: Schema::default(),
+    });
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
@@ -148,8 +154,11 @@ fn medium_change_backend() -> Backend {
         backend.apply_local_change(change).unwrap();
     }
 
-    let mut frontend =
-        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
+    let mut frontend = Frontend::new(FrontendOptions {
+        timestamper: || None,
+        actor_id: actor_id.into(),
+        schema: Schema::default(),
+    });
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 

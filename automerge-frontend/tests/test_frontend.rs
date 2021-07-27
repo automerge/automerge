@@ -1,7 +1,9 @@
 use std::{convert::TryInto, num::NonZeroU32};
 
 use amp::SortedVec;
-use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
+use automerge_frontend::{
+    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Value,
+};
 use automerge_protocol as amp;
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
@@ -9,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[test]
 fn test_should_be_empty_after_init() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let result_state = frontend.state().to_json();
     let expected_state: serde_json::Value = serde_json::from_str("{}").unwrap();
     assert_eq!(result_state, expected_state);
@@ -30,7 +32,7 @@ fn test_init_with_state() {
     )
     .unwrap();
     let value = Value::from_json(&initial_state_json);
-    let (mut frontend, _) = Frontend::new_with_initial_state(value).unwrap();
+    let (mut frontend, _) = Frontend::new_with_initial_state(value, Options::default()).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }
@@ -39,14 +41,14 @@ fn test_init_with_state() {
 fn test_init_with_empty_state() {
     let initial_state_json: serde_json::Value = serde_json::from_str("{}").unwrap();
     let value = Value::from_json(&initial_state_json);
-    let (mut frontend, _) = Frontend::new_with_initial_state(value).unwrap();
+    let (mut frontend, _) = Frontend::new_with_initial_state(value, Options::default()).unwrap();
     let result_state = frontend.state().to_json();
     assert_eq!(initial_state_json, result_state);
 }
 
 #[test]
 fn test_set_root_object_properties() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let change_request = doc
         .change::<_, _, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
@@ -84,7 +86,7 @@ fn test_set_root_object_properties() {
 
 #[test]
 fn test_set_bytes() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let change_request = doc
         .change::<_, _, InvalidChangeRequest>(Some("set root object".into()), |doc| {
             doc.add_change(LocalChange::set(
@@ -122,7 +124,7 @@ fn test_set_bytes() {
 
 #[test]
 fn it_should_return_no_changes_if_nothing_was_changed() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let change_request = doc
         .change::<_, _, InvalidChangeRequest>(Some("do nothing".into()), |_| Ok(()))
         .unwrap()
@@ -132,7 +134,7 @@ fn it_should_return_no_changes_if_nothing_was_changed() {
 
 #[test]
 fn it_should_create_nested_maps() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let change_request = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -178,7 +180,7 @@ fn it_should_create_nested_maps() {
 
 #[test]
 fn apply_updates_inside_nested_maps() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -246,7 +248,7 @@ fn apply_updates_inside_nested_maps() {
 
 #[test]
 fn delete_keys_in_a_map() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -305,7 +307,7 @@ fn delete_keys_in_a_map() {
 
 #[test]
 fn create_lists() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -371,7 +373,7 @@ fn create_lists() {
 
 #[test]
 fn apply_updates_inside_lists() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -428,7 +430,7 @@ fn apply_updates_inside_lists() {
 
 #[test]
 fn delete_list_elements() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -482,7 +484,7 @@ fn delete_list_elements() {
 
 #[test]
 fn handle_counters_inside_maps() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -561,7 +563,7 @@ fn handle_counters_inside_maps() {
 
 #[test]
 fn handle_counters_inside_lists() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -654,7 +656,7 @@ fn handle_counters_inside_lists() {
 
 #[test]
 fn refuse_to_overwrite_counter_value() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("counts"),
@@ -684,7 +686,7 @@ fn refuse_to_overwrite_counter_value() {
 
 #[test]
 fn test_sets_characters_in_text() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
@@ -735,7 +737,7 @@ fn test_sets_characters_in_text() {
 
 #[test]
 fn test_inserts_characters_in_text() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
@@ -789,7 +791,7 @@ fn test_inserts_characters_in_text() {
 
 #[test]
 fn test_inserts_characters_at_start_of_text() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("text"),
@@ -843,7 +845,7 @@ fn test_inserts_characters_at_start_of_text() {
 
 #[test]
 fn test_inserts_at_end_of_lists() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.change::<_, _, InvalidChangeRequest>(None, |doc| {
         doc.add_change(LocalChange::set(
             Path::root().key("birds"),

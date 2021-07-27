@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use automerge::{
-    Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue, Value,
+    Backend, FrontendOptions, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive,
+    ScalarValue, Value,
 };
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType};
@@ -19,7 +20,8 @@ fn test_frontend_uses_correct_elem_ids() {
     let mut backend = automerge::Backend::new();
 
     let (mut frontend, change) =
-        automerge::Frontend::new_with_initial_state(Value::Map(hm)).unwrap();
+        automerge::Frontend::new_with_initial_state(Value::Map(hm), FrontendOptions::default())
+            .unwrap();
 
     println!("change1 {:?}", change);
 
@@ -129,7 +131,10 @@ fn test_multi_insert_expands_to_correct_indices() {
         ),
     });
 
-    let mut doc = automerge::Frontend::new_with_actor_id(uuid.as_bytes());
+    let mut doc = automerge::Frontend::new(FrontendOptions {
+        actor_id: uuid.into(),
+        ..Default::default()
+    });
 
     let ((), c) = doc
         .change::<_, _, InvalidChangeRequest>(None, |old| {
@@ -191,7 +196,7 @@ fn test_frontend_doesnt_wait_for_empty_changes() {
         ],
     ];
 
-    let mut doc = automerge::Frontend::new();
+    let mut doc = automerge::Frontend::default();
 
     let mut backend = Backend::new();
 
@@ -225,7 +230,8 @@ fn test_delete_key_in_map() {
 
     let mut b = automerge::Backend::new();
     // new with old value
-    let (mut f, c) = automerge::Frontend::new_with_initial_state(old).unwrap();
+    let (mut f, c) =
+        automerge::Frontend::new_with_initial_state(old, FrontendOptions::default()).unwrap();
     let (p, _) = b.apply_local_change(c).unwrap();
     f.apply_patch(p).unwrap();
 

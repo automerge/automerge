@@ -10,7 +10,7 @@ pub fn b1_1(c: &mut Criterion) {
     c.bench_function("B1.1 Append N characters", move |b| {
         b.iter_batched(
             || {
-                let mut doc1 = Frontend::new();
+                let mut doc1 = Frontend::default();
                 let changedoc1 = doc1
                     .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
@@ -26,7 +26,7 @@ pub fn b1_1(c: &mut Criterion) {
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
                 doc1.apply_patch(patch1).unwrap();
 
-                let mut doc2 = Frontend::new();
+                let mut doc2 = Frontend::default();
                 let changedoc2 = backend1.get_changes(&[]);
                 let mut backend2 = Backend::new();
                 let patch2 = backend2
@@ -77,7 +77,7 @@ pub fn b1_2(c: &mut Criterion) {
     c.bench_function("B1.2 Append string of length N", move |b| {
         b.iter_batched(
             || {
-                let mut doc1 = Frontend::new();
+                let mut doc1 = Frontend::default();
                 let changedoc1 = doc1
                     .change::<_, _, InvalidChangeRequest>(None, |d| {
                         d.add_change(LocalChange::set(
@@ -93,7 +93,7 @@ pub fn b1_2(c: &mut Criterion) {
                 let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
                 doc1.apply_patch(patch1).unwrap();
 
-                let mut doc2 = Frontend::new();
+                let mut doc2 = Frontend::default();
                 let changedoc2 = backend1.get_changes(&[]);
                 let mut backend2 = Backend::new();
                 let patch2 = backend2
@@ -142,7 +142,7 @@ pub fn b3_1(c: &mut Criterion) {
             || {
                 let n: f64 = 6000.0;
                 let root_n: i64 = n.sqrt().floor() as i64;
-                let mut local_doc = Frontend::new();
+                let mut local_doc = Frontend::default();
                 let mut local_backend = Backend::new();
                 let init_change = local_doc
                     .change::<_, _, InvalidChangeRequest>(None, |d| {
@@ -158,7 +158,7 @@ pub fn b3_1(c: &mut Criterion) {
                     local_backend.apply_local_change(init_change).unwrap();
                 local_doc.apply_patch(patch).unwrap();
 
-                let other_docs = (1..root_n).map(|_| Frontend::new());
+                let other_docs = (1..root_n).map(|_| Frontend::default());
                 let updates: Vec<automerge_backend::Change> = other_docs
                     .enumerate()
                     .map(|(index, mut doc)| {

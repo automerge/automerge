@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 #[test]
 fn test_allow_cursor_on_list_element() {
     let _ = env_logger::builder().is_test(true).try_init().unwrap();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let change = frontend
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(Path::root().key("list"), vec![1, 2, 3]))?;
@@ -32,7 +32,7 @@ fn test_allow_cursor_on_list_element() {
     backend2
         .apply_changes(backend.get_changes(&[]).into_iter().cloned().collect())
         .unwrap();
-    let mut frontend2 = Frontend::new();
+    let mut frontend2 = Frontend::default();
     frontend2
         .apply_patch(backend2.get_patch().unwrap())
         .unwrap();
@@ -46,7 +46,7 @@ fn test_allow_cursor_on_list_element() {
 
 #[test]
 fn test_allow_cursor_on_text_element() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let change = frontend
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
@@ -71,7 +71,7 @@ fn test_allow_cursor_on_text_element() {
     backend2
         .apply_changes(backend.get_changes(&[]).into_iter().cloned().collect())
         .unwrap();
-    let mut frontend2 = Frontend::new();
+    let mut frontend2 = Frontend::default();
     frontend2
         .apply_patch(backend2.get_patch().unwrap())
         .unwrap();
@@ -85,7 +85,7 @@ fn test_allow_cursor_on_text_element() {
 
 #[test]
 fn test_do_not_allow_index_past_end_of_list() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
@@ -136,7 +136,7 @@ fn test_do_not_allow_index_past_end_of_list() {
 
 #[test]
 fn test_set_cursor_to_new_element_in_diff() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let actor = frontend.actor_id.clone();
     let patch1 = amp::Patch {
         actor: Some(actor.clone()),
@@ -263,7 +263,7 @@ fn test_set_cursor_to_new_element_in_diff() {
 // }
 #[test]
 fn test_delete_cursor_and_adding_again() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(

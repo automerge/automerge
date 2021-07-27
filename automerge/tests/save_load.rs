@@ -1,4 +1,7 @@
-use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
+use automerge::{
+    Backend, Frontend, FrontendOptions, InvalidChangeRequest, LocalChange, Path, Primitive, Schema,
+    Value,
+};
 use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue,
@@ -119,8 +122,11 @@ fn missing_object_error_flaky_null_rle_decoding() {
     ];
 
     let mut backend = Backend::new();
-    let mut frontend =
-        Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
+    let mut frontend = Frontend::new(FrontendOptions {
+        timestamper: || None,
+        actor_id: actor_id.into(),
+        schema: Schema::default(),
+    });
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
@@ -156,8 +162,11 @@ fn missing_object_error_flaky_null_rle_decoding() {
             panic!("failed loading backend: {:?}", e)
         }
         Ok(mut backend) => {
-            let mut frontend =
-                Frontend::new_with_timestamper_and_actor_id(Box::new(|| None), actor_id.as_bytes());
+            let mut frontend = Frontend::new(FrontendOptions {
+                timestamper: || None,
+                actor_id: actor_id.into(),
+                schema: Schema::default(),
+            });
             let patch = backend.get_patch().unwrap();
             frontend.apply_patch(patch).unwrap();
 

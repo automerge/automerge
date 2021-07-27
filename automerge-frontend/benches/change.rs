@@ -8,7 +8,7 @@ pub fn insert_long_string(c: &mut Criterion) {
     c.bench_function("Frontend::change insert long string", move |b| {
         b.iter_batched(
             || {
-                let doc = Frontend::new();
+                let doc = Frontend::default();
                 let random_string: SmolStr = thread_rng()
                     .sample_iter(&rand::distributions::Alphanumeric)
                     .take(6000)

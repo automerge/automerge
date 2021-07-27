@@ -26,7 +26,7 @@ fn set_object_root_properties() {
             },
         },
     };
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
         frontend.state(),
@@ -54,7 +54,7 @@ fn set_bytes_value() {
             },
         },
     };
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
         frontend.state(),
@@ -89,7 +89,7 @@ fn reveal_conflicts_on_root_properties() {
             },
         },
     };
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     doc.apply_patch(patch).unwrap();
 
     assert_eq!(
@@ -135,7 +135,7 @@ fn create_nested_maps() {
             },
         },
     };
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch).unwrap();
     assert_eq!(
         frontend.state(),
@@ -170,7 +170,7 @@ fn apply_updates_inside_nested_maps() {
             },
         },
     };
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch1).unwrap();
 
     let birds_id = frontend.get_object_id(&Path::root().key("birds")).unwrap();
@@ -251,7 +251,7 @@ fn apply_updates_inside_map_conflicts() {
             },
         },
     };
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch1).unwrap();
 
     assert_eq!(
@@ -320,7 +320,7 @@ fn apply_updates_inside_map_conflicts() {
 #[test]
 fn delete_keys_in_maps() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch1 = amp::Patch {
         actor: None,
         max_op: 2,
@@ -375,7 +375,7 @@ fn delete_keys_in_maps() {
 #[test]
 fn create_lists() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -412,7 +412,7 @@ fn create_lists() {
 #[test]
 fn apply_updates_inside_lists() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -474,7 +474,7 @@ fn apply_updates_inside_lists() {
 #[test]
 fn apply_multi_insert_updates_inside_lists() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -577,7 +577,7 @@ fn apply_updates_inside_list_conflicts() {
         },
     };
 
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch1).unwrap();
     assert_eq!(
         frontend.state(),
@@ -728,7 +728,7 @@ fn apply_updates_inside_list_conflicts() {
 #[test]
 fn delete_list_elements() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -842,7 +842,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
         },
     };
 
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     frontend.apply_patch(patch1).unwrap();
 
     assert_eq!(
@@ -913,7 +913,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
 #[test]
 fn test_text_objects() {
     let actor = amp::ActorId::random();
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let patch = amp::Patch {
         actor: None,
         seq: None,
@@ -1002,7 +1002,7 @@ fn test_text_objects() {
 
 #[test]
 fn test_unchanged_diff_creates_empty_objects() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let patch = amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(1),

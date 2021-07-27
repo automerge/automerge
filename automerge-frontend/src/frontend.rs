@@ -1,12 +1,14 @@
+mod options;
+
 use std::{
     collections::{HashMap, HashSet},
-    convert::TryFrom,
     error::Error,
     fmt::Debug,
 };
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
+pub use options::{system_time, Options};
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},
@@ -20,7 +22,7 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone)]
-pub(crate) struct Schema {
+pub struct Schema {
     sorted_maps_prefixes: HashSet<Path>,
     sorted_maps_exact: HashSet<Path>,
 }
@@ -35,7 +37,7 @@ impl Schema {
     }
 }
 
-pub struct Frontend {
+pub struct Frontend<T> {
     pub actor_id: ActorId,
     pub seq: u64,
     /// The current state of the frontend, see the description of
@@ -45,12 +47,12 @@ pub struct Frontend {
     /// A cache of the value of this frontend
     cached_value: Option<Value>,
     /// A function for generating timestamps
-    timestamper: Box<dyn Fn() -> Option<i64>>,
+    timestamper: T,
 
     schema: Schema,
 }
 
-impl Debug for Frontend {
+impl<T> Debug for Frontend<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         let Frontend {
             actor_id,
@@ -73,54 +75,25 @@ impl Debug for Frontend {
 }
 
 #[cfg(feature = "std")]
-impl Default for Frontend {
+impl Default for Frontend<fn() -> Option<i64>> {
     fn default() -> Self {
-        Self::new()
+        let options = Options::default();
+        Self::new(options)
     }
 }
 
-impl Frontend {
-    #[cfg(feature = "std")]
-    pub fn new() -> Self {
-        let system_time = || {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()
-                .and_then(|d| i64::try_from(d.as_millis()).ok())
-        };
-        Self::new_with_timestamper(Box::new(system_time))
-    }
-
-    #[cfg(feature = "std")]
-    pub fn new_with_actor_id(actor_id: &[u8]) -> Self {
-        let system_time = || {
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()
-                .and_then(|d| i64::try_from(d.as_millis()).ok())
-        };
-        Self::new_with_timestamper_and_actor_id(Box::new(system_time), actor_id)
-    }
-
-    pub fn new_with_timestamper(t: Box<dyn Fn() -> Option<i64>>) -> Self {
-        Self::new_with_timestamper_and_actor_id(t, uuid::Uuid::new_v4().as_bytes())
-    }
-
-    pub fn new_with_timestamper_and_actor_id(
-        t: Box<dyn Fn() -> Option<i64>>,
-        actor_id: &[u8],
-    ) -> Self {
-        let root_state = StateTree::new();
-        Frontend {
-            actor_id: ActorId::from(actor_id),
+impl<T> Frontend<T> {
+    pub fn new(options: Options<T>) -> Self {
+        Self {
+            actor_id: options.actor_id,
             seq: 0,
             state: FrontendState::Reconciled {
-                reconciled_root_state: root_state,
+                reconciled_root_state: StateTree::new(),
                 max_op: 0,
                 deps_of_last_received_patch: Vec::new(),
             },
             cached_value: None,
-            timestamper: t,
+            timestamper: options.timestamper,
             schema: Schema {
                 sorted_maps_prefixes: HashSet::new(),
                 sorted_maps_exact: HashSet::new(),
@@ -128,13 +101,16 @@ impl Frontend {
         }
     }
 
-    #[cfg(feature = "std")]
     pub fn new_with_initial_state(
         initial_state: Value,
-    ) -> Result<(Self, amp::Change), InvalidInitialStateError> {
+        options: Options<T>,
+    ) -> Result<(Self, amp::Change), InvalidInitialStateError>
+    where
+        T: Fn() -> Option<i64>,
+    {
         match &initial_state {
             Value::Map(kvs) => {
-                let mut front = Frontend::new();
+                let mut front = Frontend::new(options);
                 let (init_ops, _) =
                     kvs.iter()
                         .fold((Vec::new(), 1), |(mut ops, max_op), (k, v)| {
@@ -196,6 +172,7 @@ impl Frontend {
     where
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
+        T: Fn() -> Option<i64>,
     {
         let start_op = self.state.max_op() + 1;
         let change_result =

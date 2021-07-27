@@ -1,11 +1,11 @@
 use anyhow::Result;
 use automerge_backend::Backend;
-use automerge_frontend::{Frontend, Value};
+use automerge_frontend::{Frontend, Options, Value};
 
 fn initialize_from_json(json_value: &serde_json::Value) -> Result<Vec<u8>> {
     let value: Value = Value::from_json(json_value);
 
-    let (_, initial_change) = Frontend::new_with_initial_state(value)?;
+    let (_, initial_change) = Frontend::new_with_initial_state(value, Options::default())?;
     let mut backend = Backend::new();
     backend.apply_local_change(initial_change)?;
 

@@ -11,7 +11,7 @@ use rand::Rng;
 use smol_str::SmolStr;
 
 fn f() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let mut backend = Backend::new();
 
     let start = Instant::now();
@@ -97,7 +97,7 @@ fn f() {
 }
 
 fn g() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let mut backend = Backend::new();
 
     let start = Instant::now();
@@ -135,7 +135,7 @@ fn g() {
 
     let patch = backend.get_patch().unwrap();
 
-    let mut f = Frontend::new();
+    let mut f = Frontend::default();
 
     f.apply_patch(patch).unwrap();
 
@@ -158,7 +158,7 @@ fn g() {
 fn h() {
     let start = Instant::now();
 
-    let mut doc1 = Frontend::new();
+    let mut doc1 = Frontend::default();
     let changedoc1 = doc1
         .change::<_, _, InvalidChangeRequest>(None, |d| {
             d.add_change(LocalChange::set(
@@ -174,7 +174,7 @@ fn h() {
     let (patch1, _) = backend1.apply_local_change(changedoc1).unwrap();
     doc1.apply_patch(patch1).unwrap();
 
-    let mut doc2 = Frontend::new();
+    let mut doc2 = Frontend::default();
     let changedoc2 = backend1.get_changes(&[]);
     let mut backend2 = Backend::new();
     let patch2 = backend2
@@ -262,7 +262,7 @@ fn h() {
 }
 
 fn trace(edits: Vec<(u32, u32, Option<String>)>) {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let mut backend = Backend::new();
 
     let start = Instant::now();

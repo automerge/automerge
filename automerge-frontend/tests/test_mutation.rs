@@ -7,7 +7,7 @@ use maplit::hashmap;
 
 #[test]
 fn test_delete_index_in_mutation() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let _cr = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -48,7 +48,7 @@ fn test_delete_index_in_mutation() {
 
 #[test]
 fn test_multiple_primitive_inserts() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let cr = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -105,7 +105,7 @@ fn test_multiple_primitive_inserts() {
 
 #[test]
 fn test_multiple_non_primitive_inserts() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let actor = frontend.actor_id.clone();
     let cr = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
@@ -180,7 +180,7 @@ fn test_multiple_non_primitive_inserts() {
 
 #[test]
 fn test_delete_non_existent_root_key() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let path = Path::root().key("missing");
     let cr = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
@@ -194,7 +194,7 @@ fn test_delete_non_existent_root_key() {
 
 #[test]
 fn test_delete_non_existent_map_key() {
-    let mut frontend = Frontend::new();
+    let mut frontend = Frontend::default();
     let path = Path::root().key("a").key("missing");
     let cr = frontend
         .change::<_, _, InvalidChangeRequest>(None, |doc| {

@@ -1,7 +1,11 @@
 use std::time::Duration;
 
-use automerge::{Backend, Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
+use automerge::{
+    Backend, Frontend, FrontendOptions, InvalidChangeRequest, LocalChange, Path, Primitive, Schema,
+    Value,
+};
 use automerge_backend::SyncState;
+use automerge_protocol::ActorId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn sync(
@@ -47,7 +51,11 @@ fn sync_per_change(count: u32, sync_interval: u32) {
     let mut s1 = SyncState::default();
     let mut s2 = SyncState::default();
 
-    let mut f1 = Frontend::new_with_timestamper(Box::new(|| None));
+    let mut f1 = Frontend::new(FrontendOptions {
+        timestamper: || None,
+        actor_id: ActorId::random(),
+        schema: Schema::default(),
+    });
 
     let change = f1
         .change::<_, _, InvalidChangeRequest>(None, |d| {

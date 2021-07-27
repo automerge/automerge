@@ -1,7 +1,7 @@
 use amp::{RootDiff, SortedVec};
 use automerge_backend::Backend;
 use automerge_frontend::{
-    Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Path, Primitive, Value,
+    Frontend, InvalidChangeRequest, InvalidPatch, LocalChange, Options, Path, Primitive, Value,
 };
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -13,7 +13,7 @@ fn random_op_id() -> amp::OpId {
 
 #[test]
 fn use_version_and_sequence_number_from_backend() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let remote_actor1 = amp::ActorId::random();
     let remote_actor2 = amp::ActorId::random();
 
@@ -79,7 +79,7 @@ fn use_version_and_sequence_number_from_backend() {
 
 #[test]
 fn remove_pending_requests_once_handled() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
 
     // First we add two local changes
     let _req1 = doc
@@ -179,7 +179,7 @@ fn remove_pending_requests_once_handled() {
 #[test]
 fn leave_request_queue_unchanged_on_remote_changes() {
     let remote = amp::ActorId::random();
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     // Enqueue a local change, moving the document into the "waiting for in
     // flight requests" state
     let _req1 = doc
@@ -265,7 +265,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
 
 #[test]
 fn dont_allow_out_of_order_request_patches() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -307,7 +307,7 @@ fn dont_allow_out_of_order_request_patches() {
 
 #[test]
 fn handle_concurrent_insertions_into_lists() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let _req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -470,7 +470,7 @@ fn handle_concurrent_insertions_into_lists() {
 
 #[test]
 fn allow_interleaving_of_patches_and_changes() {
-    let mut doc = Frontend::new();
+    let mut doc = Frontend::default();
     let req1 = doc
         .change::<_, _, InvalidChangeRequest>(None, |doc| {
             doc.add_change(LocalChange::set(
@@ -615,13 +615,16 @@ fn allow_interleaving_of_patches_and_changes() {
 //})
 #[test]
 fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
-    let (doc, change1) =
-        Frontend::new_with_initial_state(hashmap! {"number" => Primitive::Int(1)}.into()).unwrap();
+    let (doc, change1) = Frontend::new_with_initial_state(
+        hashmap! {"number" => Primitive::Int(1)}.into(),
+        Options::default(),
+    )
+    .unwrap();
 
-    let mut backend1 = Backend::new();
+    let mut backend1 = Backend::default();
     let (_, binchange1) = backend1.apply_local_change(change1).unwrap();
 
-    let mut doc2 = Frontend::new();
+    let mut doc2 = Frontend::default();
     let mut backend2 = Backend::new();
     let patch1 = backend2.apply_changes(vec![binchange1.clone()]).unwrap();
     doc2.apply_patch(patch1.clone()).unwrap();

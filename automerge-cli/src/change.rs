@@ -182,7 +182,7 @@ pub fn change(
         .map_err(|e| ChangeError::ErrReadingChanges { source: e })?;
     let changes = amb::Change::load_document(&buf)
         .map_err(|e| ChangeError::ErrApplyingInitialChanges { source: e })?;
-    let mut frontend = amf::Frontend::new();
+    let mut frontend = amf::Frontend::default();
     let patch = backend
         .apply_changes(changes)
         .map_err(|e| ChangeError::ErrApplyingInitialChanges { source: e })?;
