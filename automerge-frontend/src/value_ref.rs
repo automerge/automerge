@@ -58,6 +58,13 @@ impl<'a> ValueRef<'a> {
         }
     }
 
+    pub fn sorted_map(&self) -> Option<&SortedMapRef<'a>> {
+        match self {
+            Self::SortedMap(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn table(&self) -> Option<&TableRef<'a>> {
         match self {
             Self::Table(t) => Some(t),
