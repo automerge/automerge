@@ -6,7 +6,7 @@ use std::{
 
 use amp::{ActorId, Diff, MapDiff, OpId, Patch, RootDiff, SortedVec};
 use automerge_frontend::{
-    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, SchemaValue, Value,
+    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Value, ValueSchema,
 };
 use automerge_protocol as amp;
 use maplit::{btreemap, hashmap};
@@ -945,10 +945,10 @@ fn test_sorted_map() {
 
 #[test]
 fn test_schema_sorted_map() {
-    let schema = SchemaValue::Map(
+    let schema = ValueSchema::Map(
         None,
         hashmap! {
-            "sorted".into() => SchemaValue::SortedMap(None, hashmap!{})
+            "sorted".into() => ValueSchema::SortedMap(None, hashmap!{})
         },
     );
 
@@ -996,11 +996,11 @@ fn test_schema_sorted_map() {
 
 #[test]
 fn test_schema_sorted_maps() {
-    let schema = SchemaValue::Map(
+    let schema = ValueSchema::Map(
         None,
         hashmap! {
-            "sorteda".into() => SchemaValue::SortedMap(None, hashmap!{}),
-            "sortedb".into() => SchemaValue::SortedMap(None, hashmap!{})
+            "sorteda".into() => ValueSchema::SortedMap(None, hashmap!{}),
+            "sortedb".into() => ValueSchema::SortedMap(None, hashmap!{})
         },
     );
 
@@ -1059,12 +1059,12 @@ fn test_schema_sorted_maps() {
 
 #[test]
 fn test_schema_sorted_unsorted_sorted() {
-    let schema = SchemaValue::Map(
+    let schema = ValueSchema::Map(
         None,
         hashmap! {
-            "sorted".into() => SchemaValue::SortedMap(None,
-                hashmap!{"unsorted".into() => SchemaValue::Map(None, hashmap!{
-                    "sorted".into() => SchemaValue::SortedMap(None, hashmap! {})
+            "sorted".into() => ValueSchema::SortedMap(None,
+                hashmap!{"unsorted".into() => ValueSchema::Map(None, hashmap!{
+                    "sorted".into() => ValueSchema::SortedMap(None, hashmap! {})
                 }),
             }),
         },

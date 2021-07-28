@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 
 use automerge_protocol::ActorId;
 
-use super::SchemaValue;
+use super::ValueSchema;
 
 /// Options for building a [`Frontend`](crate::Frontend).
 #[derive(Debug, Clone)]
@@ -10,7 +10,7 @@ pub struct Options {
     /// The schema for the frontend to use.
     ///
     /// The default is an empty [`Schema`].
-    pub(crate) schema: Option<SchemaValue>,
+    pub(crate) schema: Option<ValueSchema>,
     /// The actor id to appear in changes from this frontend.
     ///
     /// The default is [`ActorId::random`].
@@ -22,12 +22,12 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn set_schema(&mut self, schema: SchemaValue) -> &mut Self {
+    pub fn set_schema(&mut self, schema: ValueSchema) -> &mut Self {
         self.schema = Some(schema);
         self
     }
 
-    pub fn with_schema(mut self, schema: SchemaValue) -> Self {
+    pub fn with_schema(mut self, schema: ValueSchema) -> Self {
         self.schema = Some(schema);
         self
     }

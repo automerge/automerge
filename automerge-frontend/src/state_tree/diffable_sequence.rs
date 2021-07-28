@@ -7,7 +7,7 @@ use smol_str::SmolStr;
 use super::{MultiGrapheme, MultiValue, StateTreeValue};
 use crate::{
     error::InvalidPatch,
-    frontend::{Schema, SchemaValue},
+    frontend::{Schema, SchemaValue, ValueSchema},
     Path,
 };
 
@@ -20,7 +20,7 @@ pub(crate) trait DiffableValue: Sized {
         parent_object_id: &amp::ObjectId,
     ) -> Result<(), InvalidPatch>;
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) -> Self;
+    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&ValueSchema>) -> Self;
 
     fn check_diff(
         &self,
@@ -29,9 +29,9 @@ pub(crate) trait DiffableValue: Sized {
         parent_object_id: &amp::ObjectId,
     ) -> Result<(), InvalidPatch>;
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>);
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&ValueSchema>);
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&SchemaValue>)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&ValueSchema>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>;
 
@@ -61,7 +61,7 @@ impl DiffableValue for MultiGrapheme {
         MultiGrapheme::check_new_from_diff(opid, diff, parent_object_id)
     }
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, _schema: Option<&SchemaValue>) -> Self {
+    fn construct(opid: amp::OpId, diff: amp::Diff, _schema: Option<&ValueSchema>) -> Self {
         MultiGrapheme::new_from_diff(opid, diff)
     }
 
@@ -74,11 +74,11 @@ impl DiffableValue for MultiGrapheme {
         MultiGrapheme::check_diff(self, opid, diff, parent_object_id)
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, _schema: Option<&SchemaValue>) {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, _schema: Option<&ValueSchema>) {
         MultiGrapheme::apply_diff(self, opid, diff)
     }
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, _schema: Option<&SchemaValue>)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, _schema: Option<&ValueSchema>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
@@ -121,7 +121,7 @@ impl DiffableValue for MultiValue {
         MultiValue::check_new_from_diff(opid, diff)
     }
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) -> Self {
+    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&ValueSchema>) -> Self {
         MultiValue::new_from_diff(opid, diff, schema)
     }
 
@@ -134,11 +134,11 @@ impl DiffableValue for MultiValue {
         self.check_diff(opid, diff)
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&ValueSchema>) {
         self.apply_diff(opid, diff, schema)
     }
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&SchemaValue>)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&ValueSchema>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
@@ -313,7 +313,7 @@ where
         &mut self,
         _object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
-        schema: Option<&SchemaValue>,
+        schema: Option<&ValueSchema>,
     ) {
         let mut changed_indices = Vec::new();
         for edit in edits {
@@ -528,7 +528,7 @@ where
         }
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&ValueSchema>) {
         match self {
             SequenceValue::Original(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {

@@ -3,17 +3,17 @@ use std::collections::HashMap;
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone)]
-pub enum SchemaValue {
-    Map(Option<Box<SchemaValue>>, HashMap<SmolStr, SchemaValue>),
-    SortedMap(Option<Box<SchemaValue>>, HashMap<SmolStr, SchemaValue>),
-    Table(Option<Box<SchemaValue>>, HashMap<SmolStr, SchemaValue>),
-    List(Option<Box<SchemaValue>>, HashMap<u32, SchemaValue>),
-    Text(Option<Box<SchemaValue>>, HashMap<u32, SchemaValue>),
-    Primitive(SchemaPrimitive),
+pub enum ValueSchema {
+    Map(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
+    SortedMap(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
+    Table(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
+    List(Option<Box<ValueSchema>>, HashMap<u32, ValueSchema>),
+    Text(Option<Box<ValueSchema>>, HashMap<u32, ValueSchema>),
+    Primitive(PrimitiveSchema),
 }
 
 #[derive(Debug, Clone)]
-pub enum SchemaPrimitive {
+pub enum PrimitiveSchema {
     Bytes,
     Str,
     Int,
@@ -26,39 +26,39 @@ pub enum SchemaPrimitive {
     Null,
 }
 
-impl SchemaValue {
+impl ValueSchema {
     pub(crate) fn is_sorted_map(&self) -> bool {
         matches!(self, Self::SortedMap(_, _))
     }
 
-    pub(crate) fn get_key(&self, key: &SmolStr) -> Option<&SchemaValue> {
+    pub(crate) fn get_key(&self, key: &SmolStr) -> Option<&ValueSchema> {
         match self {
-            SchemaValue::Map(default, map)
-            | SchemaValue::SortedMap(default, map)
-            | SchemaValue::Table(default, map) => {
+            ValueSchema::Map(default, map)
+            | ValueSchema::SortedMap(default, map)
+            | ValueSchema::Table(default, map) => {
                 if let Some(value) = map.get(key) {
                     Some(value)
                 } else {
                     default.as_ref().map(|d| d.as_ref())
                 }
             }
-            SchemaValue::List(_, _) | SchemaValue::Text(_, _) | SchemaValue::Primitive(_) => None,
+            ValueSchema::List(_, _) | ValueSchema::Text(_, _) | ValueSchema::Primitive(_) => None,
         }
     }
 
-    pub(crate) fn get_index(&self, index: u32) -> Option<&SchemaValue> {
+    pub(crate) fn get_index(&self, index: u32) -> Option<&ValueSchema> {
         match self {
-            SchemaValue::List(default, map) | SchemaValue::Text(default, map) => {
+            ValueSchema::List(default, map) | ValueSchema::Text(default, map) => {
                 if let Some(value) = map.get(&index) {
                     Some(value)
                 } else {
                     default.as_ref().map(|d| d.as_ref())
                 }
             }
-            SchemaValue::Map(_, _)
-            | SchemaValue::SortedMap(_, _)
-            | SchemaValue::Table(_, _)
-            | SchemaValue::Primitive(_) => None,
+            ValueSchema::Map(_, _)
+            | ValueSchema::SortedMap(_, _)
+            | ValueSchema::Table(_, _)
+            | ValueSchema::Primitive(_) => None,
         }
     }
 }

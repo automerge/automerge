@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     error,
-    frontend::SchemaValue,
+    frontend::ValueSchema,
     path::PathElement,
     value::{Primitive, Value},
 };
@@ -48,7 +48,7 @@ impl MultiValue {
     pub(crate) fn new_from_diff(
         opid: amp::OpId,
         diff: amp::Diff,
-        schema: Option<&SchemaValue>,
+        schema: Option<&ValueSchema>,
     ) -> MultiValue {
         let value = StateTreeValue::new_from_diff(diff, schema);
         MultiValue {
@@ -132,12 +132,12 @@ impl MultiValue {
         &mut self,
         opid: amp::OpId,
         diff: amp::Diff,
-        schema: Option<&SchemaValue>,
+        schema: Option<&ValueSchema>,
     ) {
         self.apply_diff_iter(&mut std::iter::once((opid, diff)), schema)
     }
 
-    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&SchemaValue>)
+    pub(super) fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&ValueSchema>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {

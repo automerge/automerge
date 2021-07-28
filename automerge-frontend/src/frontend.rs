@@ -6,7 +6,7 @@ use std::{collections::HashMap, error::Error, fmt::Debug};
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
 pub use options::{system_time, Options};
-pub use schema::{SchemaPrimitive, SchemaValue};
+pub use schema::{PrimitiveSchema, ValueSchema};
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},
@@ -31,7 +31,7 @@ pub struct Frontend {
     /// A function for generating timestamps
     timestamper: fn() -> Option<i64>,
 
-    schema: Option<SchemaValue>,
+    schema: Option<ValueSchema>,
 }
 
 impl Debug for Frontend {

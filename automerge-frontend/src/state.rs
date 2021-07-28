@@ -3,7 +3,7 @@ use std::error::Error;
 use automerge_protocol as amp;
 
 use crate::{
-    frontend::SchemaValue,
+    frontend::ValueSchema,
     mutation::MutationTracker,
     state_tree::{OptimisticStateTree, ResolvedPath, StateTree},
     value_ref::RootRef,
@@ -73,7 +73,7 @@ impl FrontendState {
         &mut self,
         self_actor: &amp::ActorId,
         mut patch: amp::Patch,
-        schema: &Option<SchemaValue>,
+        schema: &Option<ValueSchema>,
     ) -> Result<(), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {
