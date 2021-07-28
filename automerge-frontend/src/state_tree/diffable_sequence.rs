@@ -1,10 +1,15 @@
-use amp::OpId;
-use automerge_protocol as amp;
+use std::collections::HashMap;
 
-use super::{MultiGrapheme, MultiValue};
+use amp::{ActorId, OpId};
+use automerge_protocol as amp;
+use smol_str::SmolStr;
+
+use super::{MultiGrapheme, MultiValue, StateTreeValue};
 use crate::error::InvalidPatch;
 
-pub(crate) trait DiffableValue: Sized + Default {
+pub(crate) trait DiffableValue: Sized {
+    fn take(&mut self) -> Self;
+
     fn check_construct(
         opid: &amp::OpId,
         diff: &amp::Diff,
@@ -34,6 +39,13 @@ pub(crate) trait DiffableValue: Sized + Default {
 }
 
 impl DiffableValue for MultiGrapheme {
+    fn take(&mut self) -> Self {
+        Self {
+            winning_value: (amp::OpId(0, ActorId::from(&[][..])), SmolStr::default()),
+            conflicts: HashMap::default(),
+        }
+    }
+
     fn check_construct(
         opid: &amp::OpId,
         diff: &amp::Diff,
@@ -81,6 +93,16 @@ impl DiffableValue for MultiGrapheme {
 }
 
 impl DiffableValue for MultiValue {
+    fn take(&mut self) -> Self {
+        Self {
+            winning_value: (
+                amp::OpId(0, ActorId::from(&[][..])),
+                StateTreeValue::default(),
+            ),
+            conflicts: HashMap::default(),
+        }
+    }
+
     fn check_construct(
         opid: &amp::OpId,
         diff: &amp::Diff,
@@ -453,7 +475,7 @@ where
         match self {
             SequenceValue::Original(_) => { // do nothing, this is the finished state
             }
-            SequenceValue::New(v) => *self = SequenceValue::Original(std::mem::take(v)),
+            SequenceValue::New(v) => *self = SequenceValue::Original(v.take()),
             SequenceValue::Updated { updates, .. } => {
                 let initial_update = updates.remove(0);
                 let t =
@@ -492,7 +514,7 @@ where
                     T::construct(opid, diff)
                 };
                 *self = SequenceValue::Updated {
-                    original: std::mem::take(v),
+                    original: v.take(),
                     updates: vec![updated],
                 };
             }
@@ -505,7 +527,7 @@ where
                 };
                 *self = SequenceValue::Updated {
                     original: v.clone(),
-                    updates: vec![std::mem::take(v), updated],
+                    updates: vec![v.take(), updated],
                 };
             }
             SequenceValue::Updated { original, updates } => {
