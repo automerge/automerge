@@ -18,6 +18,18 @@ pub use self::{
 ///
 /// In future this could be extended to more strict schema validation as well as hinting or could
 /// be removed entirely...
+///
+/// ## Usage
+///
+/// Schemas should be built from the root of the document, using [`RootSchema`].
+///
+/// At each level there is the option to create a default schema, applied to all values at that
+/// level or to provide specific schema for certain keys or indices.
+///
+/// This allows to describe the tree arbitrarily, potentially skipping levels.
+///
+/// When the schema is checked the most specific schema is selected and **no** merging takes
+/// place.
 #[derive(Debug, Clone)]
 pub enum ValueSchema {
     Map(MapSchema),
