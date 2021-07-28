@@ -10,6 +10,14 @@ pub use self::{
     table::TableSchema, text::TextSchema,
 };
 
+/// A flexible schema.
+///
+/// **Experimental**
+///
+/// Currently this is just used to decide whether to use a sorted map or not in the frontend.
+///
+/// In future this could be extended to more strict schema validation as well as hinting or could
+/// be removed entirely...
 #[derive(Debug, Clone)]
 pub enum ValueSchema {
     Map(MapSchema),
@@ -20,6 +28,7 @@ pub enum ValueSchema {
     Primitive(PrimitiveSchema),
 }
 
+/// Schema for primitive values, currently unused.
 #[derive(Debug, Clone)]
 pub enum PrimitiveSchema {
     Bytes,
@@ -35,10 +44,12 @@ pub enum PrimitiveSchema {
 }
 
 impl ValueSchema {
+    /// Check if this ValueSchema represents a sorted map.
     pub(crate) fn is_sorted_map(&self) -> bool {
         matches!(self, Self::SortedMap(_))
     }
 
+    /// Get the schema at the given key.
     pub(crate) fn get_key(&self, key: &str) -> Option<&ValueSchema> {
         match self {
             ValueSchema::Map(map) => map.get_key(key),
@@ -48,6 +59,7 @@ impl ValueSchema {
         }
     }
 
+    /// Get the schema at the given index.
     pub(crate) fn get_index(&self, index: u32) -> Option<&ValueSchema> {
         match self {
             ValueSchema::List(list) => list.get_index(index),
