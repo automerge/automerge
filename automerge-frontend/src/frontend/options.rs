@@ -6,19 +6,23 @@ use super::Schema;
 
 /// Options for building a [`Frontend`](crate::Frontend).
 #[derive(Debug, Clone)]
-pub struct Options<T> {
+pub struct Options {
     /// The schema for the frontend to use.
+    ///
+    /// The default is an empty [`Schema`].
     pub schema: Schema,
     /// The actor id to appear in changes from this frontend.
+    ///
+    /// The default is [`ActorId::random`].
     pub actor_id: ActorId,
     /// The timestamp function for this frontend.
     ///
-    /// A sensible default is [`system_time`].
-    pub timestamper: T,
+    /// The default is [`system_time`].
+    pub timestamper: fn() -> Option<i64>,
 }
 
 #[cfg(feature = "std")]
-impl Default for Options<fn() -> Option<i64>> {
+impl Default for Options {
     fn default() -> Self {
         Self {
             schema: Schema::default(),

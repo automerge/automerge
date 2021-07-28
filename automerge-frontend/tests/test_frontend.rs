@@ -6,8 +6,7 @@ use std::{
 
 use amp::{ActorId, Diff, MapDiff, OpId, Patch, RootDiff, SortedVec};
 use automerge_frontend::{
-    system_time, Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Schema,
-    Value,
+    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Schema, Value,
 };
 use automerge_protocol as amp;
 use maplit::hashmap;
@@ -951,8 +950,7 @@ fn test_schema_sorted_maps_exact_patch() {
 
     let mut doc = Frontend::new(Options {
         schema,
-        timestamper: system_time,
-        actor_id: ActorId::random(),
+        ..Default::default()
     });
 
     let patch_actor = ActorId::random();
@@ -1003,8 +1001,7 @@ fn test_schema_sorted_maps_exact_patch_multiple() {
 
     let mut doc = Frontend::new(Options {
         schema,
-        timestamper: system_time,
-        actor_id: ActorId::random(),
+        ..Default::default()
     });
 
     let patch_actor = ActorId::random();
@@ -1065,8 +1062,7 @@ fn test_schema_sorted_maps_prefix_patch() {
 
     let mut doc = Frontend::new(Options {
         schema,
-        timestamper: system_time,
-        actor_id: ActorId::random(),
+        ..Default::default()
     });
 
     let patch_actor = ActorId::random();
@@ -1151,8 +1147,7 @@ fn test_schema_sorted_maps_prefix_patch_multiple() {
 
     let mut doc = Frontend::new(Options {
         schema,
-        timestamper: system_time,
-        actor_id: ActorId::random(),
+        ..Default::default()
     });
 
     let patch_actor = ActorId::random();

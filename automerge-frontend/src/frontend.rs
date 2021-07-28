@@ -19,7 +19,7 @@ use crate::{
     value_ref::RootRef,
 };
 
-pub struct Frontend<T> {
+pub struct Frontend {
     pub actor_id: ActorId,
     pub seq: u64,
     /// The current state of the frontend, see the description of
@@ -29,12 +29,12 @@ pub struct Frontend<T> {
     /// A cache of the value of this frontend
     cached_value: Option<Value>,
     /// A function for generating timestamps
-    timestamper: T,
+    timestamper: fn() -> Option<i64>,
 
     schema: Schema,
 }
 
-impl<T> Debug for Frontend<T> {
+impl Debug for Frontend {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         let Frontend {
             actor_id,
@@ -57,15 +57,15 @@ impl<T> Debug for Frontend<T> {
 }
 
 #[cfg(feature = "std")]
-impl Default for Frontend<fn() -> Option<i64>> {
+impl Default for Frontend {
     fn default() -> Self {
         let options = Options::default();
         Self::new(options)
     }
 }
 
-impl<T> Frontend<T> {
-    pub fn new(options: Options<T>) -> Self {
+impl Frontend {
+    pub fn new(options: Options) -> Self {
         Self {
             actor_id: options.actor_id,
             seq: 0,
@@ -82,11 +82,8 @@ impl<T> Frontend<T> {
 
     pub fn new_with_initial_state(
         initial_state: Value,
-        options: Options<T>,
-    ) -> Result<(Self, amp::Change), InvalidInitialStateError>
-    where
-        T: FnMut() -> Option<i64>,
-    {
+        options: Options,
+    ) -> Result<(Self, amp::Change), InvalidInitialStateError> {
         match &initial_state {
             Value::Map(kvs) => {
                 let mut front = Frontend::new(options);
@@ -151,7 +148,6 @@ impl<T> Frontend<T> {
     where
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
-        T: FnMut() -> Option<i64>,
     {
         let start_op = self.state.max_op() + 1;
         let change_result =
