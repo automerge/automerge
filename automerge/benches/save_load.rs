@@ -1,6 +1,5 @@
 use automerge::{
-    Backend, Frontend, FrontendOptions, InvalidChangeRequest, LocalChange, Path, Primitive, Schema,
-    Value,
+    Backend, Frontend, FrontendOptions, InvalidChangeRequest, LocalChange, Path, Primitive, Value,
 };
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
@@ -133,11 +132,11 @@ fn medium_change_backend() -> Backend {
     ];
 
     let mut backend = Backend::new();
-    let mut frontend = Frontend::new(FrontendOptions {
-        timestamper: || None,
-        actor_id: actor_id.into(),
-        schema: Schema::default(),
-    });
+    let mut frontend = Frontend::new(
+        FrontendOptions::default()
+            .with_timestamper(|| None)
+            .with_actor_id(actor_id),
+    );
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 
@@ -154,11 +153,11 @@ fn medium_change_backend() -> Backend {
         backend.apply_local_change(change).unwrap();
     }
 
-    let mut frontend = Frontend::new(FrontendOptions {
-        timestamper: || None,
-        actor_id: actor_id.into(),
-        schema: Schema::default(),
-    });
+    let mut frontend = Frontend::new(
+        FrontendOptions::default()
+            .with_timestamper(|| None)
+            .with_actor_id(actor_id),
+    );
     let patch = backend.get_patch().unwrap();
     frontend.apply_patch(patch).unwrap();
 

@@ -948,10 +948,7 @@ fn test_schema_sorted_maps_exact_patch() {
     let mut schema = Schema::default();
     schema.add_sorted_map_exact(Path::root().key("sorted"));
 
-    let mut doc = Frontend::new(Options {
-        schema,
-        ..Default::default()
-    });
+    let mut doc = Frontend::new(Options::default().with_schema(schema));
 
     let patch_actor = ActorId::random();
     doc.apply_patch(Patch {
@@ -999,10 +996,7 @@ fn test_schema_sorted_maps_exact_patch_multiple() {
     schema.add_sorted_map_exact(Path::root().key("sorteda"));
     schema.add_sorted_map_exact(Path::root().key("sortedb"));
 
-    let mut doc = Frontend::new(Options {
-        schema,
-        ..Default::default()
-    });
+    let mut doc = Frontend::new(Options::default().with_schema(schema));
 
     let patch_actor = ActorId::random();
     doc.apply_patch(Patch {
@@ -1060,10 +1054,7 @@ fn test_schema_sorted_maps_prefix_patch() {
     let mut schema = Schema::default();
     schema.add_sorted_map_prefix(Path::root().key("sorted"));
 
-    let mut doc = Frontend::new(Options {
-        schema,
-        ..Default::default()
-    });
+    let mut doc = Frontend::new(Options::default().with_schema(schema));
 
     let patch_actor = ActorId::random();
     doc.apply_patch(Patch {
@@ -1145,10 +1136,7 @@ fn test_schema_sorted_maps_prefix_patch_multiple() {
     schema.add_sorted_map_prefix(Path::root().key("sorteda"));
     schema.add_sorted_map_prefix(Path::root().key("sortedb"));
 
-    let mut doc = Frontend::new(Options {
-        schema,
-        ..Default::default()
-    });
+    let mut doc = Frontend::new(Options::default().with_schema(schema));
 
     let patch_actor = ActorId::random();
     doc.apply_patch(Patch {

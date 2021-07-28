@@ -131,10 +131,7 @@ fn test_multi_insert_expands_to_correct_indices() {
         ),
     });
 
-    let mut doc = automerge::Frontend::new(FrontendOptions {
-        actor_id: uuid.into(),
-        ..Default::default()
-    });
+    let mut doc = automerge::Frontend::new(FrontendOptions::default().with_actor_id(uuid));
 
     let ((), c) = doc
         .change::<_, _, InvalidChangeRequest>(None, |old| {

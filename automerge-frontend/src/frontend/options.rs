@@ -10,15 +10,47 @@ pub struct Options {
     /// The schema for the frontend to use.
     ///
     /// The default is an empty [`Schema`].
-    pub schema: Schema,
+    pub(crate) schema: Schema,
     /// The actor id to appear in changes from this frontend.
     ///
     /// The default is [`ActorId::random`].
-    pub actor_id: ActorId,
+    pub(crate) actor_id: ActorId,
     /// The timestamp function for this frontend.
     ///
     /// The default is [`system_time`].
-    pub timestamper: fn() -> Option<i64>,
+    pub(crate) timestamper: fn() -> Option<i64>,
+}
+
+impl Options {
+    pub fn set_schema(&mut self, schema: Schema) -> &mut Self {
+        self.schema = schema;
+        self
+    }
+
+    pub fn with_schema(mut self, schema: Schema) -> Self {
+        self.schema = schema;
+        self
+    }
+
+    pub fn set_actor_id<A: Into<ActorId>>(&mut self, actor_id: A) -> &mut Self {
+        self.actor_id = actor_id.into();
+        self
+    }
+
+    pub fn with_actor_id<A: Into<ActorId>>(mut self, actor_id: A) -> Self {
+        self.actor_id = actor_id.into();
+        self
+    }
+
+    pub fn set_timestamper(&mut self, timestamper: fn() -> Option<i64>) -> &mut Self {
+        self.timestamper = timestamper;
+        self
+    }
+
+    pub fn with_timestamper(mut self, timestamper: fn() -> Option<i64>) -> Self {
+        self.timestamper = timestamper;
+        self
+    }
 }
 
 impl Default for Options {
