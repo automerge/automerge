@@ -56,7 +56,6 @@ impl Debug for Frontend {
     }
 }
 
-#[cfg(feature = "std")]
 impl Default for Frontend {
     fn default() -> Self {
         let options = Options::default();

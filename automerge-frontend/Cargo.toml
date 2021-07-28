@@ -43,6 +43,4 @@ name = "change"
 harness = false
 
 [features]
-default = ["std"]
 derive-arbitrary = ["arbitrary", "smol_str/arbitrary"]
-std = []

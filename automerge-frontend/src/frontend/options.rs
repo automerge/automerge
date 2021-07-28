@@ -21,7 +21,6 @@ pub struct Options {
     pub timestamper: fn() -> Option<i64>,
 }
 
-#[cfg(feature = "std")]
 impl Default for Options {
     fn default() -> Self {
         Self {
@@ -33,7 +32,6 @@ impl Default for Options {
 }
 
 /// Use the default timestamp since the Unix Epoch.
-#[cfg(feature = "std")]
 pub fn system_time() -> Option<i64> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
