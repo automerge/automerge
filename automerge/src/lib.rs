@@ -1,7 +1,7 @@
 pub use automerge_backend::{Backend, Change};
 pub use automerge_frontend::{
-    Frontend, InvalidChangeRequest, LocalChange, MutableDocument, Options as FrontendOptions,
-    Options, Path, Primitive, Value,
+    Frontend, InvalidChangeRequest, LocalChange, MutableDocument, Options as FrontendOptions, Path,
+    Primitive, Value,
 };
 pub use automerge_protocol::{MapType, ObjType, ScalarValue, SequenceType};
 
