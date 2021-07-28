@@ -24,7 +24,7 @@ use tinyvec::TinyVec;
 ///
 /// In the event that users want to use their own type of identifier that is longer than a uuid
 /// then they will likely end up pushing it onto the heap which is still fine.
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
@@ -33,6 +33,12 @@ impl fmt::Debug for ActorId {
         f.debug_tuple("ActorID")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl Default for ActorId {
+    fn default() -> Self {
+        Self::random()
     }
 }
 
