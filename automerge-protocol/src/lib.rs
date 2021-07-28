@@ -36,12 +36,6 @@ impl fmt::Debug for ActorId {
     }
 }
 
-impl Default for ActorId {
-    fn default() -> Self {
-        Self::random()
-    }
-}
-
 impl ActorId {
     pub fn random() -> ActorId {
         ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
@@ -119,7 +113,7 @@ pub enum SequenceType {
     Text,
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, Default)]
+#[derive(Eq, PartialEq, Hash, Clone)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OpId(pub u64, pub ActorId);
 

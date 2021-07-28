@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
 
-use amp::SortedVec;
+use amp::{ActorId, SortedVec};
 use automerge_protocol as amp;
 use smol_str::SmolStr;
 use unicode_segmentation::UnicodeSegmentation;
@@ -26,10 +26,23 @@ pub(crate) struct NewValueRequest<'a, 'c> {
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultiValue {
     winning_value: (amp::OpId, StateTreeValue),
     conflicts: HashMap<amp::OpId, StateTreeValue>,
+}
+
+// Needed so we can do a mem::take.
+impl Default for MultiValue {
+    fn default() -> Self {
+        Self {
+            winning_value: (
+                amp::OpId(0, ActorId::from(&[][..])),
+                StateTreeValue::default(),
+            ),
+            conflicts: HashMap::default(),
+        }
+    }
 }
 
 impl MultiValue {
@@ -329,10 +342,20 @@ impl NewValue {
 
 /// This struct exists to constrain the values of a text type to just containing
 /// sequences of grapheme clusters
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultiGrapheme {
     winning_value: (amp::OpId, SmolStr),
     conflicts: HashMap<amp::OpId, SmolStr>,
+}
+
+// Needed so we can do a mem::take.
+impl Default for MultiGrapheme {
+    fn default() -> Self {
+        Self {
+            winning_value: (amp::OpId(0, ActorId::from(&[][..])), SmolStr::default()),
+            conflicts: HashMap::default(),
+        }
+    }
 }
 
 impl MultiGrapheme {
