@@ -9,8 +9,8 @@ use automerge_protocol as amp;
 use smol_str::SmolStr;
 
 use super::{
-    random_op_id, LocalOperationResult, MultiGrapheme, MultiValue, NewValueRequest, StateTree,
-    StateTreeComposite, StateTreeValue,
+    random_op_id, LocalOperationResult, MultiGrapheme, MultiValue, NewValueRequest,
+    StateTreeComposite, StateTreeRoot, StateTreeValue,
 };
 use crate::{error, Cursor, Primitive, Value};
 
@@ -57,7 +57,7 @@ impl<'a> std::fmt::Debug for ResolvedPath<'a> {
 }
 
 impl<'a> ResolvedPath<'a> {
-    pub(super) fn new_root(root: &StateTree) -> ResolvedPath {
+    pub(super) fn new_root(root: &StateTreeRoot) -> ResolvedPath {
         ResolvedPath::Root(ResolvedRoot { root })
     }
 
@@ -211,7 +211,7 @@ impl<'a> std::fmt::Debug for ResolvedPathMut<'a> {
 }
 
 impl<'a> ResolvedPathMut<'a> {
-    pub(super) fn new_root(root: &mut StateTree) -> ResolvedPathMut {
+    pub(super) fn new_root(root: &mut StateTreeRoot) -> ResolvedPathMut {
         ResolvedPathMut::Root(ResolvedRootMut { root })
     }
 
@@ -293,11 +293,11 @@ pub(crate) struct SetOrInsertPayload<'a, T> {
 }
 
 pub struct ResolvedRoot<'a> {
-    pub(super) root: &'a StateTree,
+    pub(super) root: &'a StateTreeRoot,
 }
 
 pub struct ResolvedRootMut<'a> {
-    pub(super) root: &'a mut StateTree,
+    pub(super) root: &'a mut StateTreeRoot,
 }
 
 impl<'a> ResolvedRootMut<'a> {
@@ -320,7 +320,7 @@ impl<'a> ResolvedRootMut<'a> {
                 .unwrap_or_else(SortedVec::new),
         });
         let (multivalue, new_ops, _new_cursors) = newvalue.finish();
-        let old = self.root.root_props.insert(key, multivalue);
+        let old = self.root.insert(key, multivalue);
         (old, LocalOperationResult { new_ops })
     }
 
@@ -344,16 +344,16 @@ impl<'a> ResolvedRootMut<'a> {
     pub(crate) fn rollback_set(&mut self, key: SmolStr, value: Option<MultiValue>) {
         match value {
             Some(old) => {
-                self.root.root_props.insert(key, old);
+                self.root.insert(key, old);
             }
             None => {
-                self.root.root_props.remove(&key);
+                self.root.remove(&key);
             }
         }
     }
 
     pub(crate) fn rollback_delete(&mut self, key: SmolStr, value: MultiValue) {
-        self.root.root_props.insert(key, value);
+        self.root.insert(key, value);
     }
 }
 

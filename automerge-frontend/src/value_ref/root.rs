@@ -1,53 +1,28 @@
-use smol_str::SmolStr;
-
-use super::ValueRef;
-use crate::{state_tree::StateTree, Value};
+use super::{MapRef, SortedMapRef};
+use crate::{state_tree::StateTreeRoot, Value};
 
 #[derive(Clone, Debug)]
 pub struct RootRef<'a> {
-    st: &'a StateTree,
+    st: &'a StateTreeRoot,
 }
 
 impl<'a> RootRef<'a> {
-    pub(crate) fn new(st: &'a StateTree) -> Self {
+    pub(crate) fn new(st: &'a StateTreeRoot) -> Self {
         Self { st }
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.st.root_props.contains_key(key)
+    pub fn map(&self) -> Option<MapRef<'a>> {
+        match self.st {
+            StateTreeRoot::Map(m) => Some(MapRef::new(m)),
+            StateTreeRoot::SortedMap(_) => None,
+        }
     }
 
-    pub fn len(&self) -> usize {
-        self.st.root_props.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.st.root_props.is_empty()
-    }
-
-    pub fn get(&self, key: &str) -> Option<ValueRef<'a>> {
-        self.st
-            .root_props
-            .get(key)
-            .map(|mv| ValueRef::new(mv.default_statetree_value()))
-    }
-
-    pub fn keys(&self) -> impl Iterator<Item = &SmolStr> {
-        self.st.root_props.keys()
-    }
-
-    pub fn values(&self) -> impl Iterator<Item = ValueRef<'a>> {
-        self.st
-            .root_props
-            .values()
-            .map(|v| ValueRef::new(v.default_statetree_value()))
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&SmolStr, ValueRef<'a>)> {
-        self.st
-            .root_props
-            .iter()
-            .map(|(k, v)| (k, ValueRef::new(v.default_statetree_value())))
+    pub fn sorted_map(&self) -> Option<SortedMapRef<'a>> {
+        match self.st {
+            StateTreeRoot::Map(_) => None,
+            StateTreeRoot::SortedMap(m) => Some(SortedMapRef::new(m)),
+        }
     }
 
     pub fn value(&self) -> Value {

@@ -6,7 +6,8 @@ use std::{
 
 use amp::{ActorId, Diff, MapDiff, OpId, Patch, RootDiff, SortedVec};
 use automerge_frontend::{
-    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Value, ValueSchema,
+    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, RootSchema, Value,
+    ValueSchema,
 };
 use automerge_protocol as amp;
 use maplit::{btreemap, hashmap};
@@ -934,18 +935,28 @@ fn test_sorted_map() {
     .unwrap();
 
     assert_eq!(
-        doc.value_ref().get("normal").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("normal")
+            .unwrap()
+            .value(),
         Value::Map(HashMap::new())
     );
     assert_eq!(
-        doc.value_ref().get("sorted").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("sorted")
+            .unwrap()
+            .value(),
         Value::SortedMap(BTreeMap::new())
     );
 }
 
 #[test]
 fn test_schema_sorted_map() {
-    let schema = ValueSchema::Map(
+    let schema = RootSchema::Map(
         None,
         hashmap! {
             "sorted".into() => ValueSchema::SortedMap(None, hashmap!{})
@@ -984,19 +995,29 @@ fn test_schema_sorted_map() {
     dbg!(doc.state());
 
     assert_eq!(
-        doc.value_ref().get("normal").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("normal")
+            .unwrap()
+            .value(),
         Value::Map(HashMap::new())
     );
 
     assert_eq!(
-        doc.value_ref().get("sorted").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("sorted")
+            .unwrap()
+            .value(),
         Value::SortedMap(BTreeMap::new())
     );
 }
 
 #[test]
 fn test_schema_sorted_maps() {
-    let schema = ValueSchema::Map(
+    let schema = RootSchema::Map(
         None,
         hashmap! {
             "sorteda".into() => ValueSchema::SortedMap(None, hashmap!{}),
@@ -1042,24 +1063,39 @@ fn test_schema_sorted_maps() {
     dbg!(doc.state());
 
     assert_eq!(
-        doc.value_ref().get("normal").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("normal")
+            .unwrap()
+            .value(),
         Value::Map(HashMap::new())
     );
 
     assert_eq!(
-        doc.value_ref().get("sorteda").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("sorteda")
+            .unwrap()
+            .value(),
         Value::SortedMap(BTreeMap::new())
     );
 
     assert_eq!(
-        doc.value_ref().get("sortedb").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("sortedb")
+            .unwrap()
+            .value(),
         Value::SortedMap(BTreeMap::new())
     );
 }
 
 #[test]
 fn test_schema_sorted_unsorted_sorted() {
-    let schema = ValueSchema::Map(
+    let schema = RootSchema::Map(
         None,
         hashmap! {
             "sorted".into() => ValueSchema::SortedMap(None,
@@ -1116,12 +1152,105 @@ fn test_schema_sorted_unsorted_sorted() {
     dbg!(doc.state());
 
     assert_eq!(
-        doc.value_ref().get("normal").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("normal")
+            .unwrap()
+            .value(),
         Value::Map(HashMap::new())
     );
 
     assert_eq!(
-        doc.value_ref().get("sorted").unwrap().value(),
+        doc.value_ref()
+            .map()
+            .unwrap()
+            .get("sorted")
+            .unwrap()
+            .value(),
+        Value::SortedMap(btreemap! {
+            "unsorted".into() => Value::Map(hashmap!{
+                "sorted".into() => Value::SortedMap(btreemap! {})
+            })
+        })
+    );
+}
+
+#[test]
+fn test_schema_sorted_root() {
+    let schema = RootSchema::SortedMap(
+        None,
+        hashmap! {
+            "sorted".into() => ValueSchema::SortedMap(None,
+                hashmap!{"unsorted".into() => ValueSchema::Map(None, hashmap!{
+                    "sorted".into() => ValueSchema::SortedMap(None, hashmap! {})
+                }),
+            }),
+        },
+    );
+
+    let mut doc = Frontend::new(Options::default().with_schema(schema));
+
+    let patch_actor = ActorId::random();
+    doc.apply_patch(Patch {
+        actor: Some(patch_actor.clone()),
+        seq: Some(1),
+        clock: HashMap::new(),
+        deps: Vec::new(),
+        max_op: 3,
+        pending_changes: 0,
+        diffs: RootDiff {
+            props: hashmap! {
+                "normal".into() => hashmap! {
+                    OpId(1, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(1, patch_actor.clone()).into(),
+                        props : hashmap!{},
+                    })
+                },
+                "sorted".into() => hashmap! {
+                    OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                        object_id : OpId(2, patch_actor.clone()).into(),
+                        props : hashmap!{
+                            "unsorted".into() => hashmap! {
+                                OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                                    object_id : OpId(2, patch_actor.clone()).into(),
+                                    props : hashmap!{
+                                        "sorted".into() => hashmap! {
+                                            OpId(2, patch_actor.clone()) => Diff::Map(MapDiff{
+                                                object_id : OpId(2, patch_actor).into(),
+                                                props : hashmap!{ },
+                                            })
+                                        },
+                                    },
+                                })
+                            },
+                        },
+                    })
+                },
+            },
+        },
+    })
+    .unwrap();
+
+    dbg!(doc.state());
+
+    assert_eq!(
+        doc.value_ref()
+            .sorted_map()
+            .unwrap()
+            .get("normal")
+            .unwrap()
+            .value(),
+        Value::Map(HashMap::new())
+    );
+
+    assert_eq!(
+        doc.value_ref()
+            .sorted_map()
+            .unwrap()
+            .get("sorted")
+            .unwrap()
+            .value(),
         Value::SortedMap(btreemap! {
             "unsorted".into() => Value::Map(hashmap!{
                 "sorted".into() => Value::SortedMap(btreemap! {})

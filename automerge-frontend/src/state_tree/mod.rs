@@ -11,7 +11,11 @@ use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
 use crate::{
-    error, frontend::ValueSchema, path::PathElement, value_ref::RootRef, Path, Primitive, Value,
+    error,
+    frontend::{RootSchema, ValueSchema},
+    path::PathElement,
+    value_ref::RootRef,
+    Path, Primitive, Value,
 };
 
 mod diffable_sequence;
@@ -36,88 +40,47 @@ pub(crate) struct LocalOperationResult {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StateTree {
-    pub(crate) root_props: HashMap<SmolStr, MultiValue>,
+    pub(crate) root: StateTreeRoot,
     cursors: Cursors,
 }
 
 impl Default for StateTree {
     fn default() -> Self {
         Self {
-            root_props: HashMap::new(),
+            root: StateTreeRoot::Map(StateTreeMap {
+                object_id: amp::ObjectId::Root,
+                props: HashMap::new(),
+            }),
             cursors: Cursors::new(),
         }
     }
 }
 
 impl StateTree {
-    pub fn new() -> StateTree {
+    pub fn new(schema: &Option<RootSchema>) -> StateTree {
+        let root = if schema.as_ref().map_or(false, |s| s.is_sorted_map()) {
+            StateTreeRoot::SortedMap(StateTreeSortedMap {
+                object_id: amp::ObjectId::Root,
+                props: BTreeMap::new(),
+            })
+        } else {
+            StateTreeRoot::Map(StateTreeMap {
+                object_id: amp::ObjectId::Root,
+                props: HashMap::new(),
+            })
+        };
         StateTree {
-            root_props: HashMap::new(),
+            root,
             cursors: Cursors::new(),
         }
     }
 
     pub fn check_diff(&self, diff: amp::RootDiff) -> Result<CheckedRootDiff, error::InvalidPatch> {
-        for (prop, prop_diff) in &diff.props {
-            let mut diff_iter = prop_diff.iter();
-            match diff_iter.next() {
-                None => {
-                    // all ok here
-                }
-                Some((opid, diff)) => {
-                    match self.root_props.get(prop) {
-                        Some(n) => n.check_diff(opid, diff)?,
-                        None => {
-                            MultiValue::check_new_from_diff(opid, diff)?;
-                        }
-                    };
-                    // TODO: somehow get this working
-                    // self.root_props
-                    //     .get(prop)
-                    //     .unwrap()
-                    //     .check_diff_iter(&mut diff_iter)?;
-                }
-            }
-        }
-        Ok(CheckedRootDiff(diff))
+        self.root.check_diff(diff)
     }
 
-    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<ValueSchema>) {
-        for (prop, prop_diff) in diff.0.props {
-            let mut diff_iter = prop_diff.into_iter();
-            match diff_iter.next() {
-                None => {
-                    self.root_props.remove(&prop);
-                }
-                Some((opid, diff)) => {
-                    match self.root_props.get_mut(&prop) {
-                        Some(n) => {
-                            n.apply_diff(opid, diff, schema.as_ref().and_then(|s| s.get_key(&prop)))
-                        }
-                        None => {
-                            let value = MultiValue::new_from_diff(
-                                opid.clone(),
-                                diff,
-                                schema.as_ref().and_then(|s| s.get_key(&prop)),
-                            );
-                            self.root_props.insert(prop.clone(), value);
-                        }
-                    };
-                    self.root_props.get_mut(&prop).unwrap().apply_diff_iter(
-                        &mut diff_iter,
-                        schema.as_ref().and_then(|s| s.get_key(&prop)),
-                    );
-                }
-            }
-        }
-    }
-
-    fn remove(&mut self, k: &str) -> Option<MultiValue> {
-        self.root_props.remove(k)
-    }
-
-    fn get(&self, k: &str) -> Option<&MultiValue> {
-        self.root_props.get(k)
+    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<RootSchema>) {
+        self.root.apply_diff(diff, schema)
     }
 
     pub(crate) fn resolve_path<'a>(
@@ -125,13 +88,13 @@ impl StateTree {
         path: &Path,
     ) -> Option<resolved_path::ResolvedPath<'a>> {
         if path.is_root() {
-            return Some(ResolvedPath::new_root(self));
+            return Some(ResolvedPath::new_root(&self.root));
         }
         let mut stack = path.clone().elements();
         stack.reverse();
 
         if let Some(PathElement::Key(k)) = stack.pop() {
-            let o = self.root_props.get(&k)?;
+            let o = self.root.get(&k)?;
 
             o.resolve_path(stack, amp::ObjectId::Root, amp::Key::Map(k))
         } else {
@@ -144,13 +107,13 @@ impl StateTree {
         path: &Path,
     ) -> Option<resolved_path::ResolvedPathMut<'a>> {
         if path.is_root() {
-            return Some(ResolvedPathMut::new_root(self));
+            return Some(ResolvedPathMut::new_root(&mut self.root));
         }
         let mut stack = path.clone().elements();
         stack.reverse();
 
         if let Some(PathElement::Key(k)) = stack.pop() {
-            let o = self.root_props.get_mut(&k)?;
+            let o = self.root.get_mut(&k)?;
 
             o.resolve_path_mut(stack, amp::ObjectId::Root, amp::Key::Map(k))
         } else {
@@ -159,15 +122,119 @@ impl StateTree {
     }
 
     pub fn value(&self) -> Value {
-        let mut m = HashMap::new();
-        for (k, v) in &self.root_props {
-            m.insert(k.clone(), v.default_value());
-        }
-        Value::Map(m)
+        self.root.value()
     }
 
     pub(crate) fn value_ref(&self) -> RootRef {
-        RootRef::new(self)
+        RootRef::new(&self.root)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum StateTreeRoot {
+    Map(StateTreeMap),
+    SortedMap(StateTreeSortedMap),
+}
+
+impl StateTreeRoot {
+    fn check_diff(&self, diff: amp::RootDiff) -> Result<CheckedRootDiff, error::InvalidPatch> {
+        match self {
+            Self::Map(m) => m.check_diff(&diff.props)?,
+            Self::SortedMap(m) => m.check_diff(&diff.props)?,
+        }
+
+        Ok(CheckedRootDiff(diff))
+    }
+
+    fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<RootSchema>) {
+        for (prop, prop_diff) in diff.0.props {
+            let mut diff_iter = prop_diff.into_iter();
+            match diff_iter.next() {
+                None => match self {
+                    Self::Map(m) => {
+                        m.props.remove(&prop);
+                    }
+                    Self::SortedMap(m) => {
+                        m.props.remove(&prop);
+                    }
+                },
+                Some((opid, diff)) => {
+                    let mv = match self {
+                        Self::Map(m) => m.props.get_mut(&prop),
+                        Self::SortedMap(m) => m.props.get_mut(&prop),
+                    };
+                    match mv {
+                        Some(n) => {
+                            n.apply_diff(opid, diff, schema.as_ref().and_then(|s| s.get_key(&prop)))
+                        }
+                        None => {
+                            let value = MultiValue::new_from_diff(
+                                opid.clone(),
+                                diff,
+                                schema.as_ref().and_then(|s| s.get_key(&prop)),
+                            );
+                            match self {
+                                Self::Map(m) => m.props.insert(prop.clone(), value),
+                                Self::SortedMap(m) => m.props.insert(prop.clone(), value),
+                            };
+                        }
+                    };
+                    let mv = match self {
+                        Self::Map(m) => m.props.get_mut(&prop),
+                        Self::SortedMap(m) => m.props.get_mut(&prop),
+                    };
+                    mv.unwrap().apply_diff_iter(
+                        &mut diff_iter,
+                        schema.as_ref().and_then(|s| s.get_key(&prop)),
+                    );
+                }
+            }
+        }
+    }
+
+    fn insert(&mut self, k: SmolStr, v: MultiValue) -> Option<MultiValue> {
+        match self {
+            Self::Map(m) => m.props.insert(k, v),
+            Self::SortedMap(m) => m.props.insert(k, v),
+        }
+    }
+
+    fn remove(&mut self, k: &str) -> Option<MultiValue> {
+        match self {
+            Self::Map(m) => m.props.remove(k),
+            Self::SortedMap(m) => m.props.remove(k),
+        }
+    }
+
+    fn get(&self, k: &str) -> Option<&MultiValue> {
+        match self {
+            Self::Map(m) => m.props.get(k),
+            Self::SortedMap(m) => m.props.get(k),
+        }
+    }
+
+    fn get_mut(&mut self, k: &str) -> Option<&mut MultiValue> {
+        match self {
+            Self::Map(m) => m.props.get_mut(k),
+            Self::SortedMap(m) => m.props.get_mut(k),
+        }
+    }
+
+    pub(crate) fn value(&self) -> Value {
+        match self {
+            Self::Map(m) => Value::Map(
+                m.props
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.default_value()))
+                    .collect(),
+            ),
+            Self::SortedMap(m) => Value::SortedMap(
+                m.props
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.default_value()))
+                    .collect(),
+            ),
+        }
     }
 }
 

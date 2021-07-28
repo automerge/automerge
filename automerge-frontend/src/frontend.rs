@@ -6,7 +6,7 @@ use std::{collections::HashMap, error::Error, fmt::Debug};
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
 pub use options::{system_time, Options};
-pub use schema::{PrimitiveSchema, ValueSchema};
+pub use schema::{PrimitiveSchema, RootSchema, ValueSchema};
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},
@@ -31,7 +31,7 @@ pub struct Frontend {
     /// A function for generating timestamps
     timestamper: fn() -> Option<i64>,
 
-    schema: Option<ValueSchema>,
+    schema: Option<RootSchema>,
 }
 
 impl Debug for Frontend {
@@ -69,7 +69,7 @@ impl Frontend {
             actor_id: options.actor_id,
             seq: 0,
             state: FrontendState::Reconciled {
-                reconciled_root_state: StateTree::new(),
+                reconciled_root_state: StateTree::new(&options.schema),
                 max_op: 0,
                 deps_of_last_received_patch: Vec::new(),
             },

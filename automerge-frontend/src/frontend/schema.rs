@@ -3,6 +3,30 @@ use std::collections::HashMap;
 use smol_str::SmolStr;
 
 #[derive(Debug, Clone)]
+pub enum RootSchema {
+    Map(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
+    SortedMap(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
+}
+
+impl RootSchema {
+    pub(crate) fn is_sorted_map(&self) -> bool {
+        matches!(self, Self::SortedMap(_, _))
+    }
+
+    pub(crate) fn get_key(&self, key: &SmolStr) -> Option<&ValueSchema> {
+        match self {
+            Self::Map(default, map) | Self::SortedMap(default, map) => {
+                if let Some(value) = map.get(key) {
+                    Some(value)
+                } else {
+                    default.as_ref().map(|d| d.as_ref())
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ValueSchema {
     Map(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
     SortedMap(Option<Box<ValueSchema>>, HashMap<SmolStr, ValueSchema>),
