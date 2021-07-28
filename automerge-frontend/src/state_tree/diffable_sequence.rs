@@ -40,10 +40,13 @@ pub(crate) trait DiffableValue: Sized {
 
 impl DiffableValue for MultiGrapheme {
     fn take(&mut self) -> Self {
-        Self {
-            winning_value: (amp::OpId(0, ActorId::from(&[][..])), SmolStr::default()),
-            conflicts: HashMap::default(),
-        }
+        std::mem::replace(
+            self,
+            Self {
+                winning_value: (amp::OpId(0, ActorId::from(&[][..])), SmolStr::default()),
+                conflicts: HashMap::default(),
+            },
+        )
     }
 
     fn check_construct(
@@ -94,13 +97,16 @@ impl DiffableValue for MultiGrapheme {
 
 impl DiffableValue for MultiValue {
     fn take(&mut self) -> Self {
-        Self {
-            winning_value: (
-                amp::OpId(0, ActorId::from(&[][..])),
-                StateTreeValue::default(),
-            ),
-            conflicts: HashMap::default(),
-        }
+        std::mem::replace(
+            self,
+            Self {
+                winning_value: (
+                    amp::OpId(0, ActorId::from(&[][..])),
+                    StateTreeValue::default(),
+                ),
+                conflicts: HashMap::default(),
+            },
+        )
     }
 
     fn check_construct(
