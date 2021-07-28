@@ -6,7 +6,7 @@ use std::{collections::HashMap, error::Error, fmt::Debug};
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
 pub use options::{system_time, Options};
-pub use schema::{IndexMatcher, KeyMatcher, SchemaPrimitive, SchemaValue};
+pub use schema::{SchemaPrimitive, SchemaValue};
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},

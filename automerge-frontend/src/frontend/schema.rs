@@ -2,18 +2,6 @@ use std::collections::HashMap;
 
 use smol_str::SmolStr;
 
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum KeyMatcher {
-    Any,
-    Key(SmolStr),
-}
-
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum IndexMatcher {
-    Any,
-    Index(u32),
-}
-
 #[derive(Debug, Clone)]
 pub enum SchemaValue {
     Map(Option<Box<SchemaValue>>, HashMap<SmolStr, SchemaValue>),
