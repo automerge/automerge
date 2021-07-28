@@ -52,6 +52,19 @@ impl Value {
         }
     }
 
+    /// Return whether the [`Value`] is a sorted map.
+    pub fn is_sorted_map(&self) -> bool {
+        matches!(self, Self::SortedMap(_))
+    }
+
+    /// Extract the inner sorted map in this [`Value`] if it represents a sorted map.
+    pub fn sorted_map(&self) -> Option<&BTreeMap<SmolStr, Value>> {
+        match self {
+            Self::SortedMap(m) => Some(m),
+            _ => None,
+        }
+    }
+
     /// Return whether the [`Value`] is a table.
     pub fn is_table(&self) -> bool {
         matches!(self, Self::Table(_))
