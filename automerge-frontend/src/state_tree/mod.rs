@@ -7,7 +7,7 @@ use diffable_sequence::DiffableSequence;
 use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
-use crate::{error, Path, PathElement, Primitive, RootRef, Value};
+use crate::{error, path::PathElement, value_ref::RootRef, Path, Primitive, Value};
 
 mod diffable_sequence;
 mod multivalue;
