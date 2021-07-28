@@ -12,18 +12,6 @@ pub(crate) enum PathElement {
 pub struct Path(Vec<PathElement>);
 
 impl Path {
-    pub(crate) fn has_prefix(&self, prefix: &Path) -> bool {
-        if self.0.len() < prefix.0.len() {
-            return false;
-        }
-
-        // takes the shorter of the two which should be the prefix
-        self.0
-            .iter()
-            .zip(prefix.0.iter())
-            .all(|(ours, theirs)| ours == theirs)
-    }
-
     pub fn root() -> Path {
         Path(Vec::new())
     }

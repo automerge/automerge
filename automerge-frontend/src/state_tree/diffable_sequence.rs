@@ -5,7 +5,11 @@ use automerge_protocol as amp;
 use smol_str::SmolStr;
 
 use super::{MultiGrapheme, MultiValue, StateTreeValue};
-use crate::{error::InvalidPatch, frontend::Schema, Path};
+use crate::{
+    error::InvalidPatch,
+    frontend::{Schema, SchemaValue},
+    Path,
+};
 
 pub(crate) trait DiffableValue: Sized {
     fn take(&mut self) -> Self;
@@ -16,7 +20,7 @@ pub(crate) trait DiffableValue: Sized {
         parent_object_id: &amp::ObjectId,
     ) -> Result<(), InvalidPatch>;
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, schema: &Schema, path: Path) -> Self;
+    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) -> Self;
 
     fn check_diff(
         &self,
@@ -25,9 +29,9 @@ pub(crate) trait DiffableValue: Sized {
         parent_object_id: &amp::ObjectId,
     ) -> Result<(), InvalidPatch>;
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: &Schema, path: Path);
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>);
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: &Schema, path: Path)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&SchemaValue>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>;
 
@@ -57,7 +61,7 @@ impl DiffableValue for MultiGrapheme {
         MultiGrapheme::check_new_from_diff(opid, diff, parent_object_id)
     }
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, _schema: &Schema, _path: Path) -> Self {
+    fn construct(opid: amp::OpId, diff: amp::Diff, _schema: Option<&SchemaValue>) -> Self {
         MultiGrapheme::new_from_diff(opid, diff)
     }
 
@@ -70,11 +74,11 @@ impl DiffableValue for MultiGrapheme {
         MultiGrapheme::check_diff(self, opid, diff, parent_object_id)
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, _schema: &Schema, _path: Path) {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, _schema: Option<&SchemaValue>) {
         MultiGrapheme::apply_diff(self, opid, diff)
     }
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, _schema: &Schema, _path: Path)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, _schema: Option<&SchemaValue>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
@@ -117,8 +121,8 @@ impl DiffableValue for MultiValue {
         MultiValue::check_new_from_diff(opid, diff)
     }
 
-    fn construct(opid: amp::OpId, diff: amp::Diff, schema: &Schema, path: Path) -> Self {
-        MultiValue::new_from_diff(opid, diff, schema, path)
+    fn construct(opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) -> Self {
+        MultiValue::new_from_diff(opid, diff, schema)
     }
 
     fn check_diff(
@@ -130,15 +134,15 @@ impl DiffableValue for MultiValue {
         self.check_diff(opid, diff)
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: &Schema, path: Path) {
-        self.apply_diff(opid, diff, schema, path)
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) {
+        self.apply_diff(opid, diff, schema)
     }
 
-    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: &Schema, path: Path)
+    fn apply_diff_iter<I>(&mut self, diff: &mut I, schema: Option<&SchemaValue>)
     where
         I: Iterator<Item = (amp::OpId, amp::Diff)>,
     {
-        self.apply_diff_iter(diff, schema, path)
+        self.apply_diff_iter(diff, schema)
     }
 
     fn default_opid(&self) -> amp::OpId {
@@ -309,8 +313,7 @@ where
         &mut self,
         _object_id: &amp::ObjectId,
         edits: Vec<amp::DiffEdit>,
-        schema: &Schema,
-        path: Path,
+        schema: Option<&SchemaValue>,
     ) {
         let mut changed_indices = Vec::new();
         for edit in edits {
@@ -340,7 +343,8 @@ where
                     op_id,
                     value,
                 } => {
-                    let node = T::construct(op_id, value, schema, path.clone().index(index as u32));
+                    let node =
+                        T::construct(op_id, value, schema.and_then(|s| s.get_index(index as u32)));
                     if (index as usize) == self.underlying.len() {
                         self.underlying
                             .push_back(Box::new(SequenceElement::new(node)));
@@ -372,8 +376,7 @@ where
                         let mv = T::construct(
                             opid,
                             amp::Diff::Value(value.clone()),
-                            schema,
-                            path.clone().index((index + i) as u32),
+                            schema.and_then(|s| s.get_index((index + i) as u32)),
                         );
                         intermediate.push_back(Box::new(SequenceElement::new(mv)));
                     }
@@ -397,8 +400,11 @@ where
                     op_id,
                 } => {
                     if let Some(v) = self.underlying.get_mut(index as usize) {
-                        v.value
-                            .apply_diff(op_id, value, schema, path.clone().index(index as u32));
+                        v.value.apply_diff(
+                            op_id,
+                            value,
+                            schema.and_then(|s| s.get_index(index as u32)),
+                        );
                     }
                     changed_indices.push(index);
                 }
@@ -522,14 +528,14 @@ where
         }
     }
 
-    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: &Schema, path: Path) {
+    fn apply_diff(&mut self, opid: amp::OpId, diff: amp::Diff, schema: Option<&SchemaValue>) {
         match self {
             SequenceValue::Original(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
-                    existing.apply_diff(opid, diff, schema, path);
+                    existing.apply_diff(opid, diff, schema);
                     existing
                 } else {
-                    T::construct(opid, diff, schema, path)
+                    T::construct(opid, diff, schema)
                 };
                 *self = SequenceValue::Updated {
                     original: v.take(),
@@ -538,10 +544,10 @@ where
             }
             SequenceValue::New(v) => {
                 let updated = if let Some(mut existing) = v.only_for_opid(opid.clone()) {
-                    existing.apply_diff(opid, diff, schema, path);
+                    existing.apply_diff(opid, diff, schema);
                     existing
                 } else {
-                    T::construct(opid, diff, schema, path)
+                    T::construct(opid, diff, schema)
                 };
                 *self = SequenceValue::Updated {
                     original: v.clone(),
@@ -553,18 +559,18 @@ where
                     .get(1..)
                     .and_then(|i| i.iter().find_map(|v| v.only_for_opid(opid.clone())))
                 {
-                    update.apply_diff(opid, diff, schema, path);
+                    update.apply_diff(opid, diff, schema);
                     update
                 } else if let Some(mut initial) =
                     updates.get(0).and_then(|u| u.only_for_opid(opid.clone()))
                 {
-                    initial.apply_diff(opid, diff, schema, path);
+                    initial.apply_diff(opid, diff, schema);
                     initial
                 } else if let Some(mut original) = original.only_for_opid(opid.clone()) {
-                    original.apply_diff(opid, diff, schema, path);
+                    original.apply_diff(opid, diff, schema);
                     original
                 } else {
-                    T::construct(opid, diff, schema, path)
+                    T::construct(opid, diff, schema)
                 };
                 updates.push(updated);
             }
@@ -599,8 +605,7 @@ mod tests {
                     value: Diff::Value(ScalarValue::Null),
                 },
             ],
-            &Schema::default(),
-            Path::root(),
+            None,
         )
     }
 
@@ -627,8 +632,7 @@ mod tests {
                     values,
                 }),
             ],
-            &Schema::default(),
-            Path::root(),
+            None,
         )
     }
 
@@ -654,8 +658,7 @@ mod tests {
                 },
                 DiffEdit::Remove { index: 0, count: 1 },
             ],
-            &Schema::default(),
-            Path::root(),
+            None,
         )
     }
 }

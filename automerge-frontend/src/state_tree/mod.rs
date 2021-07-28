@@ -11,7 +11,7 @@ use multivalue::NewValueRequest;
 use smol_str::SmolStr;
 
 use crate::{
-    error, frontend::Schema, path::PathElement, value_ref::RootRef, Path, Primitive, Value,
+    error, frontend::SchemaValue, path::PathElement, value_ref::RootRef, Path, Primitive, Value,
 };
 
 mod diffable_sequence;
@@ -82,7 +82,7 @@ impl StateTree {
         Ok(CheckedRootDiff(diff))
     }
 
-    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Schema) {
+    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<SchemaValue>) {
         for (prop, prop_diff) in diff.0.props {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -91,21 +91,21 @@ impl StateTree {
                 }
                 Some((opid, diff)) => {
                     match self.root_props.get_mut(&prop) {
-                        Some(n) => n.apply_diff(opid, diff, schema, Path::root().key(prop.clone())),
+                        Some(n) => {
+                            n.apply_diff(opid, diff, schema.as_ref().and_then(|s| s.get_key(&prop)))
+                        }
                         None => {
                             let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 diff,
-                                schema,
-                                Path::root().key(prop.clone()),
+                                schema.as_ref().and_then(|s| s.get_key(&prop)),
                             );
                             self.root_props.insert(prop.clone(), value);
                         }
                     };
                     self.root_props.get_mut(&prop).unwrap().apply_diff_iter(
                         &mut diff_iter,
-                        schema,
-                        Path::root().key(prop),
+                        schema.as_ref().and_then(|s| s.get_key(&prop)),
                     );
                 }
             }
@@ -253,7 +253,7 @@ impl StateTreeComposite {
         }
     }
 
-    fn apply_diff(&mut self, diff: amp::Diff, schema: &Schema, path: Path) {
+    fn apply_diff(&mut self, diff: amp::Diff, schema: Option<&SchemaValue>) {
         match (diff, self) {
             (
                 amp::Diff::Map(amp::MapDiff {
@@ -261,35 +261,35 @@ impl StateTreeComposite {
                     object_id: _,
                 }),
                 StateTreeComposite::Map(map),
-            ) => map.apply_diff(prop_diffs, schema, path),
+            ) => map.apply_diff(prop_diffs, schema),
             (
                 amp::Diff::Map(amp::MapDiff {
                     props: prop_diffs,
                     object_id: _,
                 }),
                 StateTreeComposite::SortedMap(map),
-            ) => map.apply_diff(prop_diffs, schema, path),
+            ) => map.apply_diff(prop_diffs, schema),
             (
                 amp::Diff::Table(amp::TableDiff {
                     props: prop_diffs,
                     object_id: _,
                 }),
                 StateTreeComposite::Table(table),
-            ) => table.apply_diff(prop_diffs, schema, path),
+            ) => table.apply_diff(prop_diffs, schema),
             (
                 amp::Diff::List(amp::ListDiff {
                     edits,
                     object_id: _,
                 }),
                 StateTreeComposite::List(list),
-            ) => list.apply_diff(edits, schema, path),
+            ) => list.apply_diff(edits, schema),
             (
                 amp::Diff::Text(amp::TextDiff {
                     edits,
                     object_id: _,
                 }),
                 StateTreeComposite::Text(text),
-            ) => text.apply_diff(edits, schema, path),
+            ) => text.apply_diff(edits, schema),
             // TODO throw an error
             (amp::Diff::Value(..), _) => unreachable!(),
             // TODO throw an error
@@ -396,7 +396,7 @@ impl StateTreeValue {
         }
     }
 
-    fn new_from_diff(diff: amp::Diff, schema: &Schema, path: Path) -> StateTreeValue {
+    fn new_from_diff(diff: amp::Diff, schema: Option<&SchemaValue>) -> StateTreeValue {
         match diff {
             amp::Diff::Value(v) => {
                 let value = match v {
@@ -416,19 +416,19 @@ impl StateTreeValue {
                 StateTreeValue::Leaf(value)
             }
             amp::Diff::Map(amp::MapDiff { object_id, props }) => {
-                if schema.is_sorted_map(&path) {
+                if schema.map_or(false, |s| s.is_sorted_map()) {
                     let mut map = StateTreeSortedMap {
                         object_id,
                         props: BTreeMap::new(),
                     };
-                    map.apply_diff(props, schema, path);
+                    map.apply_diff(props, schema);
                     StateTreeValue::Composite(StateTreeComposite::SortedMap(map))
                 } else {
                     let mut map = StateTreeMap {
                         object_id,
                         props: HashMap::new(),
                     };
-                    map.apply_diff(props, schema, path);
+                    map.apply_diff(props, schema);
                     StateTreeValue::Composite(StateTreeComposite::Map(map))
                 }
             }
@@ -437,7 +437,7 @@ impl StateTreeValue {
                     object_id,
                     props: HashMap::new(),
                 };
-                table.apply_diff(props, schema, path);
+                table.apply_diff(props, schema);
                 StateTreeValue::Composite(StateTreeComposite::Table(table))
             }
             amp::Diff::List(amp::ListDiff { object_id, edits }) => {
@@ -445,7 +445,7 @@ impl StateTreeValue {
                     object_id,
                     elements: DiffableSequence::new(),
                 };
-                list.apply_diff(edits, schema, path);
+                list.apply_diff(edits, schema);
                 StateTreeValue::Composite(StateTreeComposite::List(list))
             }
             amp::Diff::Text(amp::TextDiff { object_id, edits }) => {
@@ -453,7 +453,7 @@ impl StateTreeValue {
                     object_id,
                     graphemes: DiffableSequence::new(),
                 };
-                text.apply_diff(edits, schema, path);
+                text.apply_diff(edits, schema);
                 StateTreeValue::Composite(StateTreeComposite::Text(text))
             }
 
@@ -505,8 +505,7 @@ impl StateTreeMap {
     fn apply_diff(
         &mut self,
         prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
-        schema: &Schema,
-        path: Path,
+        schema: Option<&SchemaValue>,
     ) {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.into_iter();
@@ -516,22 +515,20 @@ impl StateTreeMap {
                 }
                 Some((opid, diff)) => {
                     match self.props.get_mut(&prop) {
-                        Some(n) => n.apply_diff(opid, diff, schema, path.clone().key(prop.clone())),
+                        Some(n) => n.apply_diff(opid, diff, schema.and_then(|s| s.get_key(&prop))),
                         None => {
                             let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 diff,
-                                schema,
-                                path.clone().key(prop.clone()),
+                                schema.and_then(|s| s.get_key(&prop)),
                             );
                             self.props.insert(prop.clone(), value);
                         }
                     };
-                    self.props.get_mut(&prop).unwrap().apply_diff_iter(
-                        &mut diff_iter,
-                        schema,
-                        path.clone().key(prop),
-                    );
+                    self.props
+                        .get_mut(&prop)
+                        .unwrap()
+                        .apply_diff_iter(&mut diff_iter, schema.and_then(|s| s.get_key(&prop)));
                 }
             }
         }
@@ -606,8 +603,7 @@ impl StateTreeSortedMap {
     fn apply_diff(
         &mut self,
         prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
-        schema: &Schema,
-        path: Path,
+        schema: Option<&SchemaValue>,
     ) {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.into_iter();
@@ -617,22 +613,20 @@ impl StateTreeSortedMap {
                 }
                 Some((opid, diff)) => {
                     match self.props.get_mut(&prop) {
-                        Some(n) => n.apply_diff(opid, diff, schema, path.clone().key(prop.clone())),
+                        Some(n) => n.apply_diff(opid, diff, schema.and_then(|s| s.get_key(&prop))),
                         None => {
                             let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 diff,
-                                schema,
-                                path.clone().key(prop.clone()),
+                                schema.and_then(|s| s.get_key(&prop)),
                             );
                             self.props.insert(prop.clone(), value);
                         }
                     };
-                    self.props.get_mut(&prop).unwrap().apply_diff_iter(
-                        &mut diff_iter,
-                        schema,
-                        path.clone().key(prop),
-                    );
+                    self.props
+                        .get_mut(&prop)
+                        .unwrap()
+                        .apply_diff_iter(&mut diff_iter, schema.and_then(|s| s.get_key(&prop)));
                 }
             }
         }
@@ -707,8 +701,7 @@ impl StateTreeTable {
     fn apply_diff(
         &mut self,
         prop_diffs: HashMap<SmolStr, HashMap<amp::OpId, amp::Diff>>,
-        schema: &Schema,
-        path: Path,
+        schema: Option<&SchemaValue>,
     ) {
         for (prop, prop_diff) in prop_diffs {
             let mut diff_iter = prop_diff.into_iter();
@@ -718,22 +711,20 @@ impl StateTreeTable {
                 }
                 Some((opid, diff)) => {
                     match self.props.get_mut(&prop) {
-                        Some(n) => n.apply_diff(opid, diff, schema, path.clone().key(prop.clone())),
+                        Some(n) => n.apply_diff(opid, diff, schema.and_then(|s| s.get_key(&prop))),
                         None => {
                             let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 diff,
-                                schema,
-                                path.clone().key(prop.clone()),
+                                schema.and_then(|s| s.get_key(&prop)),
                             );
                             self.props.insert(prop.clone(), value);
                         }
                     };
-                    self.props.get_mut(&prop).unwrap().apply_diff_iter(
-                        &mut diff_iter,
-                        schema,
-                        path.clone().key(prop),
-                    );
+                    self.props
+                        .get_mut(&prop)
+                        .unwrap()
+                        .apply_diff_iter(&mut diff_iter, schema.and_then(|s| s.get_key(&prop)));
                 }
             }
         }
@@ -850,9 +841,8 @@ impl StateTreeText {
         Ok(())
     }
 
-    fn apply_diff(&mut self, edits: Vec<amp::DiffEdit>, schema: &Schema, path: Path) {
-        self.graphemes
-            .apply_diff(&self.object_id, edits, schema, path)
+    fn apply_diff(&mut self, edits: Vec<amp::DiffEdit>, schema: Option<&SchemaValue>) {
+        self.graphemes.apply_diff(&self.object_id, edits, schema)
     }
 
     pub fn pred_for_index(&self, index: u32) -> SortedVec<amp::OpId> {
@@ -950,9 +940,8 @@ impl StateTreeList {
         self.elements.check_diff(&self.object_id, edits)
     }
 
-    fn apply_diff(&mut self, edits: Vec<amp::DiffEdit>, schema: &Schema, path: Path) {
-        self.elements
-            .apply_diff(&self.object_id, edits, schema, path);
+    fn apply_diff(&mut self, edits: Vec<amp::DiffEdit>, schema: Option<&SchemaValue>) {
+        self.elements.apply_diff(&self.object_id, edits, schema);
     }
 
     pub fn pred_for_index(&self, index: u32) -> SortedVec<amp::OpId> {
