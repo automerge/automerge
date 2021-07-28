@@ -3,8 +3,8 @@ use std::error::Error;
 use automerge_protocol as amp;
 
 use crate::{
-    frontend::RootSchema,
     mutation::MutationTracker,
+    schema::RootSchema,
     state_tree::{OptimisticStateTree, ResolvedPath, StateTree},
     value_ref::RootRef,
     InvalidPatch, MutableDocument, Path, Value,

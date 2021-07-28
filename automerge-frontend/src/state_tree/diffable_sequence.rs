@@ -8,6 +8,7 @@ use super::{MultiGrapheme, MultiValue, StateTreeValue};
 use crate::{
     error::InvalidPatch,
     frontend::{Schema, SchemaValue, ValueSchema},
+    schema::ValueSchema,
     Path,
 };
 

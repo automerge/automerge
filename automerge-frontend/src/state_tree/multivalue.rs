@@ -15,8 +15,8 @@ use super::{
 };
 use crate::{
     error,
-    frontend::ValueSchema,
     path::PathElement,
+    schema::ValueSchema,
     value::{Primitive, Value},
 };
 

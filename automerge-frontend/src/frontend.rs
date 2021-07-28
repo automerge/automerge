@@ -1,17 +1,16 @@
 mod options;
-mod schema;
 
 use std::{collections::HashMap, error::Error, fmt::Debug};
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
 pub use options::{system_time, Options};
-pub use schema::{PrimitiveSchema, RootSchema, ValueSchema};
 
 use crate::{
     error::{InvalidInitialStateError, InvalidPatch},
     mutation::{LocalChange, MutableDocument},
     path::Path,
+    schema::RootSchema,
     state::FrontendState,
     state_tree::StateTree,
     value,

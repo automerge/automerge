@@ -2,14 +2,14 @@ use std::convert::TryFrom;
 
 use automerge_protocol::ActorId;
 
-use super::RootSchema;
+use crate::schema::RootSchema;
 
 /// Options for building a [`Frontend`](crate::Frontend).
 #[derive(Debug, Clone)]
 pub struct Options {
     /// The schema for the frontend to use.
     ///
-    /// The default is an empty [`Schema`].
+    /// The default is an empty [`RootSchema`].
     pub(crate) schema: Option<RootSchema>,
     /// The actor id to appear in changes from this frontend.
     ///
@@ -22,13 +22,13 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn set_schema(&mut self, schema: RootSchema) -> &mut Self {
-        self.schema = Some(schema);
+    pub fn set_schema<S: Into<RootSchema>>(&mut self, schema: S) -> &mut Self {
+        self.schema = Some(schema.into());
         self
     }
 
-    pub fn with_schema(mut self, schema: RootSchema) -> Self {
-        self.schema = Some(schema);
+    pub fn with_schema<S: Into<RootSchema>>(mut self, schema: S) -> Self {
+        self.schema = Some(schema.into());
         self
     }
 

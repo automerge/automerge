@@ -12,8 +12,8 @@ use smol_str::SmolStr;
 
 use crate::{
     error,
-    frontend::{RootSchema, ValueSchema},
     path::PathElement,
+    schema::{RootSchema, ValueSchema},
     value_ref::RootRef,
     Path, Primitive, Value,
 };

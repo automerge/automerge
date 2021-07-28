@@ -6,8 +6,8 @@ use std::{
 
 use amp::{ActorId, Diff, MapDiff, OpId, Patch, RootDiff, SortedVec};
 use automerge_frontend::{
-    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, RootSchema, Value,
-    ValueSchema,
+    schema::{MapSchema, SortedMapSchema, ValueSchema},
+    Frontend, InvalidChangeRequest, LocalChange, Options, Path, Primitive, Value,
 };
 use automerge_protocol as amp;
 use maplit::{btreemap, hashmap};
@@ -956,12 +956,8 @@ fn test_sorted_map() {
 
 #[test]
 fn test_schema_sorted_map() {
-    let schema = RootSchema::Map(
-        None,
-        hashmap! {
-            "sorted".into() => ValueSchema::SortedMap(None, hashmap!{})
-        },
-    );
+    let schema =
+        MapSchema::default().with_kv("sorted", ValueSchema::SortedMap(SortedMapSchema::default()));
 
     let mut doc = Frontend::new(Options::default().with_schema(schema));
 
@@ -1017,13 +1013,9 @@ fn test_schema_sorted_map() {
 
 #[test]
 fn test_schema_sorted_maps() {
-    let schema = RootSchema::Map(
-        None,
-        hashmap! {
-            "sorteda".into() => ValueSchema::SortedMap(None, hashmap!{}),
-            "sortedb".into() => ValueSchema::SortedMap(None, hashmap!{})
-        },
-    );
+    let schema = MapSchema::default()
+        .with_kv("sorteda", SortedMapSchema::default())
+        .with_kv("sortedb", SortedMapSchema::default());
 
     let mut doc = Frontend::new(Options::default().with_schema(schema));
 
@@ -1095,15 +1087,12 @@ fn test_schema_sorted_maps() {
 
 #[test]
 fn test_schema_sorted_unsorted_sorted() {
-    let schema = RootSchema::Map(
-        None,
-        hashmap! {
-            "sorted".into() => ValueSchema::SortedMap(None,
-                hashmap!{"unsorted".into() => ValueSchema::Map(None, hashmap!{
-                    "sorted".into() => ValueSchema::SortedMap(None, hashmap! {})
-                }),
-            }),
-        },
+    let schema = MapSchema::default().with_kv(
+        "sorted",
+        SortedMapSchema::default().with_kv(
+            "unsorted",
+            MapSchema::default().with_kv("sorted", SortedMapSchema::default()),
+        ),
     );
 
     let mut doc = Frontend::new(Options::default().with_schema(schema));
@@ -1178,15 +1167,12 @@ fn test_schema_sorted_unsorted_sorted() {
 
 #[test]
 fn test_schema_sorted_root() {
-    let schema = RootSchema::SortedMap(
-        None,
-        hashmap! {
-            "sorted".into() => ValueSchema::SortedMap(None,
-                hashmap!{"unsorted".into() => ValueSchema::Map(None, hashmap!{
-                    "sorted".into() => ValueSchema::SortedMap(None, hashmap! {})
-                }),
-            }),
-        },
+    let schema = SortedMapSchema::default().with_kv(
+        "sorted",
+        SortedMapSchema::default().with_kv(
+            "unsorted",
+            MapSchema::default().with_kv("sorted", SortedMapSchema::default()),
+        ),
     );
 
     let mut doc = Frontend::new(Options::default().with_schema(schema));
@@ -1261,16 +1247,10 @@ fn test_schema_sorted_root() {
 
 #[test]
 fn test_schema_defaults() {
-    let schema = RootSchema::SortedMap(
-        Some(Box::new(ValueSchema::SortedMap(
-            None,
-            hashmap! {"unsorted".into() => ValueSchema::Map(None, hashmap!{
-                    "sorted".into() => ValueSchema::SortedMap(None, hashmap! {})
-                }),
-            },
-        ))),
-        hashmap! {},
-    );
+    let schema = SortedMapSchema::default().with_default(SortedMapSchema::default().with_kv(
+        "unsorted",
+        MapSchema::default().with_kv("sorted", SortedMapSchema::default()),
+    ));
 
     let mut doc = Frontend::new(Options::default().with_schema(schema));
 
