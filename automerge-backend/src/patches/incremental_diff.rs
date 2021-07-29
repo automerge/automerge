@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
+    num::NonZeroU64,
 };
 
 use automerge_protocol as amp;
@@ -278,7 +279,7 @@ impl IncrementalPatch {
 
                     edits.append_edit(amp::DiffEdit::Remove {
                         index: (*index) as u64,
-                        count: 1,
+                        count: NonZeroU64::new(1).unwrap(),
                     });
                 }
                 PendingDiff::Set(op) => {
@@ -362,7 +363,7 @@ impl IncrementalPatch {
 
                     edits.append_edit(amp::DiffEdit::Remove {
                         index: (*index) as u64,
-                        count: 1,
+                        count: NonZeroU64::new(1).unwrap(),
                     });
                 }
                 PendingDiff::Set(op) => {

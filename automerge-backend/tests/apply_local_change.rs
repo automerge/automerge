@@ -527,7 +527,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
                                 op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: Diff::Value("magpie".into()),
                             },
-                            DiffEdit::Remove{index: 0, count: 1},
+                            DiffEdit::Remove{index: 0, count: NonZeroU64::new(1).unwrap()},
                         ],
                     })
                 }

@@ -782,7 +782,10 @@ fn delete_list_elements() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
                         object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
-                        edits: vec![amp::DiffEdit::Remove{ index: 0, count: 1 }],
+                        edits: vec![amp::DiffEdit::Remove{
+                            index: 0,
+                            count: NonZeroU64::new(1).unwrap(),
+                        }],
                     })
                 }
             },
@@ -977,7 +980,7 @@ fn test_text_objects() {
                     actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Text(amp::TextDiff{
                         object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
-                            amp::DiffEdit::Remove { index: 1, count: 1 },
+                            amp::DiffEdit::Remove { index: 1, count: NonZeroU64::new(1).unwrap() },
                             amp::DiffEdit::Update{
                                 index: 1,
                                 op_id: actor.op_id_at(NonZeroU64::new(5).unwrap()),

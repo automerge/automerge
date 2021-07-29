@@ -1,4 +1,4 @@
-use std::{convert::TryInto, mem};
+use std::{convert::TryInto, mem, num::NonZeroU64};
 
 use automerge_protocol as amp;
 
@@ -84,7 +84,9 @@ impl Edits {
                         index: new_index,
                         count: new_count,
                     },
-                ) if *index == new_index => *count += new_count,
+                ) if *index == new_index => {
+                    *count = NonZeroU64::new((*count).get() + new_count.get()).unwrap()
+                }
                 (_, edit) => self.0.push(edit),
             }
         } else {

@@ -760,7 +760,7 @@ pub enum DiffEdit {
         value: Diff,
     },
     #[serde(rename_all = "camelCase")]
-    Remove { index: u64, count: u64 },
+    Remove { index: u64, count: NonZeroU64 },
 }
 
 #[derive(Debug, PartialEq, Clone)]

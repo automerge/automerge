@@ -649,7 +649,7 @@ fn test_delete_list_elements() {
                 "birds".into() => hashmap!{
                     actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
                         object_id:  actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
-                        edits: vec![DiffEdit::Remove{index: 0, count: 1}]
+                        edits: vec![DiffEdit::Remove{index: 0, count: NonZeroU64::new(1).unwrap()}]
                     })
                 }
             },
@@ -735,7 +735,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                                 op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("chaffinch".into()),
                             },
-                            DiffEdit::Remove{index: 0, count: 1},
+                            DiffEdit::Remove{index: 0, count: NonZeroU64::new(1).unwrap()},
                         ],
                     })
                 }
@@ -1430,7 +1430,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
                 "list".into() => hashmap!{
                     actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
                         object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
-                        edits: vec![DiffEdit::Remove{index: 0, count: 1}],
+                        edits: vec![DiffEdit::Remove{index: 0, count: NonZeroU64::new(1).unwrap()}],
                     })
                 },
                 "cursor".into() => hashmap!{

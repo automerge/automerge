@@ -236,7 +236,7 @@ where
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
                     let index = *index as usize;
-                    let count = *count as usize;
+                    let count = (*count).get() as usize;
                     if index >= size {
                         return Err(InvalidPatch::InvalidIndex {
                             object_id: object_id.clone(),
@@ -314,7 +314,7 @@ where
             match edit {
                 amp::DiffEdit::Remove { index, count } => {
                     let index = index as usize;
-                    let count = count as usize;
+                    let count = count.get() as usize;
                     self.underlying.slice(index..(index + count));
 
                     let mut i = 0;
@@ -645,7 +645,10 @@ mod tests {
                     op_id: OpId(NonZeroU64::new(2).unwrap(), ActorId::random()),
                     value: Diff::Value(ScalarValue::Null),
                 },
-                DiffEdit::Remove { index: 0, count: 1 },
+                DiffEdit::Remove {
+                    index: 0,
+                    count: NonZeroU64::new(1).unwrap(),
+                },
             ],
         )
     }
