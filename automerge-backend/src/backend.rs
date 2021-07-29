@@ -119,6 +119,12 @@ impl Backend {
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
+    /// Apply a change from a local frontend.
+    ///
+    /// The change is expected to be the next in the sequence from the frontend.
+    ///
+    /// If successful then it returns the patch to update the frontend with alongside the binary
+    /// change that this application produced.
     pub fn apply_local_change(
         &mut self,
         mut change: amp::Change,
@@ -139,11 +145,17 @@ impl Backend {
 
         let patch: amp::Patch = self.apply(vec![bin_change], Some(actor_seq))?;
 
-        let change = self.get_change_by_hash(&hash).unwrap();
+        let change = self
+            .get_change_by_hash(&hash)
+            .expect("Change wasn't in the backend");
 
         Ok((patch, change))
     }
 
+    /// Like [`apply_local_change`] but returns a mutable reference to the change.
+    ///
+    /// This mutable reference is useful if you intend to compress the change using
+    /// [`Change::compress`].
     pub fn apply_local_change_mut(
         &mut self,
         change: amp::Change,
@@ -151,7 +163,9 @@ impl Backend {
         let (patch, change) = self.apply_local_change(change)?;
         let hash = change.hash;
 
-        let change = self.get_change_by_hash_mut(&hash).unwrap();
+        let change = self
+            .get_change_by_hash_mut(&hash)
+            .expect("change wasn't in the backend");
 
         Ok((patch, change))
     }
