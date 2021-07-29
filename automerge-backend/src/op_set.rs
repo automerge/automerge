@@ -103,17 +103,19 @@ impl OpSet {
             let mut target_found = false;
             for (obj_id, obj) in &self.objs {
                 if obj.insertions.contains_key(&internal_opid.into()) {
-                    target_found = true;
-                    self.cursors.entry(*obj_id).or_default().push(CursorState {
-                        referring_object_id: actors.export_obj(&op.obj),
-                        internal_referring_object_id: op.obj,
-                        key: op.key.clone(),
-                        element_opid: oid.clone(),
-                        internal_element_opid: internal_opid,
-                        index: obj.index_of(internal_opid).unwrap_or(0),
-                        referred_object_id: actors.export_obj(obj_id),
-                        internal_referred_object_id: *obj_id,
-                    });
+                    if let Key::Map(key) = &op.key {
+                        target_found = true;
+                        self.cursors.entry(*obj_id).or_default().push(CursorState {
+                            referring_object_id: actors.export_obj(&op.obj),
+                            internal_referring_object_id: op.obj,
+                            key: key.clone(),
+                            element_opid: oid.clone(),
+                            internal_element_opid: internal_opid,
+                            index: obj.index_of(internal_opid).unwrap_or(0),
+                            referred_object_id: actors.export_obj(obj_id),
+                            internal_referred_object_id: *obj_id,
+                        });
+                    }
                 }
             }
             if !target_found {
@@ -186,7 +188,11 @@ impl OpSet {
             self.unlink(&op, &overwritten_ops)?;
 
             if before || after {
-                patch.record_set(&object_id, op);
+                let key = op.operation_key().into_owned();
+                match key {
+                    Key::Map(s) => patch.record_map_set(&object_id, s),
+                    Key::Seq(_) => panic!("found seq key while applying op for a map"),
+                }
             }
             overwritten_ops
         };
@@ -235,7 +241,7 @@ impl OpSet {
             return;
         }
 
-        let mut cursor_changes: HashMap<ObjectId, Vec<Key>> = HashMap::new();
+        let mut cursor_changes: HashMap<ObjectId, Vec<SmolStr>> = HashMap::new();
         for obj_id in patch.changed_object_ids() {
             if let Some(cursors) = self.cursors.get_mut(obj_id) {
                 for cursor in cursors.iter_mut() {
@@ -301,7 +307,7 @@ struct CursorState {
     /// The same as `referring_object_id` but as an internal::ObjectID
     internal_referring_object_id: ObjectId,
     /// The key withing the referring object this cursor lives at
-    key: crate::internal::Key,
+    key: SmolStr,
     /// The id of the sequence this cursor refers
     referred_object_id: amp::ObjectId,
     /// The same as the `referred_object_id` but as an internal::ObjectID

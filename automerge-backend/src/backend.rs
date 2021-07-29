@@ -90,7 +90,7 @@ impl Backend {
         changes: Vec<Change>,
         actor: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut patch = IncrementalPatch::new();
+        let mut patch = IncrementalPatch::default();
 
         for change in changes {
             self.add_change(change, actor.is_some(), &mut patch)?;
@@ -106,7 +106,7 @@ impl Backend {
     /// Generating the patch can itself be expensive and not always required, for instance when
     /// loading a new backend from bytes.
     fn apply_without_patch(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
-        let mut patch = IncrementalPatch::new();
+        let mut patch = IncrementalPatch::default();
 
         for change in changes {
             self.add_change(change, false, &mut patch)?;
