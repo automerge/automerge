@@ -175,19 +175,27 @@ impl IncrementalPatch {
             .remove(&ObjectId::Root)
             .and_then(|root| workshop.get_obj(&ObjectId::Root).map(|obj| (root, obj)))
         {
-            let mut props = HashMap::with_capacity(root.len());
-            for key in root {
-                let mut opid_to_value = HashMap::new();
-                for op in obj.conflicts(&Key::Map(key.clone())) {
-                    let link = match op.action {
-                        InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                        InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
-                        _ => panic!("del or inc found in field_operations"),
-                    };
-                    opid_to_value.insert(workshop.make_external_opid(&op.id), link);
-                }
-                props.insert(key, opid_to_value);
-            }
+            let props = root
+                .into_iter()
+                .map(|key| {
+                    let opid_to_value = obj
+                        .conflicts(&Key::Map(key.clone()))
+                        .map(|op| {
+                            let diff = match op.action {
+                                InternalOpType::Set(ref value) => {
+                                    gen_value_diff(op, value, workshop)
+                                }
+                                InternalOpType::Make(_) => {
+                                    self.gen_obj_diff(&op.id.into(), workshop)
+                                }
+                                _ => panic!("del or inc found in field_operations"),
+                            };
+                            (workshop.make_external_opid(&op.id), diff)
+                        })
+                        .collect();
+                    (key, opid_to_value)
+                })
+                .collect();
             amp::RootDiff { props }
         } else {
             amp::RootDiff {
@@ -416,19 +424,23 @@ impl IncrementalPatch {
         pending: HashSet<SmolStr>,
         workshop: &dyn PatchWorkshop,
     ) -> amp::MapDiff {
-        let mut props = HashMap::with_capacity(pending.len());
-        for key in pending {
-            let mut opid_to_value = HashMap::new();
-            for op in obj.conflicts(&Key::Map(key.clone())) {
-                let value = match op.action {
-                    InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                    InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
-                    _ => panic!("del or inc found in field_operations"),
-                };
-                opid_to_value.insert(workshop.make_external_opid(&op.id), value);
-            }
-            props.insert(key, opid_to_value);
-        }
+        let props = pending
+            .into_iter()
+            .map(|key| {
+                let opid_to_value = obj
+                    .conflicts(&Key::Map(key.clone()))
+                    .map(|op| {
+                        let value = match op.action {
+                            InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
+                            InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
+                            _ => panic!("del or inc found in field_operations"),
+                        };
+                        (workshop.make_external_opid(&op.id), value)
+                    })
+                    .collect();
+                (key, opid_to_value)
+            })
+            .collect();
         amp::MapDiff {
             object_id: workshop.make_external_objid(obj_id),
             props,
@@ -442,19 +454,23 @@ impl IncrementalPatch {
         pending: HashSet<SmolStr>,
         workshop: &dyn PatchWorkshop,
     ) -> amp::TableDiff {
-        let mut props = HashMap::with_capacity(pending.len());
-        for key in pending {
-            let mut opid_to_value = HashMap::new();
-            for op in obj.conflicts(&Key::Map(key.clone())) {
-                let link = match op.action {
-                    InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
-                    InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
-                    _ => panic!("del or inc found in field_operations"),
-                };
-                opid_to_value.insert(workshop.make_external_opid(&op.id), link);
-            }
-            props.insert(key, opid_to_value);
-        }
+        let props = pending
+            .into_iter()
+            .map(|key| {
+                let opid_to_value = obj
+                    .conflicts(&Key::Map(key.clone()))
+                    .map(|op| {
+                        let link = match op.action {
+                            InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
+                            InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
+                            _ => panic!("del or inc found in field_operations"),
+                        };
+                        (workshop.make_external_opid(&op.id), link)
+                    })
+                    .collect();
+                (key, opid_to_value)
+            })
+            .collect();
         amp::TableDiff {
             object_id: workshop.make_external_objid(obj_id),
             props,
