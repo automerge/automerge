@@ -460,12 +460,12 @@ impl IncrementalPatch {
                 let opid_to_value = obj
                     .conflicts(&Key::Map(key.clone()))
                     .map(|op| {
-                        let link = match op.action {
+                        let diff = match op.action {
                             InternalOpType::Set(ref value) => gen_value_diff(op, value, workshop),
                             InternalOpType::Make(_) => self.gen_obj_diff(&op.id.into(), workshop),
                             _ => panic!("del or inc found in field_operations"),
                         };
-                        (workshop.make_external_opid(&op.id), link)
+                        (workshop.make_external_opid(&op.id), diff)
                     })
                     .collect();
                 (key, opid_to_value)
