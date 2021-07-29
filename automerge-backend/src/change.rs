@@ -945,8 +945,6 @@ fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
 
 #[instrument(level = "debug", skip(changes))]
 pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encoding::Error> {
-    let mut bytes: Vec<u8> = Vec::new();
-
     let heads = get_heads(changes);
 
     // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
@@ -964,6 +962,8 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
     let doc_ops = group_doc_ops(changes, &actors);
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &mut actors);
+
+    let mut bytes: Vec<u8> = Vec::new();
 
     bytes.extend(&MAGIC_BYTES);
     bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake

@@ -16,7 +16,7 @@ use crate::{
 
 pub struct Frontend {
     pub actor_id: ActorId,
-    pub seq: u64,
+    pub seq: Option<NonZeroU64>,
     /// The current state of the frontend, see the description of
     /// `FrontendState` for details. It's an `Option` to allow consuming it
     /// using Option::take whilst behind a mutable reference.
@@ -88,7 +88,7 @@ impl Frontend {
         let root_state = StateTree::new();
         Frontend {
             actor_id: ActorId::from(actor_id),
-            seq: 0,
+            seq: None,
             state: FrontendState::Reconciled {
                 reconciled_root_state: root_state,
                 max_op: 0,
@@ -173,15 +173,15 @@ impl Frontend {
         let change_result = self.state.optimistically_apply_change(
             &self.actor_id,
             change_closure,
-            NonZeroU64::new(self.seq + 1).unwrap(),
+            NonZeroU64::new(self.seq.map(|nzu| nzu.get()).unwrap_or_default() + 1).unwrap(),
         )?;
         self.cached_value = None;
         if !change_result.ops.is_empty() {
-            self.seq += 1;
+            self.seq = NonZeroU64::new(self.seq.map(|nzu| nzu.get()).unwrap_or_default() + 1);
             let change = amp::Change {
                 start_op,
                 actor_id: self.actor_id.clone(),
-                seq: NonZeroU64::new(self.seq).unwrap(),
+                seq: NonZeroU64::new(self.seq.map(|nzu| nzu.get()).unwrap_or_default()).unwrap(),
                 time: (self.timestamper)().unwrap_or(0),
                 message,
                 hash: None,
@@ -198,8 +198,8 @@ impl Frontend {
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), InvalidPatch> {
         self.cached_value = None;
         if let Some(seq) = patch.clock.get(&self.actor_id) {
-            if (*seq).get() > self.seq {
-                self.seq = (*seq).get();
+            if (*seq).get() > self.seq.map(|nzu| nzu.get()).unwrap_or_default() {
+                self.seq = Some(*seq);
             }
         }
         self.state.apply_remote_patch(&self.actor_id, patch)?;

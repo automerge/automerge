@@ -178,7 +178,7 @@ fn remove_pending_requests_once_handled() {
         })
     );
 
-    assert_eq!(doc.seq, 2);
+    assert_eq!(doc.seq, Some(NonZeroU64::new(2).unwrap()));
 }
 
 #[test]
@@ -265,7 +265,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     );
 
     assert!(doc.in_flight_requests().is_empty());
-    assert_eq!(doc.seq, 2);
+    assert_eq!(doc.seq, Some(NonZeroU64::new(2).unwrap()));
 }
 
 #[test]
