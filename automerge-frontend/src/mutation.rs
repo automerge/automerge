@@ -148,7 +148,7 @@ impl<'a> MutationTracker<'a> {
     }
 
     fn apply_state_change(&mut self, change: LocalOperationResult) {
-        self.max_op = change.new_ops.len() as u64;
+        self.max_op += change.new_ops.len() as u64;
         self.ops.extend(change.new_ops);
     }
 

@@ -32,9 +32,7 @@ fn test_incremental_diffs_in_a_map() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -73,9 +71,7 @@ fn test_bytes() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -118,9 +114,7 @@ fn test_increment_key_in_map() {
             key: "counter".into(),
             insert: false,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -140,9 +134,7 @@ fn test_increment_key_in_map() {
             key: "counter".into(),
             insert: false,
             pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -185,9 +177,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -208,9 +198,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             key: "bird".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -259,9 +247,7 @@ fn delete_key_from_map() {
             key: "bird".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -281,9 +267,7 @@ fn delete_key_from_map() {
             key: "bird".into(),
             pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -335,9 +319,7 @@ fn create_nested_maps() {
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -397,9 +379,7 @@ fn test_assign_to_nested_keys_in_map() {
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -419,9 +399,7 @@ fn test_assign_to_nested_keys_in_map() {
             key: "sparrows".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -484,9 +462,7 @@ fn test_create_lists() {
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -550,9 +526,7 @@ fn test_apply_updates_inside_lists() {
                 pred: SortedVec::new(),
                 insert: true,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -572,9 +546,7 @@ fn test_apply_updates_inside_lists() {
             key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -637,9 +609,7 @@ fn test_delete_list_elements() {
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -659,9 +629,7 @@ fn test_delete_list_elements() {
             key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -711,9 +679,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             key: "birds".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -742,9 +708,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
                 pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -803,9 +767,7 @@ fn test_handle_changes_within_conflicted_objects() {
             key: "conflict".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -825,9 +787,7 @@ fn test_handle_changes_within_conflicted_objects() {
             key: "conflict".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -847,9 +807,7 @@ fn test_handle_changes_within_conflicted_objects() {
             key: "sparrow".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -919,9 +877,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -957,9 +913,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -995,9 +949,7 @@ fn test_handle_changes_within_conflicted_lists() {
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1020,9 +972,7 @@ fn test_handle_changes_within_conflicted_lists() {
             key: "done".into(),
             pred: vec![actor1.op_id_at(NonZeroU64::new(5).unwrap())].into(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1097,9 +1047,7 @@ fn test_support_date_objects_at_root() {
             key: "now".into(),
             pred: SortedVec::new(),
             insert: false,
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1154,9 +1102,7 @@ fn test_support_date_objects_in_a_list() {
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1228,9 +1174,7 @@ fn test_cursor_objects() {
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     };
     let binchange: Change = (&change).try_into().unwrap();
@@ -1290,9 +1234,7 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
             key: "cursor".into(),
             insert: false,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     };
     let mut backend = Backend::new();
@@ -1347,9 +1289,7 @@ fn test_updating_sequences_updates_referring_cursors() {
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
@@ -1367,9 +1307,7 @@ fn test_updating_sequences_updates_referring_cursors() {
             key: amp::ElementId::Head.into(),
             insert: true,
             pred: SortedVec::new(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();
@@ -1453,9 +1391,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ]
-        .try_into()
-        .unwrap(),
+        ],
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
@@ -1473,9 +1409,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
             key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: false,
             pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
-        }]
-        .try_into()
-        .unwrap(),
+        }],
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();

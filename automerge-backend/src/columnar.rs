@@ -746,7 +746,7 @@ impl PredEncoder {
 
 struct ObjEncoder {
     actor: RleEncoder<usize>,
-    ctr: RleEncoder<u64>,
+    ctr: RleEncoder<NonZeroU64>,
 }
 
 impl ObjEncoder {
@@ -767,7 +767,7 @@ impl ObjEncoder {
             }
             amp::ObjectId::Id(amp::OpId(ctr, actor)) => {
                 self.actor.append_value(map_actor(actor, actors));
-                self.ctr.append_value((*ctr).get());
+                self.ctr.append_value(*ctr);
             }
         }
     }

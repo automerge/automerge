@@ -135,7 +135,7 @@ impl Backend {
         if change.seq.get() > 1 {
             let last_hash = self.get_hash(
                 &change.actor_id,
-                NonZeroU64::new(change.seq.get() - 1).unwrap(),
+                NonZeroU64::new(change.seq.get() - 1).expect("2 or more - 1 to be more than 0"),
             )?;
             if !change.deps.contains(&last_hash) {
                 change.deps.push(last_hash);
@@ -507,9 +507,7 @@ mod tests {
                 key: "bird".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         }
         .try_into()
@@ -528,9 +526,7 @@ mod tests {
                 key: "bug".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         }
         .try_into()
@@ -549,9 +545,7 @@ mod tests {
                 key: "bird".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         }
         .try_into()
@@ -570,9 +564,7 @@ mod tests {
                 key: "bug".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         }
         .try_into()
@@ -591,9 +583,7 @@ mod tests {
                 key: "title".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         }
         .try_into()

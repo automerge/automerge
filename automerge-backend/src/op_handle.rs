@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    fmt,
     hash::{Hash, Hasher},
     num::NonZeroU64,
     ops::Deref,
@@ -14,7 +13,7 @@ use crate::{
     Change,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct OpHandle {
     pub id: OpId,
     pub op: InternalOp,
@@ -75,17 +74,6 @@ impl OpHandle {
             }
         }
         false
-    }
-}
-
-impl fmt::Debug for OpHandle {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("OpHandle")
-            .field("id", &self.id)
-            .field("action", &self.action)
-            .field("obj", &self.obj)
-            .field("key", &self.key)
-            .finish()
     }
 }
 

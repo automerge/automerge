@@ -1117,9 +1117,7 @@ mod tests {
                     insert: false,
                     pred: SortedVec::new(),
                 },
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             extra_bytes: vec![1, 2, 3],
         };
         let bin1 = Change::from(change1.clone());
@@ -1150,9 +1148,7 @@ mod tests {
                 obj: actor1.op_id_at(NonZeroU64::new(10).unwrap()).into(),
                 insert: true,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: Vec::new(),
         };
         let bin1 = Change::try_from(change1).unwrap();
@@ -1204,9 +1200,7 @@ mod tests {
                     insert: false,
                     pred: SortedVec::new(),
                 },
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             extra_bytes: vec![1, 2, 3],
         };
         let binchange1: Change = Change::try_from(change1.clone()).unwrap();
@@ -1243,9 +1237,7 @@ mod tests {
                     insert: true,
                     pred: SortedVec::new(),
                 },
-            ]
-            .try_into()
-            .unwrap(),
+            ],
             extra_bytes: vec![],
         };
         let binchange2: Change = Change::try_from(change2).unwrap();
@@ -1288,9 +1280,7 @@ mod tests {
                 key: "somelist".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             extra_bytes: vec![1, 2, 3],
         };
         let mut last_elem_id: amp::Key = amp::ElementId::Head.into();
@@ -1334,9 +1324,7 @@ mod tests {
                 key: "somelist".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }]
-            .try_into()
-            .unwrap(),
+            }],
             actor_id: ActorId::random(),
             hash: None,
             seq: NonZeroU64::new(1).unwrap(),
