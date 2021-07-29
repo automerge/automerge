@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, num::NonZeroU64};
 
 use amp::RootDiff;
 use automerge_frontend::{Frontend, Path, Primitive, Value};
@@ -16,12 +16,12 @@ fn set_object_root_properties() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    actor.op_id_at(1) => "magpie".into()
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => "magpie".into()
                 }
             },
         },
@@ -44,12 +44,12 @@ fn set_bytes_value() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: amp::RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes(vec![1, 2, 3])),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Value(amp::ScalarValue::Bytes(vec![1, 2, 3])),
                 }
             },
         },
@@ -76,15 +76,15 @@ fn reveal_conflicts_on_root_properties() {
         max_op: 2,
         pending_changes: 0,
         clock: hashmap! {
-            actor1.clone() => 1,
-            actor2.clone() => 2,
+            actor1.clone() => NonZeroU64::new(1).unwrap(),
+            actor2.clone() => NonZeroU64::new(2).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
                 "favouriteBird".into() => hashmap!{
-                    actor1.op_id_at(1) => amp::Diff::Value("robin".into()),
-                    actor2.op_id_at(1) => amp::Diff::Value("wagtail".into()),
+                    actor1.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Value("robin".into()),
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Value("wagtail".into()),
                 }
             },
         },
@@ -102,8 +102,8 @@ fn reveal_conflicts_on_root_properties() {
     assert_eq!(
         conflicts,
         Some(hashmap! {
-            actor1.op_id_at(1) => "robin".into(),
-            actor2.op_id_at(1) => "wagtail".into(),
+            actor1.op_id_at(NonZeroU64::new(1).unwrap()) => "robin".into(),
+            actor2.op_id_at(NonZeroU64::new(1).unwrap()) => "wagtail".into(),
         })
     )
 }
@@ -118,16 +118,16 @@ fn create_nested_maps() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor.op_id_at(2).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
+                                actor.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
@@ -153,16 +153,16 @@ fn apply_updates_inside_nested_maps() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor.op_id_at(2).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3))
+                                actor.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
@@ -182,16 +182,16 @@ fn apply_updates_inside_nested_maps() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
                         object_id: birds_id,
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                actor.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(15))
+                                actor.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(15))
                             }
                         }
                     })
@@ -225,25 +225,25 @@ fn apply_updates_inside_map_conflicts() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.clone() => 1,
-            actor2.clone() => 1,
+            actor1.clone() => NonZeroU64::new(1).unwrap(),
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
-                    actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor1.op_id_at(1).into(),
+                    actor1.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
-                                actor1.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(1)),
+                                actor1.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(1)),
                             }
                         },
                     }),
-                    actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor2.op_id_at(1).into(),
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor2.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor2.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(3)),
+                                actor2.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(3)),
                             }
                         },
                     })
@@ -264,8 +264,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => Primitive::Int(1)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
+            actor1.op_id_at(NonZeroU64::new(1).unwrap()) => hashmap!{"blackbirds" => Primitive::Int(1)}.into(),
+            actor2.op_id_at(NonZeroU64::new(1).unwrap(NonZeroU64::new()).unwrap()) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
         }
     );
 
@@ -276,22 +276,22 @@ fn apply_updates_inside_map_conflicts() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.clone() => 2,
-            actor2.clone() => 1,
+            actor1.clone() => NonZeroU64::new(2).unwrap(),
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "favouriteBirds".into() => hashmap!{
-                    actor1.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor1.op_id_at(1).into(),
+                    actor1.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "blackbirds".into() => hashmap!{
-                                actor1.op_id_at(3) => amp::Diff::Value(amp::ScalarValue::Int(2)),
+                                actor1.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                             }
                         },
                     }),
-                    actor2.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor2.op_id_at(1).into(),
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor2.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: HashMap::new(),
                     })
                 }
@@ -311,8 +311,8 @@ fn apply_updates_inside_map_conflicts() {
             .get_conflicts(&Path::root().key("favouriteBirds"))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(1) => hashmap!{"blackbirds" => Primitive::Int(2)}.into(),
-            actor2.op_id_at(1) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
+            actor1.op_id_at(NonZeroU64::new(1).unwrap()) => hashmap!{"blackbirds" => Primitive::Int(2)}.into(),
+            actor2.op_id_at(NonZeroU64::new(1).unwrap()) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
         }
     );
 }
@@ -328,15 +328,15 @@ fn delete_keys_in_maps() {
         seq: None,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "magpies".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Int(2))
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(2))
                 },
                 "sparrows".into() => hashmap!{
-                    actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(15))
+                    actor.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(15))
                 }
             },
         },
@@ -356,7 +356,7 @@ fn delete_keys_in_maps() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor => 2,
+            actor => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
@@ -383,17 +383,17 @@ fn create_lists() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
-                            op_id: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                             value: amp::Diff::Value("chaffinch".into()),
                         }],
                     })
@@ -420,17 +420,17 @@ fn apply_updates_inside_lists() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![amp::DiffEdit::SingleElementInsert {
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
-                            op_id: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                             value: amp::Diff::Value("chaffinch".into()),
                         }],
                     })
@@ -447,16 +447,16 @@ fn apply_updates_inside_lists() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(3),
+                            op_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                             value: amp::Diff::Value("greenfinch".into()),
                         }],
                     })
@@ -481,16 +481,16 @@ fn apply_multi_insert_updates_inside_lists() {
         max_op: 1,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff {
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff {
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![amp::DiffEdit::MultiElementInsert(amp::MultiElementInsert {
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                             values: vec![
                                 amp::ScalarValue::Str("greenfinch".into()),
                                 amp::ScalarValue::Str("bullfinch".into()),
@@ -529,43 +529,43 @@ fn apply_updates_inside_list_conflicts() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            other_actor.clone() => 1,
-            actor1.clone() => 1,
-            actor2.clone() => 1,
+            other_actor.clone() => NonZeroU64::new(1).unwrap(),
+            actor1.clone() => NonZeroU64::new(1).unwrap(),
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: other_actor.op_id_at(1).into(),
+                    other_actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: other_actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,
-                                elem_id: actor1.op_id_at(2).into(),
-                                op_id: actor1.op_id_at(2),
+                                elem_id: actor1.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor1.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor1.op_id_at(2).into(),
+                                    object_id: actor1.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                                     props: hashmap!{
                                         "species".into() => hashmap!{
-                                            actor1.op_id_at(3) => amp::Diff::Value("woodpecker".into()),
+                                            actor1.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::Value("woodpecker".into()),
                                         },
                                         "numSeen".into() => hashmap!{
-                                            actor1.op_id_at(4) => amp::Diff::Value(amp::ScalarValue::Int(1)),
+                                            actor1.op_id_at(NonZeroU64::new(4).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(1)),
                                         },
                                     }
                                 }),
                             },
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor2.op_id_at(2).into(),
+                                    object_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                                     props: hashmap!{
                                         "species".into() => hashmap!{
-                                            actor2.op_id_at(3) => amp::Diff::Value("lapwing".into()),
+                                            actor2.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::Value("lapwing".into()),
                                         },
                                         "numSeen".into() => hashmap!{
-                                            actor2.op_id_at(4) => amp::Diff::Value(amp::ScalarValue::Int(2)),
+                                            actor2.op_id_at(NonZeroU64::new(4).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                                         },
                                     }
                                 }),
@@ -591,11 +591,11 @@ fn apply_updates_inside_list_conflicts() {
             .get_conflicts(&Path::root().key("birds").index(0))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(2) => hashmap!{
+            actor1.op_id_at(NonZeroU64::new(2).unwrap()) => hashmap!{
                 "species" => Primitive::Str("woodpecker".into()),
                 "numSeen" => Primitive::Int(1),
             }.into(),
-            actor2.op_id_at(2) => hashmap!{
+            actor2.op_id_at(NonZeroU64::new(2).unwrap()) => hashmap!{
                 "species" => Primitive::Str("lapwing".into()),
                 "numSeen" => Primitive::Int(2),
             }.into(),
@@ -610,32 +610,32 @@ fn apply_updates_inside_list_conflicts() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1.clone() => 2,
-            actor2.clone() => 1,
+            actor1.clone() => NonZeroU64::new(2).unwrap(),
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: other_actor.op_id_at(1).into(),
+                    other_actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: other_actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor1.op_id_at(2),
+                                op_id: actor1.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor1.op_id_at(2).into(),
+                                    object_id: actor1.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                                     props: hashmap!{
                                         "numSeen".into() => hashmap!{
-                                            actor1.op_id_at(5) => amp::Diff::Value(amp::ScalarValue::Int(2)),
+                                            actor1.op_id_at(NonZeroU64::new(5).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(2)),
                                         },
                                     }
                                 })
                             },
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor2.op_id_at(2).into(),
+                                    object_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                                     props: HashMap::new(),
                                 })
                             }
@@ -660,11 +660,11 @@ fn apply_updates_inside_list_conflicts() {
             .get_conflicts(&Path::root().key("birds").index(0))
             .unwrap(),
         hashmap! {
-            actor1.op_id_at(2) => hashmap!{
+            actor1.op_id_at(NonZeroU64::new(2).unwrap()) => hashmap!{
                 "species" => Primitive::Str("woodpecker".into()),
                 "numSeen" => Primitive::Int(2),
             }.into(),
-            actor2.op_id_at(2) => hashmap!{
+            actor2.op_id_at(NonZeroU64::new(2).unwrap()) => hashmap!{
                 "species" => Primitive::Str("lapwing".into()),
                 "numSeen" => Primitive::Int(2),
             }.into(),
@@ -678,20 +678,20 @@ fn apply_updates_inside_list_conflicts() {
         max_op: 5,
         deps: Vec::new(),
         clock: hashmap! {
-            actor1 => 2,
-            actor2.clone() => 1,
+            actor1 => NonZeroU64::new(2).unwrap(),
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    other_actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: other_actor.op_id_at(1).into(),
+                    other_actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: other_actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor2.op_id_at(2),
+                                op_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Map(amp::MapDiff{
-                                    object_id: actor2.op_id_at(2).into(),
+                                    object_id: actor2.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                                     props: HashMap::new(),
                                 })
                             }
@@ -717,7 +717,7 @@ fn apply_updates_inside_list_conflicts() {
             .get_conflicts(&Path::root().key("birds").index(0))
             .unwrap(),
         hashmap! {
-            actor2.op_id_at(2) => hashmap!{
+            actor2.op_id_at(NonZeroU64::new(2).unwrap()) => hashmap!{
                 "species" => Primitive::Str("lapwing".into()),
                 "numSeen" => Primitive::Int(2),
             }.into(),
@@ -736,24 +736,24 @@ fn delete_list_elements() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
-                                elem_id: actor.op_id_at(2).into(),
-                                op_id: actor.op_id_at(2),
+                                elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("chaffinch".into())
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 1,
-                                elem_id: actor.op_id_at(3).into(),
-                                op_id: actor.op_id_at(3),
+                                elem_id: actor.op_id_at(NonZeroU64::new(3).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: amp::Diff::Value("goldfinch".into()),
                             },
                         ],
@@ -775,13 +775,13 @@ fn delete_list_elements() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![amp::DiffEdit::Remove{ index: 0, count: 1 }],
                     })
                 }
@@ -799,7 +799,7 @@ fn delete_list_elements() {
 fn apply_updates_at_different_levels_of_object_tree() {
     let actor = amp::ActorId::random();
     let patch1 = amp::Patch {
-        clock: hashmap! {actor.clone() => 1},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         seq: None,
         max_op: 6,
         pending_changes: 0,
@@ -808,30 +808,30 @@ fn apply_updates_at_different_levels_of_object_tree() {
         diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "magpie".into() => hashmap!{
-                                actor.op_id_at(2) => amp::Diff::Value(amp::ScalarValue::Int(2))
+                                actor.op_id_at(NonZeroU64::new(2).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(2))
                             }
                         }
                     })
                 },
                 "details".into() => hashmap!{
-                    actor.op_id_at(3) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(3).into(),
+                    actor.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: actor.op_id_at(4).into(),
-                            op_id: actor.op_id_at(4),
+                            elem_id: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(4).unwrap()),
                             value:  amp::Diff::Map(amp::MapDiff{
-                                object_id: actor.op_id_at(4).into(),
+                                object_id: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
                                 props: hashmap!{
                                     "species".into() => hashmap!{
-                                        actor.op_id_at(5) => amp::Diff::Value("magpie".into())
+                                        actor.op_id_at(NonZeroU64::new(5).unwrap()) => amp::Diff::Value("magpie".into())
                                     },
                                     "family".into() => hashmap!{
-                                        actor.op_id_at(6) => amp::Diff::Value("Corvidae".into())
+                                        actor.op_id_at(NonZeroU64::new(6).unwrap()) => amp::Diff::Value("Corvidae".into())
                                     }
                                 }
                             })
@@ -857,7 +857,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     );
 
     let patch2 = amp::Patch {
-        clock: hashmap! {actor.clone() => 2},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
         seq: None,
         max_op: 7,
         pending_changes: 0,
@@ -866,26 +866,26 @@ fn apply_updates_at_different_levels_of_object_tree() {
         diffs: RootDiff {
             props: hashmap! {
                 "counts".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Map(amp::MapDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Map(amp::MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "magpie".into() => hashmap!{
-                                actor.op_id_at(7) => amp::Diff::Value(amp::ScalarValue::Int(3))
+                                actor.op_id_at(NonZeroU64::new(7).unwrap()) => amp::Diff::Value(amp::ScalarValue::Int(3))
                             }
                         }
                     })
                 },
                 "details".into() => hashmap!{
-                    actor.op_id_at(3) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(3).into(),
+                    actor.op_id_at(NonZeroU64::new(3).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                         edits: vec![amp::DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(4),
+                            op_id: actor.op_id_at(NonZeroU64::new(4).unwrap()),
                             value: amp::Diff::Map(amp::MapDiff{
-                                object_id: actor.op_id_at(4).into(),
+                                object_id: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
                                 props: hashmap!{
                                     "species".into() => hashmap!{
-                                        actor.op_id_at(8) => amp::Diff::Value("Eurasian magpie".into())
+                                        actor.op_id_at(NonZeroU64::new(8).unwrap()) => amp::Diff::Value("Eurasian magpie".into())
                                     },
                                 }
                             }),
@@ -921,30 +921,30 @@ fn test_text_objects() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Text(amp::TextDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Text(amp::TextDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
-                                elem_id: actor.op_id_at(2).into(),
-                                op_id: actor.op_id_at(2),
+                                elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("b".into()),
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 1,
-                                elem_id: actor.op_id_at(3).into(),
-                                op_id: actor.op_id_at(3),
+                                elem_id: actor.op_id_at(NonZeroU64::new(3).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: amp::Diff::Value("e".into()),
                             },
                             amp::DiffEdit::SingleElementInsert {
                                 index: 2,
-                                elem_id: actor.op_id_at(4).into(),
-                                op_id: actor.op_id_at(4),
+                                elem_id: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(4).unwrap()),
                                 value: amp::Diff::Value("n".into()),
                             },
                         ],
@@ -969,18 +969,18 @@ fn test_text_objects() {
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
-            actor.clone() => 3,
+            actor.clone() => NonZeroU64::new(3).unwrap(),
         },
         diffs: RootDiff {
             props: hashmap! {
                 "name".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Text(amp::TextDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Text(amp::TextDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::Remove { index: 1, count: 1 },
                             amp::DiffEdit::Update{
                                 index: 1,
-                                op_id: actor.op_id_at(5),
+                                op_id: actor.op_id_at(NonZeroU64::new(5).unwrap()),
                                 value: amp::Diff::Value(amp::ScalarValue::Str("i".into())),
                             }
                         ],
@@ -1005,8 +1005,8 @@ fn test_unchanged_diff_creates_empty_objects() {
     let mut doc = Frontend::new();
     let patch = amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(1),
-        clock: hashmap! {doc.actor_id.clone() => 1},
+        seq: Some(NonZeroU64::new(1).unwrap()),
+        clock: hashmap! {doc.actor_id.clone() => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,

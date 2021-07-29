@@ -1336,7 +1336,13 @@ mod tests {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
-            pred: Cow::Owned(vec![actor.op_id_at(1), actor2.op_id_at(1)].into()),
+            pred: Cow::Owned(
+                vec![
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()),
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()),
+                ]
+                .into(),
+            ),
             insert: false,
         };
 
@@ -1348,7 +1354,13 @@ mod tests {
             action: InternalOpType::Set(ScalarValue::Null),
             obj: Cow::Owned(amp::ObjectId::Root),
             key: Cow::Owned(Key::Map("r".into())),
-            pred: Cow::Owned(vec![actor2.op_id_at(1), actor.op_id_at(1)].into()),
+            pred: Cow::Owned(
+                vec![
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()),
+                ]
+                .into(),
+            ),
             insert: false,
         };
 

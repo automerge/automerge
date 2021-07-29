@@ -42,7 +42,8 @@ fn arb_actorid() -> impl Strategy<Value = amp::ActorId> {
 }
 
 fn arb_opid() -> impl Strategy<Value = amp::OpId> {
-    (any::<u64>(), arb_actorid()).prop_map(|(seq, actor)| amp::OpId::new(seq, &actor))
+    (any::<u64>(), arb_actorid())
+        .prop_map(|(seq, actor)| amp::OpId::new(NonZeroU64::new(seq).unwrap(), &actor))
 }
 
 fn arb_objid() -> impl Strategy<Value = amp::ObjectId> {

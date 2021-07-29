@@ -586,6 +586,10 @@ impl<T> NonEmptyVec<T> {
         Self(vec![item])
     }
 
+    pub fn push(&mut self, item: T) {
+        self.0.push(item);
+    }
+
     pub fn len(&self) -> NonZeroUsize {
         NonZeroUsize::new(self.0.len()).unwrap()
     }

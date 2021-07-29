@@ -495,8 +495,8 @@ mod tests {
         let actor_b: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
         let change_a1: Change = amp::Change {
             actor_id: actor_a.clone(),
-            seq: 1,
-            start_op: 1,
+            seq: NonZeroU64::new(1).unwrap(),
+            start_op: NonZeroU64::new(1).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -507,15 +507,17 @@ mod tests {
                 key: "bird".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         }
         .try_into()
         .unwrap();
         let change_a2: Change = amp::Change {
             actor_id: actor_a,
-            seq: 2,
-            start_op: 2,
+            seq: NonZeroU64::new(2).unwrap(),
+            start_op: NonZeroU64::new(2).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -526,15 +528,17 @@ mod tests {
                 key: "bug".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         }
         .try_into()
         .unwrap();
         let change_b1: Change = amp::Change {
             actor_id: actor_b.clone(),
-            seq: 1,
-            start_op: 1,
+            seq: NonZeroU64::new(1).unwrap(),
+            start_op: NonZeroU64::new(1).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -545,15 +549,17 @@ mod tests {
                 key: "bird".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         }
         .try_into()
         .unwrap();
         let change_b2: Change = amp::Change {
             actor_id: actor_b.clone(),
-            seq: 2,
-            start_op: 2,
+            seq: NonZeroU64::new(2).unwrap(),
+            start_op: NonZeroU64::new(2).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -564,15 +570,17 @@ mod tests {
                 key: "bug".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         }
         .try_into()
         .unwrap();
         let change_b3: Change = amp::Change {
             actor_id: actor_b,
-            seq: 3,
-            start_op: 3,
+            seq: NonZeroU64::new(3).unwrap(),
+            start_op: NonZeroU64::new(3).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -583,7 +591,9 @@ mod tests {
                 key: "title".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         }
         .try_into()

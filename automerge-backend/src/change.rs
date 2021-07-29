@@ -255,7 +255,7 @@ impl Change {
     pub fn max_op(&self) -> NonZeroU64 {
         // TODO - this could be a lot more efficient
         let len = self.iter_ops().count();
-        NonZeroU64::new(self.start_op.get() + (len as u64) - 1).unwrap()
+        NonZeroU64::new(self.start_op.get() + (len as u64) - 1).expect("max op value was 0")
     }
 
     fn message(&self) -> Option<String> {
@@ -1012,35 +1012,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_empty_change() {
-        let change1 = amp::Change {
-            start_op: 1,
-            seq: 2,
-            time: 1234,
-            message: None,
-            hash: None,
-            actor_id: amp::ActorId::from_str("deadbeefdeadbeef").unwrap(),
-            deps: vec![],
-            operations: vec![],
-            extra_bytes: vec![1, 1, 1],
-        };
-        let bin1: Change = change1.clone().try_into().unwrap();
-        let change2 = bin1.decode();
-        let bin2 = Change::try_from(change2.clone()).unwrap();
-        assert_eq!(bin1, bin2);
-        assert_eq!(change1, change2);
-    }
-
-    #[test]
     fn test_complex_change() {
         let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
         let actor2 = amp::ActorId::from_str("feeddefaff").unwrap();
         let actor3 = amp::ActorId::from_str("00101010fafafafa").unwrap();
-        let opid1 = amp::OpId::new(102, &actor1);
-        let opid2 = amp::OpId::new(391, &actor1);
-        let opid3 = amp::OpId::new(299, &actor2);
-        let opid4 = amp::OpId::new(762, &actor3);
-        let opid5 = amp::OpId::new(100_203, &actor2);
+        let opid1 = amp::OpId::new(NonZeroU64::new(102).unwrap(), &actor1);
+        let opid2 = amp::OpId::new(NonZeroU64::new(391).unwrap(), &actor1);
+        let opid3 = amp::OpId::new(NonZeroU64::new(299).unwrap(), &actor2);
+        let opid4 = amp::OpId::new(NonZeroU64::new(762).unwrap(), &actor3);
+        let opid5 = amp::OpId::new(NonZeroU64::new(100_203).unwrap(), &actor2);
         let obj1 = amp::ObjectId::Id(opid1.clone());
         let obj2 = amp::ObjectId::Root;
         let obj3 = amp::ObjectId::Id(opid4.clone());
@@ -1052,8 +1032,8 @@ mod tests {
         let keyseq2 = amp::Key::from(&opid2);
         let insert = false;
         let change1 = amp::Change {
-            start_op: 123,
-            seq: 29291,
+            start_op: NonZeroU64::new(123).unwrap(),
+            seq: NonZeroU64::new(29291).unwrap(),
             time: 12_341_231,
             message: Some("This is my message".into()),
             hash: None,
@@ -1137,7 +1117,9 @@ mod tests {
                     insert: false,
                     pred: SortedVec::new(),
                 },
-            ],
+            ]
+            .try_into()
+            .unwrap(),
             extra_bytes: vec![1, 2, 3],
         };
         let bin1 = Change::from(change1.clone());
@@ -1151,8 +1133,8 @@ mod tests {
     fn test_multiops() {
         let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
         let change1 = amp::Change {
-            start_op: 123,
-            seq: 29291,
+            start_op: NonZeroU64::new(123).unwrap(),
+            seq: NonZeroU64::new(29291).unwrap(),
             time: 12_341_231,
             message: Some("A multiop change".into()),
             hash: None,
@@ -1165,10 +1147,12 @@ mod tests {
                         .unwrap(),
                 ),
                 key: amp::ElementId::Head.into(),
-                obj: actor1.op_id_at(10).into(),
+                obj: actor1.op_id_at(NonZeroU64::new(10).unwrap()).into(),
                 insert: true,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: Vec::new(),
         };
         let bin1 = Change::try_from(change1).unwrap();
@@ -1182,8 +1166,8 @@ mod tests {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
         let change1 = amp::Change {
-            start_op: 1,
-            seq: 1,
+            start_op: NonZeroU64::new(1).unwrap(),
+            seq: NonZeroU64::new(1).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -1206,27 +1190,31 @@ mod tests {
                 },
                 amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str("elem".into())),
-                    obj: actor.op_id_at(2).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                     key: amp::ElementId::Head.into(),
                     insert: true,
                     pred: SortedVec::new(),
                 },
                 amp::Op {
-                    action: amp::OpType::Set(amp::ScalarValue::Cursor(actor.op_id_at(3))),
+                    action: amp::OpType::Set(amp::ScalarValue::Cursor(
+                        actor.op_id_at(NonZeroU64::new(3).unwrap()),
+                    )),
                     obj: amp::ObjectId::Root,
                     key: "cursor".into(),
                     insert: false,
                     pred: SortedVec::new(),
                 },
-            ],
+            ]
+            .try_into()
+            .unwrap(),
             extra_bytes: vec![1, 2, 3],
         };
         let binchange1: Change = Change::try_from(change1.clone()).unwrap();
         backend.apply_changes(vec![binchange1.clone()]).unwrap();
 
         let change2 = amp::Change {
-            start_op: 5,
-            seq: 2,
+            start_op: NonZeroU64::new(5).unwrap(),
+            seq: NonZeroU64::new(2).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -1250,12 +1238,14 @@ mod tests {
                         .try_into()
                         .unwrap(),
                     ),
-                    obj: actor.op_id_at(2).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                     key: amp::ElementId::Head.into(),
                     insert: true,
                     pred: SortedVec::new(),
                 },
-            ],
+            ]
+            .try_into()
+            .unwrap(),
             extra_bytes: vec![],
         };
         let binchange2: Change = Change::try_from(change2).unwrap();
@@ -1277,7 +1267,7 @@ mod tests {
             changes.into_iter().cloned().collect::<Vec<Change>>()
         );
         // Check that expanded ops are accounted for in max_op
-        assert_eq!(loaded_changes[1].max_op(), 8);
+        assert_eq!(loaded_changes[1].max_op().get(), 8);
     }
 
     #[test_env_log::test]
@@ -1285,8 +1275,8 @@ mod tests {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
         let mut change1 = amp::Change {
-            start_op: 1,
-            seq: 1,
+            start_op: NonZeroU64::new(1).unwrap(),
+            seq: NonZeroU64::new(1).unwrap(),
             time: 0,
             message: None,
             hash: None,
@@ -1298,19 +1288,21 @@ mod tests {
                 key: "somelist".into(),
                 insert: false,
                 pred: SortedVec::new(),
-            }],
+            }]
+            .try_into()
+            .unwrap(),
             extra_bytes: vec![1, 2, 3],
         };
         let mut last_elem_id: amp::Key = amp::ElementId::Head.into();
         for i in 0..256 {
             change1.operations.push(amp::Op {
                 action: amp::OpType::Set(format!("value {}", i).as_str().into()),
-                obj: actor.op_id_at(1).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: last_elem_id,
                 insert: true,
                 pred: SortedVec::new(),
             });
-            last_elem_id = actor.op_id_at(i + 2).into();
+            last_elem_id = actor.op_id_at(NonZeroU64::new(i + 2).unwrap()).into();
         }
         let binchange1: Change = Change::try_from(change1).unwrap();
         backend.apply_changes(vec![binchange1]).unwrap();
@@ -1325,7 +1317,7 @@ mod tests {
             .collect();
         let decoded_preload: Vec<amp::Change> =
             changes.clone().into_iter().map(Change::decode).collect();
-        assert_eq!(decoded_loaded[0].operations.len(), 257);
+        assert_eq!(decoded_loaded[0].operations.len().get(), 257);
         assert_eq!(decoded_loaded, decoded_preload);
         assert_eq!(
             loaded_changes,
@@ -1336,11 +1328,19 @@ mod tests {
     #[test]
     fn test_invalid_document_checksum() {
         let change = amp::Change {
-            operations: Vec::new(),
+            operations: vec![amp::Op {
+                action: amp::OpType::Make(amp::ObjType::List),
+                obj: amp::ObjectId::Root,
+                key: "somelist".into(),
+                insert: false,
+                pred: SortedVec::new(),
+            }]
+            .try_into()
+            .unwrap(),
             actor_id: ActorId::random(),
             hash: None,
-            seq: 1,
-            start_op: 1,
+            seq: NonZeroU64::new(1).unwrap(),
+            start_op: NonZeroU64::new(1).unwrap(),
             time: 0,
             message: None,
             deps: Vec::new(),

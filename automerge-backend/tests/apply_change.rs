@@ -1,5 +1,9 @@
 extern crate automerge_backend;
-use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
+use std::{
+    convert::TryInto,
+    num::{NonZeroU32, NonZeroU64},
+    str::FromStr,
+};
 
 use amp::{RootDiff, SortedVec};
 use automerge_backend::{AutomergeError, Backend, Change};
@@ -16,8 +20,8 @@ fn test_incremental_diffs_in_a_map() {
     let actor: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -28,7 +32,9 @@ fn test_incremental_diffs_in_a_map() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -40,11 +46,11 @@ fn test_incremental_diffs_in_a_map() {
         actor: None,
         seq: None,
         deps: vec![change.hash],
-        clock: hashmap! {actor.clone() => 1},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         max_op: 1,
         pending_changes: 0,
         diffs: RootDiff {
-            props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(1) => "magpie".into() )),
+            props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(NonZeroU64::new(1).unwrap()) => "magpie".into() )),
         },
     };
     assert_eq!(patch, expected_patch)
@@ -55,8 +61,8 @@ fn test_bytes() {
     let actor: ActorId = "7b7723afd9e6480397a4d467b7693156".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -67,7 +73,9 @@ fn test_bytes() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -79,13 +87,13 @@ fn test_bytes() {
         actor: None,
         seq: None,
         deps: vec![change.hash],
-        clock: hashmap! {actor.clone() => 1},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         max_op: 1,
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::Value(amp::ScalarValue::Bytes("AQID".into())),
                 }
             },
         },
@@ -98,8 +106,8 @@ fn test_increment_key_in_map() {
     let actor: ActorId = "cdee6963c1664645920be8b41a933c2b".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -110,7 +118,9 @@ fn test_increment_key_in_map() {
             key: "counter".into(),
             insert: false,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -118,8 +128,8 @@ fn test_increment_key_in_map() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 2,
         message: None,
         hash: None,
@@ -129,8 +139,10 @@ fn test_increment_key_in_map() {
             action: amp::OpType::Inc(2),
             key: "counter".into(),
             insert: false,
-            pred: vec![actor.op_id_at(1)].into(),
-        }],
+            pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -139,14 +151,14 @@ fn test_increment_key_in_map() {
     let expected_patch = Patch {
         actor: None,
         seq: None,
-        clock: hashmap! {actor.clone() => 2},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
         max_op: 2,
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
             props: hashmap!(
             "counter".into() => hashmap!{
-                actor.op_id_at(1) =>  ScalarValue::Counter(3).into(),
+                actor.op_id_at(NonZeroU64::new(1).unwrap()) =>  ScalarValue::Counter(3).into(),
             }),
         },
     };
@@ -161,10 +173,10 @@ fn test_conflict_on_assignment_to_same_map_key() {
     let actor_1 = ActorId::from_str("ac11").unwrap();
     let change1: Change = amp::Change {
         actor_id: actor_1.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         message: None,
         hash: None,
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         operations: vec![Op {
@@ -173,7 +185,9 @@ fn test_conflict_on_assignment_to_same_map_key() {
             key: "bird".into(),
             insert: false,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -182,8 +196,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
     let actor_2 = ActorId::from_str("ac22").unwrap();
     let change2: Change = amp::Change {
         actor_id: actor_2.clone(),
-        start_op: 2,
-        seq: 1,
+        start_op: NonZeroU64::new(2).unwrap(),
+        seq: NonZeroU64::new(1).unwrap(),
         message: None,
         hash: None,
         deps: vec![change1.hash],
@@ -194,7 +208,9 @@ fn test_conflict_on_assignment_to_same_map_key() {
             key: "bird".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -204,8 +220,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            actor_1.clone() => 1,
-            actor_2.clone() => 1,
+            actor_1.clone() => NonZeroU64::new(1).unwrap(),
+            actor_2.clone() => NonZeroU64::new(1).unwrap(),
         },
         deps: vec![change2.hash],
         max_op: 2,
@@ -213,8 +229,8 @@ fn test_conflict_on_assignment_to_same_map_key() {
         diffs: RootDiff {
             props: hashmap! {
                 "bird".into() => hashmap!{
-                    actor_1.op_id_at(1) => "magpie".into(),
-                    actor_2.op_id_at(2) => "blackbird".into(),
+                    actor_1.op_id_at(NonZeroU64::new(1).unwrap()) => "magpie".into(),
+                    actor_2.op_id_at(NonZeroU64::new(2).unwrap()) => "blackbird".into(),
                 }
             },
         },
@@ -231,8 +247,8 @@ fn delete_key_from_map() {
     let actor: ActorId = "cd86c07f109348f494af5be30fdc4c71".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -243,7 +259,9 @@ fn delete_key_from_map() {
             key: "bird".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -251,8 +269,8 @@ fn delete_key_from_map() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -261,9 +279,11 @@ fn delete_key_from_map() {
             obj: ObjectId::Root,
             action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             key: "bird".into(),
-            pred: vec![actor.op_id_at(1)].into(),
+            pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -272,7 +292,7 @@ fn delete_key_from_map() {
     let expected_patch = Patch {
         actor: None,
         seq: None,
-        clock: hashmap! {actor => 2},
+        clock: hashmap! {actor => NonZeroU64::new(2).unwrap()},
         deps: vec![change2.hash],
         max_op: 2,
         pending_changes: 0,
@@ -294,8 +314,8 @@ fn create_nested_maps() {
     let actor: ActorId = "d6226fcd55204b82b396f2473da3e26f".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -310,12 +330,14 @@ fn create_nested_maps() {
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::F64(3.0)),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: "wrens".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -327,15 +349,15 @@ fn create_nested_maps() {
         pending_changes: 0,
         deps: vec![change.hash],
         seq: None,
-        clock: hashmap! {actor.clone() => 1},
+        clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Map(MapDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::Map(MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "wrens".into() => hashmap!{
-                                actor.op_id_at(2) => Diff::Value(ScalarValue::F64(3.0))
+                                actor.op_id_at(NonZeroU64::new(2).unwrap()) => Diff::Value(ScalarValue::F64(3.0))
                             }
                         }
                     })
@@ -354,8 +376,8 @@ fn test_assign_to_nested_keys_in_map() {
     let actor: ActorId = "3c39c994039042778f4779a01a59a917".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -369,13 +391,15 @@ fn test_assign_to_nested_keys_in_map() {
                 insert: false,
             },
             Op {
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set(ScalarValue::F64(3.0)),
                 key: "wrens".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -383,19 +407,21 @@ fn test_assign_to_nested_keys_in_map() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         deps: vec![change1.hash],
         message: None,
         hash: None,
         operations: vec![Op {
-            obj: ObjectId::from(actor.op_id_at(1)),
+            obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
             action: amp::OpType::Set(ScalarValue::F64(15.0)),
             key: "sparrows".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -403,7 +429,7 @@ fn test_assign_to_nested_keys_in_map() {
 
     let expected_patch = Patch {
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         actor: None,
         seq: None,
@@ -413,11 +439,11 @@ fn test_assign_to_nested_keys_in_map() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Map(MapDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::Map(MapDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "sparrows".into() => hashmap!{
-                                actor.op_id_at(3) => Diff::Value(ScalarValue::F64(15.0))
+                                actor.op_id_at(NonZeroU64::new(3).unwrap()) => Diff::Value(ScalarValue::F64(15.0))
                             }
                         }
                     })
@@ -437,8 +463,8 @@ fn test_create_lists() {
     let actor: ActorId = "f82cb62dabe64372ab87466b77792010".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -453,12 +479,14 @@ fn test_create_lists() {
             },
             Op {
                 action: amp::OpType::Set("chaffinch".into()),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -466,7 +494,7 @@ fn test_create_lists() {
 
     let expected_patch = Patch {
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 2,
         pending_changes: 0,
@@ -476,12 +504,12 @@ fn test_create_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
-                            op_id: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                             value: Diff::Value(ScalarValue::Str("chaffinch".into())),
 
                         }],
@@ -501,8 +529,8 @@ fn test_apply_updates_inside_lists() {
     let actor: ActorId = "4ee4a0d033b841c4b26d73d70a879547".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -517,12 +545,14 @@ fn test_apply_updates_inside_lists() {
             },
             Op {
                 action: amp::OpType::Set("chaffinch".into()),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: ElementId::Head.into(),
                 pred: SortedVec::new(),
                 insert: true,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -530,19 +560,21 @@ fn test_apply_updates_inside_lists() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         deps: vec![change1.hash],
         message: None,
         hash: None,
         operations: vec![Op {
             action: amp::OpType::Set("greenfinch".into()),
-            obj: ObjectId::from(actor.op_id_at(1)),
-            key: actor.op_id_at(2).into(),
-            pred: vec![actor.op_id_at(2)].into(),
+            obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
+            key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+            pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -552,7 +584,7 @@ fn test_apply_updates_inside_lists() {
         actor: None,
         deps: vec![change2.hash],
         clock: hashmap! {
-            actor.clone() => 2
+            actor.clone() => NonZeroU64::new(2).unwrap()
         },
         max_op: 3,
         pending_changes: 0,
@@ -560,11 +592,11 @@ fn test_apply_updates_inside_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::Update{
                             index: 0,
-                            op_id: actor.op_id_at(3),
+                            op_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                             value: Diff::Value("greenfinch".into()),
                         }],
                     })
@@ -584,8 +616,8 @@ fn test_delete_list_elements() {
     let actor: ActorId = "8a3d4716fdca49f4aa5835901f2034c7".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -600,12 +632,14 @@ fn test_delete_list_elements() {
             },
             Op {
                 action: amp::OpType::Set("chaffinch".into()),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -613,19 +647,21 @@ fn test_delete_list_elements() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: vec![change1.hash],
         operations: vec![Op {
             action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-            obj: ObjectId::from(actor.op_id_at(1)),
-            key: actor.op_id_at(2).into(),
-            pred: vec![actor.op_id_at(2)].into(),
+            obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
+            key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+            pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -637,14 +673,14 @@ fn test_delete_list_elements() {
         max_op: 3,
         pending_changes: 0,
         clock: hashmap! {
-            actor.clone() => 2
+            actor.clone() => NonZeroU64::new(2).unwrap()
         },
         deps: vec![change2.hash],
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id:  actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id:  actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::Remove{index: 0, count: 1}]
                     })
                 }
@@ -663,8 +699,8 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
     let actor: ActorId = "ca95bc759404486bbe7b9dd2be779fa8".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -675,7 +711,9 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
             key: "birds".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -683,8 +721,8 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 
     let change2: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -692,19 +730,21 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         operations: vec![
             Op {
                 action: amp::OpType::Set("chaffinch".into()),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
                 action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-                obj: ObjectId::from(actor.op_id_at(1)),
-                key: actor.op_id_at(2).into(),
-                pred: vec![actor.op_id_at(2)].into(),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -712,7 +752,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
 
     let expected_patch = Patch {
         clock: hashmap! {
-            actor.clone() => 2
+            actor.clone() => NonZeroU64::new(2).unwrap()
         },
         seq: None,
         actor: None,
@@ -722,13 +762,13 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
-                                elem_id: actor.op_id_at(2).into(),
-                                op_id: actor.op_id_at(2),
+                                elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("chaffinch".into()),
                             },
                             DiffEdit::Remove{index: 0, count: 1},
@@ -751,8 +791,8 @@ fn test_handle_changes_within_conflicted_objects() {
     let actor2: ActorId = "83768a19a13842beb6dde8c68a662fad".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor1.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -763,7 +803,9 @@ fn test_handle_changes_within_conflicted_objects() {
             key: "conflict".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -771,8 +813,8 @@ fn test_handle_changes_within_conflicted_objects() {
 
     let change2: Change = amp::Change {
         actor_id: actor2.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -783,7 +825,9 @@ fn test_handle_changes_within_conflicted_objects() {
             key: "conflict".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -791,19 +835,21 @@ fn test_handle_changes_within_conflicted_objects() {
 
     let change3: Change = amp::Change {
         actor_id: actor2.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: vec![change2.hash],
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::F64(12.0)),
-            obj: ObjectId::from(actor2.op_id_at(1)),
+            obj: ObjectId::from(actor2.op_id_at(NonZeroU64::new(1).unwrap())),
             key: "sparrow".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -813,8 +859,8 @@ fn test_handle_changes_within_conflicted_objects() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            actor1.clone() => 1,
-            actor2.clone() => 2,
+            actor1.clone() => NonZeroU64::new(1).unwrap(),
+            actor2.clone() => NonZeroU64::new(2).unwrap(),
         },
         max_op: 2,
         pending_changes: 0,
@@ -822,15 +868,15 @@ fn test_handle_changes_within_conflicted_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "conflict".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor1.op_id_at(1).into(),
+                    actor1.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: Vec::new(),
                     }),
-                    actor2.op_id_at(1) => Diff::Map(MapDiff{
-                        object_id: actor2.op_id_at(1).into(),
+                    actor2.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::Map(MapDiff{
+                        object_id: actor2.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         props: hashmap!{
                             "sparrow".into() => hashmap!{
-                                actor2.op_id_at(2) => Diff::Value(ScalarValue::F64(12.0))
+                                actor2.op_id_at(NonZeroU64::new(2).unwrap()) => Diff::Value(ScalarValue::F64(12.0))
                             }
                         }
                     })
@@ -852,8 +898,8 @@ fn test_handle_changes_within_conflicted_lists() {
     let actor2: ActorId = "89abcdef".try_into().unwrap();
     let change1: Change = amp::Change {
         actor_id: actor1.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -868,12 +914,14 @@ fn test_handle_changes_within_conflicted_lists() {
             },
             Op {
                 action: amp::OpType::Make(amp::ObjType::Map),
-                obj: actor1.op_id_at(1).into(),
+                obj: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -881,8 +929,8 @@ fn test_handle_changes_within_conflicted_lists() {
 
     let change2: Change = amp::Change {
         actor_id: actor1.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -890,26 +938,28 @@ fn test_handle_changes_within_conflicted_lists() {
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::Map),
-                obj: actor1.op_id_at(1).into(),
-                key: actor1.op_id_at(2).into(),
-                pred: vec![actor1.op_id_at(2)].into(),
+                obj: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                key: actor1.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![actor1.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
             Op {
                 action: amp::OpType::Set("buy milk".into()),
-                obj: actor1.op_id_at(3).into(),
+                obj: actor1.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                 key: "title".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
             Op {
                 action: amp::OpType::Set(false.into()),
-                obj: actor1.op_id_at(3).into(),
+                obj: actor1.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                 key: "done".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -917,8 +967,8 @@ fn test_handle_changes_within_conflicted_lists() {
 
     let change3: Change = amp::Change {
         actor_id: actor2.clone(),
-        seq: 1,
-        start_op: 3,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -926,26 +976,28 @@ fn test_handle_changes_within_conflicted_lists() {
         operations: vec![
             Op {
                 action: amp::OpType::Make(amp::ObjType::Map),
-                obj: actor1.op_id_at(1).into(),
-                key: actor1.op_id_at(2).into(),
-                pred: vec![actor1.op_id_at(2)].into(),
+                obj: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                key: actor1.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![actor1.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
             Op {
                 action: amp::OpType::Set("water plants".into()),
-                obj: actor2.op_id_at(3).into(),
+                obj: actor2.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                 key: "title".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
             Op {
                 action: amp::OpType::Set(false.into()),
-                obj: actor2.op_id_at(3).into(),
+                obj: actor2.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                 key: "done".into(),
                 pred: SortedVec::new(),
                 insert: false,
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -956,19 +1008,21 @@ fn test_handle_changes_within_conflicted_lists() {
 
     let change4: Change = amp::Change {
         actor_id: actor1.clone(),
-        seq: 3,
-        start_op: 6,
+        seq: NonZeroU64::new(3).unwrap(),
+        start_op: NonZeroU64::new(6).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: change4_deps,
         operations: vec![Op {
             action: amp::OpType::Set(true.into()),
-            obj: actor1.op_id_at(3).into(),
+            obj: actor1.op_id_at(NonZeroU64::new(3).unwrap()).into(),
             key: "done".into(),
-            pred: vec![actor1.op_id_at(5)].into(),
+            pred: vec![actor1.op_id_at(NonZeroU64::new(5).unwrap())].into(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -978,8 +1032,8 @@ fn test_handle_changes_within_conflicted_lists() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            actor2.clone() => 1,
-            actor1.clone() => 3,
+            actor2.clone() => NonZeroU64::new(1).unwrap(),
+            actor1.clone() => NonZeroU64::new(3).unwrap(),
         },
         max_op: 6,
         pending_changes: 0,
@@ -987,26 +1041,26 @@ fn test_handle_changes_within_conflicted_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "todos".into() => hashmap!{
-                    actor1.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor1.op_id_at(1).into(),
+                    actor1.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor1.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor1.op_id_at(3),
+                                op_id: actor1.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: Diff::Map(MapDiff{
-                                    object_id: actor1.op_id_at(3).into(),
+                                    object_id: actor1.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                                     props: hashmap!{
                                         "done".into() => hashmap!{
-                                            actor1.op_id_at(6) => Diff::Value(true.into())
+                                            actor1.op_id_at(NonZeroU64::new(6).unwrap()) => Diff::Value(true.into())
                                         }
                                     }
                                 })
                             },
                             amp::DiffEdit::Update{
                                 index: 0,
-                                op_id: actor2.op_id_at(3),
+                                op_id: actor2.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: Diff::Map(MapDiff{
-                                    object_id: actor2.op_id_at(3).into(),
+                                    object_id: actor2.op_id_at(NonZeroU64::new(3).unwrap()).into(),
                                     props: hashmap!{},
                                 })
                             }
@@ -1031,8 +1085,8 @@ fn test_support_date_objects_at_root() {
     let actor: ActorId = "955afa3bbcc140b3b4bac8836479d650".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -1043,7 +1097,9 @@ fn test_support_date_objects_at_root() {
             key: "now".into(),
             pred: SortedVec::new(),
             insert: false,
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1051,7 +1107,7 @@ fn test_support_date_objects_at_root() {
 
     let expected_patch = Patch {
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 1,
         pending_changes: 0,
@@ -1061,7 +1117,7 @@ fn test_support_date_objects_at_root() {
         diffs: RootDiff {
             props: hashmap! {
                 "now".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::Value(ScalarValue::Timestamp(1_586_528_122_277))
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::Value(ScalarValue::Timestamp(1_586_528_122_277))
                 }
             },
         },
@@ -1077,8 +1133,8 @@ fn test_support_date_objects_in_a_list() {
     let actor: ActorId = "27d467ecb1a640fb9bed448ce7cf6a44".try_into().unwrap();
     let change: Change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -1093,12 +1149,14 @@ fn test_support_date_objects_in_a_list() {
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::Timestamp(1_586_528_191_421)),
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     }
     .try_into()
@@ -1106,7 +1164,7 @@ fn test_support_date_objects_in_a_list() {
 
     let expected_patch = Patch {
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 2,
         pending_changes: 0,
@@ -1116,12 +1174,12 @@ fn test_support_date_objects_in_a_list() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
-                            op_id: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                             value: Diff::Value(ScalarValue::Timestamp(1_586_528_191_421))
                         }],
                     })
@@ -1140,8 +1198,8 @@ fn test_cursor_objects() {
     let actor = ActorId::random();
     let change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -1156,19 +1214,23 @@ fn test_cursor_objects() {
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::Str("something".into())),
-                obj: actor.op_id_at(1).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
-                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+                action: amp::OpType::Set(ScalarValue::Cursor(
+                    actor.op_id_at(NonZeroU64::new(2).unwrap()),
+                )),
                 obj: ObjectId::Root,
                 key: "cursor".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let binchange: Change = (&change).try_into().unwrap();
@@ -1176,7 +1238,7 @@ fn test_cursor_objects() {
     let patch = backend.apply_changes(vec![Change::from(change)]).unwrap();
     let expected_patch = amp::Patch {
         clock: hashmap! {
-            actor.clone() => 1,
+            actor.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 3,
         pending_changes: 0,
@@ -1186,20 +1248,20 @@ fn test_cursor_objects() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: actor.op_id_at(2).into(),
-                            op_id: actor.op_id_at(2),
+                            elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                             value: Diff::Value(ScalarValue::Str("something".into())),
                         }],
                     })
                 },
                 "cursor".into() => hashmap!{
-                    actor.op_id_at(3) => Diff::Cursor(CursorDiff{
-                        object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(2),
+                    actor.op_id_at(NonZeroU64::new(3).unwrap()) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                        elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                         index: 0,
                     }),
                 },
@@ -1214,19 +1276,23 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
     let actor = ActorId::random();
     let change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
         hash: None,
         operations: vec![Op {
-            action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+            action: amp::OpType::Set(ScalarValue::Cursor(
+                actor.op_id_at(NonZeroU64::new(2).unwrap()),
+            )),
             obj: ObjectId::Root,
             key: "cursor".into(),
             insert: false,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let mut backend = Backend::new();
@@ -1234,10 +1300,10 @@ fn test_throws_on_attempt_to_create_missing_cursor() {
         .apply_changes(vec![Change::from(change)])
         .expect_err("Should be an error");
     if let AutomergeError::InvalidCursor { opid } = err {
-        if opid != actor.op_id_at(2) {
+        if opid != actor.op_id_at(NonZeroU64::new(2).unwrap()) {
             panic!(
                 "Expected InvalidCursor error with opid {:?} but found one with {:?}",
-                actor.op_id_at(2),
+                actor.op_id_at(NonZeroU64::new(2).unwrap()),
                 opid
             )
         }
@@ -1251,8 +1317,8 @@ fn test_updating_sequences_updates_referring_cursors() {
     let actor = ActorId::random();
     let change1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -1267,37 +1333,43 @@ fn test_updating_sequences_updates_referring_cursors() {
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::Str("something".into())),
-                obj: actor.op_id_at(1).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
-                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+                action: amp::OpType::Set(ScalarValue::Cursor(
+                    actor.op_id_at(NonZeroU64::new(2).unwrap()),
+                )),
                 obj: ObjectId::Root,
                 key: "cursor".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
     let change2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 4,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(4).unwrap(),
         time: 0,
         deps: vec![binchange1.hash],
         message: None,
         hash: None,
         operations: vec![Op {
             action: amp::OpType::Set(ScalarValue::Str("something else".into())),
-            obj: actor.op_id_at(1).into(),
+            obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
             key: amp::ElementId::Head.into(),
             insert: true,
             pred: SortedVec::new(),
-        }],
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();
@@ -1306,7 +1378,7 @@ fn test_updating_sequences_updates_referring_cursors() {
     let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
     let expected_patch = amp::Patch {
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         max_op: 4,
         pending_changes: 0,
@@ -1316,20 +1388,20 @@ fn test_updating_sequences_updates_referring_cursors() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: actor.op_id_at(4).into(),
-                            op_id: actor.op_id_at(4),
+                            elem_id: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
+                            op_id: actor.op_id_at(NonZeroU64::new(4).unwrap()),
                             value: Diff::Value(ScalarValue::Str("something else".into())),
                         }],
                     })
                 },
                 "cursor".into() => hashmap!{
-                    actor.op_id_at(3) => Diff::Cursor(CursorDiff{
-                        object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(2),
+                    actor.op_id_at(NonZeroU64::new(3).unwrap()) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                        elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                         index: 1,
                     }),
                 },
@@ -1344,8 +1416,8 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
     let actor = ActorId::random();
     let change1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -1360,44 +1432,50 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::Str("something".into())),
-                obj: actor.op_id_at(1).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: amp::ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
                 action: amp::OpType::Set(ScalarValue::Str("something else".into())),
-                obj: actor.op_id_at(1).into(),
-                key: actor.op_id_at(2).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
-                action: amp::OpType::Set(ScalarValue::Cursor(actor.op_id_at(3))),
+                action: amp::OpType::Set(ScalarValue::Cursor(
+                    actor.op_id_at(NonZeroU64::new(3).unwrap()),
+                )),
                 obj: ObjectId::Root,
                 key: "cursor".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
-        ],
+        ]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let binchange1: Change = (&change1).try_into().unwrap();
     let change2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 5,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(5).unwrap(),
         time: 0,
         deps: vec![binchange1.hash],
         message: None,
         hash: None,
         operations: vec![Op {
             action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
-            obj: actor.op_id_at(1).into(),
-            key: actor.op_id_at(2).into(),
+            obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+            key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: false,
-            pred: vec![actor.op_id_at(2)].into(),
-        }],
+            pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
+        }]
+        .try_into()
+        .unwrap(),
         extra_bytes: Vec::new(),
     };
     let binchange2: Change = change2.try_into().unwrap();
@@ -1406,7 +1484,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
     let patch = backend.apply_changes(vec![binchange2.clone()]).unwrap();
     let expected_patch = amp::Patch {
         clock: hashmap! {
-            actor.clone() => 2,
+            actor.clone() => NonZeroU64::new(2).unwrap(),
         },
         max_op: 5,
         pending_changes: 0,
@@ -1416,15 +1494,15 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![DiffEdit::Remove{index: 0, count: 1}],
                     })
                 },
                 "cursor".into() => hashmap!{
-                    actor.op_id_at(4) => Diff::Cursor(CursorDiff{
-                        object_id: actor.op_id_at(1).into(),
-                        elem_id: actor.op_id_at(3),
+                    actor.op_id_at(NonZeroU64::new(4).unwrap()) => Diff::Cursor(CursorDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                        elem_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                         index: 0,
                     }),
                 },

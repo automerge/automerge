@@ -161,7 +161,7 @@ mod tests {
                 .try_into()
                 .unwrap(),
             ),
-            obj: ObjectId::Id(OpId(1, actor.clone())),
+            obj: ObjectId::Id(OpId(NonZeroU64::new(1).unwrap(), actor.clone())),
             key: Key::Seq(ElementId::Head),
             pred: SortedVec::new(),
             insert: true,
@@ -172,22 +172,37 @@ mod tests {
             vec![
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(1)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
                     key: Cow::Owned(Key::Seq(ElementId::Head)),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(2)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(2).unwrap(),
+                        actor.clone()
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(3)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor)))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(3).unwrap(),
+                        actor
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
@@ -209,7 +224,7 @@ mod tests {
                     .try_into()
                     .unwrap(),
                 ),
-                obj: ObjectId::Id(OpId(1, actor.clone())),
+                obj: ObjectId::Id(OpId(NonZeroU64::new(1).unwrap(), actor.clone())),
                 key: Key::Seq(ElementId::Head),
                 pred: SortedVec::new(),
                 insert: true,
@@ -223,8 +238,11 @@ mod tests {
                     .try_into()
                     .unwrap(),
                 ),
-                obj: ObjectId::Id(OpId(1, actor.clone())),
-                key: Key::Seq(ElementId::Id(OpId(4, actor.clone()))),
+                obj: ObjectId::Id(OpId(NonZeroU64::new(1).unwrap(), actor.clone())),
+                key: Key::Seq(ElementId::Id(OpId(
+                    NonZeroU64::new(4).unwrap(),
+                    actor.clone(),
+                ))),
                 pred: SortedVec::new(),
                 insert: true,
             },
@@ -235,36 +253,63 @@ mod tests {
             vec![
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(1)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
                     key: Cow::Owned(Key::Seq(ElementId::Head)),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(2)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(2).unwrap(),
+                        actor.clone()
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Uint(3)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(3).unwrap(),
+                        actor.clone()
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Str("hi".into())),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(4).unwrap(),
+                        actor.clone()
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Set(ScalarValue::Str("world".into())),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(5, actor)))),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(5).unwrap(),
+                        actor
+                    )))),
                     pred: Cow::Owned(SortedVec::new()),
                     insert: true
                 },
@@ -275,11 +320,14 @@ mod tests {
     #[test]
     fn expand_multi_del() {
         let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
-        let pred = OpId(1, actor.clone());
+        let pred = OpId(NonZeroU64::new(1).unwrap(), actor.clone());
         let ops = [Op {
             action: OpType::Del(NonZeroU32::new(3).unwrap()),
-            obj: ObjectId::Id(OpId(1, actor.clone())),
-            key: Key::Seq(ElementId::Id(OpId(1, actor.clone()))),
+            obj: ObjectId::Id(OpId(NonZeroU64::new(1).unwrap(), actor.clone())),
+            key: Key::Seq(ElementId::Id(OpId(
+                NonZeroU64::new(1).unwrap(),
+                actor.clone(),
+            ))),
             pred: vec![pred].into(),
             insert: true,
         }];
@@ -289,23 +337,41 @@ mod tests {
             vec![
                 ExpandedOp {
                     action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(1, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(1, actor.clone())].into()),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    )))),
+                    pred: Cow::Owned(vec![OpId(NonZeroU64::new(1).unwrap(), actor.clone())].into()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(2, actor.clone())].into()),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(2).unwrap(),
+                        actor.clone()
+                    )))),
+                    pred: Cow::Owned(vec![OpId(NonZeroU64::new(2).unwrap(), actor.clone())].into()),
                     insert: true
                 },
                 ExpandedOp {
                     action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(3, actor)].into()),
+                    obj: Cow::Owned(ObjectId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        actor.clone()
+                    ))),
+                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(
+                        NonZeroU64::new(3).unwrap(),
+                        actor.clone()
+                    )))),
+                    pred: Cow::Owned(vec![OpId(NonZeroU64::new(3).unwrap(), actor)].into()),
                     insert: true
                 },
             ]

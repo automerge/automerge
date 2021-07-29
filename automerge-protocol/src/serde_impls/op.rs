@@ -514,12 +514,14 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "ref": actor.op_id_at(2).to_string(),
+                    "ref": actor.op_id_at(NonZeroU64::new(2).unwrap()).to_string(),
                     "datatype": "cursor",
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Cursor(actor.op_id_at(2))),
+                    action: OpType::Set(ScalarValue::Cursor(
+                        actor.op_id_at(NonZeroU64::new(2).unwrap()),
+                    )),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,

@@ -8,7 +8,7 @@ fn test_msgpack_roundtrip_diff() {
     let diff = amp::RootDiff {
         props: hashmap! {
             "bird".into() => hashmap! {
-                actor.op_id_at(1) => "magpie".into()
+                actor.op_id_at(NonZeroU64::new(1).unwrap()) => "magpie".into()
             }
         },
     };
