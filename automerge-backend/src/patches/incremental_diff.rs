@@ -252,7 +252,7 @@ impl IncrementalPatch {
                     let op_id = workshop.make_external_opid(opid);
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
                         index: *index as u64,
-                        elem_id: op_id.clone().into(),
+                        elem_id: op_id.into(),
                         op_id: workshop.make_external_opid(&op.id),
                         value,
                     });
@@ -336,7 +336,7 @@ impl IncrementalPatch {
                     let op_id = workshop.make_external_opid(opid);
                     edits.append_edit(amp::DiffEdit::SingleElementInsert {
                         index: *index as u64,
-                        elem_id: op_id.clone().into(),
+                        elem_id: op_id.into(),
                         op_id: workshop.make_external_opid(&op.id),
                         value,
                     });
