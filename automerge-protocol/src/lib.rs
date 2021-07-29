@@ -6,7 +6,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
     iter::FromIterator,
-    num::{NonZeroU32, NonZeroU64},
+    num::{NonZeroU32, NonZeroU64, NonZeroUsize},
     slice::Iter,
 };
 
@@ -577,6 +577,89 @@ where
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct NonEmptyVec<T>(Vec<T>);
+
+impl<T> NonEmptyVec<T> {
+    pub fn new(item: T) -> Self {
+        Self(vec![item])
+    }
+
+    pub fn len(&self) -> NonZeroUsize {
+        NonZeroUsize::new(self.0.len()).unwrap()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.0.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.0.get_mut(index)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.0.iter()
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        self.0.as_slice()
+    }
+}
+
+impl<T> TryFrom<Vec<T>> for NonEmptyVec<T> {
+    type Error = ();
+
+    fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(())
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl<T> FromIterator<T> for NonEmptyVec<T> {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: std::iter::IntoIterator<Item = T>,
+    {
+        let inner: Vec<T> = iter.into_iter().collect();
+        if inner.is_empty() {
+            panic!("found non empty sequence")
+        } else {
+            Self(inner)
+        }
+    }
+}
+
+impl<T> IntoIterator for NonEmptyVec<T> {
+    type Item = T;
+
+    type IntoIter = <Vec<T> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'de, T> serde::Deserialize<'de> for NonEmptyVec<T>
+where
+    T: serde::Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = Vec::deserialize(deserializer)?;
+        if v.is_empty() {
+            Err(serde::de::Error::invalid_length(0, &"at least one"))
+        } else {
+            Ok(Self(v))
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct Op {
     pub action: OpType,
@@ -798,7 +881,7 @@ pub struct RootDiff {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "ops")]
-    pub operations: Vec<Op>,
+    pub operations: NonEmptyVec<Op>,
     #[serde(rename = "actor")]
     pub actor_id: ActorId,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -830,7 +913,7 @@ impl PartialEq for Change {
 impl Change {
     pub fn op_id_of(&self, index: u64) -> Option<OpId> {
         if let Ok(index_usize) = usize::try_from(index) {
-            if index_usize < self.operations.len() {
+            if index_usize < self.operations.len().get() {
                 return Some(
                     self.actor_id
                         .op_id_at(NonZeroU64::new(self.start_op.get() + index).unwrap()),

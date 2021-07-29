@@ -830,7 +830,7 @@ impl ChangeEncoder {
                 .append_value(actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq.get());
             self.max_op
-                .append_value(change.start_op.get() + change.operations.len() as u64 - 1);
+                .append_value(change.start_op.get() + change.operations.len().get() as u64 - 1);
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message.clone());
             self.deps_num.append_value(change.deps.len());
