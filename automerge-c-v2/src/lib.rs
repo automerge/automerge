@@ -334,7 +334,7 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let backend = get_backend_mut!(backend);
     let buffs = get_buff_mut!(buffs);
     let request: amp::Change = from_msgpack!(backend, request, len);
-    let (patch, mut change) = call_automerge!(backend, backend.apply_local_change(request));
+    let (patch, change) = call_automerge!(backend, backend.apply_local_change_mut(request));
     change.compress();
     backend.last_local_change = Some(change.raw_bytes().to_vec());
     backend.write_msgpack(&patch, buffs)

@@ -29,7 +29,7 @@ impl Automerge {
         if let Some(change) = change {
             let (patch, change) = self.backend.apply_local_change(change)?;
             self.frontend.apply_patch(patch)?;
-            self.stream.push(change);
+            self.stream.push(change.clone());
         }
         Ok(output)
     }

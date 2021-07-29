@@ -209,11 +209,11 @@ pub unsafe extern "C" fn automerge_apply_local_change(
     let request: Result<amp::Change, _> = serde_json::from_str(&request);
     match request {
         Ok(request) => {
-            let result = (*backend).apply_local_change(request);
+            let result = (*backend).apply_local_change_mut(request);
             match result {
-                Ok((patch, mut change)) => {
+                Ok((patch, change)) => {
                     change.compress();
-                    (*backend).last_local_change = Some(change);
+                    (*backend).last_local_change = Some(change.clone());
                     (*backend).generate_json(Ok(patch))
                 }
                 Err(err) => (*backend).handle_error(err),

@@ -124,7 +124,9 @@ pub fn b1_2(c: &mut Criterion) {
                         backend1.apply_local_change(doc1_insert_change).unwrap();
                     doc1.apply_patch(patch).unwrap();
 
-                    let patch2 = backend2.apply_changes(vec![change_to_send]).unwrap();
+                    let patch2 = backend2
+                        .apply_changes(vec![change_to_send.clone()])
+                        .unwrap();
                     doc2.apply_patch(patch2).unwrap();
                     (doc1, backend1, doc2, backend2)
                 })
@@ -173,7 +175,7 @@ pub fn b3_1(c: &mut Criterion) {
                             .unwrap()
                             .1
                             .unwrap();
-                        backend.apply_local_change(change).unwrap().1
+                        backend.apply_local_change(change).unwrap().1.clone()
                     })
                     .collect();
                 (local_doc, local_backend, updates)
