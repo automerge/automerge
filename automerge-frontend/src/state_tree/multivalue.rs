@@ -26,10 +26,10 @@ pub(crate) struct NewValueRequest<'a, 'c> {
 }
 
 /// A set of conflicting values for the same key, indexed by OpID
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultiValue {
-    winning_value: (amp::OpId, StateTreeValue),
-    conflicts: HashMap<amp::OpId, StateTreeValue>,
+    pub(super) winning_value: (amp::OpId, StateTreeValue),
+    pub(super) conflicts: HashMap<amp::OpId, StateTreeValue>,
 }
 
 impl MultiValue {
@@ -329,10 +329,10 @@ impl NewValue {
 
 /// This struct exists to constrain the values of a text type to just containing
 /// sequences of grapheme clusters
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MultiGrapheme {
-    winning_value: (amp::OpId, SmolStr),
-    conflicts: HashMap<amp::OpId, SmolStr>,
+    pub(super) winning_value: (amp::OpId, SmolStr),
+    pub(super) conflicts: HashMap<amp::OpId, SmolStr>,
 }
 
 impl MultiGrapheme {
