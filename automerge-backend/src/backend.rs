@@ -56,7 +56,7 @@ impl Backend {
         Ok(amp::Patch {
             diffs,
             deps,
-            max_op: NonZeroU64::new(self.op_set.max_op).unwrap(),
+            max_op: self.op_set.max_op,
             clock: self
                 .states
                 .iter()

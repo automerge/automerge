@@ -139,7 +139,7 @@ impl FrontendState {
 
                     *self = FrontendState::Reconciled {
                         reconciled_root_state,
-                        max_op: max_op.get(),
+                        max_op,
                         deps_of_last_received_patch,
                     }
                 } else {
@@ -159,7 +159,7 @@ impl FrontendState {
 
                 reconciled_root_state.apply_diff(checked_diff);
 
-                *max_op = patch.max_op.get();
+                *max_op = patch.max_op;
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
             }
