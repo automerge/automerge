@@ -39,19 +39,24 @@ impl Backend {
         diffs: amp::RootDiff,
         actor_seq: Option<(amp::ActorId, u64)>,
     ) -> Result<amp::Patch, AutomergeError> {
-        let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
-            let last_hash = self.get_hash(actor, *seq)?;
-            self.op_set
+        let (mut deps, actor, seq) = if let Some((actor, seq)) = actor_seq {
+            let last_hash = self.get_hash(&actor, seq)?;
+            let deps = self
+                .op_set
                 .deps
                 .iter()
                 .filter(|&dep| dep != &last_hash)
                 .copied()
-                .collect()
+                .collect::<Vec<_>>();
+            (deps, Some(actor), Some(seq))
         } else {
-            self.op_set.deps.iter().copied().collect()
+            let deps = self.op_set.deps.iter().copied().collect::<Vec<_>>();
+            (deps, None, None)
         };
         deps.sort_unstable();
+
         let pending_changes = self.get_missing_deps(&[]).len();
+
         Ok(amp::Patch {
             diffs,
             deps,
@@ -61,8 +66,8 @@ impl Backend {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.len() as u64))
                 .collect(),
-            actor: actor_seq.clone().map(|(actor, _)| actor),
-            seq: actor_seq.map(|(_, seq)| seq),
+            actor,
+            seq,
             pending_changes,
         })
     }
@@ -373,25 +378,38 @@ impl Backend {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
-        for head in self.queue.iter().flat_map(|change| &change.deps) {
-            if !self.history_index.contains_key(head) {
-                missing.insert(head);
+        for hash in self
+            .queue
+            .iter()
+            .flat_map(|change| &change.deps)
+            .chain(heads)
+        {
+            if !self.history_index.contains_key(hash) && !in_queue.contains(hash) {
+                missing.insert(hash);
             }
         }
 
-        for head in heads {
-            if !self.history_index.contains_key(head) {
-                missing.insert(head);
-            }
-        }
-
-        let mut missing = missing
-            .into_iter()
-            .filter(|hash| !in_queue.contains(hash))
-            .copied()
-            .collect::<Vec<_>>();
+        let mut missing = missing.into_iter().copied().collect::<Vec<_>>();
         missing.sort();
         missing
+    }
+
+    pub fn get_missing_deps_count(&self, heads: &[ChangeHash]) -> usize {
+        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
+        let mut missing = HashSet::new();
+
+        for hash in self
+            .queue
+            .iter()
+            .flat_map(|change| &change.deps)
+            .chain(heads)
+        {
+            if !self.history_index.contains_key(hash) && !in_queue.contains(hash) {
+                missing.insert(hash);
+            }
+        }
+
+        missing.len()
     }
 
     pub fn get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
