@@ -294,7 +294,7 @@ impl Encodable for u64 {
 
 impl Encodable for NonZeroU64 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        leb128::write::unsigned(buf, (*self).get())
+        (*self).get().encode(buf)
     }
 }
 

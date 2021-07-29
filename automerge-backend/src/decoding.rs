@@ -356,7 +356,7 @@ impl Decodable for NonZeroU64 {
     where
         R: Read,
     {
-        let u = leb128::read::unsigned(bytes).ok()?;
+        let u = u64::decode(bytes)?;
         NonZeroU64::new(u)
     }
 }

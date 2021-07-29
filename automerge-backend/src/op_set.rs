@@ -121,10 +121,6 @@ impl OpSet {
             }
         }
 
-        if matches!(op.action, InternalOpType::Make(_)) {
-            println!("make @ {:?}", op.id);
-        }
-
         let object_id = op.obj;
         let object = self.get_obj_mut(&object_id)?;
 
@@ -225,10 +221,9 @@ impl OpSet {
     }
 
     fn get_obj_mut(&mut self, object_id: &ObjectId) -> Result<&mut ObjState, AutomergeError> {
-        self.objs.get_mut(object_id).ok_or_else(|| {
-            dbg!(object_id);
-            AutomergeError::MissingObjectError
-        })
+        self.objs
+            .get_mut(object_id)
+            .ok_or(AutomergeError::MissingObjectError)
     }
 
     /// Update any cursors which will be affected by the changes in `pending`
