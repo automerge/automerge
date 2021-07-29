@@ -146,7 +146,7 @@ impl Backend {
 
     pub fn apply_local_change_mut(
         &mut self,
-        mut change: amp::Change,
+        change: amp::Change,
     ) -> Result<(amp::Patch, &mut Change), AutomergeError> {
         let (patch, change) = self.apply_local_change(change)?;
         let hash = change.hash;
