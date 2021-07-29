@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    error::Error,
-    fmt::Debug,
-    num::NonZeroU64,
-};
+use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug, num::NonZeroU64};
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
@@ -136,7 +130,7 @@ impl Frontend {
                     message: Some("Initialization".to_string()),
                     hash: None,
                     deps: Vec::new(),
-                    operations: init_ops.try_into().unwrap(),
+                    operations: init_ops,
                     extra_bytes: Vec::new(),
                 };
                 // Unwrap here is fine because it should be impossible to
@@ -192,7 +186,7 @@ impl Frontend {
                 message,
                 hash: None,
                 deps: change_result.deps,
-                operations: change_result.ops.try_into().unwrap(),
+                operations: change_result.ops,
                 extra_bytes: Vec::new(),
             };
             Ok((change_result.closure_result, Some(change)))

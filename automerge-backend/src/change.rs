@@ -142,7 +142,7 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     let message = message..bytes.len();
 
     let expanded_ops = ExpandedOpIterator::new(
-        change.operations.as_slice(),
+        &change.operations,
         change.start_op.get(),
         change.actor_id.clone(),
     );
@@ -827,7 +827,7 @@ fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp>
 
     for change in changes {
         for (i, op) in ExpandedOpIterator::new(
-            change.operations.as_slice(),
+            &change.operations,
             change.start_op.get(),
             change.actor_id.clone(),
         )
