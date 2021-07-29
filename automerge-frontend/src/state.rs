@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, num::NonZeroU64};
 
 use automerge_protocol as amp;
 
@@ -39,7 +39,7 @@ pub(crate) enum FrontendState {
     /// state.
     WaitingForInFlightRequests {
         /// The sequence numbers of in flight changes.
-        in_flight_requests: Vec<u64>,
+        in_flight_requests: Vec<NonZeroU64>,
         /// The optimistic version of the root state that the user manipulates.
         optimistic_root_state: OptimisticStateTree,
         /// Queued patches to be applied when we have no more in-flight requests.
@@ -51,7 +51,7 @@ pub(crate) enum FrontendState {
         /// need to do extra work when moving to the reconciled state.
         seen_non_local_patch: bool,
         /// The maximum operation observed.
-        max_op: u64,
+        max_op: NonZeroU64,
     },
     /// The backend has processed all changes and we no longer wait for anything.
     Reconciled {
@@ -139,7 +139,7 @@ impl FrontendState {
 
                     *self = FrontendState::Reconciled {
                         reconciled_root_state,
-                        max_op,
+                        max_op: max_op.get(),
                         deps_of_last_received_patch,
                     }
                 } else {
@@ -159,7 +159,7 @@ impl FrontendState {
 
                 reconciled_root_state.apply_diff(checked_diff);
 
-                *max_op = patch.max_op;
+                *max_op = patch.max_op.get();
                 *deps_of_last_received_patch = patch.deps;
                 Ok(())
             }
@@ -196,7 +196,7 @@ impl FrontendState {
         &mut self,
         actor: &amp::ActorId,
         change_closure: F,
-        seq: u64,
+        seq: NonZeroU64,
     ) -> Result<OptimisticChangeResult<O>, E>
     where
         E: Error,
@@ -210,7 +210,7 @@ impl FrontendState {
                 ..
             } => {
                 let mut mutation_tracker =
-                    MutationTracker::new(optimistic_root_state, *max_op, actor.clone());
+                    MutationTracker::new(optimistic_root_state, (*max_op).get(), actor.clone());
 
                 let result = match change_closure(&mut mutation_tracker) {
                     Ok(result) => result,
@@ -222,7 +222,7 @@ impl FrontendState {
                 };
 
                 let (ops, mt_max_op) = mutation_tracker.commit();
-                *max_op = mt_max_op;
+                *max_op = NonZeroU64::new(mt_max_op).unwrap();
                 if !ops.is_empty() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
@@ -268,7 +268,7 @@ impl FrontendState {
                         optimistic_root_state,
                         queued_diffs: Vec::new(),
                         seen_non_local_patch: false,
-                        max_op: *max_op,
+                        max_op: NonZeroU64::new(*max_op).unwrap(),
                     }
                 } else {
                     // we can remain in the reconciled frontend state since we didn't make a change
@@ -285,7 +285,7 @@ impl FrontendState {
         }
     }
 
-    pub(crate) fn in_flight_requests(&self) -> Vec<u64> {
+    pub(crate) fn in_flight_requests(&self) -> Vec<NonZeroU64> {
         match self {
             FrontendState::WaitingForInFlightRequests {
                 in_flight_requests, ..
@@ -296,7 +296,7 @@ impl FrontendState {
 
     pub(crate) fn max_op(&self) -> u64 {
         match self {
-            FrontendState::WaitingForInFlightRequests { max_op, .. } => *max_op,
+            FrontendState::WaitingForInFlightRequests { max_op, .. } => (*max_op).get(),
             FrontendState::Reconciled { max_op, .. } => *max_op,
         }
     }

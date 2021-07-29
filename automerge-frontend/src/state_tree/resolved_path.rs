@@ -1,7 +1,7 @@
 use std::{
     convert::TryInto,
     mem::{discriminant, Discriminant},
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroU64},
 };
 
 use amp::SortedVec;
@@ -256,7 +256,7 @@ impl<'a> ResolvedPathMut<'a> {
 }
 
 pub(crate) struct SetOrInsertPayload<'a, T> {
-    pub start_op: u64,
+    pub start_op: NonZeroU64,
     pub actor: &'a amp::ActorId,
     pub value: T,
 }
@@ -582,7 +582,10 @@ impl<'a> ResolvedTextMut<'a> {
         let mut values = Vec::with_capacity(payload.value.len());
         let mut chars: Vec<amp::ScalarValue> = Vec::with_capacity(payload.value.len());
         for (i, c) in payload.value.enumerate() {
-            let insert_op = amp::OpId::new(payload.start_op + i as u64, payload.actor);
+            let insert_op = amp::OpId::new(
+                NonZeroU64::new(payload.start_op.get() + i as u64).unwrap(),
+                payload.actor,
+            );
             chars.push(amp::ScalarValue::Str(c.clone()));
             let c = MultiGrapheme::new_from_grapheme_cluster(insert_op, c);
             values.push(c)
@@ -807,7 +810,7 @@ impl<'a> ResolvedListMut<'a> {
                 pred: SortedVec::new(),
             });
             last_elemid = amp::OpId::new(op_num, payload.actor).into();
-            op_num = newvalue.max_op() + 1;
+            op_num = NonZeroU64::new(newvalue.max_op().get() + 1).unwrap();
             let (multivalue, new_ops, _new_cursors) = newvalue.finish();
             newvalues.push(multivalue);
             ops.extend(new_ops);

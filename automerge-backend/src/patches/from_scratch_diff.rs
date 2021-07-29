@@ -97,7 +97,7 @@ fn construct_list(
     let mut seen_indices: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     for opid in &object.seq {
-        max_counter = max(max_counter, opid.0);
+        max_counter = max(max_counter, opid.0.get());
         let key = (*opid).into(); // FIXME - something is wrong here
         if let Some(ops) = object.props.get(&key) {
             if !ops.is_empty() {
@@ -148,7 +148,7 @@ fn construct_text(
     let mut seen_indices: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     for opid in &object.seq {
-        max_counter = max(max_counter, opid.0);
+        max_counter = max(max_counter, opid.0.get());
         let key = (*opid).into(); // FIXME - something is wrong here
         if let Some(ops) = object.props.get(&key) {
             if !ops.is_empty() {

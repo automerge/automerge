@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::HashMap, iter::Iterator};
+use std::{cmp::Ordering, collections::HashMap, iter::Iterator, num::NonZeroU64};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -17,7 +17,7 @@ use crate::{
 
 pub(crate) struct NewValueRequest<'a, 'c> {
     pub(crate) actor: &'a amp::ActorId,
-    pub(crate) start_op: u64,
+    pub(crate) start_op: NonZeroU64,
     pub(crate) key: amp::Key,
     pub(crate) value: Value,
     pub(crate) parent_obj: &'c amp::ObjectId,
@@ -72,7 +72,7 @@ impl MultiValue {
 
     pub(super) fn new_from_value(
         actor: &amp::ActorId,
-        start_op: u64,
+        start_op: NonZeroU64,
         parent_id: amp::ObjectId,
         key: amp::Key,
         value: Value,
@@ -310,11 +310,11 @@ pub(super) struct NewValue {
     opid: amp::OpId,
     ops: Vec<amp::Op>,
     new_cursors: Cursors,
-    max_op: u64,
+    max_op: NonZeroU64,
 }
 
 impl NewValue {
-    pub(super) fn max_op(&self) -> u64 {
+    pub(super) fn max_op(&self) -> NonZeroU64 {
         self.max_op
     }
 
@@ -527,7 +527,7 @@ where
     O: Clone,
 {
     pub(crate) actor: &'a amp::ActorId,
-    pub(crate) start_op: u64,
+    pub(crate) start_op: NonZeroU64,
     pub(crate) key: amp::Key,
     pub(crate) parent_obj: O,
     pub(crate) insert: bool,
@@ -572,7 +572,7 @@ where
             let context = NewValueContext {
                 actor: self.actor,
                 parent_obj: &make_op_id,
-                start_op: current_max_op + 1,
+                start_op: NonZeroU64::new(current_max_op.get() + 1).unwrap(),
                 key: amp::Key::Map(prop.clone()),
                 pred: SortedVec::new(),
                 insert: false,
@@ -621,9 +621,11 @@ where
         let mut result_elems: Vec<MultiValue> = Vec::with_capacity(values.len());
         let mut last_elemid = amp::ElementId::Head;
         for value in values {
-            let elem_opid = self.actor.op_id_at(current_max_op + 1);
+            let elem_opid = self
+                .actor
+                .op_id_at(NonZeroU64::new(current_max_op.get() + 1).unwrap());
             let context = NewValueContext {
-                start_op: current_max_op + 1,
+                start_op: NonZeroU64::new(current_max_op.get() + 1).unwrap(),
                 pred: SortedVec::new(),
                 insert: true,
                 key: amp::Key::Seq(last_elemid),
@@ -668,7 +670,7 @@ where
         let mut last_elemid = amp::ElementId::Head;
         let mut multigraphemes: Vec<MultiGrapheme> = Vec::with_capacity(graphemes.len());
         for grapheme in graphemes.iter() {
-            current_max_op += 1;
+            current_max_op = NonZeroU64::new(current_max_op.get() + 1).unwrap();
             let opid = self.actor.op_id_at(current_max_op);
             let op = amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str(grapheme.clone())),

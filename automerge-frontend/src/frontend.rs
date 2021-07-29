@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug};
+use std::{collections::HashMap, convert::TryFrom, error::Error, fmt::Debug, num::NonZeroU64};
 
 use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ObjectId, OpId, Patch};
@@ -106,26 +106,27 @@ impl Frontend {
         match &initial_state {
             Value::Map(kvs) => {
                 let mut front = Frontend::new();
-                let (init_ops, _) =
-                    kvs.iter()
-                        .fold((Vec::new(), 1), |(mut ops, max_op), (k, v)| {
-                            let (more_ops, max_op) = value::value_to_op_requests(
-                                &front.actor_id,
-                                max_op,
-                                ObjectId::Root,
-                                &amp::Key::Map(k.clone()),
-                                v,
-                                false,
-                            );
-                            ops.extend(more_ops);
-                            (ops, max_op)
-                        });
+                let (init_ops, _) = kvs.iter().fold(
+                    (Vec::new(), NonZeroU64::new(1).unwrap()),
+                    |(mut ops, max_op), (k, v)| {
+                        let (more_ops, max_op) = value::value_to_op_requests(
+                            &front.actor_id,
+                            max_op,
+                            ObjectId::Root,
+                            &amp::Key::Map(k.clone()),
+                            v,
+                            false,
+                        );
+                        ops.extend(more_ops);
+                        (ops, max_op)
+                    },
+                );
 
                 let init_change_request = amp::Change {
                     actor_id: front.actor_id.clone(),
-                    start_op: 1,
+                    start_op: NonZeroU64::new(1).unwrap(),
                     time: (front.timestamper)().unwrap_or(0),
-                    seq: 1,
+                    seq: NonZeroU64::new(1).unwrap(),
                     message: Some("Initialization".to_string()),
                     hash: None,
                     deps: Vec::new(),
@@ -168,17 +169,19 @@ impl Frontend {
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
-        let start_op = self.state.max_op() + 1;
-        let change_result =
-            self.state
-                .optimistically_apply_change(&self.actor_id, change_closure, self.seq + 1)?;
+        let start_op = NonZeroU64::new(self.state.max_op() + 1).unwrap();
+        let change_result = self.state.optimistically_apply_change(
+            &self.actor_id,
+            change_closure,
+            NonZeroU64::new(self.seq + 1).unwrap(),
+        )?;
         self.cached_value = None;
         if !change_result.ops.is_empty() {
             self.seq += 1;
             let change = amp::Change {
                 start_op,
                 actor_id: self.actor_id.clone(),
-                seq: self.seq,
+                seq: NonZeroU64::new(self.seq).unwrap(),
                 time: (self.timestamper)().unwrap_or(0),
                 message,
                 hash: None,
@@ -195,8 +198,8 @@ impl Frontend {
     pub fn apply_patch(&mut self, patch: Patch) -> Result<(), InvalidPatch> {
         self.cached_value = None;
         if let Some(seq) = patch.clock.get(&self.actor_id) {
-            if *seq > self.seq {
-                self.seq = *seq;
+            if (*seq).get() > self.seq {
+                self.seq = (*seq).get();
             }
         }
         self.state.apply_remote_patch(&self.actor_id, patch)?;
@@ -207,7 +210,7 @@ impl Frontend {
         self.state.get_object_id(path)
     }
 
-    pub fn in_flight_requests(&self) -> Vec<u64> {
+    pub fn in_flight_requests(&self) -> Vec<NonZeroU64> {
         self.state.in_flight_requests()
     }
 

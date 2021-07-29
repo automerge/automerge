@@ -1,5 +1,5 @@
 //use std::error::Error;
-use std::fmt::Debug;
+use std::{fmt::Debug, num::NonZeroU64};
 
 use automerge_protocol as amp;
 use thiserror::Error;
@@ -39,7 +39,7 @@ pub enum AutomergeError {
     #[error("Diverged state {0}")]
     DivergedState(String),
     #[error("Invalid seq {0}")]
-    InvalidSeq(u64),
+    InvalidSeq(NonZeroU64),
     #[error("Map key in seq")]
     MapKeyInSeq,
     #[error("Head to opid")]

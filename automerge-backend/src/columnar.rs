@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     io,
     io::{Read, Write},
+    num::NonZeroU64,
     ops::Range,
     str,
 };
@@ -167,7 +168,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
     fn next(&mut self) -> Option<DocOp> {
         let action = self.action.next()??;
         let actor = self.actor.next()??;
-        let ctr = self.ctr.next()??;
+        let ctr = NonZeroU64::new(self.ctr.next()??).unwrap();
         let insert = self.insert.next()?;
         let obj = self.objs.next()?;
         let key = self.keys.next()?;
@@ -262,7 +263,7 @@ impl<'a> Iterator for ChangeIterator<'a> {
     type Item = DocChange;
     fn next(&mut self) -> Option<DocChange> {
         let actor = self.actor.next()??;
-        let seq = self.seq.next()??;
+        let seq = NonZeroU64::new(self.seq.next()??).unwrap();
         let max_op = self.max_op.next()??;
         let time = self.time.next()?? as i64;
         let message = self.message.next()?;
@@ -283,7 +284,7 @@ pub struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
     pub(crate) actors: &'a [amp::ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
-    pub(crate) ctr: RleDecoder<'a, u64>,
+    pub(crate) ctr: RleDecoder<'a, NonZeroU64>,
 }
 
 pub struct DepsIterator<'a> {
@@ -330,7 +331,7 @@ pub struct ValueIterator<'a> {
     pub(crate) val_len: RleDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,
     pub(crate) actor: RleDecoder<'a, usize>,
-    pub(crate) ctr: RleDecoder<'a, u64>,
+    pub(crate) ctr: RleDecoder<'a, NonZeroU64>,
 }
 
 impl<'a> Iterator for DepsIterator<'a> {
@@ -366,7 +367,7 @@ impl<'a> Iterator for PredIterator<'a> {
             let actor = self.pred_actor.next()??;
             let ctr = self.pred_ctr.next()??;
             let actor_id = self.actors.get(actor)?.clone();
-            let op_id = amp::OpId::new(ctr, &actor_id);
+            let op_id = amp::OpId::new(NonZeroU64::new(ctr).unwrap(), &actor_id);
             p.push(op_id);
         }
         Some(SortedVec::from(p))
@@ -374,13 +375,13 @@ impl<'a> Iterator for PredIterator<'a> {
 }
 
 impl<'a> Iterator for SuccIterator<'a> {
-    type Item = Vec<(u64, usize)>;
-    fn next(&mut self) -> Option<Vec<(u64, usize)>> {
+    type Item = Vec<(NonZeroU64, usize)>;
+    fn next(&mut self) -> Option<Vec<(NonZeroU64, usize)>> {
         let num = self.succ_num.next()??;
         let mut p = Vec::with_capacity(num);
         for _ in 0..num {
             let actor = self.succ_actor.next()??;
-            let ctr = self.succ_ctr.next()??;
+            let ctr = NonZeroU64::new(self.succ_ctr.next()??).unwrap();
             p.push((ctr, actor));
         }
         Some(p)
@@ -481,7 +482,7 @@ impl<'a> Iterator for KeyIterator<'a> {
             (None, Some(0), None) => Some(amp::Key::head()),
             (Some(actor), Some(ctr), None) => {
                 let actor_id = self.actors.get(actor)?;
-                Some(amp::OpId::new(ctr, actor_id).into())
+                Some(amp::OpId::new(NonZeroU64::new(ctr).unwrap(), actor_id).into())
             }
             _ => None,
         }
@@ -503,7 +504,7 @@ impl<'a> Iterator for ObjIterator<'a> {
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) struct DocChange {
     pub actor: usize,
-    pub seq: u64,
+    pub seq: NonZeroU64,
     pub max_op: u64,
     pub time: i64,
     pub message: Option<String>,
@@ -514,12 +515,12 @@ pub(crate) struct DocChange {
 #[derive(Debug, Clone)]
 pub(crate) struct DocOp {
     pub actor: usize,
-    pub ctr: u64,
+    pub ctr: NonZeroU64,
     pub action: InternalOpType,
     pub obj: amp::ObjectId,
     pub key: amp::Key,
-    pub succ: Vec<(u64, usize)>,
-    pub pred: Vec<(u64, usize)>,
+    pub succ: Vec<(NonZeroU64, usize)>,
+    pub pred: Vec<(NonZeroU64, usize)>,
     pub insert: bool,
 }
 
@@ -546,7 +547,7 @@ impl Eq for DocOp {}
 struct ValEncoder {
     len: RleEncoder<usize>,
     ref_actor: RleEncoder<usize>,
-    ref_counter: RleEncoder<u64>,
+    ref_counter: RleEncoder<NonZeroU64>,
     raw: Vec<u8>,
 }
 
@@ -662,7 +663,7 @@ impl KeyEncoder {
             }
             amp::Key::Seq(amp::ElementId::Id(amp::OpId(ctr, actor))) => {
                 self.actor.append_value(map_actor(&actor, actors));
-                self.ctr.append_value(ctr);
+                self.ctr.append_value(ctr.get());
                 self.str.append_null();
             }
         }
@@ -692,10 +693,10 @@ impl SuccEncoder {
         }
     }
 
-    fn append(&mut self, succ: &[(u64, usize)]) {
+    fn append(&mut self, succ: &[(NonZeroU64, usize)]) {
         self.num.append_value(succ.len());
         for s in succ.iter() {
-            self.ctr.append_value(s.0);
+            self.ctr.append_value(s.0.get());
             self.actor.append_value(s.1);
         }
     }
@@ -729,7 +730,7 @@ impl PredEncoder {
     fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<amp::ActorId>) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
-            self.ctr.append_value(p.0);
+            self.ctr.append_value(p.0.get());
             self.actor.append_value(map_actor(&p.1, actors));
         }
     }
@@ -766,7 +767,7 @@ impl ObjEncoder {
             }
             amp::ObjectId::Id(amp::OpId(ctr, actor)) => {
                 self.actor.append_value(map_actor(actor, actors));
-                self.ctr.append_value(*ctr);
+                self.ctr.append_value((*ctr).get());
             }
         }
     }
@@ -827,9 +828,9 @@ impl ChangeEncoder {
             }
             self.actor
                 .append_value(actors.iter().position(|a| a == &change.actor_id).unwrap());
-            self.seq.append_value(change.seq);
+            self.seq.append_value(change.seq.get());
             self.max_op
-                .append_value(change.start_op + change.operations.len() as u64 - 1);
+                .append_value(change.start_op.get() + change.operations.len() as u64 - 1);
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message.clone());
             self.deps_num.append_value(change.deps.len());
@@ -929,7 +930,7 @@ impl DocOpEncoder {
     {
         for op in ops {
             self.actor.append_value(op.actor);
-            self.ctr.append_value(op.ctr);
+            self.ctr.append_value(op.ctr.get());
             self.obj.append(&op.obj, actors);
             self.key.append(op.key, actors);
             self.insert.append(op.insert);

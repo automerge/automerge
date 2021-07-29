@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, num::NonZeroU64};
 
 use amp::{ActorId, ElementId, Key, OpId, SortedVec};
 use automerge_protocol as amp;
@@ -89,7 +89,7 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
                         Cow::Borrowed(&op.key)
                     } else {
                         Cow::Owned(Key::Seq(ElementId::Id(OpId(
-                            self.op_num - 1,
+                            NonZeroU64::new(self.op_num - 1).unwrap(),
                             self.actor.clone(),
                         ))))
                     };

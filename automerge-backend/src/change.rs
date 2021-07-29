@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::{TryFrom, TryInto},
     io::{Read, Write},
+    num::NonZeroU64,
     ops::Range,
     str,
 };
@@ -140,8 +141,11 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
-    let expanded_ops =
-        ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone());
+    let expanded_ops = ExpandedOpIterator::new(
+        &change.operations,
+        change.start_op.get(),
+        change.actor_id.clone(),
+    );
 
     // encode ops into a side buffer - collect all other actors
     let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
@@ -224,8 +228,8 @@ pub struct Change {
     bytes: ChangeBytes,
     body_start: usize,
     pub hash: amp::ChangeHash,
-    pub seq: u64,
-    pub start_op: u64,
+    pub seq: NonZeroU64,
+    pub start_op: NonZeroU64,
     pub time: i64,
     message: Range<usize>,
     actors: Vec<amp::ActorId>,
@@ -248,10 +252,10 @@ impl Change {
         decode_change(bytes)
     }
 
-    pub fn max_op(&self) -> u64 {
+    pub fn max_op(&self) -> NonZeroU64 {
         // TODO - this could be a lot more efficient
         let len = self.iter_ops().count();
-        self.start_op + (len as u64) - 1
+        NonZeroU64::new(self.start_op.get() + (len as u64) - 1).unwrap()
     }
 
     fn message(&self) -> Option<String> {
@@ -591,7 +595,7 @@ fn group_doc_change_and_doc_ops(
 
     for (i, change) in changes.iter().enumerate() {
         let actor_change_index = changes_by_actor.entry(change.actor).or_default();
-        if change.seq != (actor_change_index.len() + 1) as u64 {
+        if change.seq.get() != (actor_change_index.len() + 1) as u64 {
             return Err(decoding::Error::ChangeDecompressFailed(
                 "Doc Seq Invalid".into(),
             ));
@@ -645,7 +649,7 @@ fn group_doc_change_and_doc_ops(
         let mut right = actor_change_index.len();
         while left < right {
             let seq = (left + right) / 2;
-            if changes[actor_change_index[seq]].max_op < op.ctr {
+            if changes[actor_change_index[seq]].max_op < op.ctr.get() {
                 left = seq + 1;
             } else {
                 right = seq;
@@ -667,7 +671,7 @@ fn group_doc_change_and_doc_ops(
 }
 
 fn pred_into(
-    pred: impl Iterator<Item = (u64, usize)>,
+    pred: impl Iterator<Item = (NonZeroU64, usize)>,
     actors: &[amp::ActorId],
 ) -> SortedVec<amp::OpId> {
     pred.map(|(ctr, actor)| amp::OpId(ctr, actors[actor].clone()))
@@ -683,7 +687,7 @@ fn doc_changes_to_uncompressed_changes<'a>(
         actor_id: actors[change.actor].clone(),
         seq: change.seq,
         time: change.time,
-        start_op: change.max_op - change.ops.len() as u64 + 1,
+        start_op: NonZeroU64::new(change.max_op - change.ops.len() as u64 + 1).unwrap(),
         hash: None,
         message: change.message,
         operations: change
@@ -822,12 +826,18 @@ fn group_doc_ops(changes: &[amp::Change], actors: &[amp::ActorId]) -> Vec<DocOp>
     let mut ops = Vec::new();
 
     for change in changes {
-        for (i, op) in
-            ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone())
-                .enumerate()
+        for (i, op) in ExpandedOpIterator::new(
+            &change.operations,
+            change.start_op.get(),
+            change.actor_id.clone(),
+        )
+        .enumerate()
         {
             //for (i, op) in change.operations.iter().enumerate() {
-            let opid = amp::OpId(change.start_op + i as u64, change.actor_id.clone());
+            let opid = amp::OpId(
+                NonZeroU64::new(change.start_op.get() + i as u64).unwrap(),
+                change.actor_id.clone(),
+            );
             let objid = op.obj.clone();
             if let InternalOpType::Make(obj_type) = op.action {
                 if obj_type.is_sequence() {

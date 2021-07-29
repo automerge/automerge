@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use automerge_protocol as amp;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -146,7 +148,7 @@ impl<'a> MutationTracker<'a> {
     }
 
     fn apply_state_change(&mut self, change: LocalOperationResult) {
-        self.max_op += change.new_ops.len() as u64;
+        self.max_op = change.new_ops.len() as u64;
         self.ops.extend(change.new_ops);
     }
 
@@ -167,7 +169,7 @@ impl<'a> MutationTracker<'a> {
                 match parent {
                     ResolvedPathMut::List(mut list_target) => {
                         let payload = SetOrInsertPayload {
-                            start_op: self.max_op + 1,
+                            start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                             actor: &self.actor_id.clone(),
                             value: values,
                         };
@@ -199,7 +201,7 @@ impl<'a> MutationTracker<'a> {
                             }
                         }
                         let payload = SetOrInsertPayload {
-                            start_op: self.max_op + 1,
+                            start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                             actor: &self.actor_id.clone(),
                             value: chars.into_iter(),
                         };
@@ -254,7 +256,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 ResolvedPathMut::Root(ref mut root_target),
                             ) => {
                                 let payload = SetOrInsertPayload {
-                                    start_op: self.max_op + 1,
+                                    start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
@@ -263,7 +265,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             (PathElement::Key(ref k), ResolvedPathMut::Map(ref mut maptarget)) => {
                                 let payload = SetOrInsertPayload {
-                                    start_op: self.max_op + 1,
+                                    start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
@@ -275,7 +277,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                 ResolvedPathMut::Table(ref mut tabletarget),
                             ) => {
                                 let payload = SetOrInsertPayload {
-                                    start_op: self.max_op + 1,
+                                    start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
@@ -291,7 +293,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                             }
                             (PathElement::Index(i), ResolvedPathMut::List(ref mut list_target)) => {
                                 let payload = SetOrInsertPayload {
-                                    start_op: self.max_op + 1,
+                                    start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                                     actor: &self.actor_id.clone(),
                                     value,
                                 };
@@ -303,7 +305,7 @@ impl<'a> MutableDocument for MutationTracker<'a> {
                                     Value::Primitive(Primitive::Str(s)) => {
                                         if s.graphemes(true).count() == 1 {
                                             let payload = SetOrInsertPayload {
-                                                start_op: self.max_op + 1,
+                                                start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
                                                 actor: &self.actor_id.clone(),
                                                 value: s,
                                             };

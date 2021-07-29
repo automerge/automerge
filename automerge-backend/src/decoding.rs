@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
+use std::{borrow::Cow, convert::TryFrom, io, io::Read, num::NonZeroU64, str};
 
 use automerge_protocol as amp;
 use smol_str::SmolStr;
@@ -348,6 +348,16 @@ impl Decodable for u64 {
         R: Read,
     {
         leb128::read::unsigned(bytes).ok()
+    }
+}
+
+impl Decodable for NonZeroU64 {
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        let u = leb128::read::unsigned(bytes).ok()?;
+        NonZeroU64::new(u)
     }
 }
 

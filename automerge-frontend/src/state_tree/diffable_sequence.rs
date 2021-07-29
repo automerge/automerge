@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU64};
 
 use amp::{ActorId, OpId};
 use automerge_protocol as amp;
@@ -43,7 +43,10 @@ impl DiffableValue for MultiGrapheme {
         std::mem::replace(
             self,
             Self {
-                winning_value: (amp::OpId(0, ActorId::from(&[][..])), SmolStr::default()),
+                winning_value: (
+                    amp::OpId(NonZeroU64::new(1).unwrap(), ActorId::from(&[][..])),
+                    SmolStr::default(),
+                ),
                 conflicts: HashMap::default(),
             },
         )
@@ -101,7 +104,7 @@ impl DiffableValue for MultiValue {
             self,
             Self {
                 winning_value: (
-                    amp::OpId(0, ActorId::from(&[][..])),
+                    amp::OpId(NonZeroU64::new(1).unwrap(), ActorId::from(&[][..])),
                     StateTreeValue::default(),
                 ),
                 conflicts: HashMap::default(),

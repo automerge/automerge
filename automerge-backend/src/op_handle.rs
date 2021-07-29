@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     fmt,
     hash::{Hash, Hasher},
+    num::NonZeroU64,
     ops::Deref,
 };
 
@@ -29,7 +30,7 @@ impl OpHandle {
             .map(|op| {
                 let internal_op = actors.import_op(op);
                 let id = OpId(opnum, actor);
-                opnum += 1;
+                opnum = NonZeroU64::new(opnum.get() + 1).unwrap();
                 OpHandle {
                     id,
                     op: internal_op,

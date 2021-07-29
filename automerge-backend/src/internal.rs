@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use automerge_protocol as amp;
 use nonzero_ext::nonzero;
 use smol_str::SmolStr;
@@ -6,7 +8,7 @@ use smol_str::SmolStr;
 pub(crate) struct ActorId(pub usize);
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
-pub(crate) struct OpId(pub u64, pub ActorId);
+pub(crate) struct OpId(pub NonZeroU64, pub ActorId);
 
 #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
 pub(crate) enum ObjectId {

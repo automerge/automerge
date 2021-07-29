@@ -3,6 +3,7 @@ use std::{
     io,
     io::{Read, Write},
     mem,
+    num::NonZeroU64,
 };
 
 use automerge_protocol as amp;
@@ -288,6 +289,12 @@ impl Encodable for Option<String> {
 impl Encodable for u64 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         leb128::write::unsigned(buf, *self)
+    }
+}
+
+impl Encodable for NonZeroU64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        leb128::write::unsigned(buf, (*self).get())
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, num::NonZeroU64};
 
 use amp::{ElementId, SortedVec};
 use automerge_protocol as amp;
@@ -844,7 +844,7 @@ impl StateTreeList {
 }
 
 pub fn random_op_id() -> amp::OpId {
-    amp::OpId::new(1, &amp::ActorId::random())
+    amp::OpId::new(NonZeroU64::new(1).unwrap(), &amp::ActorId::random())
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -2,7 +2,7 @@ mod conflicts;
 mod cursor;
 mod primitive;
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, num::NonZeroU64};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -273,12 +273,12 @@ impl AsRef<Value> for Value {
 /// Returns a vector of the op requests which will create this value
 pub(crate) fn value_to_op_requests(
     actor: &amp::ActorId,
-    start_op: u64,
+    start_op: NonZeroU64,
     parent_object: amp::ObjectId,
     key: &amp::Key,
     v: &Value,
     insert: bool,
-) -> (Vec<amp::Op>, u64) {
+) -> (Vec<amp::Op>, NonZeroU64) {
     match v {
         Value::List(vs) => {
             let list_op = amp::OpId(start_op, actor.clone());
@@ -289,7 +289,7 @@ pub(crate) fn value_to_op_requests(
                 insert,
                 pred: SortedVec::new(),
             };
-            let mut op_num = start_op + 1;
+            let mut op_num = NonZeroU64::new(start_op.get() + 1).unwrap();
             let mut result = vec![make_op];
             let mut last_elemid = amp::ElementId::Head;
             for v in vs.iter() {
@@ -318,7 +318,7 @@ pub(crate) fn value_to_op_requests(
             };
             let mut insert_ops: Vec<amp::Op> = Vec::new();
             let mut last_elemid = amp::ElementId::Head;
-            let mut op_num = start_op + 1;
+            let mut op_num = NonZeroU64::new(start_op.get() + 1).unwrap();
             for c in chars.iter() {
                 insert_ops.push(amp::Op {
                     action: amp::OpType::Set(amp::ScalarValue::Str(c.clone())),
@@ -328,7 +328,7 @@ pub(crate) fn value_to_op_requests(
                     pred: SortedVec::new(),
                 });
                 last_elemid = amp::OpId::new(op_num, actor).into();
-                op_num += 1;
+                op_num = NonZeroU64::new(op_num.get() + 1).unwrap();
             }
             let mut ops = vec![make_op];
             ops.extend(insert_ops.into_iter());
@@ -343,7 +343,7 @@ pub(crate) fn value_to_op_requests(
                 insert,
                 pred: SortedVec::new(),
             };
-            let mut op_num = start_op + 1;
+            let mut op_num = NonZeroU64::new(start_op.get() + 1).unwrap();
             let mut result = vec![make_op];
             for (key, v) in kvs.iter() {
                 let (child_requests, new_op_num) = value_to_op_requests(
@@ -368,7 +368,7 @@ pub(crate) fn value_to_op_requests(
                 insert,
                 pred: SortedVec::new(),
             };
-            let mut op_num = start_op + 1;
+            let mut op_num = NonZeroU64::new(start_op.get() + 1).unwrap();
             let mut result = vec![make_op];
             for (key, v) in kvs.iter() {
                 let (child_requests, new_op_num) = value_to_op_requests(
@@ -392,7 +392,7 @@ pub(crate) fn value_to_op_requests(
                 insert,
                 pred: SortedVec::new(),
             }];
-            (ops, start_op + 1)
+            (ops, NonZeroU64::new(start_op.get() + 1).unwrap())
         }
     }
 }

@@ -6,7 +6,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
     iter::FromIterator,
-    num::NonZeroU32,
+    num::{NonZeroU32, NonZeroU64},
     slice::Iter,
 };
 
@@ -49,7 +49,7 @@ impl ActorId {
         hex::encode(&self.0)
     }
 
-    pub fn op_id_at(&self, seq: u64) -> OpId {
+    pub fn op_id_at(&self, seq: NonZeroU64) -> OpId {
         OpId(seq, self.clone())
     }
 }
@@ -115,25 +115,25 @@ pub enum SequenceType {
 
 #[derive(Eq, PartialEq, Hash, Clone)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
-pub struct OpId(pub u64, pub ActorId);
+pub struct OpId(pub NonZeroU64, pub ActorId);
 
 impl OpId {
-    pub fn new(seq: u64, actor: &ActorId) -> OpId {
+    pub fn new(seq: NonZeroU64, actor: &ActorId) -> OpId {
         OpId(seq, actor.clone())
     }
 
-    pub fn counter(&self) -> u64 {
+    pub fn counter(&self) -> NonZeroU64 {
         self.0
     }
 
     pub fn increment_by(&self, by: u64) -> OpId {
-        OpId(self.0 + by, self.1.clone())
+        OpId(NonZeroU64::new(self.0.get() + by).unwrap(), self.1.clone())
     }
 
     /// Returns true if `other` has the same actor ID, and their counter is `delta` greater than
     /// ours.
     pub fn delta(&self, other: &Self, delta: u64) -> bool {
-        self.1 == other.1 && self.0 + delta == other.0
+        self.1 == other.1 && self.0.get() + delta == other.0.get()
     }
 }
 
@@ -778,10 +778,10 @@ pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub actor: Option<ActorId>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u64>,
-    pub clock: HashMap<ActorId, u64>,
+    pub seq: Option<NonZeroU64>,
+    pub clock: HashMap<ActorId, NonZeroU64>,
     pub deps: Vec<ChangeHash>,
-    pub max_op: u64,
+    pub max_op: NonZeroU64,
     pub pending_changes: usize,
     //    pub can_undo: bool,
     //    pub can_redo: bool,
@@ -803,9 +803,9 @@ pub struct Change {
     pub actor_id: ActorId,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hash: Option<ChangeHash>,
-    pub seq: u64,
+    pub seq: NonZeroU64,
     #[serde(rename = "startOp")]
-    pub start_op: u64,
+    pub start_op: NonZeroU64,
     pub time: i64,
     pub message: Option<String>,
     pub deps: Vec<ChangeHash>,
@@ -831,7 +831,10 @@ impl Change {
     pub fn op_id_of(&self, index: u64) -> Option<OpId> {
         if let Ok(index_usize) = usize::try_from(index) {
             if index_usize < self.operations.len() {
-                return Some(self.actor_id.op_id_at(self.start_op + index));
+                return Some(
+                    self.actor_id
+                        .op_id_at(NonZeroU64::new(self.start_op.get() + index).unwrap()),
+                );
             }
         }
         None

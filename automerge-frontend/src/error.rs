@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, num::NonZeroU64};
 
 use automerge_protocol as amp;
 use automerge_protocol::ObjectId;
@@ -49,7 +49,10 @@ impl Error for InvalidInitialStateError {}
 #[derive(Error, Debug, PartialEq)]
 pub enum InvalidPatch {
     #[error("Mismatched sequence number, expected: {expected} but got {actual}")]
-    MismatchedSequenceNumber { expected: u64, actual: u64 },
+    MismatchedSequenceNumber {
+        expected: NonZeroU64,
+        actual: NonZeroU64,
+    },
     #[error("Received a diff inserting a non text object in a text object. Target object id was {object_id}, diff was {diff:?}")]
     InsertNonTextInTextObject {
         object_id: ObjectId,

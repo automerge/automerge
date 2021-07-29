@@ -2,6 +2,7 @@ use core::cmp::max;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
+    num::NonZeroU64,
 };
 
 use amp::ChangeHash;
@@ -37,7 +38,7 @@ impl Backend {
     fn make_patch(
         &self,
         diffs: amp::RootDiff,
-        actor_seq: Option<(amp::ActorId, u64)>,
+        actor_seq: Option<(amp::ActorId, NonZeroU64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut deps: Vec<_> = if let Some((ref actor, ref seq)) = actor_seq {
             let last_hash = self.get_hash(actor, *seq)?;
@@ -55,11 +56,11 @@ impl Backend {
         Ok(amp::Patch {
             diffs,
             deps,
-            max_op: self.op_set.max_op,
+            max_op: NonZeroU64::new(self.op_set.max_op).unwrap(),
             clock: self
                 .states
                 .iter()
-                .map(|(k, v)| (k.clone(), v.len() as u64))
+                .map(|(k, v)| (k.clone(), NonZeroU64::new(v.len() as u64).unwrap()))
                 .collect(),
             actor: actor_seq.clone().map(|(actor, _)| actor),
             seq: actor_seq.map(|(_, seq)| seq),
@@ -83,7 +84,7 @@ impl Backend {
     fn apply(
         &mut self,
         changes: Vec<Change>,
-        actor: Option<(amp::ActorId, u64)>,
+        actor: Option<(amp::ActorId, NonZeroU64)>,
     ) -> Result<amp::Patch, AutomergeError> {
         let mut patch = IncrementalPatch::new();
 
@@ -110,10 +111,14 @@ impl Backend {
         Ok(())
     }
 
-    fn get_hash(&self, actor: &amp::ActorId, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+    fn get_hash(
+        &self,
+        actor: &amp::ActorId,
+        seq: NonZeroU64,
+    ) -> Result<amp::ChangeHash, AutomergeError> {
         self.states
             .get(actor)
-            .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|v| v.get(seq.get() as usize - 1))
             .and_then(|&i| self.history.get(i))
             .map(|c| c.hash)
             .ok_or(AutomergeError::InvalidSeq(seq))
@@ -127,8 +132,11 @@ impl Backend {
 
         let actor_seq = (change.actor_id.clone(), change.seq);
 
-        if change.seq > 1 {
-            let last_hash = self.get_hash(&change.actor_id, change.seq - 1)?;
+        if change.seq.get() > 1 {
+            let last_hash = self.get_hash(
+                &change.actor_id,
+                NonZeroU64::new(change.seq.get() - 1).unwrap(),
+            )?;
             if !change.deps.contains(&last_hash) {
                 change.deps.push(last_hash);
             }
@@ -145,7 +153,7 @@ impl Backend {
             .states
             .get(&change.actor_id)
             .map_or(0, |v| v.len() as u64)
-            >= change.seq
+            >= change.seq.get()
         {
             return Err(AutomergeError::DuplicateChange(format!(
                 "Change request has already been applied {}:{}",
@@ -204,7 +212,7 @@ impl Backend {
 
         op_set.max_op = max(
             op_set.max_op,
-            (start_op + (ops.len() as u64)).saturating_sub(1),
+            (start_op.get() + (ops.len() as u64)).saturating_sub(1),
         );
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;
