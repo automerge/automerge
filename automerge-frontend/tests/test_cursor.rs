@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, num::NonZeroU64};
 
 use amp::RootDiff;
 use automerge_backend::Backend;
@@ -141,36 +141,36 @@ fn test_set_cursor_to_new_element_in_diff() {
     let patch1 = amp::Patch {
         actor: Some(actor.clone()),
         deps: Vec::new(),
-        seq: Some(1),
-        clock: hashmap! {actor.clone() => 1},
+        seq: Some(NonZeroU64::new(1).unwrap()),
+        clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         max_op: 3,
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
                 "list".into() => hashmap!{
-                    actor.op_id_at(1) => amp::Diff::List(amp::ListDiff{
-                        object_id: actor.op_id_at(1).into(),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert{
                                 index: 0,
-                                elem_id: actor.op_id_at(2).into(),
-                                op_id: actor.op_id_at(2),
+                                elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("one".into()),
                             },
                             amp::DiffEdit::SingleElementInsert{
                                 index: 1,
-                                elem_id: actor.op_id_at(3).into(),
-                                op_id: actor.op_id_at(3),
+                                elem_id: actor.op_id_at(NonZeroU64::new(3).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: amp::Diff::Value("two".into()),
                             },
                         ],
                     }),
                 },
                 "cursor".into() => hashmap!{
-                    actor.op_id_at(4) => amp::Diff::Cursor(amp::CursorDiff{
-                        elem_id: actor.op_id_at(3),
+                    actor.op_id_at(NonZeroU64::new(4).unwrap()) => amp::Diff::Cursor(amp::CursorDiff{
+                        elem_id: actor.op_id_at(NonZeroU64::new(3).unwrap()),
                         index: 1,
-                        object_id: actor.op_id_at(1).into(),
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                     })
                 },
             },
@@ -181,17 +181,17 @@ fn test_set_cursor_to_new_element_in_diff() {
     let patch2 = amp::Patch {
         actor: Some(actor.clone()),
         deps: Vec::new(),
-        seq: Some(2),
-        clock: hashmap! {actor.clone() => 2},
+        seq: Some(NonZeroU64::new(2).unwrap()),
+        clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
         max_op: 5,
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
                 "cursor".into() => hashmap!{
-                    actor.op_id_at(4) => amp::Diff::Cursor(amp::CursorDiff{
-                        elem_id: actor.op_id_at(2),
+                    actor.op_id_at(NonZeroU64::new(4).unwrap()) => amp::Diff::Cursor(amp::CursorDiff{
+                        elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                         index: 0,
-                        object_id: actor.op_id_at(1).into(),
+                        object_id: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                     })
                 }
             },

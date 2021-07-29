@@ -1,4 +1,4 @@
-use std::{collections::HashMap, convert::TryInto};
+use std::{collections::HashMap, convert::TryInto, num::NonZeroU64};
 
 use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Value};
@@ -69,10 +69,10 @@ fn test_multiple_primitive_inserts() {
         cr,
         amp::Change {
             message: None,
-            seq: 1,
+            seq: NonZeroU64::new(1).unwrap(),
             actor_id: frontend.actor_id.clone(),
             hash: None,
-            start_op: 1,
+            start_op: NonZeroU64::new(1).unwrap(),
             deps: Vec::new(),
             time: cr.time,
             extra_bytes: Vec::new(),
@@ -94,7 +94,10 @@ fn test_multiple_primitive_inserts() {
                         .try_into()
                         .unwrap()
                     ),
-                    obj: frontend.actor_id.op_id_at(1).into(),
+                    obj: frontend
+                        .actor_id
+                        .op_id_at(NonZeroU64::new(1).unwrap())
+                        .into(),
                     pred: SortedVec::new(),
                     insert: true,
                 }
@@ -130,10 +133,10 @@ fn test_multiple_non_primitive_inserts() {
         cr,
         amp::Change {
             message: None,
-            seq: 1,
+            seq: NonZeroU64::new(1).unwrap(),
             actor_id: actor.clone(),
             hash: None,
-            start_op: 1,
+            start_op: NonZeroU64::new(1).unwrap(),
             deps: Vec::new(),
             time: cr.time,
             extra_bytes: Vec::new(),
@@ -147,28 +150,28 @@ fn test_multiple_non_primitive_inserts() {
                 },
                 amp::Op {
                     key: amp::ElementId::Head.into(),
-                    obj: actor.op_id_at(1).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                     pred: SortedVec::new(),
                     insert: true,
                     action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),
-                    obj: actor.op_id_at(2).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                     pred: SortedVec::new(),
                     insert: false,
                     action: amp::OpType::Set("test1".into()),
                 },
                 amp::Op {
-                    key: actor.op_id_at(2).into(),
-                    obj: actor.op_id_at(1).into(),
+                    key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                     pred: SortedVec::new(),
                     insert: true,
                     action: amp::OpType::Make(amp::ObjType::Map),
                 },
                 amp::Op {
                     key: "test".into(),
-                    obj: actor.op_id_at(4).into(),
+                    obj: actor.op_id_at(NonZeroU64::new(4).unwrap()).into(),
                     pred: SortedVec::new(),
                     insert: false,
                     action: amp::OpType::Set("test2".into()),

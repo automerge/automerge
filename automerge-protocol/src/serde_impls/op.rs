@@ -269,7 +269,7 @@ impl<'de> Deserialize<'de> for Op {
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, str::FromStr};
+    use std::{convert::TryInto, num::NonZeroU64, str::FromStr};
 
     use super::*;
 

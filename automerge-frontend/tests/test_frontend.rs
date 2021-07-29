@@ -1,4 +1,7 @@
-use std::{convert::TryInto, num::NonZeroU32};
+use std::{
+    convert::TryInto,
+    num::{NonZeroU32, NonZeroU64},
+};
 
 use amp::SortedVec;
 use automerge_frontend::{Frontend, InvalidChangeRequest, LocalChange, Path, Primitive, Value};
@@ -64,8 +67,8 @@ fn test_set_root_object_properties() {
         });
     let expected_change = amp::Change {
         actor_id: doc.actor_id,
-        start_op: 1,
-        seq: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
+        seq: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: Some("set root object".into()),
         hash: None,
@@ -102,8 +105,8 @@ fn test_set_bytes() {
         });
     let expected_change = amp::Change {
         actor_id: doc.actor_id,
-        start_op: 1,
-        seq: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
+        seq: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: Some("set root object".into()),
         hash: None,
@@ -149,8 +152,8 @@ fn it_should_create_nested_maps() {
     let birds_id = doc.get_object_id(&Path::root().key("birds")).unwrap();
     let expected_change = amp::Change {
         actor_id: doc.actor_id,
-        start_op: 1,
-        seq: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
+        seq: NonZeroU64::new(1).unwrap(),
         time: change_request.time,
         message: None,
         hash: None,
@@ -225,8 +228,8 @@ fn apply_updates_inside_nested_maps() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -284,8 +287,8 @@ fn delete_keys_in_a_map() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -295,7 +298,7 @@ fn delete_keys_in_a_map() {
             obj: amp::ObjectId::Root,
             key: "magpies".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -341,8 +344,8 @@ fn create_lists() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: req1.time,
         message: None,
         hash: None,
@@ -407,8 +410,8 @@ fn apply_updates_inside_lists() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -416,9 +419,9 @@ fn apply_updates_inside_lists() {
         operations: vec![amp::Op {
             action: amp::OpType::Set("greenfinch".into()),
             obj: birds_id,
-            key: doc.actor_id.op_id_at(2).into(),
+            key: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -461,8 +464,8 @@ fn delete_list_elements() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 4,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(4).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -470,9 +473,9 @@ fn delete_list_elements() {
         operations: vec![amp::Op {
             action: amp::OpType::Del(NonZeroU32::new(1).unwrap()),
             obj: birds_id,
-            key: doc.actor_id.op_id_at(2).into(),
+            key: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -522,8 +525,8 @@ fn handle_counters_inside_maps() {
 
     let expected_change_request_1 = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: req1.time,
         message: None,
         hash: None,
@@ -541,8 +544,8 @@ fn handle_counters_inside_maps() {
 
     let expected_change_request_2 = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -552,7 +555,7 @@ fn handle_counters_inside_maps() {
             obj: amp::ObjectId::Root,
             key: "wrens".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -606,12 +609,12 @@ fn handle_counters_inside_lists() {
 
     let expected_change_request_1 = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         time: req1.time,
         message: None,
         hash: None,
         deps: Vec::new(),
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         operations: vec![
             amp::Op {
                 action: amp::OpType::Make(amp::ObjType::List),
@@ -634,8 +637,8 @@ fn handle_counters_inside_lists() {
 
     let expected_change_request_2 = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: req2.time,
         message: None,
         hash: None,
@@ -643,9 +646,9 @@ fn handle_counters_inside_lists() {
         operations: vec![amp::Op {
             action: amp::OpType::Inc(2),
             obj: counts_id,
-            key: doc.actor_id.op_id_at(2).into(),
+            key: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(2)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -709,8 +712,8 @@ fn test_sets_characters_in_text() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 6,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(6).unwrap(),
         time: request.time,
         message: None,
         hash: None,
@@ -718,9 +721,9 @@ fn test_sets_characters_in_text() {
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("a".into())),
             obj: text_id,
-            key: doc.actor_id.op_id_at(3).into(),
+            key: doc.actor_id.op_id_at(NonZeroU64::new(3).unwrap()).into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(3)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(3).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -763,8 +766,8 @@ fn test_inserts_characters_in_text() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 6,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(6).unwrap(),
         time: request.time,
         message: None,
         hash: None,
@@ -772,7 +775,7 @@ fn test_inserts_characters_in_text() {
         operations: vec![amp::Op {
             action: amp::OpType::Set(amp::ScalarValue::Str("h".into())),
             obj: text_id,
-            key: doc.actor_id.op_id_at(2).into(),
+            key: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: true,
             pred: SortedVec::new(),
         }],
@@ -817,8 +820,8 @@ fn test_inserts_characters_at_start_of_text() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: request.time,
         message: None,
         hash: None,
@@ -875,8 +878,8 @@ fn test_inserts_at_end_of_lists() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: request.time,
         message: None,
         hash: None,
@@ -892,7 +895,7 @@ fn test_inserts_at_end_of_lists() {
             amp::Op {
                 action: amp::OpType::Set(amp::ScalarValue::Str("bullfinch".into())),
                 obj: list_id,
-                key: doc.actor_id.op_id_at(2).into(),
+                key: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                 insert: true,
                 pred: SortedVec::new(),
             },

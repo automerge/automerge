@@ -1,4 +1,6 @@
 extern crate automerge_protocol as amp;
+use std::num::NonZeroU64;
+
 use maplit::hashmap;
 
 // This was not caught in the proptests

@@ -580,13 +580,13 @@ mod tests {
                 DiffEdit::SingleElementInsert {
                     index: 0,
                     elem_id: amp::ElementId::Head,
-                    op_id: OpId(0, ActorId::random()),
+                    op_id: OpId(NonZeroU64::new(1).unwrap(), ActorId::random()),
                     value: Diff::Value(ScalarValue::Null),
                 },
                 DiffEdit::SingleElementInsert {
                     index: 0,
                     elem_id: amp::ElementId::Head,
-                    op_id: OpId(1, ActorId::random()),
+                    op_id: OpId(NonZeroU64::new(2).unwrap(), ActorId::random()),
                     value: Diff::Value(ScalarValue::Null),
                 },
             ],
@@ -607,12 +607,18 @@ mod tests {
             vec![
                 DiffEdit::MultiElementInsert(MultiElementInsert {
                     index: 0,
-                    elem_id: amp::ElementId::Id(OpId(0, ActorId::random())),
+                    elem_id: amp::ElementId::Id(OpId(
+                        NonZeroU64::new(1).unwrap(),
+                        ActorId::random(),
+                    )),
                     values: values.clone(),
                 }),
                 DiffEdit::MultiElementInsert(MultiElementInsert {
                     index: 0,
-                    elem_id: amp::ElementId::Id(OpId(1, ActorId::random())),
+                    elem_id: amp::ElementId::Id(OpId(
+                        NonZeroU64::new(2).unwrap(),
+                        ActorId::random(),
+                    )),
                     values,
                 }),
             ],
@@ -630,13 +636,13 @@ mod tests {
                 DiffEdit::SingleElementInsert {
                     index: 0,
                     elem_id: amp::ElementId::Head,
-                    op_id: OpId(0, ActorId::random()),
+                    op_id: OpId(NonZeroU64::new(1).unwrap(), ActorId::random()),
                     value: Diff::Value(ScalarValue::Null),
                 },
                 DiffEdit::SingleElementInsert {
                     index: 1,
                     elem_id: amp::ElementId::Head,
-                    op_id: OpId(0, ActorId::random()),
+                    op_id: OpId(NonZeroU64::new(2).unwrap(), ActorId::random()),
                     value: Diff::Value(ScalarValue::Null),
                 },
                 DiffEdit::Remove { index: 0, count: 1 },

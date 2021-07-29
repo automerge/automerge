@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU64};
 
 use automerge::{
     Backend, InvalidChangeRequest, LocalChange, ObjType, Path, Primitive, ScalarValue, Value,
@@ -81,30 +81,30 @@ fn test_multi_insert_expands_to_correct_indices() {
             },
             Op {
                 action: OpType::Make(ObjType::List),
-                obj: actor.op_id_at(1).into(),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
                 key: Key::Seq(ElementId::Head),
                 pred: vec![].into(),
                 insert: true,
             },
             Op {
                 action: OpType::Set(ScalarValue::Null),
-                obj: actor.op_id_at(1).into(),
-                key: Key::Seq(actor.op_id_at(2).into()),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                key: Key::Seq(actor.op_id_at(NonZeroU64::new(2).unwrap()).into()),
                 pred: vec![].into(),
                 insert: true,
             },
             Op {
                 action: OpType::Set(ScalarValue::Uint(0)),
-                obj: actor.op_id_at(1).into(),
-                key: Key::Seq(actor.op_id_at(3).into()),
+                obj: actor.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                key: Key::Seq(actor.op_id_at(NonZeroU64::new(3).unwrap()).into()),
                 pred: vec![].into(),
                 insert: true,
             },
         ],
         actor_id: actor,
         hash: None,
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         deps: vec![],

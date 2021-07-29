@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use amp::RootDiff;
 use automerge_frontend::Frontend;
 use automerge_protocol as amp;
@@ -6,11 +8,11 @@ use maplit::hashmap;
 
 pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
     let actor_id = amp::ActorId::random();
-    let make_list_opid = actor_id.op_id_at(1);
+    let make_list_opid = actor_id.op_id_at(NonZeroU64::new(1).unwrap());
     let mut patches: Vec<amp::Patch> = vec![amp::Patch {
         actor: None,
         seq: None,
-        clock: hashmap! {actor_id.clone() => 1},
+        clock: hashmap! {actor_id.clone() => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,
@@ -27,11 +29,11 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
     }];
     for index in 0..6000 {
         let op_num = index + 2;
-        let this_op_id = actor_id.op_id_at(op_num as u64);
+        let this_op_id = actor_id.op_id_at(NonZeroU64::new(op_num as u64).unwrap());
         patches.push(amp::Patch {
             actor: None,
             seq: None,
-            clock: hashmap! {actor_id.clone() => op_num as u64},
+            clock: hashmap! {actor_id.clone() => NonZeroU64::new(op_num as u64).unwrap()},
             deps: Vec::new(),
             max_op: op_num as u64,
             pending_changes: 0,
@@ -77,11 +79,11 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
 
 pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
     let actor_id = amp::ActorId::random();
-    let make_list_opid = actor_id.op_id_at(1);
+    let make_list_opid = actor_id.op_id_at(NonZeroU64::new(1).unwrap());
     let mut edits: Vec<amp::DiffEdit> = Vec::new();
     for index in 0..6000 {
         let op_num = index + 2;
-        let this_op_id = actor_id.op_id_at(op_num as u64);
+        let this_op_id = actor_id.op_id_at(NonZeroU64::new(op_num as u64).unwrap());
         edits.push(amp::DiffEdit::SingleElementInsert {
             index,
             elem_id: this_op_id.clone().into(),
@@ -92,7 +94,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
     let patch: amp::Patch = amp::Patch {
         actor: None,
         seq: None,
-        clock: hashmap! {actor_id => 1},
+        clock: hashmap! {actor_id => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
         max_op: 1,
         pending_changes: 0,

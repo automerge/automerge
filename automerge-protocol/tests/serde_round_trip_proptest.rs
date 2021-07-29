@@ -1,5 +1,5 @@
 extern crate automerge_protocol as amp;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use amp::SortedVec;
 use proptest::prelude::*;
@@ -99,9 +99,9 @@ prop_compose! {
              extra_bytes in proptest::collection::vec(any::<u8>(), 0..10),
              operations in proptest::collection::vec(arb_op(), 0..10)) -> amp::Change {
             amp::Change{
-                seq,
+                seq:NonZeroU64::new(seq).unwrap(),
                 actor_id,
-                start_op,
+                start_op:NonZeroU64::new(start_op).unwrap(),
                 time,
                 hash: None,
                 message,

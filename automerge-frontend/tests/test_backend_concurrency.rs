@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use amp::{RootDiff, SortedVec};
 use automerge_backend::Backend;
 use automerge_frontend::{
@@ -8,7 +10,7 @@ use maplit::hashmap;
 use pretty_assertions::assert_eq;
 
 fn random_op_id() -> amp::OpId {
-    amp::OpId::new(1, &amp::ActorId::random())
+    amp::OpId::new(NonZeroU64::new(1).unwrap(), &amp::ActorId::random())
 }
 
 #[test]
@@ -22,9 +24,9 @@ fn use_version_and_sequence_number_from_backend() {
         actor: None,
         seq: None,
         clock: hashmap! {
-            doc.actor_id.clone() => 4,
-            remote_actor1 => 11,
-            remote_actor2 => 41,
+            doc.actor_id.clone() => NonZeroU64::new(4).unwrap(),
+            remote_actor1 => NonZeroU64::new(11).unwrap(),
+            remote_actor2 => NonZeroU64::new(41).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
@@ -58,8 +60,8 @@ fn use_version_and_sequence_number_from_backend() {
 
     let expected_change_request = amp::Change {
         actor_id: doc.actor_id,
-        seq: 5,
-        start_op: 5,
+        seq: NonZeroU64::new(5).unwrap(),
+        start_op: NonZeroU64::new(5).unwrap(),
         time: req.time,
         message: None,
         hash: None,
@@ -107,14 +109,17 @@ fn remove_pending_requests_once_handled() {
         .unwrap();
 
     // The doc is waiting for those changes to be applied
-    assert_eq!(doc.in_flight_requests(), vec![1, 2]);
+    assert_eq!(
+        doc.in_flight_requests(),
+        vec![NonZeroU64::new(1).unwrap(), NonZeroU64::new(2).unwrap()]
+    );
 
     // Apply a patch corresponding (via actor ID and seq) to the first change
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(1),
+        seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {
-            doc.actor_id.clone() => 1,
+            doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 4,
         pending_changes: 0,
@@ -138,14 +143,14 @@ fn remove_pending_requests_once_handled() {
             "partridges".to_string() => Primitive::Int(1),
         })
     );
-    assert_eq!(doc.in_flight_requests(), vec![2]);
+    assert_eq!(doc.in_flight_requests(), vec![NonZeroU64::new(2).unwrap()]);
 
     // Apply a patch corresponding (via actor ID and seq) to the second change
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(2),
+        seq: Some(NonZeroU64::new(2).unwrap()),
         clock: hashmap! {
-            doc.actor_id.clone() => 2,
+            doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
         },
         max_op: 5,
         pending_changes: 0,
@@ -195,7 +200,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         .unwrap();
 
     // The document is now waiting for the above request
-    assert_eq!(doc.in_flight_requests(), vec![1]);
+    assert_eq!(doc.in_flight_requests(), vec![NonZeroU64::new(1).unwrap()]);
 
     // Apply a remote patch (due to actor ID and seq missing)
     doc.apply_patch(amp::Patch {
@@ -204,7 +209,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
         max_op: 10,
         pending_changes: 0,
         clock: hashmap! {
-            remote.clone() => 1,
+            remote.clone() => NonZeroU64::new(1).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
@@ -225,15 +230,15 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             "blackbirds".to_string() => Primitive::Int(24),
         })
     );
-    assert_eq!(doc.in_flight_requests(), vec![1]);
+    assert_eq!(doc.in_flight_requests(), vec![NonZeroU64::new(1).unwrap()]);
 
     // Now apply a patch corresponding to the outstanding in flight request
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(1),
+        seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {
-            doc.actor_id.clone() => 2,
-            remote => 1,
+            doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
+            remote => NonZeroU64::new(1).unwrap(),
         },
         max_op: 11,
         pending_changes: 0,
@@ -280,11 +285,11 @@ fn dont_allow_out_of_order_request_patches() {
 
     let result = doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(2),
+        seq: Some(NonZeroU64::new(2).unwrap()),
         max_op: 8,
         pending_changes: 0,
         clock: hashmap! {
-            doc.actor_id.clone() => 2,
+            doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
@@ -299,8 +304,8 @@ fn dont_allow_out_of_order_request_patches() {
     assert_eq!(
         result,
         Err(InvalidPatch::MismatchedSequenceNumber {
-            expected: 1,
-            actual: 2
+            expected: NonZeroU64::new(1).unwrap(),
+            actual: NonZeroU64::new(2).unwrap()
         })
     );
 }
@@ -326,22 +331,22 @@ fn handle_concurrent_insertions_into_lists() {
     // shoudl be reconciled after this
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(1),
+        seq: Some(NonZeroU64::new(1).unwrap()),
         max_op: 1,
         pending_changes: 0,
         clock: hashmap! {
-            doc.actor_id.clone() => 1,
+            doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
+                    doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id.clone(),
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 0,
-                            elem_id: doc.actor_id.op_id_at(1).into(),
-                            op_id: doc.actor_id.op_id_at(1),
+                            elem_id: doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                            op_id: doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()),
                             value: amp::Diff::Value("goldfinch".into()),
                         }],
                     })
@@ -388,8 +393,8 @@ fn handle_concurrent_insertions_into_lists() {
     // for the in flight requests to be responded to
     doc.apply_patch(amp::Patch {
         clock: hashmap! {
-            doc.actor_id.clone() => 1,
-            remote.clone() => 1,
+            doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
+            remote.clone() => NonZeroU64::new(1).unwrap(),
         },
         max_op: 3,
         pending_changes: 0,
@@ -399,12 +404,12 @@ fn handle_concurrent_insertions_into_lists() {
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
+                    doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id.clone(),
                         edits: vec![amp::DiffEdit::SingleElementInsert{
                             index: 1,
-                            elem_id: remote.op_id_at(1).into(),
-                            op_id: doc.actor_id.op_id_at(1),
+                            elem_id: remote.op_id_at(NonZeroU64::new(1).unwrap()).into(),
+                            op_id: doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()),
                             value: amp::Diff::Value("bullfinch".into()),
                         }],
                     })
@@ -425,30 +430,30 @@ fn handle_concurrent_insertions_into_lists() {
     // Now apply a patch acknowledging the in flight request
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
-        seq: Some(2),
+        seq: Some(NonZeroU64::new(2).unwrap()),
         max_op: 3,
         pending_changes: 0,
         clock: hashmap! {
-            doc.actor_id.clone() => 2,
-            remote => 1,
+            doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
+            remote => NonZeroU64::new(1).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    doc.actor_id.op_id_at(1) => amp::Diff::List(amp::ListDiff{
+                    doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap()) => amp::Diff::List(amp::ListDiff{
                         object_id: birds_id,
                         edits: vec![
                             amp::DiffEdit::SingleElementInsert {
                                 index: 0,
-                                elem_id: doc.actor_id.op_id_at(2).into(),
-                                op_id: doc.actor_id.op_id_at(2),
+                                elem_id: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: amp::Diff::Value("chaffinch".into()),
                             },
                             amp::DiffEdit::SingleElementInsert{
                                 index: 2,
-                                elem_id: doc.actor_id.op_id_at(3).into(),
-                                op_id: doc.actor_id.op_id_at(3),
+                                elem_id: doc.actor_id.op_id_at(NonZeroU64::new(3).unwrap()).into(),
+                                op_id: doc.actor_id.op_id_at(NonZeroU64::new(3).unwrap()),
                                 value: amp::Diff::Value("greenfinch".into()),
                             },
                         ],
@@ -499,8 +504,8 @@ fn allow_interleaving_of_patches_and_changes() {
         req1,
         amp::Change {
             actor_id: doc.actor_id.clone(),
-            seq: 1,
-            start_op: 1,
+            seq: NonZeroU64::new(1).unwrap(),
+            start_op: NonZeroU64::new(1).unwrap(),
             message: None,
             hash: None,
             time: req1.time,
@@ -520,8 +525,8 @@ fn allow_interleaving_of_patches_and_changes() {
         req2,
         amp::Change {
             actor_id: doc.actor_id.clone(),
-            seq: 2,
-            start_op: 2,
+            seq: NonZeroU64::new(2).unwrap(),
+            start_op: NonZeroU64::new(2).unwrap(),
             message: None,
             hash: None,
             time: req2.time,
@@ -531,7 +536,7 @@ fn allow_interleaving_of_patches_and_changes() {
                 obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
-                pred: vec![doc.actor_id.op_id_at(1)].into(),
+                pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap())].into(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -557,8 +562,8 @@ fn allow_interleaving_of_patches_and_changes() {
         req3,
         amp::Change {
             actor_id: doc.actor_id.clone(),
-            seq: 3,
-            start_op: 3,
+            seq: NonZeroU64::new(3).unwrap(),
+            start_op: NonZeroU64::new(3).unwrap(),
             message: None,
             hash: None,
             time: req3.time,
@@ -568,7 +573,7 @@ fn allow_interleaving_of_patches_and_changes() {
                 obj: amp::ObjectId::Root,
                 key: "number".into(),
                 insert: false,
-                pred: vec![doc.actor_id.op_id_at(2)].into(),
+                pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             }],
             extra_bytes: Vec::new(),
         }
@@ -652,8 +657,8 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
 
     let expected_change2 = amp::Change {
         actor_id: doc2.actor_id.clone(),
-        start_op: 2,
-        seq: 1,
+        start_op: NonZeroU64::new(2).unwrap(),
+        seq: NonZeroU64::new(1).unwrap(),
         time: change2.time,
         message: None,
         hash: None,
@@ -663,7 +668,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc.actor_id.op_id_at(1)].into(),
+            pred: vec![doc.actor_id.op_id_at(NonZeroU64::new(1).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -671,8 +676,8 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
 
     let expected_change3 = amp::Change {
         actor_id: doc2.actor_id.clone(),
-        start_op: 3,
-        seq: 2,
+        start_op: NonZeroU64::new(3).unwrap(),
+        seq: NonZeroU64::new(2).unwrap(),
         time: change3.time,
         message: None,
         hash: None,
@@ -682,7 +687,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc2.actor_id.op_id_at(2)].into(),
+            pred: vec![doc2.actor_id.op_id_at(NonZeroU64::new(2).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
@@ -713,8 +718,8 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
 
     let expected_change4 = amp::Change {
         actor_id: doc2.actor_id.clone(),
-        start_op: 4,
-        seq: 3,
+        start_op: NonZeroU64::new(4).unwrap(),
+        seq: NonZeroU64::new(3).unwrap(),
         time: change4.time,
         message: None,
         hash: None,
@@ -724,7 +729,7 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
             obj: amp::ObjectId::Root,
             key: "number".into(),
             insert: false,
-            pred: vec![doc2.actor_id.op_id_at(3)].into(),
+            pred: vec![doc2.actor_id.op_id_at(NonZeroU64::new(3).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };

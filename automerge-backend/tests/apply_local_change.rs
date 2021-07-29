@@ -1,5 +1,9 @@
 extern crate automerge_backend;
-use std::{collections::HashSet, convert::TryInto, num::NonZeroU32};
+use std::{
+    collections::HashSet,
+    convert::TryInto,
+    num::{NonZeroU32, NonZeroU64},
+};
 
 use amp::{RootDiff, SortedVec};
 use automerge_backend::{Backend, Change};
@@ -17,9 +21,9 @@ fn test_apply_local_change() {
         time: 0,
         message: None,
         hash: None,
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         deps: Vec::new(),
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             key: "bird".into(),
@@ -36,8 +40,8 @@ fn test_apply_local_change() {
     let changes = backend.get_changes(&[]);
     let expected_change = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: changes[0].time,
         message: None,
         hash: None,
@@ -59,9 +63,9 @@ fn test_apply_local_change() {
         actor: Some(actor.clone()),
         max_op: 1,
         pending_changes: 0,
-        seq: Some(1),
+        seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {
-            actor => 1,
+            actor => NonZeroU64::new(1).unwrap(),
         },
         deps: Vec::new(),
         diffs: RootDiff {
@@ -80,12 +84,12 @@ fn test_error_on_duplicate_requests() {
     let actor: ActorId = "37704788917a499cb0206fa8519ac4d9".try_into().unwrap();
     let change_request1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         message: None,
         hash: None,
         time: 0,
         deps: Vec::new(),
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
@@ -98,12 +102,12 @@ fn test_error_on_duplicate_requests() {
 
     let change_request2 = amp::Change {
         actor_id: actor,
-        seq: 2,
+        seq: NonZeroU64::new(2).unwrap(),
         message: None,
         hash: None,
         time: 0,
         deps: Vec::new(),
-        start_op: 2,
+        start_op: NonZeroU64::new(2).unwrap(),
         operations: vec![Op {
             action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
@@ -125,12 +129,12 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
     let actor: ActorId = "cb55260e9d7e457886a4fc73fd949202".try_into().unwrap();
     let local1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
         hash: None,
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
             obj: ObjectId::Root,
@@ -143,8 +147,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
     let local2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -154,15 +158,15 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             obj: ObjectId::Root,
             key: "bird".into(),
             insert: false,
-            pred: vec![actor.op_id_at(1)].into(),
+            pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
         }],
         extra_bytes: Vec::new(),
     };
     let remote_actor: ActorId = "6d48a01318644eed90455d2cb68ac657".try_into().unwrap();
     let remote1 = amp::Change {
         actor_id: remote_actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         deps: Vec::new(),
         message: None,
@@ -181,8 +185,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
     let mut expected_change1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -199,8 +203,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
     let mut expected_change2 = amp::Change {
         actor_id: remote_actor,
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -217,8 +221,8 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
 
     let mut expected_change3 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -227,7 +231,7 @@ fn test_handle_concurrent_frontend_and_backend_changes() {
             action: amp::OpType::Set("jay".into()),
             obj: ObjectId::Root,
             key: "bird".into(),
-            pred: vec![actor.op_id_at(1)].into(),
+            pred: vec![actor.op_id_at(NonZeroU64::new(1).unwrap())].into(),
             insert: false,
         }],
         extra_bytes: Vec::new(),
@@ -264,8 +268,8 @@ fn test_transform_list_indexes_into_element_ids() {
     let remote_actor: ActorId = "9ba21574dc44411b8ce37bc6037a9687".try_into().unwrap();
     let remote1: Change = amp::Change {
         actor_id: remote_actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: 0,
         message: None,
         hash: None,
@@ -284,15 +288,15 @@ fn test_transform_list_indexes_into_element_ids() {
 
     let remote2: Change = amp::Change {
         actor_id: remote_actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
             action: amp::OpType::Set("magpie".into()),
-            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
             key: ElementId::Head.into(),
             insert: true,
             pred: SortedVec::new(),
@@ -304,14 +308,14 @@ fn test_transform_list_indexes_into_element_ids() {
 
     let local1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         message: None,
         hash: None,
         time: 0,
         deps: vec![remote1.hash],
-        start_op: 2,
+        start_op: NonZeroU64::new(2).unwrap(),
         operations: vec![Op {
-            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
             action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
@@ -321,16 +325,16 @@ fn test_transform_list_indexes_into_element_ids() {
     };
     let local2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
+        seq: NonZeroU64::new(2).unwrap(),
         message: None,
         hash: None,
         deps: Vec::new(),
         time: 0,
-        start_op: 3,
+        start_op: NonZeroU64::new(3).unwrap(),
         operations: vec![Op {
-            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
             action: amp::OpType::Set("wagtail".into()),
-            key: actor.op_id_at(2).into(),
+            key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: true,
             pred: SortedVec::new(),
         }],
@@ -339,26 +343,26 @@ fn test_transform_list_indexes_into_element_ids() {
 
     let local3 = amp::Change {
         actor_id: actor.clone(),
-        seq: 3,
+        seq: NonZeroU64::new(3).unwrap(),
         message: None,
         hash: None,
         deps: vec![remote2.hash],
         time: 0,
-        start_op: 4,
+        start_op: NonZeroU64::new(4).unwrap(),
         operations: vec![
             Op {
-                obj: ObjectId::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("Magpie".into()),
-                key: remote_actor.op_id_at(2).into(),
+                key: remote_actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                 insert: false,
-                pred: vec![remote_actor.op_id_at(2)].into(),
+                pred: vec![remote_actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             },
             Op {
-                obj: ObjectId::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("Goldfinch".into()),
-                key: actor.op_id_at(2).into(),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                 insert: false,
-                pred: vec![actor.op_id_at(2)].into(),
+                pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -366,14 +370,14 @@ fn test_transform_list_indexes_into_element_ids() {
 
     let mut expected_change1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 2,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: vec![remote1.hash],
         operations: vec![Op {
-            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
             action: amp::OpType::Set("goldfinch".into()),
             key: ElementId::Head.into(),
             insert: true,
@@ -383,16 +387,16 @@ fn test_transform_list_indexes_into_element_ids() {
     };
     let mut expected_change2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 3,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(3).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: Vec::new(),
         operations: vec![Op {
-            obj: ObjectId::from(remote_actor.op_id_at(1)),
+            obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
             action: amp::OpType::Set("wagtail".into()),
-            key: actor.op_id_at(2).into(),
+            key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
             insert: true,
             pred: SortedVec::new(),
         }],
@@ -400,25 +404,25 @@ fn test_transform_list_indexes_into_element_ids() {
     };
     let mut expected_change3 = amp::Change {
         actor_id: actor.clone(),
-        seq: 3,
-        start_op: 4,
+        seq: NonZeroU64::new(3).unwrap(),
+        start_op: NonZeroU64::new(4).unwrap(),
         time: 0,
         message: None,
         hash: None,
         deps: Vec::new(),
         operations: vec![
             Op {
-                obj: ObjectId::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("Magpie".into()),
-                key: remote_actor.op_id_at(2).into(),
-                pred: vec![remote_actor.op_id_at(2)].into(),
+                key: remote_actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![remote_actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
             Op {
-                obj: ObjectId::from(remote_actor.op_id_at(1)),
+                obj: ObjectId::from(remote_actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("Goldfinch".into()),
-                key: actor.op_id_at(2).into(),
-                pred: vec![actor.op_id_at(2)].into(),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
         ],
@@ -459,12 +463,12 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     let actor: ActorId = "0723d2a1940744868ffd6b294ada813f".try_into().unwrap();
     let local1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
+        seq: NonZeroU64::new(1).unwrap(),
         message: None,
         hash: None,
         time: 0,
         deps: Vec::new(),
-        start_op: 1,
+        start_op: NonZeroU64::new(1).unwrap(),
         operations: vec![Op {
             obj: ObjectId::Root,
             action: amp::OpType::Make(ObjType::List),
@@ -477,26 +481,26 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
     let local2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
+        seq: NonZeroU64::new(2).unwrap(),
         message: None,
         hash: None,
         time: 0,
         deps: Vec::new(),
-        start_op: 2,
+        start_op: NonZeroU64::new(2).unwrap(),
         operations: vec![
             Op {
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: OpType::Del(NonZeroU32::new(1).unwrap()),
-                key: actor.op_id_at(2).into(),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
                 insert: false,
-                pred: vec![actor.op_id_at(2)].into(),
+                pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
             },
         ],
         extra_bytes: Vec::new(),
@@ -504,23 +508,23 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
     let mut expected_patch = Patch {
         actor: Some(actor.clone()),
-        seq: Some(2),
+        seq: Some(NonZeroU64::new(2).unwrap()),
         max_op: 3,
         pending_changes: 0,
         clock: hashmap! {
-            actor.clone() => 2
+            actor.clone() => NonZeroU64::new(2).unwrap()
         },
         deps: Vec::new(),
         diffs: RootDiff {
             props: hashmap! {
                 "birds".into() => hashmap!{
-                    actor.op_id_at(1) => Diff::List(ListDiff{
-                        object_id: ObjectId::from(actor.op_id_at(1)),
+                    actor.op_id_at(NonZeroU64::new(1).unwrap()) => Diff::List(ListDiff{
+                        object_id: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                         edits: vec![
                             DiffEdit::SingleElementInsert{
                                 index: 0,
-                                elem_id: actor.op_id_at(2).into(),
-                                op_id: actor.op_id_at(2),
+                                elem_id: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                                op_id: actor.op_id_at(NonZeroU64::new(2).unwrap()),
                                 value: Diff::Value("magpie".into()),
                             },
                             DiffEdit::Remove{index: 0, count: 1},
@@ -544,8 +548,8 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
     let expected_change1 = amp::Change {
         actor_id: actor.clone(),
-        seq: 1,
-        start_op: 1,
+        seq: NonZeroU64::new(1).unwrap(),
+        start_op: NonZeroU64::new(1).unwrap(),
         time: change1.time,
         message: None,
         hash: None,
@@ -564,25 +568,25 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
 
     let expected_change2 = amp::Change {
         actor_id: actor.clone(),
-        seq: 2,
-        start_op: 2,
+        seq: NonZeroU64::new(2).unwrap(),
+        start_op: NonZeroU64::new(2).unwrap(),
         time: change2.time,
         message: None,
         hash: None,
         deps: vec![change1.hash],
         operations: vec![
             Op {
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: amp::OpType::Set("magpie".into()),
                 key: ElementId::Head.into(),
                 insert: true,
                 pred: SortedVec::new(),
             },
             Op {
-                obj: ObjectId::from(actor.op_id_at(1)),
+                obj: ObjectId::from(actor.op_id_at(NonZeroU64::new(1).unwrap())),
                 action: OpType::Del(NonZeroU32::new(1).unwrap()),
-                key: actor.op_id_at(2).into(),
-                pred: vec![actor.op_id_at(2)].into(),
+                key: actor.op_id_at(NonZeroU64::new(2).unwrap()).into(),
+                pred: vec![actor.op_id_at(NonZeroU64::new(2).unwrap())].into(),
                 insert: false,
             },
         ],

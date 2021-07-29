@@ -1317,7 +1317,7 @@ mod tests {
             .collect();
         let decoded_preload: Vec<amp::Change> =
             changes.clone().into_iter().map(Change::decode).collect();
-        assert_eq!(decoded_loaded[0].operations.len().get(), 257);
+        assert_eq!(decoded_loaded[0].operations.len(), 257);
         assert_eq!(decoded_loaded, decoded_preload);
         assert_eq!(
             loaded_changes,

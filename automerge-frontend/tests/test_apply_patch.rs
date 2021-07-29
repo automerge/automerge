@@ -265,7 +265,7 @@ fn apply_updates_inside_map_conflicts() {
             .unwrap(),
         hashmap! {
             actor1.op_id_at(NonZeroU64::new(1).unwrap()) => hashmap!{"blackbirds" => Primitive::Int(1)}.into(),
-            actor2.op_id_at(NonZeroU64::new(1).unwrap(NonZeroU64::new()).unwrap()) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
+            actor2.op_id_at(NonZeroU64::new(1).unwrap()) => hashmap!{"wrens" => Primitive::Int(3)}.into(),
         }
     );
 
