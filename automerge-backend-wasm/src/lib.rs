@@ -129,7 +129,7 @@ pub fn apply_local_change(input: Object, change: JsValue) -> Result<JsValue, JsV
         let change: amp::Change = change
             .into_serde()
             .map_err(|_| AutomergeError::DecodeFailed)?;
-        let (patch, mut change) = state.0.apply_local_change(change)?;
+        let (patch, change) = state.0.apply_local_change_mut(change)?;
         change.compress();
         let result = Array::new();
         let change_bytes = types::BinaryChange(change.raw_bytes().to_vec());

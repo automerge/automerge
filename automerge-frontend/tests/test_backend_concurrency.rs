@@ -689,10 +689,13 @@ fn test_deps_are_filled_in_if_frontend_does_not_have_latest_patch() {
     assert_eq!(change3, expected_change3);
 
     let (patch2, binchange2) = backend2.apply_local_change(change2).unwrap();
-    let (patch3, binchange3) = backend2.apply_local_change(change3).unwrap();
 
     assert_eq!(binchange2.deps, vec![binchange1.hash]);
-    assert_eq!(binchange3.deps, vec![binchange2.hash]);
+    let binchange2_hash = binchange2.hash;
+
+    let (patch3, binchange3) = backend2.apply_local_change(change3).unwrap();
+
+    assert_eq!(binchange3.deps, vec![binchange2_hash]);
     assert_eq!(patch1.deps, vec![binchange1.hash]);
     assert_eq!(patch2.deps, Vec::new());
 

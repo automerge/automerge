@@ -122,7 +122,7 @@ impl Backend {
     pub fn apply_local_change(
         &mut self,
         mut change: amp::Change,
-    ) -> Result<(amp::Patch, Change), AutomergeError> {
+    ) -> Result<(amp::Patch, &Change), AutomergeError> {
         self.check_for_duplicate(&change)?; // Change has already been applied
 
         let actor_seq = (change.actor_id.clone(), change.seq);
@@ -135,9 +135,25 @@ impl Backend {
         }
 
         let bin_change: Change = change.into();
-        let patch: amp::Patch = self.apply(vec![bin_change.clone()], Some(actor_seq))?;
+        let hash = bin_change.hash;
 
-        Ok((patch, bin_change))
+        let patch: amp::Patch = self.apply(vec![bin_change], Some(actor_seq))?;
+
+        let change = self.get_change_by_hash(&hash).unwrap();
+
+        Ok((patch, change))
+    }
+
+    pub fn apply_local_change_mut(
+        &mut self,
+        mut change: amp::Change,
+    ) -> Result<(amp::Patch, &mut Change), AutomergeError> {
+        let (patch, change) = self.apply_local_change(change)?;
+        let hash = change.hash;
+
+        let change = self.get_change_by_hash_mut(&hash).unwrap();
+
+        Ok((patch, change))
     }
 
     fn check_for_duplicate(&self, change: &amp::Change) -> Result<(), AutomergeError> {
@@ -368,6 +384,13 @@ impl Backend {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
+    }
+
+    pub fn get_change_by_hash_mut(&mut self, hash: &amp::ChangeHash) -> Option<&mut Change> {
+        self.history_index
+            .get(hash)
+            .copied()
+            .and_then(move |index| self.history.get_mut(index))
     }
 
     /**
