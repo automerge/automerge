@@ -23,24 +23,32 @@ pub struct Options {
 
 impl Options {
     /// Set the schema.
+    ///
+    /// The default is a [`RootSchema`] with a map and no other levels.
     pub fn set_schema<S: Into<RootSchema>>(&mut self, schema: S) -> &mut Self {
         self.schema = schema.into();
         self
     }
 
     /// Set the schema.
+    ///
+    /// The default is a [`RootSchema`] with a map and no other levels.
     pub fn with_schema<S: Into<RootSchema>>(mut self, schema: S) -> Self {
         self.schema = schema.into();
         self
     }
 
     /// Set the actor id.
+    ///
+    /// The default is [`ActorId::random`].
     pub fn set_actor_id<A: Into<ActorId>>(&mut self, actor_id: A) -> &mut Self {
         self.actor_id = actor_id.into();
         self
     }
 
     /// Set the actor id.
+    ///
+    /// The default is [`ActorId::random`].
     pub fn with_actor_id<A: Into<ActorId>>(mut self, actor_id: A) -> Self {
         self.actor_id = actor_id.into();
         self
