@@ -85,7 +85,7 @@ impl Edits {
                         count: new_count,
                     },
                 ) if *index == new_index => {
-                    *count = NonZeroU64::new((*count).get() + new_count.get()).unwrap()
+                    *count = NonZeroU64::new((*count).get() + new_count.get()).unwrap();
                 }
                 (_, edit) => self.0.push(edit),
             }
