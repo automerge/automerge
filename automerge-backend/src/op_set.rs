@@ -46,6 +46,9 @@ use crate::{
 pub(crate) struct OpSet {
     pub objs: HashMap<ObjectId, ObjState, FxBuildHasher>,
     pub deps: HashSet<amp::ChangeHash>,
+    /// The maximum operation observed by this opset.
+    ///
+    /// When no changes have been applied then this is `None`.
     pub max_op: Option<NonZeroU64>,
     cursors: HashMap<ObjectId, Vec<CursorState>>,
 }

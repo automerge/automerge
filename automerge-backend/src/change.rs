@@ -228,7 +228,13 @@ pub struct Change {
     bytes: ChangeBytes,
     body_start: usize,
     pub hash: amp::ChangeHash,
+    /// The sequence number of this change.
+    ///
+    /// Sequence numbers start at 1.
     pub seq: NonZeroU64,
+    /// The counter of the first operation in this change.
+    ///
+    /// The first operation for an actor should have a counter of 1.
     pub start_op: NonZeroU64,
     pub time: i64,
     message: Range<usize>,

@@ -7,6 +7,10 @@ use smol_str::SmolStr;
 #[derive(Eq, PartialEq, Hash, Debug, Clone, Copy)]
 pub(crate) struct ActorId(pub usize);
 
+/// An operation id.
+///
+/// Made up of a counter and an actor id.
+/// The counter starts at 1.
 #[derive(Eq, PartialEq, Debug, Hash, Clone, Copy)]
 pub(crate) struct OpId(pub NonZeroU64, pub ActorId);
 

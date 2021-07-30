@@ -256,6 +256,7 @@ impl<'a> ResolvedPathMut<'a> {
 }
 
 pub(crate) struct SetOrInsertPayload<'a, T> {
+    /// The start operation for this payload.
     pub start_op: NonZeroU64,
     pub actor: &'a amp::ActorId,
     pub value: T,

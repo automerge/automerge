@@ -113,6 +113,10 @@ pub enum SequenceType {
     Text,
 }
 
+/// An operation ID.
+///
+/// The ID is made up of a counter and an actor id.
+/// The counter starts at 1 for the first operation.
 #[derive(Eq, PartialEq, Hash, Clone)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OpId(pub NonZeroU64, pub ActorId);
@@ -759,6 +763,9 @@ pub enum DiffEdit {
         op_id: OpId,
         value: Diff,
     },
+    /// Removing `count` values beginning at `index`.
+    ///
+    /// The count should not be 0, hence it is a NonZero value.
     #[serde(rename_all = "camelCase")]
     Remove { index: u64, count: NonZeroU64 },
 }
@@ -777,10 +784,18 @@ pub struct MultiElementInsert {
 pub struct Patch {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub actor: Option<ActorId>,
+    /// The sequence number of the actor when this patch was generated.
+    ///
+    /// `None` if this is a remote patch.
+    /// `Some(seq)` if it is the result of applying a local change, `seq` is the sequence number of
+    /// the latest change from this actor.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seq: Option<NonZeroU64>,
     pub clock: HashMap<ActorId, NonZeroU64>,
     pub deps: Vec<ChangeHash>,
+    /// The maximum operation observed when this patch was generated.
+    ///
+    /// `None` if there were no operations or `Some(counter)` if there were `counter` operations.
     pub max_op: Option<NonZeroU64>,
     pub pending_changes: usize,
     //    pub can_undo: bool,
@@ -803,7 +818,13 @@ pub struct Change {
     pub actor_id: ActorId,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hash: Option<ChangeHash>,
+    /// The sequence number of this change.
+    ///
+    /// Sequence numbers start at 1.
     pub seq: NonZeroU64,
+    /// The counter of the first operation in this change.
+    ///
+    /// The first operation for an actor should have a counter of 1.
     #[serde(rename = "startOp")]
     pub start_op: NonZeroU64,
     pub time: i64,

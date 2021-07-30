@@ -16,6 +16,10 @@ use crate::{
 
 pub struct Frontend {
     pub actor_id: ActorId,
+    /// The sequence number of this frontend.
+    ///
+    /// `None` if no changes have been made.
+    /// `Some(counter)` if `counter` changes have been made.
     pub seq: Option<NonZeroU64>,
     /// The current state of the frontend, see the description of
     /// `FrontendState` for details. It's an `Option` to allow consuming it
