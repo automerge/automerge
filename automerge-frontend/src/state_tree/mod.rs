@@ -57,8 +57,8 @@ impl Default for StateTree {
 }
 
 impl StateTree {
-    pub fn new(schema: &Option<RootSchema>) -> StateTree {
-        let root = if schema.as_ref().map_or(false, |s| s.is_sorted_map()) {
+    pub fn new(schema: &RootSchema) -> StateTree {
+        let root = if schema.is_sorted_map() {
             StateTreeRoot::SortedMap(StateTreeSortedMap {
                 object_id: amp::ObjectId::Root,
                 props: BTreeMap::new(),
@@ -79,7 +79,7 @@ impl StateTree {
         self.root.check_diff(diff)
     }
 
-    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<RootSchema>) {
+    pub fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &RootSchema) {
         self.root.apply_diff(diff, schema)
     }
 
@@ -146,7 +146,7 @@ impl StateTreeRoot {
         Ok(CheckedRootDiff(diff))
     }
 
-    fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &Option<RootSchema>) {
+    fn apply_diff(&mut self, diff: CheckedRootDiff, schema: &RootSchema) {
         for (prop, prop_diff) in diff.0.props {
             let mut diff_iter = prop_diff.into_iter();
             match diff_iter.next() {
@@ -164,14 +164,12 @@ impl StateTreeRoot {
                         Self::SortedMap(m) => m.props.get_mut(&prop),
                     };
                     match mv {
-                        Some(n) => {
-                            n.apply_diff(opid, diff, schema.as_ref().and_then(|s| s.get_key(&prop)))
-                        }
+                        Some(n) => n.apply_diff(opid, diff, schema.get_key(&prop)),
                         None => {
                             let value = MultiValue::new_from_diff(
                                 opid.clone(),
                                 diff,
-                                schema.as_ref().and_then(|s| s.get_key(&prop)),
+                                schema.get_key(&prop),
                             );
                             match self {
                                 Self::Map(m) => m.props.insert(prop.clone(), value),
@@ -183,10 +181,8 @@ impl StateTreeRoot {
                         Self::Map(m) => m.props.get_mut(&prop),
                         Self::SortedMap(m) => m.props.get_mut(&prop),
                     };
-                    mv.unwrap().apply_diff_iter(
-                        &mut diff_iter,
-                        schema.as_ref().and_then(|s| s.get_key(&prop)),
-                    );
+                    mv.unwrap()
+                        .apply_diff_iter(&mut diff_iter, schema.get_key(&prop));
                 }
             }
         }

@@ -73,7 +73,7 @@ impl FrontendState {
         &mut self,
         self_actor: &amp::ActorId,
         mut patch: amp::Patch,
-        schema: &Option<RootSchema>,
+        schema: &RootSchema,
     ) -> Result<(), InvalidPatch> {
         match self {
             FrontendState::WaitingForInFlightRequests {

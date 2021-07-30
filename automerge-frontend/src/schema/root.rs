@@ -19,6 +19,12 @@ impl RootSchema {
     }
 }
 
+impl Default for RootSchema {
+    fn default() -> Self {
+        Self::Map(MapSchema::default())
+    }
+}
+
 impl From<MapSchema> for RootSchema {
     fn from(m: MapSchema) -> Self {
         Self::Map(m)

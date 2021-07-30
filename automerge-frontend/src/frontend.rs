@@ -31,7 +31,7 @@ pub struct Frontend {
     /// A function for generating timestamps
     timestamper: fn() -> Option<i64>,
     /// The schema for hinting the structure of the frontend.
-    schema: Option<RootSchema>,
+    schema: RootSchema,
 }
 
 impl Default for Frontend {

@@ -9,8 +9,8 @@ use crate::schema::RootSchema;
 pub struct Options {
     /// The schema for the frontend to use.
     ///
-    /// The default is an empty [`RootSchema`].
-    pub(crate) schema: Option<RootSchema>,
+    /// The default is a [`RootSchema`] with a map and no other levels.
+    pub(crate) schema: RootSchema,
     /// The actor id to appear in changes from this frontend.
     ///
     /// The default is [`ActorId::random`].
@@ -24,13 +24,13 @@ pub struct Options {
 impl Options {
     /// Set the schema.
     pub fn set_schema<S: Into<RootSchema>>(&mut self, schema: S) -> &mut Self {
-        self.schema = Some(schema.into());
+        self.schema = schema.into();
         self
     }
 
     /// Set the schema.
     pub fn with_schema<S: Into<RootSchema>>(mut self, schema: S) -> Self {
-        self.schema = Some(schema.into());
+        self.schema = schema.into();
         self
     }
 
@@ -72,7 +72,7 @@ impl Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            schema: None,
+            schema: RootSchema::default(),
             actor_id: ActorId::random(),
             timestamper: system_time,
         }
