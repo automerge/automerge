@@ -18,6 +18,7 @@ use crate::{
     value_ref::RootRef,
 };
 
+#[derive(Debug)]
 pub struct Frontend {
     pub actor_id: ActorId,
     pub seq: u64,
@@ -29,30 +30,8 @@ pub struct Frontend {
     cached_value: Option<Value>,
     /// A function for generating timestamps
     timestamper: fn() -> Option<i64>,
-
+    /// The schema for hinting the structure of the frontend.
     schema: Option<RootSchema>,
-}
-
-impl Debug for Frontend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        let Frontend {
-            actor_id,
-            seq,
-            state,
-            cached_value,
-            timestamper: _,
-            schema,
-        } = self;
-        {
-            let mut builder = f.debug_struct("Frontend");
-            let _ = builder.field("actor_id", &actor_id);
-            let _ = builder.field("seq", &seq);
-            let _ = builder.field("state", &state);
-            let _ = builder.field("cached_value", &cached_value);
-            let _ = builder.field("schema", &schema);
-            builder.finish()
-        }
-    }
 }
 
 impl Default for Frontend {
