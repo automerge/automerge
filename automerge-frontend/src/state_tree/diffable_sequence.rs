@@ -5,12 +5,7 @@ use automerge_protocol as amp;
 use smol_str::SmolStr;
 
 use super::{MultiGrapheme, MultiValue, StateTreeValue};
-use crate::{
-    error::InvalidPatch,
-    frontend::{Schema, SchemaValue, ValueSchema},
-    schema::ValueSchema,
-    Path,
-};
+use crate::{error::InvalidPatch, schema::ValueSchema};
 
 pub(crate) trait DiffableValue: Sized {
     fn take(&mut self) -> Self;
