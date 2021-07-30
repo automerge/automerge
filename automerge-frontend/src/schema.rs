@@ -62,7 +62,7 @@ impl ValueSchema {
     }
 
     /// Get the schema at the given key.
-    pub(crate) fn get_key(&self, key: &str) -> Option<&ValueSchema> {
+    pub fn get_key(&self, key: &str) -> Option<&ValueSchema> {
         match self {
             ValueSchema::Map(map) => map.get_key(key),
             ValueSchema::SortedMap(map) => map.get_key(key),
@@ -72,7 +72,7 @@ impl ValueSchema {
     }
 
     /// Get the schema at the given index.
-    pub(crate) fn get_index(&self, index: u32) -> Option<&ValueSchema> {
+    pub fn get_index(&self, index: u32) -> Option<&ValueSchema> {
         match self {
             ValueSchema::List(list) => list.get_index(index),
             ValueSchema::Text(text) => text.get_index(index),
