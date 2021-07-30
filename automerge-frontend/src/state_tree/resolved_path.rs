@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     convert::TryInto,
     mem::{discriminant, Discriminant},
     num::NonZeroU32,
@@ -135,10 +136,10 @@ impl<'a> ResolvedPath<'a> {
         }
     }
 
-    pub fn values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+    pub fn values(&self) -> HashMap<amp::OpId, Value> {
         match &self {
             ResolvedPath::Root(root) => {
-                let mut result = std::collections::HashMap::new();
+                let mut result = HashMap::new();
                 result.insert(random_op_id(), root.root.value());
                 result
             }

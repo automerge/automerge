@@ -207,7 +207,7 @@ impl MultiValue {
             .chain(self.conflicts.iter())
     }
 
-    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+    pub(super) fn realise_values(&self) -> HashMap<amp::OpId, Value> {
         self.iter()
             .map(|(opid, v)| (opid.clone(), v.realise_value()))
             .collect()
@@ -488,7 +488,7 @@ impl MultiGrapheme {
             .chain(self.conflicts.iter())
     }
 
-    pub(super) fn realise_values(&self) -> std::collections::HashMap<amp::OpId, Value> {
+    pub(super) fn realise_values(&self) -> HashMap<amp::OpId, Value> {
         self.iter()
             .map(|(opid, v)| (opid.clone(), Value::Primitive(Primitive::Str(v.to_owned()))))
             .collect()
@@ -571,11 +571,7 @@ where
         }
     }
 
-    fn new_map_or_table(
-        self,
-        props: std::collections::HashMap<SmolStr, Value>,
-        map_type: amp::MapType,
-    ) -> NewValue {
+    fn new_map_or_table(self, props: HashMap<SmolStr, Value>, map_type: amp::MapType) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::from(map_type)),
@@ -626,7 +622,7 @@ where
         }
     }
 
-    fn new_sorted_map(self, props: std::collections::BTreeMap<SmolStr, Value>) -> NewValue {
+    fn new_sorted_map(self, props: BTreeMap<SmolStr, Value>) -> NewValue {
         let make_op_id = amp::OpId(self.start_op, self.actor.clone());
         let make_op = amp::Op {
             action: amp::OpType::Make(amp::ObjType::from(amp::MapType::Map)),
