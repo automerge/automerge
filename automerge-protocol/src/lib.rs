@@ -781,7 +781,7 @@ pub struct Patch {
     pub seq: Option<NonZeroU64>,
     pub clock: HashMap<ActorId, NonZeroU64>,
     pub deps: Vec<ChangeHash>,
-    pub max_op: u64,
+    pub max_op: Option<NonZeroU64>,
     pub pending_changes: usize,
     //    pub can_undo: bool,
     //    pub can_redo: bool,

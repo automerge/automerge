@@ -12,7 +12,7 @@ fn set_object_root_properties() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -40,7 +40,7 @@ fn set_bytes_value() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -73,7 +73,7 @@ fn reveal_conflicts_on_root_properties() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         clock: hashmap! {
             actor1.clone() => NonZeroU64::new(1).unwrap(),
@@ -114,7 +114,7 @@ fn create_nested_maps() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -149,7 +149,7 @@ fn apply_updates_inside_nested_maps() {
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -178,7 +178,7 @@ fn apply_updates_inside_nested_maps() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -221,7 +221,7 @@ fn apply_updates_inside_map_conflicts() {
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -272,7 +272,7 @@ fn apply_updates_inside_map_conflicts() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -323,7 +323,7 @@ fn delete_keys_in_maps() {
     let mut frontend = Frontend::new();
     let patch1 = amp::Patch {
         actor: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         seq: None,
         deps: Vec::new(),
@@ -352,7 +352,7 @@ fn delete_keys_in_maps() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -379,7 +379,7 @@ fn create_lists() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -416,7 +416,7 @@ fn apply_updates_inside_lists() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -443,7 +443,7 @@ fn apply_updates_inside_lists() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -478,7 +478,7 @@ fn apply_multi_insert_updates_inside_lists() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         deps: Vec::new(),
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
@@ -525,7 +525,7 @@ fn apply_updates_inside_list_conflicts() {
     let patch1 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -606,7 +606,7 @@ fn apply_updates_inside_list_conflicts() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -675,7 +675,7 @@ fn apply_updates_inside_list_conflicts() {
     let patch3 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         deps: Vec::new(),
         clock: hashmap! {
             actor1 => NonZeroU64::new(2).unwrap(),
@@ -732,7 +732,7 @@ fn delete_list_elements() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -771,7 +771,7 @@ fn delete_list_elements() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -804,7 +804,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     let patch1 = amp::Patch {
         clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
         seq: None,
-        max_op: 6,
+        max_op: NonZeroU64::new(6),
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
@@ -862,7 +862,7 @@ fn apply_updates_at_different_levels_of_object_tree() {
     let patch2 = amp::Patch {
         clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
         seq: None,
-        max_op: 7,
+        max_op: NonZeroU64::new(7),
         pending_changes: 0,
         actor: None,
         deps: Vec::new(),
@@ -920,7 +920,7 @@ fn test_text_objects() {
     let patch = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -968,7 +968,7 @@ fn test_text_objects() {
     let patch2 = amp::Patch {
         actor: None,
         seq: None,
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         pending_changes: 0,
         deps: Vec::new(),
         clock: hashmap! {
@@ -1011,7 +1011,7 @@ fn test_unchanged_diff_creates_empty_objects() {
         seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {doc.actor_id.clone() => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {

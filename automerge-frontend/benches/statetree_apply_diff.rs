@@ -14,7 +14,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
         seq: None,
         clock: hashmap! {actor_id.clone() => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
@@ -35,7 +35,7 @@ pub fn sequential_inserts_in_multiple_patches(c: &mut Criterion) {
             seq: None,
             clock: hashmap! {actor_id.clone() => NonZeroU64::new(op_num as u64).unwrap()},
             deps: Vec::new(),
-            max_op: op_num as u64,
+            max_op: NonZeroU64::new(op_num as u64),
             pending_changes: 0,
             diffs: RootDiff {
                 props: hashmap! {
@@ -96,7 +96,7 @@ pub fn sequential_inserts_in_single_patch(c: &mut Criterion) {
         seq: None,
         clock: hashmap! {actor_id => NonZeroU64::new(1).unwrap()},
         deps: Vec::new(),
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {

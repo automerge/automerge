@@ -6,7 +6,10 @@
 //! document::state) the implementation fetches the root object ID's history
 //! and then recursively walks through the tree of histories constructing the
 //! state. Obviously this is not very efficient.
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    num::NonZeroU64,
+};
 
 use automerge_protocol as amp;
 use fxhash::FxBuildHasher;
@@ -43,7 +46,7 @@ use crate::{
 pub(crate) struct OpSet {
     pub objs: HashMap<ObjectId, ObjState, FxBuildHasher>,
     pub deps: HashSet<amp::ChangeHash>,
-    pub max_op: u64,
+    pub max_op: Option<NonZeroU64>,
     cursors: HashMap<ObjectId, Vec<CursorState>>,
 }
 
@@ -60,7 +63,7 @@ impl OpSet {
 
         OpSet {
             objs,
-            max_op: 0,
+            max_op: None,
             deps: HashSet::default(),
             cursors: HashMap::new(),
         }

@@ -58,7 +58,7 @@ pub(crate) enum FrontendState {
         /// The root state that the backend tracks.
         reconciled_root_state: StateTree,
         /// The maximum operation observed.
-        max_op: u64,
+        max_op: Option<NonZeroU64>,
         /// The dependencies of the last received patch.
         deps_of_last_received_patch: Vec<amp::ChangeHash>,
     },
@@ -210,7 +210,7 @@ impl FrontendState {
                 ..
             } => {
                 let mut mutation_tracker =
-                    MutationTracker::new(optimistic_root_state, (*max_op).get(), actor.clone());
+                    MutationTracker::new(optimistic_root_state, Some(*max_op), actor.clone());
 
                 let result = match change_closure(&mut mutation_tracker) {
                     Ok(result) => result,
@@ -222,7 +222,7 @@ impl FrontendState {
                 };
 
                 let (ops, mt_max_op) = mutation_tracker.commit();
-                *max_op = NonZeroU64::new(mt_max_op).unwrap();
+                *max_op = mt_max_op.unwrap();
                 if !ops.is_empty() {
                     // we actually have made a change so expect it to be sent to the backend
                     in_flight_requests.push(seq);
@@ -268,7 +268,7 @@ impl FrontendState {
                         optimistic_root_state,
                         queued_diffs: Vec::new(),
                         seen_non_local_patch: false,
-                        max_op: NonZeroU64::new(*max_op).unwrap(),
+                        max_op: max_op.unwrap(),
                     }
                 } else {
                     // we can remain in the reconciled frontend state since we didn't make a change
@@ -294,9 +294,9 @@ impl FrontendState {
         }
     }
 
-    pub(crate) fn max_op(&self) -> u64 {
+    pub(crate) fn max_op(&self) -> Option<NonZeroU64> {
         match self {
-            FrontendState::WaitingForInFlightRequests { max_op, .. } => (*max_op).get(),
+            FrontendState::WaitingForInFlightRequests { max_op, .. } => Some(*max_op),
             FrontendState::Reconciled { max_op, .. } => *max_op,
         }
     }

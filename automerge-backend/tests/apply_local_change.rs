@@ -61,7 +61,7 @@ fn test_apply_local_change() {
 
     let expected_patch = Patch {
         actor: Some(actor.clone()),
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {
@@ -509,7 +509,7 @@ fn test_handle_list_insertion_and_deletion_in_same_change() {
     let mut expected_patch = Patch {
         actor: Some(actor.clone()),
         seq: Some(NonZeroU64::new(2).unwrap()),
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap()

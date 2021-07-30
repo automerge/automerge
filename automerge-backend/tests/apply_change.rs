@@ -45,7 +45,7 @@ fn test_incremental_diffs_in_a_map() {
         seq: None,
         deps: vec![change.hash],
         clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap!( "bird".into() => hashmap!( actor.op_id_at(NonZeroU64::new(1).unwrap()) => "magpie".into() )),
@@ -84,7 +84,7 @@ fn test_bytes() {
         seq: None,
         deps: vec![change.hash],
         clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
@@ -144,7 +144,7 @@ fn test_increment_key_in_map() {
         actor: None,
         seq: None,
         clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
@@ -212,7 +212,7 @@ fn test_conflict_on_assignment_to_same_map_key() {
             actor_2.clone() => NonZeroU64::new(1).unwrap(),
         },
         deps: vec![change2.hash],
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
@@ -278,7 +278,7 @@ fn delete_key_from_map() {
         seq: None,
         clock: hashmap! {actor => NonZeroU64::new(2).unwrap()},
         deps: vec![change2.hash],
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
@@ -327,7 +327,7 @@ fn create_nested_maps() {
 
     let expected_patch: Patch = Patch {
         actor: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: vec![change.hash],
         seq: None,
@@ -411,7 +411,7 @@ fn test_assign_to_nested_keys_in_map() {
         },
         actor: None,
         seq: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
@@ -472,7 +472,7 @@ fn test_create_lists() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -558,7 +558,7 @@ fn test_apply_updates_inside_lists() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap()
         },
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         seq: None,
         diffs: RootDiff {
@@ -638,7 +638,7 @@ fn test_delete_list_elements() {
     let expected_patch = Patch {
         seq: None,
         actor: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap()
@@ -720,7 +720,7 @@ fn test_handle_list_element_insertion_and_deletion_in_same_change() {
         },
         seq: None,
         actor: None,
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
@@ -820,7 +820,7 @@ fn test_handle_changes_within_conflicted_objects() {
             actor1.clone() => NonZeroU64::new(1).unwrap(),
             actor2.clone() => NonZeroU64::new(2).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: vec![change1.hash, change3.hash],
         diffs: RootDiff {
@@ -985,7 +985,7 @@ fn test_handle_changes_within_conflicted_lists() {
             actor2.clone() => NonZeroU64::new(1).unwrap(),
             actor1.clone() => NonZeroU64::new(3).unwrap(),
         },
-        max_op: 6,
+        max_op: NonZeroU64::new(6),
         pending_changes: 0,
         deps: vec![change4.hash],
         diffs: RootDiff {
@@ -1057,7 +1057,7 @@ fn test_support_date_objects_at_root() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         seq: None,
         actor: None,
@@ -1112,7 +1112,7 @@ fn test_support_date_objects_in_a_list() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: vec![change.hash],
         actor: None,
@@ -1184,7 +1184,7 @@ fn test_cursor_objects() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         deps: vec![binchange.hash],
         actor: None,
@@ -1318,7 +1318,7 @@ fn test_updating_sequences_updates_referring_cursors() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap(),
         },
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         deps: vec![binchange2.hash],
         actor: None,
@@ -1420,7 +1420,7 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap(),
         },
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         pending_changes: 0,
         deps: vec![binchange2.hash],
         actor: None,

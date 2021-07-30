@@ -36,7 +36,7 @@ fn use_version_and_sequence_number_from_backend() {
                 }
             },
         },
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
     };
 
@@ -121,7 +121,7 @@ fn remove_pending_requests_once_handled() {
         clock: hashmap! {
             doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         deps: Vec::new(),
         diffs: RootDiff {
@@ -152,7 +152,7 @@ fn remove_pending_requests_once_handled() {
         clock: hashmap! {
             doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
         },
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         pending_changes: 0,
         deps: Vec::new(),
         diffs: RootDiff {
@@ -206,7 +206,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
     doc.apply_patch(amp::Patch {
         actor: None,
         seq: None,
-        max_op: 10,
+        max_op: NonZeroU64::new(10),
         pending_changes: 0,
         clock: hashmap! {
             remote.clone() => NonZeroU64::new(1).unwrap(),
@@ -240,7 +240,7 @@ fn leave_request_queue_unchanged_on_remote_changes() {
             doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
             remote => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 11,
+        max_op: NonZeroU64::new(11),
         pending_changes: 0,
         deps: Vec::new(),
         diffs: RootDiff {
@@ -286,7 +286,7 @@ fn dont_allow_out_of_order_request_patches() {
     let result = doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(NonZeroU64::new(2).unwrap()),
-        max_op: 8,
+        max_op: NonZeroU64::new(8),
         pending_changes: 0,
         clock: hashmap! {
             doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),
@@ -332,7 +332,7 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(NonZeroU64::new(1).unwrap()),
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         clock: hashmap! {
             doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
@@ -396,7 +396,7 @@ fn handle_concurrent_insertions_into_lists() {
             doc.actor_id.clone() => NonZeroU64::new(1).unwrap(),
             remote.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -431,7 +431,7 @@ fn handle_concurrent_insertions_into_lists() {
     doc.apply_patch(amp::Patch {
         actor: Some(doc.actor_id.clone()),
         seq: Some(NonZeroU64::new(2).unwrap()),
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         clock: hashmap! {
             doc.actor_id.clone() => NonZeroU64::new(2).unwrap(),

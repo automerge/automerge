@@ -143,7 +143,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         deps: Vec::new(),
         seq: Some(NonZeroU64::new(1).unwrap()),
         clock: hashmap! {actor.clone() => NonZeroU64::new(1).unwrap()},
-        max_op: 3,
+        max_op: NonZeroU64::new(3),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {
@@ -183,7 +183,7 @@ fn test_set_cursor_to_new_element_in_diff() {
         deps: Vec::new(),
         seq: Some(NonZeroU64::new(2).unwrap()),
         clock: hashmap! {actor.clone() => NonZeroU64::new(2).unwrap()},
-        max_op: 5,
+        max_op: NonZeroU64::new(5),
         pending_changes: 0,
         diffs: RootDiff {
             props: hashmap! {

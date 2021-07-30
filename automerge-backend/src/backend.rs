@@ -212,7 +212,7 @@ impl Backend {
 
         op_set.max_op = max(
             op_set.max_op,
-            (start_op.get() + (ops.len() as u64)).saturating_sub(1),
+            NonZeroU64::new((start_op.get() + (ops.len() as u64)).saturating_sub(1)),
         );
 
         op_set.apply_ops(ops, diffs, &mut self.actors)?;

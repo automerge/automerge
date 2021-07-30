@@ -91,7 +91,7 @@ impl Frontend {
             seq: None,
             state: FrontendState::Reconciled {
                 reconciled_root_state: root_state,
-                max_op: 0,
+                max_op: None,
                 deps_of_last_received_patch: Vec::new(),
             },
             cached_value: None,
@@ -169,7 +169,9 @@ impl Frontend {
         E: Error,
         F: FnOnce(&mut dyn MutableDocument) -> Result<O, E>,
     {
-        let start_op = NonZeroU64::new(self.state.max_op() + 1).unwrap();
+        let start_op =
+            NonZeroU64::new(self.state.max_op().map(|nzu| nzu.get()).unwrap_or_default() + 1)
+                .unwrap();
         let change_result = self.state.optimistically_apply_change(
             &self.actor_id,
             change_closure,

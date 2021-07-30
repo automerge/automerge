@@ -59,7 +59,7 @@ fn test_include_most_recent_value_for_key() {
     let expected_patch = Patch {
         actor: None,
         seq: None,
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap(),
@@ -129,7 +129,7 @@ fn test_includes_conflicting_values_for_key() {
             actor1.clone() => NonZeroU64::new(1).unwrap(),
             actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         seq: None,
         actor: None,
@@ -199,7 +199,7 @@ fn test_handles_counter_increment_at_keys_in_a_map() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(2).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
@@ -284,7 +284,7 @@ fn test_creates_nested_maps() {
         },
         actor: None,
         seq: None,
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         deps: vec![change2.hash],
         diffs: RootDiff {
@@ -345,7 +345,7 @@ fn test_create_lists() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -423,7 +423,7 @@ fn test_includes_latests_state_of_list() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap()
         },
-        max_op: 4,
+        max_op: NonZeroU64::new(4),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -488,7 +488,7 @@ fn test_includes_date_objects_at_root() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 1,
+        max_op: NonZeroU64::new(1),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -544,7 +544,7 @@ fn test_includes_date_objects_in_a_list() {
         clock: hashmap! {
             actor.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         pending_changes: 0,
         actor: None,
         seq: None,
@@ -654,7 +654,7 @@ fn test_includes_updates_for_conflicting_list_elements() {
             actor1.clone() => NonZeroU64::new(1).unwrap(),
             actor2.clone() => NonZeroU64::new(1).unwrap(),
         },
-        max_op: 2,
+        max_op: NonZeroU64::new(2),
         actor: None,
         seq: None,
         deps,
