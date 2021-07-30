@@ -157,7 +157,7 @@ impl Backend {
         Ok((patch, change))
     }
 
-    /// Like [`apply_local_change`] but returns a mutable reference to the change.
+    /// Like [`apply_local_change`](Self::apply_local_change) but returns a mutable reference to the change.
     ///
     /// This mutable reference is useful if you intend to compress the change using
     /// [`Change::compress`].
