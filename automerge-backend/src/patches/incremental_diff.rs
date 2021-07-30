@@ -45,7 +45,7 @@ impl IncrementalPatch {
     }
 
     pub(crate) fn record_map_set(&mut self, oid: &ObjectId, key: SmolStr) {
-        self.append_map_diff(oid, key)
+        self.append_map_diff(oid, key);
     }
 
     pub(crate) fn record_cursor_change(&mut self, oid: &ObjectId, key: SmolStr) {
@@ -164,7 +164,7 @@ impl IncrementalPatch {
                         }
                     }
                     amp::ObjType::List | amp::ObjType::Text => {
-                        self.record_seq_set(&inbound.obj, inbound.clone())
+                        self.record_seq_set(&inbound.obj, inbound.clone());
                     }
                 }
             }
