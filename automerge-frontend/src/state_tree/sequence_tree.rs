@@ -4,16 +4,22 @@ use automerge_protocol::{ActorId, OpId};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceTree<T> {
-    nodes: Vec<SequenceTreeNode<T>>,
-    length: usize,
+    root_node: SequenceTreeNode<T>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum SequenceTreeInner<T> {
+    Leaf(OpId, T),
+    Node {
+        left: Option<Box<SequenceTreeNode<T>>>,
+        right: Option<Box<SequenceTreeNode<T>>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceTreeNode<T> {
-    actor: ActorId,
-    start_counter: u64,
-    start_index: usize,
-    elements: Vec<T>,
+    inner: SequenceTreeInner<T>,
+    len: usize,
 }
 
 impl<T> SequenceTree<T>
@@ -22,13 +28,18 @@ where
 {
     pub fn new() -> Self {
         Self {
-            nodes: Vec::new(),
-            length: 0,
+            root_node: SequenceTreeNode {
+                inner: SequenceTreeInner::Node {
+                    left: None,
+                    right: None,
+                },
+                len: 0,
+            },
         }
     }
 
     pub fn len(&self) -> usize {
-        self.length
+        self.root_node.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -36,220 +47,155 @@ where
     }
 
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
-        if index == self.len() {
-            self.push_back(opid, element);
-            return;
-        }
-        self.length += 1;
-        let mut new_node_needed = false;
-        let mut split_node = None;
-
-        for node in &mut self.nodes {
-            if index < node.start_index {
-                node.start_index += 1
-            } else if index == node.start_index {
-                node.start_index += 1;
-                new_node_needed = true;
-            } else if index > node.start_index && index < node.start_index + node.elements.len() {
-                let other_elements = node.elements.split_off(index - node.start_index);
-                assert!(!node.elements.is_empty());
-                if !other_elements.is_empty() {
-                    split_node = Some(SequenceTreeNode {
-                        actor: node.actor.clone(),
-                        start_counter: node.start_counter + (index - node.start_index) as u64,
-                        start_index: index + 1,
-                        elements: other_elements,
-                    });
-                }
-
-                new_node_needed = true
-            } else if index > node.start_index && index == node.start_index + node.elements.len() {
-                // at the end, may be able to add it if correct actorid and counter
-                if opid.1 == node.actor && opid.0 == node.start_counter + node.elements.len() as u64
-                {
-                    node.elements.push(element.clone())
-                } else {
-                    new_node_needed = true
-                }
-            } else {
-                // do nothing
-            }
-        }
-
-        if new_node_needed {
-            self.nodes.push(SequenceTreeNode {
-                actor: opid.1,
-                start_counter: opid.0,
-                start_index: index,
-                elements: vec![element],
-            })
-        }
-
-        if let Some(node) = split_node {
-            self.nodes.push(node)
-        }
-
-        let any_empty = self.nodes.iter().any(|n| n.elements.is_empty());
-        if any_empty {
-            let mut indices = self
-                .nodes
-                .iter()
-                .map(|i| (i.start_index, i.elements.len()))
-                .collect::<Vec<_>>();
-            indices.sort_unstable_by_key(|v| v.0);
-            dbg!(&self, index, indices);
-            panic!("empty insert {:?}", index)
-        }
+        self.root_node.insert(index, opid, element)
     }
 
     pub fn push_back(&mut self, opid: OpId, element: T) {
-        let mut new_node_needed = false;
-        let len = self.len();
-        self.length += 1;
-        if self.nodes.is_empty() {
-            new_node_needed = true
-        } else {
-            for node in &mut self.nodes {
-                if node.start_index + node.elements.len() == len {
-                    if opid.1 == node.actor
-                        && opid.0 == node.start_counter + node.elements.len() as u64
-                    {
-                        node.elements.push(element.clone())
+        let l = self.len();
+        self.insert(l, opid, element)
+    }
+
+    pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
+        self.root_node.get(index)
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
+        self.root_node.get_mut(index)
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        self.root_node.remove(index)
+    }
+
+    pub fn set(&mut self, index: usize, element: T) -> T {
+        todo!()
+    }
+}
+
+impl<T> SequenceTreeNode<T>
+where
+    T: Clone + Debug,
+{
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
+        match &mut self.inner {
+            SequenceTreeInner::Leaf(old_opid, old_element) => {
+                let left = Some(Box::new(SequenceTreeNode {
+                    inner: SequenceTreeInner::Leaf(old_opid.clone(), old_element.clone()),
+                    len: 1,
+                }));
+                let right = Some(Box::new(SequenceTreeNode {
+                    inner: SequenceTreeInner::Leaf(opid, element),
+                    len: 1,
+                }));
+                self.inner = SequenceTreeInner::Node { left, right };
+                self.len = 2;
+            }
+            SequenceTreeInner::Node { left, right } => {
+                let left_len = left.as_ref().map_or(0, |l| l.len());
+                self.len += 1;
+                if index > left_len {
+                    if let Some(right) = right {
+                        right.insert(index - left_len, opid, element)
                     } else {
-                        new_node_needed = true;
-                        break;
+                        *right = Some(Box::new(SequenceTreeNode {
+                            inner: SequenceTreeInner::Leaf(opid, element),
+                            len: 1,
+                        }))
+                    }
+                } else {
+                    if let Some(left) = left {
+                        left.insert(index, opid, element)
+                    } else {
+                        *left = Some(Box::new(SequenceTreeNode {
+                            inner: SequenceTreeInner::Leaf(opid, element),
+                            len: 1,
+                        }))
                     }
                 }
             }
         }
+    }
 
-        if new_node_needed {
-            self.nodes.push(SequenceTreeNode {
-                actor: opid.1,
-                start_counter: opid.0,
-                start_index: self.len() - 1,
-                elements: vec![element],
-            })
-        }
-        let any_empty = self.nodes.iter().any(|n| n.elements.is_empty());
-        if any_empty {
-            let mut indices = self
-                .nodes
-                .iter()
-                .map(|i| (i.start_index, i.elements.len()))
-                .collect::<Vec<_>>();
-            indices.sort_unstable_by_key(|v| v.0);
-            dbg!(&self, indices);
-            panic!("empty push_back")
+    pub fn remove(&mut self, index: usize) -> T {
+        match &mut self.inner {
+            SequenceTreeInner::Leaf(old_opid, old_element) => {
+                unreachable!("shouldn't be calling remove on a leaf, just a node")
+            }
+            SequenceTreeInner::Node { left, right } => {
+                let left_len = left.as_ref().map_or(0, |l| l.len());
+                self.len -= 1;
+                if index > left_len {
+                    if let Some(right_child) = right {
+                        if let SequenceTreeInner::Leaf(opid, element) = &right_child.inner {
+                            let el = element.clone();
+                            *right = None;
+                            el
+                        } else {
+                            right_child.remove(index - left_len)
+                        }
+                    } else {
+                        unreachable!("no right child")
+                    }
+                } else {
+                    if let Some(left_child) = left {
+                        if let SequenceTreeInner::Leaf(opid, element) = &left_child.inner {
+                            let el = element.clone();
+                            *left = None;
+                            el
+                        } else {
+                            left_child.remove(index)
+                        }
+                    } else {
+                        unreachable!("no left child")
+                    }
+                }
+            }
         }
     }
 
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
-        for node in &self.nodes {
-            if index >= node.start_index && index < node.start_index + node.elements.len() {
-                return node.elements.get(index - node.start_index).map(|v| {
-                    (
-                        OpId(
-                            node.start_counter + (index - node.start_index) as u64,
-                            node.actor.clone(),
-                        ),
-                        v,
-                    )
-                });
+        match &self.inner {
+            SequenceTreeInner::Leaf(opid, element) => Some((opid.clone(), element)),
+            SequenceTreeInner::Node { left, right } => {
+                let left_len = left.as_ref().map_or(0, |l| l.len());
+                if index > left_len {
+                    right.as_ref().and_then(|r| r.get(index - left_len))
+                } else {
+                    left.as_ref().and_then(|l| l.get(index))
+                }
             }
         }
-        let mut indices = self
-            .nodes
-            .iter()
-            .map(|i| (i.start_index, i.elements.len()))
-            .collect::<Vec<_>>();
-        indices.sort_unstable_by_key(|v| v.0);
-        dbg!(&self, index, indices);
-        None
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
-        for node in &mut self.nodes {
-            if index >= node.start_index && index < node.start_index + node.elements.len() {
-                let counter = node.start_counter + (index - node.start_index) as u64;
-                let actor = node.actor.clone();
-                return node
-                    .elements
-                    .get_mut(index - node.start_index)
-                    .map(|v| (OpId(counter, actor), v));
+        match &mut self.inner {
+            SequenceTreeInner::Leaf(opid, element) => Some((opid.clone(), element)),
+            SequenceTreeInner::Node { left, right } => {
+                let left_len = left.as_ref().map_or(0, |l| l.len());
+                if index > left_len {
+                    right.as_mut().and_then(|r| r.get_mut(index - left_len))
+                } else {
+                    left.as_mut().and_then(|l| l.get_mut(index))
+                }
             }
         }
-        None
     }
+}
 
-    pub fn remove(&mut self, index: usize) -> T {
-        self.length -= 1;
-        let mut split_node = None;
-
-        let mut to_return = None;
-        let mut node_to_remove = None;
-
-        for (i, node) in self.nodes.iter_mut().enumerate() {
-            if index < node.start_index {
-                node.start_index -= 1
-            } else if index == node.start_index {
-                node.start_counter += 1;
-                node.start_index -= 1;
-                if node.elements.len() == 1 {
-                    node_to_remove = Some(i)
-                }
-                to_return = Some(node.elements.remove(0))
-            } else if index > node.start_index && index < node.start_index + node.elements.len() {
-                let other_elements = node.elements.split_off((index - node.start_index) + 1);
-                if !other_elements.is_empty() {
-                    split_node = Some(SequenceTreeNode {
-                        actor: node.actor.clone(),
-                        start_counter: node.start_counter + (index - node.start_index) as u64,
-                        start_index: index,
-                        elements: other_elements,
-                    });
-                }
-
-                if node.elements.len() == 1 {
-                    node_to_remove = Some(i)
-                }
-                to_return = Some(node.elements.remove(index - node.start_index))
-            } else if index > node.start_index && index == node.start_index + node.elements.len() {
-                // at the end, may be able to add it if correct actorid and counter
-                if node.elements.len() == 1 {
-                    node_to_remove = Some(i)
-                }
-                to_return = Some(node.elements.remove(node.elements.len() - 1))
-            } else {
-                // do nothing
+impl<T> SequenceTreeInner<T>
+where
+    T: Clone + Debug,
+{
+    fn len(&self) -> usize {
+        match self {
+            Self::Leaf(..) => 1,
+            Self::Node { left, right } => {
+                left.as_ref().map_or(0, |l| l.len()) + right.as_ref().map_or(0, |r| r.len())
             }
         }
-
-        if let Some(i) = node_to_remove {
-            self.nodes.remove(i);
-        }
-
-        if let Some(node) = split_node {
-            self.nodes.push(node)
-        }
-
-        let any_empty = self.nodes.iter().any(|n| n.elements.is_empty());
-        if any_empty {
-            let mut indices = self
-                .nodes
-                .iter()
-                .map(|i| (i.start_index, i.elements.len()))
-                .collect::<Vec<_>>();
-            indices.sort_unstable_by_key(|v| v.0);
-            dbg!(&self, index, indices);
-            panic!("empty remove {:?}", index)
-        }
-
-        to_return.unwrap()
-    }
-
-    pub fn set(&mut self, index: usize, element: T) -> T {
-        // TODO
-        todo!()
     }
 }
