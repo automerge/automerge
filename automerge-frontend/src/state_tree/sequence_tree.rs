@@ -68,7 +68,7 @@ where
     }
 
     pub fn set(&mut self, index: usize, element: T) -> T {
-        todo!()
+        self.root_node.set(index, element)
     }
 }
 
@@ -81,6 +81,7 @@ where
     }
 
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
+        println!("insert");
         match &mut self.inner {
             SequenceTreeInner::Leaf(old_opid, old_element) => {
                 let left = Some(Box::new(SequenceTreeNode {
@@ -121,6 +122,7 @@ where
     }
 
     pub fn remove(&mut self, index: usize) -> T {
+        println!("remove");
         match &mut self.inner {
             SequenceTreeInner::Leaf(old_opid, old_element) => {
                 unreachable!("shouldn't be calling remove on a leaf, just a node")
@@ -157,6 +159,29 @@ where
         }
     }
 
+    pub fn set(&mut self, index: usize, element: T) -> T {
+        println!("set");
+        match &mut self.inner {
+            SequenceTreeInner::Leaf(_, old_element) => std::mem::replace(old_element, element),
+            SequenceTreeInner::Node { left, right } => {
+                let left_len = left.as_ref().map_or(0, |l| l.len());
+                if index > left_len {
+                    if let Some(right) = right {
+                        right.set(index - left_len, element)
+                    } else {
+                        unreachable!("set on non existant index")
+                    }
+                } else {
+                    if let Some(left) = left {
+                        left.set(index, element)
+                    } else {
+                        unreachable!("set on non existant index")
+                    }
+                }
+            }
+        }
+    }
+
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
         match &self.inner {
             SequenceTreeInner::Leaf(opid, element) => Some((opid.clone(), element)),
@@ -181,20 +206,6 @@ where
                 } else {
                     left.as_mut().and_then(|l| l.get_mut(index))
                 }
-            }
-        }
-    }
-}
-
-impl<T> SequenceTreeInner<T>
-where
-    T: Clone + Debug,
-{
-    fn len(&self) -> usize {
-        match self {
-            Self::Leaf(..) => 1,
-            Self::Node { left, right } => {
-                left.as_ref().map_or(0, |l| l.len()) + right.as_ref().map_or(0, |r| r.len())
             }
         }
     }
