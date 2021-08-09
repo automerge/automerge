@@ -13,13 +13,13 @@ enum SequenceTreeInner<T> {
     Node {
         left: Option<Box<SequenceTreeNode<T>>>,
         right: Option<Box<SequenceTreeNode<T>>>,
+        len: usize,
     },
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceTreeNode<T> {
     inner: SequenceTreeInner<T>,
-    len: usize,
 }
 
 impl<T> SequenceTree<T>
@@ -32,8 +32,8 @@ where
                 inner: SequenceTreeInner::Node {
                     left: None,
                     right: None,
+                    len: 0,
                 },
-                len: 0,
             },
         }
     }
@@ -77,34 +77,36 @@ where
     T: Clone + Debug,
 {
     pub fn len(&self) -> usize {
-        self.len
+        match self.inner {
+            SequenceTreeInner::Leaf(..) => 1,
+            SequenceTreeInner::Node { len, .. } => len,
+        }
     }
 
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
-        println!("insert");
         match &mut self.inner {
             SequenceTreeInner::Leaf(old_opid, old_element) => {
                 let left = Some(Box::new(SequenceTreeNode {
                     inner: SequenceTreeInner::Leaf(old_opid.clone(), old_element.clone()),
-                    len: 1,
                 }));
                 let right = Some(Box::new(SequenceTreeNode {
                     inner: SequenceTreeInner::Leaf(opid, element),
-                    len: 1,
                 }));
-                self.inner = SequenceTreeInner::Node { left, right };
-                self.len = 2;
+                self.inner = SequenceTreeInner::Node {
+                    left,
+                    right,
+                    len: 2,
+                };
             }
-            SequenceTreeInner::Node { left, right } => {
+            SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
-                self.len += 1;
+                *len += 1;
                 if index > left_len {
                     if let Some(right) = right {
                         right.insert(index - left_len, opid, element)
                     } else {
                         *right = Some(Box::new(SequenceTreeNode {
                             inner: SequenceTreeInner::Leaf(opid, element),
-                            len: 1,
                         }))
                     }
                 } else {
@@ -113,7 +115,6 @@ where
                     } else {
                         *left = Some(Box::new(SequenceTreeNode {
                             inner: SequenceTreeInner::Leaf(opid, element),
-                            len: 1,
                         }))
                     }
                 }
@@ -122,14 +123,13 @@ where
     }
 
     pub fn remove(&mut self, index: usize) -> T {
-        println!("remove");
         match &mut self.inner {
             SequenceTreeInner::Leaf(old_opid, old_element) => {
                 unreachable!("shouldn't be calling remove on a leaf, just a node")
             }
-            SequenceTreeInner::Node { left, right } => {
+            SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
-                self.len -= 1;
+                *len -= 1;
                 if index > left_len {
                     if let Some(right_child) = right {
                         if let SequenceTreeInner::Leaf(opid, element) = &right_child.inner {
@@ -160,10 +160,9 @@ where
     }
 
     pub fn set(&mut self, index: usize, element: T) -> T {
-        println!("set");
         match &mut self.inner {
             SequenceTreeInner::Leaf(_, old_element) => std::mem::replace(old_element, element),
-            SequenceTreeInner::Node { left, right } => {
+            SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
                 if index > left_len {
                     if let Some(right) = right {
@@ -185,7 +184,7 @@ where
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
         match &self.inner {
             SequenceTreeInner::Leaf(opid, element) => Some((opid.clone(), element)),
-            SequenceTreeInner::Node { left, right } => {
+            SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
                 if index > left_len {
                     right.as_ref().and_then(|r| r.get(index - left_len))
@@ -199,7 +198,7 @@ where
     pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
         match &mut self.inner {
             SequenceTreeInner::Leaf(opid, element) => Some((opid.clone(), element)),
-            SequenceTreeInner::Node { left, right } => {
+            SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
                 if index > left_len {
                     right.as_mut().and_then(|r| r.get_mut(index - left_len))
