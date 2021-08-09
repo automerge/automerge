@@ -86,17 +86,30 @@ where
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
         match &mut self.inner {
             SequenceTreeInner::Leaf(old_opid, old_element) => {
-                let left = Some(Box::new(SequenceTreeNode {
-                    inner: SequenceTreeInner::Leaf(old_opid.clone(), old_element.clone()),
-                }));
-                let right = Some(Box::new(SequenceTreeNode {
-                    inner: SequenceTreeInner::Leaf(opid, element),
-                }));
-                self.inner = SequenceTreeInner::Node {
-                    left,
-                    right,
-                    len: 2,
-                };
+                let leaf = std::mem::replace(
+                    &mut self.inner,
+                    SequenceTreeInner::Node {
+                        left: None,
+                        right: None,
+                        len: 0,
+                    },
+                );
+
+                if let SequenceTreeInner::Leaf(old_opid, old_element) = leaf {
+                    let left = Some(Box::new(SequenceTreeNode {
+                        inner: SequenceTreeInner::Leaf(old_opid, old_element),
+                    }));
+                    let right = Some(Box::new(SequenceTreeNode {
+                        inner: SequenceTreeInner::Leaf(opid, element),
+                    }));
+                    self.inner = SequenceTreeInner::Node {
+                        left,
+                        right,
+                        len: 2,
+                    };
+                } else {
+                    unreachable!("was leaf then not a leaf")
+                }
             }
             SequenceTreeInner::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
@@ -132,10 +145,14 @@ where
                 *len -= 1;
                 if index > left_len {
                     if let Some(right_child) = right {
-                        if let SequenceTreeInner::Leaf(opid, element) = &right_child.inner {
-                            let el = element.clone();
-                            *right = None;
-                            el
+                        if let SequenceTreeInner::Leaf(_opid, element) = &right_child.inner {
+                            let right_child = std::mem::take(right);
+                            if let SequenceTreeInner::Leaf(_, element) = right_child.unwrap().inner
+                            {
+                                element
+                            } else {
+                                unreachable!("was leaf then wasn't leaf")
+                            }
                         } else {
                             right_child.remove(index - left_len)
                         }
@@ -145,9 +162,12 @@ where
                 } else {
                     if let Some(left_child) = left {
                         if let SequenceTreeInner::Leaf(opid, element) = &left_child.inner {
-                            let el = element.clone();
-                            *left = None;
-                            el
+                            let left_child = std::mem::take(left);
+                            if let SequenceTreeInner::Leaf(_, element) = left_child.unwrap().inner {
+                                element
+                            } else {
+                                unreachable!("was leaf then wasn't leaf")
+                            }
                         } else {
                             left_child.remove(index)
                         }
