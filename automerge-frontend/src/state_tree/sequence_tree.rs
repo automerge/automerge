@@ -11,8 +11,7 @@ pub struct SequenceTree<T> {
 enum SequenceTreeNode<T> {
     Leaf {
         opid: OpId,
-        element: T,
-        len: usize,
+        elements: Vec<T>,
     },
     Node {
         left: Option<Box<SequenceTreeNode<T>>>,
@@ -44,7 +43,7 @@ where
     }
 
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
-        self.root_node.insert(index, opid, element)
+        self.root_node.insert(index, opid, element);
     }
 
     pub fn push_back(&mut self, opid: OpId, element: T) {
@@ -75,75 +74,132 @@ where
 {
     pub fn len(&self) -> usize {
         match self {
-            SequenceTreeNode::Leaf { len, .. } => *len,
+            SequenceTreeNode::Leaf { elements, .. } => elements.len(),
             SequenceTreeNode::Node { len, .. } => *len,
         }
     }
 
-    pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
+    pub fn insert(&mut self, index: usize, opid: OpId, element: T) -> bool {
         match self {
             SequenceTreeNode::Leaf {
-                opid: _,
-                element: _,
-                len: _,
+                opid: leaf_opid,
+                elements,
             } => {
-                let leaf = std::mem::replace(
-                    self,
-                    SequenceTreeNode::Node {
-                        left: None,
-                        right: None,
-                        len: 0,
-                    },
-                );
-
-                if let SequenceTreeNode::Leaf {
-                    opid: old_opid,
-                    element: old_element,
-                    len: _,
-                } = leaf
-                {
-                    let left = Some(Box::new(SequenceTreeNode::Leaf {
-                        opid: old_opid,
-                        element: old_element,
-                        len: 1,
-                    }));
-                    let right = Some(Box::new(SequenceTreeNode::Leaf {
-                        opid,
-                        element,
-                        len: 1,
-                    }));
-                    *self = SequenceTreeNode::Node {
-                        left,
-                        right,
-                        len: 2,
-                    };
+                if leaf_opid.1 == opid.1 {
+                    // has our actor, see if the sequence counter fits in
+                    if index == elements.len() {
+                        // pushing onto the end so index may be rle-able
+                        if leaf_opid.0 + elements.len() as u64 == opid.0 {
+                            // is the next in sequence so just append
+                            elements.push(element);
+                            true
+                        } else {
+                            // may need to split the node
+                            false
+                        }
+                    } else {
+                        // need to split
+                        false
+                    }
                 } else {
-                    unreachable!("was leaf then not a leaf")
+                    // need to make a new node
+                    false
                 }
             }
             SequenceTreeNode::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
                 *len += 1;
                 if index > left_len {
-                    if let Some(right) = right {
-                        right.insert(index - left_len, opid, element)
+                    if let Some(right_child) = right {
+                        if !right_child.insert(index - left_len, opid, element) {
+                            // failed to insert, need to split the node
+                            let right_child = std::mem::take(right);
+                            if let SequenceTreeNode::Leaf { opid, mut elements } =
+                                *right_child.unwrap()
+                            {
+                                let right_elements = elements.split_off(index - left_len);
+                                let len = elements.len() + right_elements.len();
+
+                                let l = if elements.is_empty() {
+                                    None
+                                } else {
+                                    Some(Box::new(SequenceTreeNode::Leaf {
+                                        elements,
+                                        opid: opid.clone(),
+                                    }))
+                                };
+                                let r = if right_elements.is_empty() {
+                                    None
+                                } else {
+                                    Some(Box::new(SequenceTreeNode::Leaf {
+                                        opid: OpId(opid.0 + (index - left_len) as u64 + 1, opid.1),
+                                        elements: right_elements,
+                                    }))
+                                };
+                                *right = Some(Box::new(SequenceTreeNode::Node {
+                                    left: l,
+                                    right: r,
+                                    len,
+                                }));
+                                true
+                            } else {
+                                unreachable!("found non leaf on split")
+                            }
+                        } else {
+                            // added to elements
+                            true
+                        }
                     } else {
                         *right = Some(Box::new(SequenceTreeNode::Leaf {
                             opid,
-                            element,
-                            len: 1,
-                        }))
+                            elements: vec![element],
+                        }));
+                        true
+                    }
+                } else if let Some(left_child) = left {
+                    if !left_child.insert(index, opid, element) {
+                        // failed to insert, need to split the node
+                        let left_child = std::mem::take(left);
+                        if let SequenceTreeNode::Leaf { opid, mut elements } = *left_child.unwrap()
+                        {
+                            let right_elements = elements.split_off(index);
+                            let len = elements.len() + right_elements.len();
+
+                            let l = if elements.is_empty() {
+                                None
+                            } else {
+                                Some(Box::new(SequenceTreeNode::Leaf {
+                                    elements,
+                                    opid: opid.clone(),
+                                }))
+                            };
+                            let r = if right_elements.is_empty() {
+                                None
+                            } else {
+                                Some(Box::new(SequenceTreeNode::Leaf {
+                                    opid: OpId(opid.0 + index as u64 + 1, opid.1),
+                                    elements: right_elements,
+                                }))
+                            };
+                            *left = Some(Box::new(SequenceTreeNode::Node {
+                                left: l,
+                                right: r,
+                                len,
+                            }));
+                            true
+                        } else {
+                            unreachable!("found non leaf on split")
+                        }
+                    } else {
+                        // added to elements
+                        true
                     }
                 } else {
-                    if let Some(left) = left {
-                        left.insert(index, opid, element)
-                    } else {
-                        *left = Some(Box::new(SequenceTreeNode::Leaf {
-                            opid,
-                            element,
-                            len: 1,
-                        }))
-                    }
+                    *left = Some(Box::new(SequenceTreeNode::Leaf {
+                        opid,
+                        elements: vec![element],
+                    }));
+                    true
                 }
             }
         }
@@ -153,8 +209,7 @@ where
         match self {
             SequenceTreeNode::Leaf {
                 opid: _,
-                element: _,
-                len: _,
+                elements: _,
             } => {
                 unreachable!("shouldn't be calling remove on a leaf, just a node")
             }
@@ -163,54 +218,52 @@ where
                 *len -= 1;
                 if index > left_len {
                     if let Some(right_child) = right {
-                        if let SequenceTreeNode::Leaf {
-                            opid: _,
-                            element: _,
-                            len: _,
-                        } = &**right_child
-                        {
-                            let right_child = std::mem::take(right);
-                            if let SequenceTreeNode::Leaf {
-                                opid: _,
-                                element,
-                                len: _,
-                            } = *right_child.unwrap()
-                            {
-                                element
-                            } else {
-                                unreachable!("was leaf then wasn't leaf")
-                            }
+                        if let SequenceTreeNode::Leaf { opid: _, elements } = &**right_child {
+                            todo!();
+
+                            // let right_child = std::mem::take(right);
+                            // if let SequenceTreeNode::Leaf {
+                            //     opid: _,
+                            //     elements,
+                            //     len: _,
+                            // } = *right_child.unwrap()
+                            // {
+                            //     element
+                            // } else {
+                            //     unreachable!("was leaf then wasn't leaf")
+                            // }
                         } else {
                             right_child.remove(index - left_len)
                         }
                     } else {
                         unreachable!("no right child")
                     }
-                } else {
-                    if let Some(left_child) = left {
-                        if let SequenceTreeNode::Leaf {
-                            opid: _,
-                            element: _,
-                            len: _,
-                        } = &**left_child
-                        {
-                            let left_child = std::mem::take(left);
-                            if let SequenceTreeNode::Leaf {
-                                opid: _,
-                                element,
-                                len: _,
-                            } = *left_child.unwrap()
-                            {
-                                element
-                            } else {
-                                unreachable!("was leaf then wasn't leaf")
-                            }
+                } else if let Some(left_child) = left {
+                    if let SequenceTreeNode::Leaf { opid: _, elements } = &mut **left_child {
+                        if index + 1 == elements.len() {
+                            // removing from the end, no split needed
+                            return elements.remove(index);
                         } else {
-                            left_child.remove(index)
+                            // need to split
+                            todo!()
                         }
+                        todo!();
+                        // let left_child = std::mem::take(left);
+                        // if let SequenceTreeNode::Leaf {
+                        //     opid: _,
+                        //     element,
+                        //     len: _,
+                        // } = *left_child.unwrap()
+                        // {
+                        //     element
+                        // } else {
+                        //     unreachable!("was leaf then wasn't leaf")
+                        // }
                     } else {
-                        unreachable!("no left child")
+                        left_child.remove(index)
                     }
+                } else {
+                    unreachable!("no left child")
                 }
             }
         }
@@ -218,11 +271,10 @@ where
 
     pub fn set(&mut self, index: usize, element: T) -> T {
         match self {
-            SequenceTreeNode::Leaf {
-                opid: _,
-                element: old_element,
-                len: _,
-            } => std::mem::replace(old_element, element),
+            SequenceTreeNode::Leaf { opid: _, elements } => {
+                let old = elements.get_mut(index).unwrap();
+                std::mem::replace(old, element)
+            }
             SequenceTreeNode::Node {
                 left,
                 right,
@@ -248,11 +300,9 @@ where
 
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
         match &self {
-            SequenceTreeNode::Leaf {
-                opid,
-                element,
-                len: _,
-            } => Some((opid.clone(), element)),
+            SequenceTreeNode::Leaf { opid, elements } => elements
+                .get(index)
+                .map(|e| (OpId(opid.0 + elements.len() as u64, opid.1.clone()), e)),
             SequenceTreeNode::Node {
                 left,
                 right,
@@ -270,11 +320,13 @@ where
 
     pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
         match self {
-            SequenceTreeNode::Leaf {
-                opid,
-                element,
-                len: _,
-            } => Some((opid.clone(), element)),
+            SequenceTreeNode::Leaf { opid, elements } => {
+                let len = elements.len();
+
+                elements
+                    .get_mut(index)
+                    .map(|e| (OpId(opid.0 + len as u64, opid.1.clone()), e))
+            }
             SequenceTreeNode::Node {
                 left,
                 right,
