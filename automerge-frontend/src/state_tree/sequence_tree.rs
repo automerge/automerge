@@ -43,7 +43,6 @@ where
     }
 
     pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
-        println!("insert {}", index);
         self.root_node.insert(index, opid, element);
     }
 
@@ -61,7 +60,6 @@ where
     }
 
     pub fn remove(&mut self, index: usize) -> T {
-        println!("remove {}", index);
         self.root_node.remove(index)
     }
 
@@ -112,7 +110,7 @@ where
             SequenceTreeNode::Node { left, right, len } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
                 *len += 1;
-                if index > left_len {
+                if index >= left_len {
                     if let Some(right_child) = right {
                         if let Some((index, opid, element)) =
                             right_child.insert(index - left_len, opid, element)
@@ -126,7 +124,6 @@ where
                             {
                                 assert!(!elements.is_empty());
                                 let right_elements = elements.split_off(index);
-                                dbg!("{} {}", elements.len(), right_elements.len());
                                 let len = elements.len() + right_elements.len() + 1;
 
                                 let l = if elements.is_empty() {
@@ -190,7 +187,6 @@ where
                         {
                             assert!(!elements.is_empty());
                             let right_elements = elements.split_off(index);
-                            dbg!("{} {}", elements.len(), right_elements.len());
                             let len = elements.len() + right_elements.len() + 1;
 
                             let l = if elements.is_empty() {
@@ -259,8 +255,6 @@ where
                     if let Some(right_child) = right {
                         if let SequenceTreeNode::Leaf { opid, elements } = &mut **right_child {
                             assert!(!elements.is_empty());
-                            dbg!(index - left_len + 1);
-                            dbg!(elements.len());
                             if index - left_len + 1 == elements.len() {
                                 // removing from the end, no split needed
                                 elements.remove(index - left_len)
@@ -269,7 +263,6 @@ where
                                 let mut right_elements = elements.split_off(index - left_len);
                                 let old_element = right_elements.remove(0);
                                 let len = elements.len() + right_elements.len();
-                                dbg!("{} {}", elements.len(), right_elements.len());
                                 let l = if elements.is_empty() {
                                     None
                                 } else {
@@ -307,8 +300,6 @@ where
                 } else if let Some(left_child) = left {
                     if let SequenceTreeNode::Leaf { opid, elements } = &mut **left_child {
                         assert!(!elements.is_empty());
-                        dbg!(index + 1);
-                        dbg!(elements.len());
                         if index + 1 == elements.len() {
                             // removing from the end, no split needed
                             elements.remove(index)
@@ -317,7 +308,6 @@ where
                             let mut right_elements = elements.split_off(index);
                             let old_element = right_elements.remove(0);
                             let len = elements.len() + right_elements.len();
-                            dbg!("{} {}", elements.len(), right_elements.len());
                             let l = if elements.is_empty() {
                                 None
                             } else {
@@ -366,7 +356,7 @@ where
                 len: _,
             } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
-                if index > left_len {
+                if index >= left_len {
                     if let Some(right) = right {
                         right.set(index - left_len, element)
                     } else {
@@ -392,7 +382,7 @@ where
                 len: _,
             } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
-                if index > left_len {
+                if index >= left_len {
                     right.as_ref().and_then(|r| r.get(index - left_len))
                 } else {
                     left.as_ref().and_then(|l| l.get(index))
@@ -416,7 +406,7 @@ where
                 len: _,
             } => {
                 let left_len = left.as_ref().map_or(0, |l| l.len());
-                if index > left_len {
+                if index >= left_len {
                     right.as_mut().and_then(|r| r.get_mut(index - left_len))
                 } else {
                     left.as_mut().and_then(|l| l.get_mut(index))
