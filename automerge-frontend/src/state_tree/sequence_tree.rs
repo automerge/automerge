@@ -2,17 +2,18 @@ use std::fmt::Debug;
 
 use automerge_protocol::OpId;
 
+const T: usize = 5;
 const FULL_AMOUNT: usize = 9;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceTree<T> {
-    root_node: SequenceTreeNode<T>,
+    root_node: Option<SequenceTreeNode<T>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T> {
     elements: Vec<(OpId, T)>,
-    children: Vec<Box<SequenceTreeNode<T>>>,
+    children: Vec<SequenceTreeNode<T>>,
 }
 
 impl<T> SequenceTree<T>
@@ -20,25 +21,46 @@ where
     T: Clone + Debug,
 {
     pub fn new() -> Self {
-        Self {
-            root_node: SequenceTreeNode {
-                elements: Vec::new(),
-                children: Vec::new(),
-            },
-        }
+        Self { root_node: None }
     }
 
     pub fn len(&self) -> usize {
-        self.root_node.len()
+        self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
     pub fn is_empty(&self) -> bool {
-        self.length == 0
+        self.len() == 0
     }
 
-    pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
-        println!("insert {}", index);
-        self.root_node.insert(index, opid, element);
+    pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
+        if let Some(root) = self.root_node.as_mut() {
+            if root.elements.len() == 2 * T - 1 {
+                let new_root = SequenceTreeNode {
+                    elements: Vec::new(),
+                    children: Vec::new(),
+                };
+
+                // move new_root to root position
+                let old_root = std::mem::replace(root, new_root);
+
+                root.children.push(old_root);
+                root.split_child(0);
+
+                let mut i = 0;
+                if root.children[0].len() < index {
+                    i += 1;
+                    index -= root.children[0].len()
+                }
+                root.children[i].insert_non_full(index, opid, element)
+            } else {
+                root.insert_non_full(index, opid, element)
+            }
+        } else {
+            self.root_node = Some(SequenceTreeNode {
+                elements: vec![(opid, element)],
+                children: Vec::new(),
+            })
+        }
     }
 
     pub fn push_back(&mut self, opid: OpId, element: T) {
@@ -47,20 +69,20 @@ where
     }
 
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
-        self.root_node.get(index)
+        self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
     pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
-        self.root_node.get_mut(index)
+        self.root_node.as_mut().and_then(|n| n.get_mut(index))
     }
 
     pub fn remove(&mut self, index: usize) -> T {
         println!("remove {}", index);
-        self.root_node.remove(index)
+        self.root_node.as_mut().unwrap().remove(index)
     }
 
     pub fn set(&mut self, index: usize, element: T) -> T {
-        self.root_node.set(index, element)
+        self.root_node.as_mut().unwrap().set(index, element)
     }
 }
 
@@ -72,26 +94,54 @@ where
         self.elements.len() + self.children.iter().map(|c| c.len()).sum::<usize>()
     }
 
-    pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
-        self.try_split();
+    fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
         if self.children.is_empty() {
-            // leaf node
+            // leaf
+
             self.elements.insert(index, (opid, element));
         } else {
-            // internal node
-            for c in &mut self.children {
-                let c_len = c.len();
-                if index < c_len {
-                    c.insert(index, opid, element);
-                    break;
-                } else if index == c_len {
-                    self.elements.insert(index, (opid, element));
+            // not a leaf
+
+            let mut i = 0;
+            for (child_index, c) in self.children.iter_mut().enumerate() {
+                if i + c.len() > index {
+                    // insert into c
+                    if c.elements.len() == 2 * T - 1 {
+                        self.split_child(child_index);
+
+                        todo!("find which split child to insert into")
+                    }
+                    c.insert_non_full(index - i, opid, element);
                     break;
                 } else {
-                    index -= c_len;
+                    i += c.len()
                 }
             }
         }
+    }
+
+    // A utility function to split the child y of this node
+    // Note that y must be full when this function is called
+    fn split_child(&mut self, i: usize) {
+        // Create a new node which is going to store (t-1) keys
+        // of y
+        let mut z = SequenceTreeNode {
+            elements: Vec::new(),
+            children: Vec::new(),
+        };
+
+        let y = &mut self.children[i];
+        dbg!(&y);
+        z.elements = y.elements.split_off(T);
+        if !y.children.is_empty() {
+            z.children = y.children.split_off(T);
+        }
+
+        let middle = y.elements.remove(T - 1);
+
+        self.children.insert(i + 1, z);
+
+        self.elements.insert(i, middle);
     }
 
     pub fn remove(&mut self, index: usize) -> T {
@@ -100,14 +150,6 @@ where
 
     pub fn set(&mut self, index: usize, element: T) -> T {
         todo!()
-    }
-
-    // try to split this node if it is full
-    fn try_split(&mut self) {
-        if self.elements.len() == FULL_AMOUNT {
-            // do the split
-            todo!("split")
-        }
     }
 
     pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
