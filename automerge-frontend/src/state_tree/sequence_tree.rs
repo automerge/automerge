@@ -76,8 +76,21 @@ where
     }
 
     pub fn remove(&mut self, index: usize) -> T {
-        println!("remove {}", index);
-        self.root_node.as_mut().unwrap().remove(index)
+        if let Some(root) = self.root_node.as_mut() {
+            let old = root.remove(index);
+
+            if root.elements.is_empty() {
+                if root.children.is_empty() {
+                    self.root_node = None;
+                } else {
+                    self.root_node = Some(root.children[0].clone());
+                }
+            }
+
+            old
+        } else {
+            panic!("remove from empty tree")
+        }
     }
 
     pub fn set(&mut self, index: usize, element: T) -> T {
@@ -143,8 +156,34 @@ where
         self.elements.insert(i, middle);
     }
 
-    pub fn remove(&mut self, index: usize) -> T {
+    fn remove_from_leaf(&mut self, index: usize) -> T {
+        self.elements.remove(index).1
+    }
+
+    fn remove_from_non_leaf(&mut self, index: usize) -> T {
         todo!()
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        let mut total_index = 0;
+        for (ci, child) in self.children.iter().enumerate() {
+            if total_index + child.len() > index {
+                // in that child
+                todo!("remove in a child")
+            } else if total_index + child.len() == index {
+                // in this node
+                if self.children.is_empty() {
+                    return self.remove_from_leaf(ci);
+                } else {
+                    todo!("delete internal key")
+                }
+            } else {
+                // should be later on in the loop
+                total_index += child.len();
+                continue;
+            }
+        }
+        panic!("index not found to remove")
     }
 
     pub fn set(&mut self, mut index: usize, element: T) -> T {
