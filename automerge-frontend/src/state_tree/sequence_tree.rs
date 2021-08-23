@@ -209,3 +209,39 @@ where
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use automerge_protocol::ActorId;
+
+    use super::*;
+
+    #[test]
+    fn push_back() {
+        let mut t = SequenceTree::new();
+        let actor = ActorId::random();
+
+        t.push_back(actor.op_id_at(1), ());
+        t.push_back(actor.op_id_at(2), ());
+        t.push_back(actor.op_id_at(3), ());
+        t.push_back(actor.op_id_at(4), ());
+        t.push_back(actor.op_id_at(5), ());
+        t.push_back(actor.op_id_at(6), ());
+        t.push_back(actor.op_id_at(8), ());
+        t.push_back(actor.op_id_at(100), ());
+    }
+
+    #[test]
+    fn insert() {
+        let mut t = SequenceTree::new();
+        let actor = ActorId::random();
+
+        t.insert(0, actor.op_id_at(1), ());
+        t.insert(1, actor.op_id_at(1), ());
+        t.insert(0, actor.op_id_at(1), ());
+        t.insert(0, actor.op_id_at(1), ());
+        t.insert(0, actor.op_id_at(1), ());
+        t.insert(3, actor.op_id_at(1), ());
+        t.insert(4, actor.op_id_at(1), ());
+    }
+}
