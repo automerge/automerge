@@ -48,7 +48,7 @@ where
                 let mut i = 0;
                 if root.children[0].len() < index {
                     i += 1;
-                    index -= root.children[0].len()
+                    index -= root.children[0].len() + 1
                 }
                 root.children[i].insert_non_full(index, opid, element)
             } else {
