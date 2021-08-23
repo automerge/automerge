@@ -32,8 +32,9 @@ where
     }
 
     pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
+        let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
-            if root.elements.len() == 2 * T - 1 {
+            if root.is_full() {
                 let new_root = SequenceTreeNode {
                     elements: Vec::new(),
                     children: Vec::new(),
@@ -60,6 +61,7 @@ where
                 children: Vec::new(),
             })
         }
+        assert_eq!(self.len(), old_len + 1);
     }
 
     pub fn push_back(&mut self, opid: OpId, element: T) {
@@ -110,6 +112,10 @@ where
         self.children.is_empty()
     }
 
+    fn is_full(&self) -> bool {
+        self.elements.len() == 2 * T - 1
+    }
+
     fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
         if self.is_leaf() {
             // leaf
@@ -118,27 +124,36 @@ where
         } else {
             // not a leaf
 
-            let mut i = 0;
+            let num_children = self.children.len();
+            let mut cumulative_len = 0;
             for (child_index, c) in self.children.iter_mut().enumerate() {
-                if i + c.len() > index {
+                if cumulative_len + c.len() > index {
                     // insert into c
-                    if c.elements.len() == 2 * T - 1 {
+                    if c.is_full() {
                         self.split_child(child_index);
 
+                        let num_children = self.children.len();
                         let mut cumulative_len = 0;
                         for c in self.children.iter_mut() {
-                            cumulative_len += c.len() + 1;
-                            if cumulative_len > index {
-                                c.insert_non_full(index - i, opid, element);
+                            if cumulative_len + c.len() > index {
+                                c.insert_non_full(index - cumulative_len, opid, element);
                                 break;
+                            } else if child_index == num_children - 1 {
+                                c.insert_non_full(index - cumulative_len, opid, element);
+                                break;
+                            } else {
+                                cumulative_len += c.len() + 1;
                             }
                         }
                     } else {
-                        c.insert_non_full(index - i, opid, element);
+                        c.insert_non_full(index - cumulative_len, opid, element);
                     }
                     break;
+                } else if child_index == num_children - 1 {
+                    c.insert_non_full(index - cumulative_len, opid, element);
+                    break;
                 } else {
-                    i += c.len() + 1
+                    cumulative_len += c.len() + 1
                 }
             }
         }
