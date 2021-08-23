@@ -80,7 +80,7 @@ where
             let old = root.remove(index);
 
             if root.elements.is_empty() {
-                if root.children.is_empty() {
+                if root.is_leaf() {
                     self.root_node = None;
                 } else {
                     self.root_node = Some(root.children[0].clone());
@@ -106,8 +106,12 @@ where
         self.elements.len() + self.children.iter().map(|c| c.len()).sum::<usize>()
     }
 
+    fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+
     fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
-        if self.children.is_empty() {
+        if self.is_leaf() {
             // leaf
 
             self.elements.insert(index, (opid, element));
@@ -153,7 +157,7 @@ where
         let y = &mut self.children[i];
         dbg!(&y);
         z.elements = y.elements.split_off(T);
-        if !y.children.is_empty() {
+        if !y.is_leaf() {
             z.children = y.children.split_off(T);
         }
 
@@ -180,7 +184,7 @@ where
                 todo!("remove in a child")
             } else if total_index + child.len() == index {
                 // in this node
-                if self.children.is_empty() {
+                if self.is_leaf() {
                     return self.remove_from_leaf(ci);
                 } else {
                     todo!("delete internal key")
@@ -196,7 +200,7 @@ where
 
     pub fn set(&mut self, mut index: usize, element: T) -> T {
         let mut i = 0;
-        if self.children.is_empty() {
+        if self.is_leaf() {
             let (_, old_element) = self.elements.get_mut(i).unwrap();
             std::mem::replace(old_element, element)
         } else {
@@ -218,7 +222,7 @@ where
 
     pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
         let mut i = 0;
-        if self.children.is_empty() {
+        if self.is_leaf() {
             return self.elements.get(index).map(|(o, t)| (o.clone(), t));
         } else {
             for c in &self.children {
@@ -228,7 +232,7 @@ where
                 } else if index == c_len {
                     return self.elements.get(i).map(|(o, t)| (o.clone(), t));
                 } else {
-                    index -= c_len;
+                    index -= c_len + 1;
                     i += 1;
                 }
             }
@@ -238,7 +242,7 @@ where
 
     pub fn get_mut(&mut self, mut index: usize) -> Option<(OpId, &mut T)> {
         let mut i = 0;
-        if self.children.is_empty() {
+        if self.is_leaf() {
             return self.elements.get_mut(index).map(|(o, t)| (o.clone(), t));
         } else {
             for c in &mut self.children {
@@ -248,7 +252,7 @@ where
                 } else if index == c_len {
                     return self.elements.get_mut(i).map(|(o, t)| (o.clone(), t));
                 } else {
-                    index -= c_len;
+                    index -= c_len + 1;
                     i += 1;
                 }
             }
