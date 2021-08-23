@@ -127,7 +127,7 @@ where
 
                         let mut cumulative_len = 0;
                         for c in self.children.iter_mut() {
-                            cumulative_len += c.len();
+                            cumulative_len += c.len() + 1;
                             if cumulative_len > index {
                                 c.insert_non_full(index - i, opid, element);
                                 break;
