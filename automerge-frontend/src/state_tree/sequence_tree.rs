@@ -121,12 +121,20 @@ where
                     if c.elements.len() == 2 * T - 1 {
                         self.split_child(child_index);
 
-                        todo!("find which split child to insert into")
+                        let mut cumulative_len = 0;
+                        for c in self.children.iter_mut() {
+                            cumulative_len += c.len();
+                            if cumulative_len > index {
+                                c.insert_non_full(index - i, opid, element);
+                                break;
+                            }
+                        }
+                    } else {
+                        c.insert_non_full(index - i, opid, element);
                     }
-                    c.insert_non_full(index - i, opid, element);
                     break;
                 } else {
-                    i += c.len()
+                    i += c.len() + 1
                 }
             }
         }
