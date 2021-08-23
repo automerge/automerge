@@ -147,8 +147,26 @@ where
         todo!()
     }
 
-    pub fn set(&mut self, index: usize, element: T) -> T {
-        todo!()
+    pub fn set(&mut self, mut index: usize, element: T) -> T {
+        let mut i = 0;
+        if self.children.is_empty() {
+            let (_, old_element) = self.elements.get_mut(i).unwrap();
+            std::mem::replace(old_element, element)
+        } else {
+            for c in &mut self.children {
+                let c_len = c.len();
+                if index < c_len {
+                    return c.set(index, element);
+                } else if index == c_len {
+                    let (_, old_element) = self.elements.get_mut(i).unwrap();
+                    return std::mem::replace(old_element, element);
+                } else {
+                    index -= c_len;
+                    i += 1;
+                }
+            }
+            panic!("Invalid index to set")
+        }
     }
 
     pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
