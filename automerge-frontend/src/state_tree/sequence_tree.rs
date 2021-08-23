@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use automerge_protocol::OpId;
 
 const T: usize = 5;
-const FULL_AMOUNT: usize = 9;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceTree<T> {
