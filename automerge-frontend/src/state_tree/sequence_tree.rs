@@ -31,7 +31,7 @@ where
         self.len() == 0
     }
 
-    pub fn iter<'a>(&'a self) -> Iter<'a, T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self,
             index: 0,
@@ -142,10 +142,8 @@ where
                         let num_children = self.children.len();
                         let mut cumulative_len = 0;
                         for c in self.children.iter_mut() {
-                            if cumulative_len + c.len() >= index {
-                                c.insert_non_full(index - cumulative_len, opid, element);
-                                break;
-                            } else if child_index == num_children - 1 {
+                            if cumulative_len + c.len() >= index || child_index == num_children - 1
+                            {
                                 c.insert_non_full(index - cumulative_len, opid, element);
                                 break;
                             } else {
