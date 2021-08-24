@@ -177,7 +177,6 @@ where
         };
 
         let y = &mut self.children[i];
-        dbg!(&y);
         z.elements = y.elements.split_off(T);
         if !y.is_leaf() {
             z.children = y.children.split_off(T);
