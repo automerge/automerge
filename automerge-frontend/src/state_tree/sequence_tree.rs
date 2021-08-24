@@ -11,7 +11,7 @@ pub struct SequenceTree<T> {
 
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T> {
-    elements: Vec<(OpId, T)>,
+    elements: Vec<Box<(OpId, T)>>,
     children: Vec<SequenceTreeNode<T>>,
 }
 
@@ -64,7 +64,7 @@ where
             }
         } else {
             self.root_node = Some(SequenceTreeNode {
-                elements: vec![(opid, element)],
+                elements: vec![Box::new((opid, element))],
                 children: Vec::new(),
             })
         }
@@ -127,7 +127,7 @@ where
         if self.is_leaf() {
             // leaf
 
-            self.elements.insert(index, (opid, element));
+            self.elements.insert(index, Box::new((opid, element)));
         } else {
             // not a leaf
 
@@ -222,7 +222,7 @@ where
     pub fn set(&mut self, mut index: usize, element: T) -> T {
         let mut i = 0;
         if self.is_leaf() {
-            let (_, old_element) = self.elements.get_mut(i).unwrap();
+            let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
             std::mem::replace(old_element, element)
         } else {
             for c in &mut self.children {
@@ -230,7 +230,7 @@ where
                 if index < c_len {
                     return c.set(index, element);
                 } else if index == c_len {
-                    let (_, old_element) = self.elements.get_mut(i).unwrap();
+                    let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
                     return std::mem::replace(old_element, element);
                 } else {
                     index -= c_len;
@@ -244,14 +244,14 @@ where
     pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
         let mut i = 0;
         if self.is_leaf() {
-            return self.elements.get(index).map(|(o, t)| (o.clone(), t));
+            return self.elements.get(index).map(|b| (b.0.clone(), &b.1));
         } else {
             for c in &self.children {
                 let c_len = c.len();
                 if index < c_len {
                     return c.get(index);
                 } else if index == c_len {
-                    return self.elements.get(i).map(|(o, t)| (o.clone(), t));
+                    return self.elements.get(i).map(|b| (b.0.clone(), &b.1));
                 } else {
                     index -= c_len + 1;
                     i += 1;
@@ -264,14 +264,17 @@ where
     pub fn get_mut(&mut self, mut index: usize) -> Option<(OpId, &mut T)> {
         let mut i = 0;
         if self.is_leaf() {
-            return self.elements.get_mut(index).map(|(o, t)| (o.clone(), t));
+            return self
+                .elements
+                .get_mut(index)
+                .map(|b| (b.0.clone(), &mut b.1));
         } else {
             for c in &mut self.children {
                 let c_len = c.len();
                 if index < c_len {
                     return c.get_mut(index);
                 } else if index == c_len {
-                    return self.elements.get_mut(i).map(|(o, t)| (o.clone(), t));
+                    return self.elements.get_mut(i).map(|b| (b.0.clone(), &mut b.1));
                 } else {
                     index -= c_len + 1;
                     i += 1;
