@@ -4,7 +4,7 @@ use automerge_protocol::OpId;
 
 const T: usize = 3;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SequenceTree<T> {
     root_node: Option<SequenceTreeNode<T>>,
 }
@@ -29,6 +29,13 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn iter<'a>(&'a self) -> Iter<'a, T> {
+        Iter {
+            inner: self,
+            index: 0,
+        }
     }
 
     pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
@@ -135,7 +142,7 @@ where
                         let num_children = self.children.len();
                         let mut cumulative_len = 0;
                         for c in self.children.iter_mut() {
-                            if cumulative_len + c.len() > index {
+                            if cumulative_len + c.len() >= index {
                                 c.insert_non_full(index - cumulative_len, opid, element);
                                 break;
                             } else if child_index == num_children - 1 {
@@ -276,6 +283,32 @@ where
     }
 }
 
+impl<T> PartialEq for SequenceTree<T>
+where
+    T: Clone + Debug + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+pub struct Iter<'a, T> {
+    inner: &'a SequenceTree<T>,
+    index: usize,
+}
+
+impl<'a, T> Iterator for Iter<'a, T>
+where
+    T: Clone + Debug,
+{
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.index += 1;
+        self.inner.get(self.index - 1).map(|(_, t)| t)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use automerge_protocol::ActorId;
@@ -309,5 +342,65 @@ mod tests {
         t.insert(0, actor.op_id_at(1), ());
         t.insert(3, actor.op_id_at(1), ());
         t.insert(4, actor.op_id_at(1), ());
+    }
+
+    #[test]
+    fn insert_book() {
+        let mut t = SequenceTree::new();
+        let actor = ActorId::random();
+
+        for i in 0..100 {
+            t.insert(i % 2, actor.op_id_at(1), ());
+        }
+    }
+
+    #[test]
+    fn insert_book_vec() {
+        let mut t = SequenceTree::new();
+        let actor = ActorId::random();
+        let mut v = Vec::new();
+
+        for i in 0..100 {
+            t.insert(i % 3, actor.op_id_at(1), ());
+            v.insert(i % 3, ());
+
+            assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+        }
+    }
+
+    fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
+        proptest::collection::vec(any::<usize>(), 0..10).prop_map(|v| {
+            let mut len = 0;
+            v.into_iter()
+                .map(|i| {
+                    len += 1;
+                    i % len
+                })
+                .collect::<Vec<_>>()
+        })
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+
+        #[test]
+        fn proptest_insert(indices in arb_indices()) {
+            let mut t = SequenceTree::new();
+            let actor = ActorId::random();
+            let mut v = Vec::new();
+
+            for i in indices{
+                if i <= v.len() {
+                    t.insert(i % 3, actor.op_id_at(1), ());
+                    v.insert(i % 3, ());
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
+                }
+
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            }
+        }
+
     }
 }
