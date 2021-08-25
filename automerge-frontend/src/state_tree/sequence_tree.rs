@@ -13,6 +13,7 @@ pub struct SequenceTree<T> {
 struct SequenceTreeNode<T> {
     elements: Vec<Box<(OpId, T)>>,
     children: Vec<SequenceTreeNode<T>>,
+    length: usize,
 }
 
 impl<T> SequenceTree<T>
@@ -42,14 +43,17 @@ where
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             if root.is_full() {
+                let original_len = root.len();
                 let new_root = SequenceTreeNode {
                     elements: Vec::new(),
                     children: Vec::new(),
+                    length: 0,
                 };
 
                 // move new_root to root position
                 let old_root = std::mem::replace(root, new_root);
 
+                root.length += old_root.len();
                 root.children.push(old_root);
                 root.split_child(0);
 
@@ -58,6 +62,8 @@ where
                     i += 1;
                     index -= root.children[0].len() + 1
                 }
+                assert_eq!(original_len, root.len());
+                root.length += 1;
                 root.children[i].insert_non_full(index, opid, element)
             } else {
                 root.insert_non_full(index, opid, element)
@@ -66,9 +72,10 @@ where
             self.root_node = Some(SequenceTreeNode {
                 elements: vec![Box::new((opid, element))],
                 children: Vec::new(),
+                length: 1,
             })
         }
-        assert_eq!(self.len(), old_len + 1);
+        assert_eq!(self.len(), old_len + 1, "{:#?}", self);
     }
 
     pub fn push_back(&mut self, opid: OpId, element: T) {
@@ -112,7 +119,7 @@ where
     T: Clone + Debug,
 {
     pub fn len(&self) -> usize {
-        self.elements.len() + self.children.iter().map(|c| c.len()).sum::<usize>()
+        self.length
     }
 
     fn is_leaf(&self) -> bool {
@@ -128,6 +135,7 @@ where
         if self.is_leaf() {
             // leaf
 
+            self.length += 1;
             self.elements.insert(index, Box::new((opid, element)));
         } else {
             // not a leaf
@@ -140,12 +148,11 @@ where
                     if c.is_full() {
                         self.split_child(child_index);
 
-                        let num_children = self.children.len();
                         let mut cumulative_len = 0;
                         for c in self.children.iter_mut() {
-                            if cumulative_len + c.len() >= index || child_index == num_children - 1
-                            {
+                            if cumulative_len + c.len() >= index {
                                 c.insert_non_full(index - cumulative_len, opid, element);
+                                self.length += 1;
                                 break;
                             } else {
                                 cumulative_len += c.len() + 1;
@@ -153,10 +160,12 @@ where
                         }
                     } else {
                         c.insert_non_full(index - cumulative_len, opid, element);
+                        self.length += 1;
                     }
                     break;
                 } else if child_index == num_children - 1 {
                     c.insert_non_full(index - cumulative_len, opid, element);
+                    self.length += 1;
                     break;
                 } else {
                     cumulative_len += c.len() + 1
@@ -167,26 +176,43 @@ where
 
     // A utility function to split the child y of this node
     // Note that y must be full when this function is called
-    fn split_child(&mut self, i: usize) {
+    fn split_child(&mut self, full_child_index: usize) {
+        let original_len_self = self.len();
         // Create a new node which is going to store (t-1) keys
         // of y
         let mut z = SequenceTreeNode {
             elements: Vec::new(),
             children: Vec::new(),
+            length: 0,
         };
 
-        let y = &mut self.children[i];
-        assert!(y.is_full());
-        z.elements = y.elements.split_off(T);
-        if !y.is_leaf() {
-            z.children = y.children.split_off(T);
+        let full_child = &mut self.children[full_child_index];
+        let original_len = full_child.len();
+        assert!(full_child.is_full());
+
+        z.elements = full_child.elements.split_off(T);
+
+        if !full_child.is_leaf() {
+            z.children = full_child.children.split_off(T);
         }
 
-        let middle = y.elements.remove(T - 1);
+        let middle = full_child.elements.remove(T - 1);
 
-        self.children.insert(i + 1, z);
+        full_child.length =
+            full_child.elements.len() + full_child.children.iter().map(|c| c.len()).sum::<usize>();
+        z.length = z.elements.len() + z.children.iter().map(|c| c.len()).sum::<usize>();
 
-        self.elements.insert(i, middle);
+        let z_len = z.len();
+
+        let full_child_len = full_child.len();
+
+        self.children.insert(full_child_index + 1, z);
+
+        self.elements.insert(full_child_index, middle);
+
+        assert_eq!(full_child_len + z_len + 1, original_len, "{:#?}", self);
+
+        assert_eq!(original_len_self, self.len());
     }
 
     fn remove_from_leaf(&mut self, index: usize) -> T {
