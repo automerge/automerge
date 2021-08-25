@@ -120,10 +120,11 @@ where
     }
 
     fn is_full(&self) -> bool {
-        self.elements.len() == 2 * T - 1
+        self.elements.len() >= 2 * T - 1
     }
 
     fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
+        assert!(!self.is_full());
         if self.is_leaf() {
             // leaf
 
@@ -134,7 +135,7 @@ where
             let num_children = self.children.len();
             let mut cumulative_len = 0;
             for (child_index, c) in self.children.iter_mut().enumerate() {
-                if cumulative_len + c.len() > index {
+                if cumulative_len + c.len() >= index {
                     // insert into c
                     if c.is_full() {
                         self.split_child(child_index);
@@ -175,6 +176,7 @@ where
         };
 
         let y = &mut self.children[i];
+        assert!(y.is_full());
         z.elements = y.elements.split_off(T);
         if !y.is_leaf() {
             z.children = y.children.split_off(T);
