@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{cmp::min, fmt::Debug};
 
 use automerge_protocol::OpId;
 
@@ -42,6 +42,7 @@ where
     pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
+            root.calculate_length();
             if root.is_full() {
                 let original_len = root.len();
                 let new_root = SequenceTreeNode {
@@ -93,6 +94,9 @@ where
 
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
+            println!("{:?}", root);
+            println!();
+            root.calculate_length();
             let old = root.remove(index);
 
             if root.elements.is_empty() {
@@ -103,7 +107,7 @@ where
                 }
             }
 
-            old
+            old.1
         } else {
             panic!("remove from empty tree")
         }
@@ -215,34 +219,213 @@ where
         assert_eq!(original_len_self, self.len());
     }
 
-    fn remove_from_leaf(&mut self, index: usize) -> T {
-        self.elements.remove(index).1
+    fn remove_from_leaf(&mut self, index: usize) -> Box<(OpId, T)> {
+        self.length -= 1;
+        self.elements.remove(index)
     }
 
-    fn remove_from_non_leaf(&mut self, index: usize) -> T {
-        todo!()
-    }
-
-    pub fn remove(&mut self, index: usize) -> T {
-        let mut total_index = 0;
-        for (ci, child) in self.children.iter().enumerate() {
-            if total_index + child.len() > index {
-                // in that child
-                todo!("remove in a child")
-            } else if total_index + child.len() == index {
-                // in this node
-                if self.is_leaf() {
-                    return self.remove_from_leaf(ci);
-                } else {
-                    todo!("delete internal key")
-                }
+    fn remove_from_non_leaf(&mut self, index: usize, child_index: usize) -> Box<(OpId, T)> {
+        self.length -= 1;
+        if self.children[child_index].elements.len() >= T {
+            // recursively delete index - 1 in predecessor_node
+            let value = self.children[child_index].remove(index);
+            // replace element with that one
+            std::mem::replace(&mut self.elements[child_index], value)
+        } else {
+            // predecessor_node.elements.len() < T
+            let successor_node = &mut self.children[child_index + 1];
+            if successor_node.elements.len() >= T {
+                // recursively delete index - 1 in predecessor_node
+                let value = successor_node.remove(index);
+                successor_node.length -= 1;
+                // replace element with that one
+                std::mem::replace(&mut self.elements[child_index], value)
             } else {
-                // should be later on in the loop
-                total_index += child.len();
-                continue;
+                let k = self.elements.remove(child_index);
+                assert!(!self.elements.is_empty());
+                let z = self.children.remove(child_index + 1);
+                self.children[child_index].merge(k, z);
+                self.children[child_index].remove(index)
             }
         }
-        panic!("index not found to remove")
+    }
+
+    fn remove_from_internal_child(
+        &mut self,
+        mut index: usize,
+        child_index: usize,
+    ) -> Box<(OpId, T)> {
+        self.length -= 1;
+        if self.children[child_index].elements.len() < T
+            && if child_index > 0 {
+                self.children[child_index - 1].elements.len() < T
+            } else {
+                true
+            }
+            && if child_index + 1 < self.children.len() {
+                self.children[child_index + 1].elements.len() < T
+            } else {
+                true
+            }
+        {
+            // if the child and its immediate siblings have t-1 elements merge the child
+            // with one sibling, moving an element from this node into the new merged node
+            // to be the median
+            let middle = self
+                .elements
+                .remove(min(child_index, self.elements.len() - 1));
+            if child_index > 0 {
+                // use the predessor sibling
+                let predecessor = self.children.remove(child_index - 1);
+
+                self.children[child_index].elements.insert(0, middle);
+                self.children[child_index].length += 1;
+
+                for elements in predecessor.elements {
+                    self.children[child_index].elements.insert(0, elements);
+                    self.children[child_index].length += 1;
+                }
+                for children in predecessor.children {
+                    self.children[child_index].length += children.len();
+                    self.children[child_index].children.insert(0, children);
+                }
+            } else {
+                // use the sucessor sibling
+                let successor = self.children.remove(child_index + 1);
+
+                self.children[child_index].elements.push(middle);
+                self.children[child_index].length += 1;
+
+                for elements in successor.elements {
+                    self.children[child_index].elements.push(elements);
+                    self.children[child_index].length += 1;
+                }
+                for children in successor.children {
+                    self.children[child_index].length += children.len();
+                    self.children[child_index].children.push(children);
+                }
+            }
+        } else if self.children[child_index].elements.len() < T {
+            if self.children.get(child_index - 1).is_some()
+                && self.children[child_index - 1].elements.len() >= T
+            {
+                let predecessor_elements_len = self.children[child_index - 1].elements.len();
+                let predecessor_children_len = self.children[child_index - 1].children.len();
+
+                let last_element = self.children[child_index - 1]
+                    .elements
+                    .remove(predecessor_elements_len - 1);
+                assert!(!self.children[child_index - 1].elements.is_empty());
+                self.children[child_index - 1].length -= 1;
+                let last_child = self.children[child_index - 1]
+                    .children
+                    .remove(predecessor_children_len - 1);
+                self.children[child_index - 1].length -= last_child.len();
+
+                let parent_element =
+                    std::mem::replace(&mut self.elements[child_index], last_element);
+
+                self.children[child_index]
+                    .elements
+                    .insert(0, parent_element);
+                self.children[child_index].length += 1;
+                index += 1;
+                index += last_child.len();
+                self.children[child_index].length += last_child.len();
+                self.children[child_index].children.insert(0, last_child);
+            } else if self.children.get(child_index + 1).is_some()
+                && self.children[child_index + 1].elements.len() >= T
+            {
+                let first_element = self.children[child_index + 1].elements.remove(0);
+                assert!(!self.children[child_index + 1].elements.is_empty());
+                self.children[child_index + 1].length -= 1;
+                let first_child = self.children[child_index + 1].children.remove(0);
+                self.children[child_index + 1].length -= first_child.len();
+
+                let parent_element =
+                    std::mem::replace(&mut self.elements[child_index], first_element);
+
+                let child_elements_len = self.children[child_index].elements.len();
+                let child_children_len = self.children[child_index].children.len();
+                self.children[child_index].length += 1;
+                self.children[child_index]
+                    .elements
+                    .insert(child_elements_len, parent_element);
+                self.children[child_index].length += first_child.len();
+                self.children[child_index]
+                    .children
+                    .insert(child_children_len, first_child);
+            }
+        }
+        self.children[child_index].remove(index)
+    }
+
+    fn calculate_length(&self) -> usize {
+        assert!(!self.elements.is_empty());
+        let l = self.elements.len()
+            + self
+                .children
+                .iter()
+                .map(|c| c.calculate_length())
+                .sum::<usize>();
+        assert_eq!(self.len(), l, "{:#?}", self);
+
+        l
+    }
+
+    pub fn remove(&mut self, index: usize) -> Box<(OpId, T)> {
+        let original_len = self.len();
+        if self.is_leaf() {
+            let v = self.remove_from_leaf(index);
+            assert_eq!(original_len, self.len() + 1);
+            assert_eq!(self.calculate_length(), self.len());
+            v
+        } else {
+            let mut total_index = 0;
+            for (ci, child) in self.children.iter().enumerate() {
+                if total_index + child.len() > index {
+                    let v = self.remove_from_internal_child(index - total_index, ci);
+                    assert_eq!(original_len, self.len() + 1);
+                    assert_eq!(self.calculate_length(), self.len());
+                    return v;
+                } else if total_index + child.len() == index {
+                    if ci + 1 == self.children.len() {
+                        let v = self.remove_from_non_leaf(index - total_index, ci - 1);
+                        assert_eq!(original_len, self.len() + 1);
+                        assert_eq!(self.calculate_length(), self.len());
+                        return v;
+                    } else {
+                        let v = self.remove_from_non_leaf(index - total_index, ci);
+                        assert_eq!(original_len, self.len() + 1);
+                        assert_eq!(self.calculate_length(), self.len());
+                        return v;
+                    }
+                } else {
+                    // should be later on in the loop
+                    total_index += child.len() + 1;
+                    continue;
+                }
+            }
+            panic!(
+                "index not found to remove {} {} {} {}",
+                index,
+                total_index,
+                self.len(),
+                self.calculate_length()
+            );
+        }
+    }
+
+    fn merge(&mut self, key: Box<(OpId, T)>, sibling: SequenceTreeNode<T>) {
+        self.elements.push(key);
+        for element in sibling.elements {
+            self.elements.push(element);
+        }
+        for child in sibling.children {
+            self.children.push(child)
+        }
+        self.length += sibling.length + 1;
+        assert!(self.is_full());
     }
 
     pub fn set(&mut self, mut index: usize, element: T) -> T {
