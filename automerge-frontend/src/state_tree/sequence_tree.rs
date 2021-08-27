@@ -253,7 +253,7 @@ where
     fn remove_from_internal_child(
         &mut self,
         mut index: usize,
-        child_index: usize,
+        mut child_index: usize,
     ) -> Box<(OpId, T)> {
         self.length -= 1;
         if self.children[child_index].elements.len() < T
@@ -277,6 +277,7 @@ where
             if child_index > 0 {
                 // use the predessor sibling
                 let predecessor = self.children.remove(child_index - 1);
+                child_index -= 1;
 
                 self.children[child_index].elements.insert(0, middle);
                 self.children[child_index].length += 1;
