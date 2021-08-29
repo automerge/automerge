@@ -96,7 +96,7 @@ where
         if let Some(root) = self.root_node.as_mut() {
             println!("{:?}", root);
             println!();
-            root.calculate_length();
+            let len = root.calculate_length();
             let old = root.remove(index);
 
             if root.elements.is_empty() {
@@ -107,6 +107,10 @@ where
                 }
             }
 
+            assert_eq!(
+                len,
+                self.root_node.as_ref().map_or(0, |r| r.calculate_length()) + 1
+            );
             old.1
         } else {
             panic!("remove from empty tree")
@@ -241,7 +245,6 @@ where
                 std::mem::replace(&mut self.elements[child_index], value)
             } else {
                 let k = self.elements.remove(child_index);
-                assert!(!self.elements.is_empty());
                 let z = self.children.remove(child_index + 1);
                 self.children[child_index].merge(k, z);
                 self.children[child_index].remove(index)
@@ -251,10 +254,9 @@ where
 
     fn remove_from_internal_child(
         &mut self,
-        mut index: usize,
+        index: usize,
         mut child_index: usize,
     ) -> Box<(OpId, T)> {
-        self.length -= 1;
         if self.children[child_index].elements.len() < T
             && if child_index > 0 {
                 self.children[child_index - 1].elements.len() < T
@@ -273,40 +275,51 @@ where
             let middle = self
                 .elements
                 .remove(min(child_index, self.elements.len() - 1));
+            self.length -= 1;
+
             if child_index > 0 {
                 // use the predessor sibling
                 let predecessor = self.children.remove(child_index - 1);
+                self.length -= predecessor.len();
                 child_index -= 1;
 
                 self.children[child_index].elements.insert(0, middle);
                 self.children[child_index].length += 1;
+                self.length += 1;
 
                 for elements in predecessor.elements {
                     self.children[child_index].elements.insert(0, elements);
                     self.children[child_index].length += 1;
+                    self.length += 1;
                 }
                 for children in predecessor.children {
                     self.children[child_index].length += children.len();
+                    self.length += children.len();
                     self.children[child_index].children.insert(0, children);
                 }
             } else {
                 // use the sucessor sibling
                 let successor = self.children.remove(child_index + 1);
+                self.length -= successor.len();
 
                 self.children[child_index].elements.push(middle);
                 self.children[child_index].length += 1;
+                self.length += 1;
 
                 for elements in successor.elements {
                     self.children[child_index].elements.push(elements);
                     self.children[child_index].length += 1;
+                    self.length += 1;
                 }
                 for children in successor.children {
                     self.children[child_index].length += children.len();
+                    self.length += children.len();
                     self.children[child_index].children.push(children);
                 }
             }
         } else if self.children[child_index].elements.len() < T {
-            if self.children.get(child_index - 1).is_some()
+            if child_index > 0
+                && self.children.get(child_index - 1).is_some()
                 && self.children[child_index - 1].elements.len() >= T
             {
                 let predecessor_elements_len = self.children[child_index - 1].elements.len();
@@ -317,51 +330,65 @@ where
                     .remove(predecessor_elements_len - 1);
                 assert!(!self.children[child_index - 1].elements.is_empty());
                 self.children[child_index - 1].length -= 1;
-                let last_child = self.children[child_index - 1]
-                    .children
-                    .remove(predecessor_children_len - 1);
-                self.children[child_index - 1].length -= last_child.len();
+                self.length -= 1;
 
-                let parent_element =
-                    std::mem::replace(&mut self.elements[child_index], last_element);
+                if !self.children[child_index - 1].is_leaf() {
+                    let last_child = self.children[child_index - 1]
+                        .children
+                        .remove(predecessor_children_len - 1);
+                    self.children[child_index - 1].length -= last_child.len();
+                    self.children[child_index].length += last_child.len();
+                    self.children[child_index].children.insert(0, last_child);
+                }
+
+                let elements_len = self.elements.len();
+                let parent_element = std::mem::replace(
+                    &mut self.elements[min(child_index, elements_len - 1)],
+                    last_element,
+                );
 
                 self.children[child_index]
                     .elements
                     .insert(0, parent_element);
                 self.children[child_index].length += 1;
-                index += 1;
-                index += last_child.len();
-                self.children[child_index].length += last_child.len();
-                self.children[child_index].children.insert(0, last_child);
+                self.length += 1;
             } else if self.children.get(child_index + 1).is_some()
                 && self.children[child_index + 1].elements.len() >= T
             {
                 let first_element = self.children[child_index + 1].elements.remove(0);
+
                 assert!(!self.children[child_index + 1].elements.is_empty());
+
                 self.children[child_index + 1].length -= 1;
-                let first_child = self.children[child_index + 1].children.remove(0);
-                self.children[child_index + 1].length -= first_child.len();
+                self.length -= 1;
+
+                if !self.children[child_index + 1].is_leaf() {
+                    let first_child = self.children[child_index + 1].children.remove(0);
+                    self.children[child_index + 1].length -= first_child.len();
+                    self.children[child_index].length += first_child.len();
+                    let child_children_len = self.children[child_index].children.len();
+                    self.children[child_index]
+                        .children
+                        .insert(child_children_len, first_child);
+                }
 
                 let parent_element =
                     std::mem::replace(&mut self.elements[child_index], first_element);
 
                 let child_elements_len = self.children[child_index].elements.len();
-                let child_children_len = self.children[child_index].children.len();
                 self.children[child_index].length += 1;
+                self.length += 1;
                 self.children[child_index]
                     .elements
                     .insert(child_elements_len, parent_element);
-                self.children[child_index].length += first_child.len();
-                self.children[child_index]
-                    .children
-                    .insert(child_children_len, first_child);
             }
         }
+        self.length -= 1;
         self.children[child_index].remove(index)
     }
 
     fn calculate_length(&self) -> usize {
-        assert!(!self.elements.is_empty());
+        // assert!(!self.elements.is_empty(), "{}", self.children.len());
         let l = self.elements.len()
             + self
                 .children
@@ -605,6 +632,39 @@ mod tests {
                 if i <= v.len() {
                     t.insert(i % 3, actor.op_id_at(1), ());
                     v.insert(i % 3, ());
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
+                }
+
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            }
+        }
+
+    }
+
+    proptest! {
+
+        #[test]
+        fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
+            let mut t = SequenceTree::new();
+            let actor = ActorId::random();
+            let mut v = Vec::new();
+
+            for i in inserts {
+                if i <= v.len() {
+                    t.insert(i , actor.op_id_at(1), ());
+                    v.insert(i , ());
+                } else {
+                    return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
+                }
+
+                assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            }
+
+            for i in removes {
+                if i < v.len() {
+                    t.remove(i );
+                    v.remove(i );
                 } else {
                     return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
