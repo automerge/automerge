@@ -1,0 +1,15 @@
+{
+  "name": "automerge-wrapper",
+  "version": "0.1.0",
+  "main": "src/index.js",
+  "license": "MIT",
+  "scripts": {
+    "test": "mocha --bail --full-trace"
+  },
+  "devDependencies": {
+    "mocha": "^9.1.1"
+  },
+  "dependencies": {
+    "automerge-wasm": "file:../automerge-wasm"
+  }
+}
