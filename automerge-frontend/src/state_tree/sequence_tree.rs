@@ -7,6 +7,15 @@ pub struct SequenceTree<T, const B: usize> {
     root_node: Option<SequenceTreeNode<T, B>>,
 }
 
+impl<T> Default for SequenceTree<T, 9>
+where
+    T: Clone + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T, const B: usize> {
     elements: Vec<Box<(OpId, T)>>,
@@ -561,7 +570,7 @@ mod tests {
 
     #[test]
     fn push_back() {
-        let mut t = SequenceTree::new();
+        let mut t = SequenceTree::default();
         let actor = ActorId::random();
 
         t.push_back(actor.op_id_at(1), ());
@@ -576,7 +585,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t = SequenceTree::new();
+        let mut t = SequenceTree::default();
         let actor = ActorId::random();
 
         t.insert(0, actor.op_id_at(1), ());
@@ -590,7 +599,7 @@ mod tests {
 
     #[test]
     fn insert_book() {
-        let mut t = SequenceTree::new();
+        let mut t = SequenceTree::default();
         let actor = ActorId::random();
 
         for i in 0..100 {
@@ -600,7 +609,7 @@ mod tests {
 
     #[test]
     fn insert_book_vec() {
-        let mut t = SequenceTree::new();
+        let mut t = SequenceTree::default();
         let actor = ActorId::random();
         let mut v = Vec::new();
 
@@ -630,7 +639,7 @@ mod tests {
 
         #[test]
         fn proptest_insert(indices in arb_indices()) {
-            let mut t = SequenceTree::new();
+            let mut t = SequenceTree::default();
             let actor = ActorId::random();
             let mut v = Vec::new();
 
@@ -652,7 +661,7 @@ mod tests {
 
         #[test]
         fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
-            let mut t = SequenceTree::new();
+            let mut t = SequenceTree::default();
             let actor = ActorId::random();
             let mut v = Vec::new();
 
