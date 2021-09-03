@@ -404,12 +404,12 @@ where
             }
         }
 
-        // debug_assert!(
-        //     self.underlying
-        //         .iter()
-        //         .all(|u| matches!(u.value, SequenceValue::Original(_))),
-        //     "diffable sequence apply_diff_iter didn't call finish on all values"
-        // );
+        debug_assert!(
+            self.underlying
+                .iter()
+                .all(|u| matches!(u.value, SequenceValue::Original(_))),
+            "diffable sequence apply_diff_iter didn't call finish on all values"
+        );
     }
 
     pub(super) fn remove(&mut self, index: usize) -> T {
@@ -467,9 +467,7 @@ where
     }
 
     pub(crate) fn iter(&self) -> impl std::iter::Iterator<Item = &T> {
-        // Making this unwrap safe is the entire point of this data structure
-        // self.underlying.iter().map(|i| i.value.get())
-        std::iter::empty()
+        self.underlying.iter().map(|i| i.value.get())
     }
 }
 
