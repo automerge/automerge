@@ -2,21 +2,19 @@ use std::{cmp::min, fmt::Debug};
 
 use automerge_protocol::OpId;
 
-const T: usize = 3;
-
 #[derive(Clone, Debug)]
-pub struct SequenceTree<T> {
-    root_node: Option<SequenceTreeNode<T>>,
+pub struct SequenceTree<T, const B: usize> {
+    root_node: Option<SequenceTreeNode<T, B>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct SequenceTreeNode<T> {
+struct SequenceTreeNode<T, const B: usize> {
     elements: Vec<Box<(OpId, T)>>,
-    children: Vec<SequenceTreeNode<T>>,
+    children: Vec<SequenceTreeNode<T, B>>,
     length: usize,
 }
 
-impl<T> SequenceTree<T>
+impl<T, const B: usize> SequenceTree<T, B>
 where
     T: Clone + Debug,
 {
@@ -32,7 +30,7 @@ where
         self.len() == 0
     }
 
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub fn iter(&self) -> Iter<'_, T, B> {
         Iter {
             inner: self,
             index: 0,
@@ -123,7 +121,7 @@ where
     }
 }
 
-impl<T> SequenceTreeNode<T>
+impl<T, const B: usize> SequenceTreeNode<T, B>
 where
     T: Clone + Debug,
 {
@@ -136,7 +134,7 @@ where
     }
 
     fn is_full(&self) -> bool {
-        self.elements.len() >= 2 * T - 1
+        self.elements.len() >= 2 * B - 1
     }
 
     fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
@@ -195,13 +193,13 @@ where
         let original_len = full_child.len();
         assert!(full_child.is_full());
 
-        z.elements = full_child.elements.split_off(T);
+        z.elements = full_child.elements.split_off(B);
 
         if !full_child.is_leaf() {
-            z.children = full_child.children.split_off(T);
+            z.children = full_child.children.split_off(B);
         }
 
-        let middle = full_child.elements.remove(T - 1);
+        let middle = full_child.elements.remove(B - 1);
 
         full_child.length =
             full_child.elements.len() + full_child.children.iter().map(|c| c.len()).sum::<usize>();
@@ -227,7 +225,7 @@ where
 
     fn remove_element_from_non_leaf(&mut self, index: usize, child_index: usize) -> Box<(OpId, T)> {
         self.length -= 1;
-        if self.children[child_index].elements.len() >= T {
+        if self.children[child_index].elements.len() >= B {
             let total_index: usize = self.children[0..child_index]
                 .iter()
                 .map(|c| c.len() + 1)
@@ -238,7 +236,7 @@ where
             std::mem::replace(&mut self.elements[child_index], predecessor)
         } else {
             // predecessor_node.elements.len() < T
-            if self.children[child_index + 1].elements.len() >= T {
+            if self.children[child_index + 1].elements.len() >= B {
                 // recursively delete index + 1 in successor_node
                 let total_index: usize = self.children[0..child_index + 1]
                     .iter()
@@ -266,14 +264,14 @@ where
         index: usize,
         mut child_index: usize,
     ) -> Box<(OpId, T)> {
-        if self.children[child_index].elements.len() < T
+        if self.children[child_index].elements.len() < B
             && if child_index > 0 {
-                self.children[child_index - 1].elements.len() < T
+                self.children[child_index - 1].elements.len() < B
             } else {
                 true
             }
             && if child_index + 1 < self.children.len() {
-                self.children[child_index + 1].elements.len() < T
+                self.children[child_index + 1].elements.len() < B
             } else {
                 true
             }
@@ -326,10 +324,10 @@ where
                     self.children[child_index].children.push(children);
                 }
             }
-        } else if self.children[child_index].elements.len() < T {
+        } else if self.children[child_index].elements.len() < B {
             if child_index > 0
                 && self.children.get(child_index - 1).is_some()
-                && self.children[child_index - 1].elements.len() >= T
+                && self.children[child_index - 1].elements.len() >= B
             {
                 let predecessor_elements_len = self.children[child_index - 1].elements.len();
                 let predecessor_children_len = self.children[child_index - 1].children.len();
@@ -362,7 +360,7 @@ where
                 self.children[child_index].length += 1;
                 self.length += 1;
             } else if self.children.get(child_index + 1).is_some()
-                && self.children[child_index + 1].elements.len() >= T
+                && self.children[child_index + 1].elements.len() >= B
             {
                 let first_element = self.children[child_index + 1].elements.remove(0);
 
@@ -451,7 +449,7 @@ where
         }
     }
 
-    fn merge(&mut self, key: Box<(OpId, T)>, sibling: SequenceTreeNode<T>) {
+    fn merge(&mut self, key: Box<(OpId, T)>, sibling: SequenceTreeNode<T, B>) {
         self.elements.push(key);
         for element in sibling.elements {
             self.elements.push(element);
@@ -529,7 +527,7 @@ where
     }
 }
 
-impl<T> PartialEq for SequenceTree<T>
+impl<T, const B: usize> PartialEq for SequenceTree<T, B>
 where
     T: Clone + Debug + PartialEq,
 {
@@ -538,12 +536,12 @@ where
     }
 }
 
-pub struct Iter<'a, T> {
-    inner: &'a SequenceTree<T>,
+pub struct Iter<'a, T, const B: usize> {
+    inner: &'a SequenceTree<T, B>,
     index: usize,
 }
 
-impl<'a, T> Iterator for Iter<'a, T>
+impl<'a, T, const B: usize> Iterator for Iter<'a, T, B>
 where
     T: Clone + Debug,
 {

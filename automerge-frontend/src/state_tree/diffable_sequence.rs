@@ -197,7 +197,7 @@ where
     T: Debug,
 {
     // stores the opid that created the element and the diffable value
-    underlying: Box<SequenceTree<SequenceElement<T>>>,
+    underlying: Box<SequenceTree<SequenceElement<T>, 9>>,
 }
 
 impl<T> DiffableSequence<T>
