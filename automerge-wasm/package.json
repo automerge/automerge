@@ -18,7 +18,7 @@
   "main": "./dev/index.js",
   "scripts": {
     "build": "rm -rf dev && wasm-pack build --target nodejs --dev --out-name index -d dev",
-    "test": "cargo test && wasm-pack test --node && mocha --bail --full-trace"
+    "test": "yarn build && cargo test && wasm-pack test --node && mocha --bail --full-trace"
   },
   "dependencies": {},
   "devDependencies": {
