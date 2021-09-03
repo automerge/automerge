@@ -1,4 +1,7 @@
-use std::{cmp::min, fmt::Debug};
+use std::{
+    cmp::{min, Ordering},
+    fmt::Debug,
+};
 
 use automerge_protocol::OpId;
 
@@ -425,27 +428,31 @@ where
         } else {
             let mut total_index = 0;
             for (ci, child) in self.children.iter().enumerate() {
-                if total_index + child.len() > index {
-                    let v = self.remove_from_internal_child(index - total_index, ci);
-                    assert_eq!(original_len, self.len() + 1);
-                    debug_assert_eq!(self.calculate_length(), self.len());
-                    return v;
-                } else if total_index + child.len() == index {
-                    if ci + 1 == self.children.len() {
-                        let v = self.remove_element_from_non_leaf(index, ci - 1);
-                        assert_eq!(original_len, self.len() + 1);
-                        debug_assert_eq!(self.calculate_length(), self.len());
-                        return v;
-                    } else {
-                        let v = self.remove_element_from_non_leaf(index, ci);
+                match (total_index + child.len()).cmp(&index) {
+                    Ordering::Less => {
+                        // should be later on in the loop
+                        total_index += child.len() + 1;
+                        continue;
+                    }
+                    Ordering::Equal => {
+                        if ci + 1 == self.children.len() {
+                            let v = self.remove_element_from_non_leaf(index, ci - 1);
+                            assert_eq!(original_len, self.len() + 1);
+                            debug_assert_eq!(self.calculate_length(), self.len());
+                            return v;
+                        } else {
+                            let v = self.remove_element_from_non_leaf(index, ci);
+                            assert_eq!(original_len, self.len() + 1);
+                            debug_assert_eq!(self.calculate_length(), self.len());
+                            return v;
+                        }
+                    }
+                    Ordering::Greater => {
+                        let v = self.remove_from_internal_child(index - total_index, ci);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.calculate_length(), self.len());
                         return v;
                     }
-                } else {
-                    // should be later on in the loop
-                    total_index += child.len() + 1;
-                    continue;
                 }
             }
             panic!(
@@ -478,14 +485,18 @@ where
         } else {
             for c in &mut self.children {
                 let c_len = c.len();
-                if index < c_len {
-                    return c.set(index, element);
-                } else if index == c_len {
-                    let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
-                    return std::mem::replace(old_element, element);
-                } else {
-                    index -= c_len;
-                    i += 1;
+                match index.cmp(&c_len) {
+                    Ordering::Less => {
+                        return c.set(index, element);
+                    }
+                    Ordering::Equal => {
+                        let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
+                        return std::mem::replace(old_element, element);
+                    }
+                    Ordering::Greater => {
+                        index -= c_len;
+                        i += 1;
+                    }
                 }
             }
             panic!("Invalid index to set")
@@ -499,13 +510,17 @@ where
         } else {
             for c in &self.children {
                 let c_len = c.len();
-                if index < c_len {
-                    return c.get(index);
-                } else if index == c_len {
-                    return self.elements.get(i).map(|b| (b.0.clone(), &b.1));
-                } else {
-                    index -= c_len + 1;
-                    i += 1;
+                match index.cmp(&c_len) {
+                    Ordering::Less => {
+                        return c.get(index);
+                    }
+                    Ordering::Equal => {
+                        return self.elements.get(i).map(|b| (b.0.clone(), &b.1));
+                    }
+                    Ordering::Greater => {
+                        index -= c_len + 1;
+                        i += 1;
+                    }
                 }
             }
         }
@@ -522,13 +537,17 @@ where
         } else {
             for c in &mut self.children {
                 let c_len = c.len();
-                if index < c_len {
-                    return c.get_mut(index);
-                } else if index == c_len {
-                    return self.elements.get_mut(i).map(|b| (b.0.clone(), &mut b.1));
-                } else {
-                    index -= c_len + 1;
-                    i += 1;
+                match index.cmp(&c_len) {
+                    Ordering::Less => {
+                        return c.get_mut(index);
+                    }
+                    Ordering::Equal => {
+                        return self.elements.get_mut(i).map(|b| (b.0.clone(), &mut b.1));
+                    }
+                    Ordering::Greater => {
+                        index -= c_len + 1;
+                        i += 1;
+                    }
                 }
             }
         }

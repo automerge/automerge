@@ -315,7 +315,7 @@ where
                 amp::DiffEdit::Remove { index, count } => {
                     let index = index as usize;
                     let count = count as usize;
-                    for i in index..(index + count) {
+                    for _ in index..(index + count) {
                         self.underlying.remove(index);
                     }
 
@@ -390,7 +390,7 @@ where
                     value,
                     op_id,
                 } => {
-                    if let Some((opid, v)) = self.underlying.get_mut(index as usize) {
+                    if let Some((_opid, v)) = self.underlying.get_mut(index as usize) {
                         v.value.apply_diff(op_id, value);
                     }
                     changed_indices.push(index);
@@ -431,7 +431,7 @@ where
         let elem_id = self
             .underlying
             .get(index)
-            .map(|(opid, existing)| existing.opid.clone())
+            .map(|(_opid, existing)| existing.opid.clone())
             .expect("Failed to get existing index in set");
         self.underlying
             .set(
@@ -449,13 +449,13 @@ where
     pub(crate) fn get(&self, index: usize) -> Option<(&OpId, &T)> {
         self.underlying
             .get(index)
-            .map(|(opid, e)| (&e.opid, e.value.get()))
+            .map(|(_opid, e)| (&e.opid, e.value.get()))
     }
 
     pub(crate) fn get_mut(&mut self, index: usize) -> Option<(&mut OpId, &mut T)> {
         self.underlying
             .get_mut(index)
-            .map(|(opid, e)| (&mut e.opid, e.value.get_mut()))
+            .map(|(_opid, e)| (&mut e.opid, e.value.get_mut()))
     }
 
     pub(super) fn insert(&mut self, index: usize, value: T) {
