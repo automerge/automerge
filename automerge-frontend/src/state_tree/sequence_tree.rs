@@ -42,6 +42,7 @@ where
     pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
+            #[cfg(debug_assertions)]
             root.calculate_length();
             if root.is_full() {
                 let original_len = root.len();
@@ -94,8 +95,7 @@ where
 
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
-            println!("{:?}", root);
-            println!();
+            #[cfg(debug_assertions)]
             let len = root.calculate_length();
             let old = root.remove(index);
 
@@ -103,11 +103,12 @@ where
                 if root.is_leaf() {
                     self.root_node = None;
                 } else {
-                    self.root_node = Some(root.children[0].clone());
+                    self.root_node = Some(root.children.remove(0));
                 }
             }
 
-            assert_eq!(
+            #[cfg(debug_assertions)]
+            debug_assert_eq!(
                 len,
                 self.root_node.as_ref().map_or(0, |r| r.calculate_length()) + 1
             );
@@ -400,7 +401,6 @@ where
     }
 
     fn calculate_length(&self) -> usize {
-        // assert!(!self.elements.is_empty(), "{}", self.children.len());
         let l = self.elements.len()
             + self
                 .children
@@ -417,7 +417,7 @@ where
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
             assert_eq!(original_len, self.len() + 1);
-            assert_eq!(self.calculate_length(), self.len());
+            debug_assert_eq!(self.calculate_length(), self.len());
             v
         } else {
             let mut total_index = 0;
@@ -425,18 +425,18 @@ where
                 if total_index + child.len() > index {
                     let v = self.remove_from_internal_child(index - total_index, ci);
                     assert_eq!(original_len, self.len() + 1);
-                    assert_eq!(self.calculate_length(), self.len());
+                    debug_assert_eq!(self.calculate_length(), self.len());
                     return v;
                 } else if total_index + child.len() == index {
                     if ci + 1 == self.children.len() {
                         let v = self.remove_element_from_non_leaf(index, ci - 1);
                         assert_eq!(original_len, self.len() + 1);
-                        assert_eq!(self.calculate_length(), self.len());
+                        debug_assert_eq!(self.calculate_length(), self.len());
                         return v;
                     } else {
                         let v = self.remove_element_from_non_leaf(index, ci);
                         assert_eq!(original_len, self.len() + 1);
-                        assert_eq!(self.calculate_length(), self.len());
+                        debug_assert_eq!(self.calculate_length(), self.len());
                         return v;
                     }
                 } else {
@@ -619,7 +619,7 @@ mod tests {
     }
 
     fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
-        proptest::collection::vec(any::<usize>(), 0..10).prop_map(|v| {
+        proptest::collection::vec(any::<usize>(), 0..100).prop_map(|v| {
             let mut len = 0;
             v.into_iter()
                 .map(|i| {
