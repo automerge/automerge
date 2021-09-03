@@ -142,13 +142,9 @@ where
     fn insert_non_full(&mut self, index: usize, opid: OpId, element: T) {
         assert!(!self.is_full());
         if self.is_leaf() {
-            // leaf
-
             self.length += 1;
             self.elements.insert(index, Box::new((opid, element)));
         } else {
-            // not a leaf
-
             let num_children = self.children.len();
             let mut cumulative_len = 0;
             for (child_index, c) in self.children.iter_mut().enumerate() {
