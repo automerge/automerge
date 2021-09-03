@@ -232,9 +232,9 @@ where
         self.length -= 1;
         if self.children[child_index].elements.len() >= T {
             // recursively delete index - 1 in predecessor_node
-            let value = self.children[child_index].remove(index);
+            let predecessor = self.children[child_index].remove(index - 1);
             // replace element with that one
-            std::mem::replace(&mut self.elements[child_index], value)
+            std::mem::replace(&mut self.elements[child_index], predecessor)
         } else {
             // predecessor_node.elements.len() < T
             let successor_node = &mut self.children[child_index + 1];
