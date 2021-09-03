@@ -10,7 +10,7 @@ pub struct SequenceTree<T, const B: usize> {
     root_node: Option<SequenceTreeNode<T, B>>,
 }
 
-impl<T> Default for SequenceTree<T, 9>
+impl<T> Default for SequenceTree<T, 25>
 where
     T: Clone + Debug,
 {
