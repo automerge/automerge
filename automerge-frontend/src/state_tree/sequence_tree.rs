@@ -228,26 +228,38 @@ where
         self.elements.remove(index)
     }
 
-    fn remove_from_non_leaf(&mut self, index: usize, child_index: usize) -> Box<(OpId, T)> {
+    fn remove_element_from_non_leaf(&mut self, index: usize, child_index: usize) -> Box<(OpId, T)> {
         self.length -= 1;
         if self.children[child_index].elements.len() >= T {
+            let total_index: usize = self.children[0..child_index]
+                .iter()
+                .map(|c| c.len() + 1)
+                .sum();
             // recursively delete index - 1 in predecessor_node
-            let predecessor = self.children[child_index].remove(index - 1);
+            let predecessor = self.children[child_index].remove(index - 1 - total_index);
             // replace element with that one
             std::mem::replace(&mut self.elements[child_index], predecessor)
         } else {
             // predecessor_node.elements.len() < T
-            let successor_node = &mut self.children[child_index + 1];
-            if successor_node.elements.len() >= T {
-                // recursively delete index - 1 in predecessor_node
-                let value = successor_node.remove(index);
+            if self.children[child_index + 1].elements.len() >= T {
+                // recursively delete index + 1 in successor_node
+                let total_index: usize = self.children[0..child_index + 1]
+                    .iter()
+                    .map(|c| c.len() + 1)
+                    .sum();
+                let successor = self.children[child_index + 1].remove(index + 1 - total_index);
                 // replace element with that one
-                std::mem::replace(&mut self.elements[child_index], value)
+                std::mem::replace(&mut self.elements[child_index], successor)
             } else {
-                let k = self.elements.remove(child_index);
-                let z = self.children.remove(child_index + 1);
-                self.children[child_index].merge(k, z);
-                self.children[child_index].remove(index)
+                let middle_element = self.elements.remove(child_index);
+                let successor_child = self.children.remove(child_index + 1);
+                self.children[child_index].merge(middle_element, successor_child);
+
+                let total_index: usize = self.children[0..child_index]
+                    .iter()
+                    .map(|c| c.len() + 1)
+                    .sum();
+                self.children[child_index].remove(index - total_index)
             }
         }
     }
@@ -417,12 +429,12 @@ where
                     return v;
                 } else if total_index + child.len() == index {
                     if ci + 1 == self.children.len() {
-                        let v = self.remove_from_non_leaf(index - total_index, ci - 1);
+                        let v = self.remove_element_from_non_leaf(index, ci - 1);
                         assert_eq!(original_len, self.len() + 1);
                         assert_eq!(self.calculate_length(), self.len());
                         return v;
                     } else {
-                        let v = self.remove_from_non_leaf(index - total_index, ci);
+                        let v = self.remove_element_from_non_leaf(index, ci);
                         assert_eq!(original_len, self.len() + 1);
                         assert_eq!(self.calculate_length(), self.len());
                         return v;
