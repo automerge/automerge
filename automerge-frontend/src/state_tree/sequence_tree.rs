@@ -7,15 +7,6 @@ pub struct SequenceTree<T> {
     root_node: Option<SequenceTreeNode<T, 25>>,
 }
 
-impl<T> Default for SequenceTree<T>
-where
-    T: Clone + Debug,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct SequenceTreeNode<T, const B: usize> {
     elements: Vec<Box<(OpId, T)>>,
@@ -557,12 +548,37 @@ where
     }
 }
 
+impl<T> Default for SequenceTree<T>
+where
+    T: Clone + Debug,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> PartialEq for SequenceTree<T>
 where
     T: Clone + Debug + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl<'a, T> IntoIterator for &'a SequenceTree<T>
+where
+    T: Clone + Debug,
+{
+    type Item = &'a T;
+
+    type IntoIter = Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Iter {
+            inner: self,
+            index: 0,
+        }
     }
 }
 
