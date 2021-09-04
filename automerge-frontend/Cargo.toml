@@ -31,7 +31,7 @@ env_logger = "0.8.3"
 log = "0.4.14"
 wasm-bindgen-test = "0.3.22"
 pretty_assertions = "0.7.1"
-proptest = "0.10.1"
+proptest = { version = "0.10.1", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "statetree_apply_diff"
