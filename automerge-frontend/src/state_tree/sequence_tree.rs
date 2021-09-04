@@ -1,7 +1,4 @@
-use std::{
-    cmp::{min, Ordering},
-    fmt::Debug,
-};
+use std::{cmp::Ordering, fmt::Debug};
 
 use automerge_protocol::OpId;
 
