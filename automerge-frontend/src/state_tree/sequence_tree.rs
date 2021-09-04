@@ -294,23 +294,25 @@ where
                 self.length -= 1;
 
                 // use the predessor sibling
-                let predecessor = self.children.remove(child_index - 1);
-                self.length -= predecessor.len();
+                let child_to_merge_from = self.children.remove(child_index);
+                self.length -= child_to_merge_from.len();
                 child_index -= 1;
 
-                self.children[child_index].elements.insert(0, middle);
-                self.children[child_index].length += 1;
+                let predecessor = &mut self.children[child_index];
+
+                predecessor.elements.push(middle);
+                predecessor.length += 1;
                 self.length += 1;
 
-                for element in predecessor.elements.into_iter().rev() {
-                    self.children[child_index].elements.insert(0, element);
-                    self.children[child_index].length += 1;
+                for element in child_to_merge_from.elements {
+                    predecessor.elements.push(element);
+                    predecessor.length += 1;
                     self.length += 1;
                 }
-                for child in predecessor.children.into_iter().rev() {
-                    self.children[child_index].length += child.len();
+                for child in child_to_merge_from.children {
+                    predecessor.length += child.len();
                     self.length += child.len();
-                    self.children[child_index].children.insert(0, child);
+                    predecessor.children.push(child);
                 }
             } else {
                 let middle = self.elements.remove(child_index);
