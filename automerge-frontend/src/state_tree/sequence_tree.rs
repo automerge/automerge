@@ -3,11 +3,11 @@ use std::{cmp::Ordering, fmt::Debug};
 use automerge_protocol::OpId;
 
 #[derive(Clone, Debug)]
-pub struct SequenceTree<T, const B: usize> {
-    root_node: Option<SequenceTreeNode<T, B>>,
+pub struct SequenceTree<T> {
+    root_node: Option<SequenceTreeNode<T, 25>>,
 }
 
-impl<T> Default for SequenceTree<T, 25>
+impl<T> Default for SequenceTree<T>
 where
     T: Clone + Debug,
 {
@@ -23,7 +23,7 @@ struct SequenceTreeNode<T, const B: usize> {
     length: usize,
 }
 
-impl<T, const B: usize> SequenceTree<T, B>
+impl<T> SequenceTree<T>
 where
     T: Clone + Debug,
 {
@@ -39,7 +39,7 @@ where
         self.len() == 0
     }
 
-    pub fn iter(&self) -> Iter<'_, T, B> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             inner: self,
             index: 0,
@@ -557,7 +557,7 @@ where
     }
 }
 
-impl<T, const B: usize> PartialEq for SequenceTree<T, B>
+impl<T> PartialEq for SequenceTree<T>
 where
     T: Clone + Debug + PartialEq,
 {
@@ -566,12 +566,12 @@ where
     }
 }
 
-pub struct Iter<'a, T, const B: usize> {
-    inner: &'a SequenceTree<T, B>,
+pub struct Iter<'a, T> {
+    inner: &'a SequenceTree<T>,
     index: usize,
 }
 
-impl<'a, T, const B: usize> Iterator for Iter<'a, T, B>
+impl<'a, T> Iterator for Iter<'a, T>
 where
     T: Clone + Debug,
 {
