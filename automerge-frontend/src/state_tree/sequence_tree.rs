@@ -437,7 +437,7 @@ where
                     }
                 }
             }
-            panic!("Invalid index to set")
+            panic!("Invalid index to set: {} but len was {}", index, self.len())
         }
     }
 
