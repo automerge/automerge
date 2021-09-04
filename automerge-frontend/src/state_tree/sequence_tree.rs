@@ -419,24 +419,21 @@ where
     }
 
     pub fn set(&mut self, mut index: usize, element: T) -> T {
-        let mut i = 0;
         if self.is_leaf() {
-            let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
+            let (_, old_element) = &mut **self.elements.get_mut(index).unwrap();
             mem::replace(old_element, element)
         } else {
-            for c in &mut self.children {
-                let c_len = c.len();
-                match index.cmp(&c_len) {
+            for (child_index, child) in self.children.iter_mut().enumerate() {
+                match index.cmp(&child.len()) {
                     Ordering::Less => {
-                        return c.set(index, element);
+                        return child.set(index, element);
                     }
                     Ordering::Equal => {
-                        let (_, old_element) = &mut **self.elements.get_mut(i).unwrap();
+                        let (_, old_element) = &mut **self.elements.get_mut(child_index).unwrap();
                         return mem::replace(old_element, element);
                     }
                     Ordering::Greater => {
-                        index -= c_len;
-                        i += 1;
+                        index -= child.len() + 1;
                     }
                 }
             }
@@ -445,22 +442,19 @@ where
     }
 
     pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
-        let mut i = 0;
         if self.is_leaf() {
             return self.elements.get(index).map(|b| (b.0.clone(), &b.1));
         } else {
-            for c in &self.children {
-                let c_len = c.len();
-                match index.cmp(&c_len) {
+            for (child_index, child) in self.children.iter().enumerate() {
+                match index.cmp(&child.len()) {
                     Ordering::Less => {
-                        return c.get(index);
+                        return child.get(index);
                     }
                     Ordering::Equal => {
-                        return self.elements.get(i).map(|b| (b.0.clone(), &b.1));
+                        return self.elements.get(child_index).map(|b| (b.0.clone(), &b.1));
                     }
                     Ordering::Greater => {
-                        index -= c_len + 1;
-                        i += 1;
+                        index -= child.len() + 1;
                     }
                 }
             }
@@ -469,25 +463,25 @@ where
     }
 
     pub fn get_mut(&mut self, mut index: usize) -> Option<(OpId, &mut T)> {
-        let mut i = 0;
         if self.is_leaf() {
             return self
                 .elements
                 .get_mut(index)
                 .map(|b| (b.0.clone(), &mut b.1));
         } else {
-            for c in &mut self.children {
-                let c_len = c.len();
-                match index.cmp(&c_len) {
+            for (child_index, child) in self.children.iter_mut().enumerate() {
+                match index.cmp(&child.len()) {
                     Ordering::Less => {
-                        return c.get_mut(index);
+                        return child.get_mut(index);
                     }
                     Ordering::Equal => {
-                        return self.elements.get_mut(i).map(|b| (b.0.clone(), &mut b.1));
+                        return self
+                            .elements
+                            .get_mut(child_index)
+                            .map(|b| (b.0.clone(), &mut b.1));
                     }
                     Ordering::Greater => {
-                        index -= c_len + 1;
-                        i += 1;
+                        index -= child.len() + 1;
                     }
                 }
             }
