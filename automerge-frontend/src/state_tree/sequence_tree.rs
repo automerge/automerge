@@ -41,7 +41,8 @@ where
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
-            root.calculate_length();
+            root.check();
+
             if root.is_full() {
                 let original_len = root.len();
                 let new_root = SequenceTreeNode {
@@ -94,7 +95,7 @@ where
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
-            let len = root.calculate_length();
+            let len = root.check();
             let old = root.remove(index);
 
             if root.elements.is_empty() {
@@ -106,10 +107,7 @@ where
             }
 
             #[cfg(debug_assertions)]
-            debug_assert_eq!(
-                len,
-                self.root_node.as_ref().map_or(0, |r| r.calculate_length()) + 1
-            );
+            debug_assert_eq!(len, self.root_node.as_ref().map_or(0, |r| r.check()) + 1);
             old.1
         } else {
             panic!("remove from empty tree")
@@ -399,13 +397,8 @@ where
         self.children[child_index].remove(index - total_index)
     }
 
-    fn calculate_length(&self) -> usize {
-        let l = self.elements.len()
-            + self
-                .children
-                .iter()
-                .map(|c| c.calculate_length())
-                .sum::<usize>();
+    fn check(&self) -> usize {
+        let l = self.elements.len() + self.children.iter().map(|c| c.check()).sum::<usize>();
         assert_eq!(self.len(), l, "{:#?}", self);
 
         l
@@ -416,7 +409,7 @@ where
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
             assert_eq!(original_len, self.len() + 1);
-            debug_assert_eq!(self.calculate_length(), self.len());
+            debug_assert_eq!(self.check(), self.len());
             v
         } else {
             let mut total_index = 0;
@@ -431,19 +424,19 @@ where
                         if ci + 1 == self.children.len() {
                             let v = self.remove_element_from_non_leaf(index, ci - 1);
                             assert_eq!(original_len, self.len() + 1);
-                            debug_assert_eq!(self.calculate_length(), self.len());
+                            debug_assert_eq!(self.check(), self.len());
                             return v;
                         } else {
                             let v = self.remove_element_from_non_leaf(index, ci);
                             assert_eq!(original_len, self.len() + 1);
-                            debug_assert_eq!(self.calculate_length(), self.len());
+                            debug_assert_eq!(self.check(), self.len());
                             return v;
                         }
                     }
                     Ordering::Greater => {
                         let v = self.remove_from_internal_child(index, ci);
                         assert_eq!(original_len, self.len() + 1);
-                        debug_assert_eq!(self.calculate_length(), self.len());
+                        debug_assert_eq!(self.check(), self.len());
                         return v;
                     }
                 }
@@ -453,7 +446,7 @@ where
                 index,
                 total_index,
                 self.len(),
-                self.calculate_length()
+                self.check()
             );
         }
     }
