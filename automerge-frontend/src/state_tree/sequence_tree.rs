@@ -658,14 +658,14 @@ mod tests {
 
         #[test]
         fn proptest_insert(indices in arb_indices()) {
-            let mut t = SequenceTree::default();
+            let mut t = SequenceTree::<usize, 3>::new();
             let actor = ActorId::random();
             let mut v = Vec::new();
 
             for i in indices{
                 if i <= v.len() {
-                    t.insert(i % 3, actor.op_id_at(1), ());
-                    v.insert(i % 3, ());
+                    t.insert(i % 3, actor.op_id_at(1), i);
+                    v.insert(i % 3, i);
                 } else {
                     return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
@@ -680,14 +680,14 @@ mod tests {
 
         #[test]
         fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
-            let mut t = SequenceTree::default();
+            let mut t = SequenceTree::<usize, 3>::new();
             let actor = ActorId::random();
             let mut v = Vec::new();
 
             for i in inserts {
                 if i <= v.len() {
-                    t.insert(i , actor.op_id_at(1), ());
-                    v.insert(i , ());
+                    t.insert(i , actor.op_id_at(1), i);
+                    v.insert(i , i);
                 } else {
                     return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
@@ -697,8 +697,9 @@ mod tests {
 
             for i in removes {
                 if i < v.len() {
-                    t.remove(i );
-                    v.remove(i );
+                    let tr = t.remove(i);
+                    let vr = v.remove(i);
+                    assert_eq!(tr, vr);
                 } else {
                     return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
                 }
