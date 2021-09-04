@@ -291,12 +291,11 @@ where
             // if the child and its immediate siblings have t-1 elements merge the child
             // with one sibling, moving an element from this node into the new merged node
             // to be the median
-            let middle = self
-                .elements
-                .remove(min(child_index, self.elements.len() - 1));
-            self.length -= 1;
 
             if child_index > 0 {
+                let middle = self.elements.remove(child_index - 1);
+                self.length -= 1;
+
                 // use the predessor sibling
                 let predecessor = self.children.remove(child_index - 1);
                 self.length -= predecessor.len();
@@ -306,17 +305,20 @@ where
                 self.children[child_index].length += 1;
                 self.length += 1;
 
-                for elements in predecessor.elements {
-                    self.children[child_index].elements.insert(0, elements);
+                for element in predecessor.elements.into_iter().rev() {
+                    self.children[child_index].elements.insert(0, element);
                     self.children[child_index].length += 1;
                     self.length += 1;
                 }
-                for children in predecessor.children {
-                    self.children[child_index].length += children.len();
-                    self.length += children.len();
-                    self.children[child_index].children.insert(0, children);
+                for child in predecessor.children.into_iter().rev() {
+                    self.children[child_index].length += child.len();
+                    self.length += child.len();
+                    self.children[child_index].children.insert(0, child);
                 }
             } else {
+                let middle = self.elements.remove(child_index);
+                self.length -= 1;
+
                 // use the sucessor sibling
                 let successor = self.children.remove(child_index + 1);
                 self.length -= successor.len();
@@ -360,11 +362,8 @@ where
                     self.children[child_index].children.insert(0, last_child);
                 }
 
-                let elements_len = self.elements.len();
-                let parent_element = std::mem::replace(
-                    &mut self.elements[min(child_index, elements_len - 1)],
-                    last_element,
-                );
+                let parent_element =
+                    std::mem::replace(&mut self.elements[child_index - 1], last_element);
 
                 self.children[child_index]
                     .elements
@@ -403,7 +402,11 @@ where
             }
         }
         self.length -= 1;
-        self.children[child_index].remove(index)
+        let total_index: usize = self.children[0..child_index]
+            .iter()
+            .map(|c| c.len() + 1)
+            .sum();
+        self.children[child_index].remove(index - total_index)
     }
 
     fn calculate_length(&self) -> usize {
@@ -448,7 +451,7 @@ where
                         }
                     }
                     Ordering::Greater => {
-                        let v = self.remove_from_internal_child(index - total_index, ci);
+                        let v = self.remove_from_internal_child(index, ci);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.calculate_length(), self.len());
                         return v;
