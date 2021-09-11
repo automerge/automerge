@@ -346,12 +346,13 @@ impl Automerge {
         key: Key,
         action: OpType,
         insert: bool,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<OpId, AutomergeError> {
         if let Some(mut tx) = self.transaction.take() {
             tx.max_op += 1;
+            let id = OpId(tx.max_op, 0);
             self.insert_op(Op {
                 change: self.changes.len(),
-                id: OpId(tx.max_op, 0),
+                id,
                 action,
                 obj,
                 key,
@@ -360,7 +361,7 @@ impl Automerge {
                 insert,
             });
             self.transaction = Some(tx);
-            Ok(())
+            Ok(id)
         } else {
             Err(AutomergeError::OpOutsideOfTransaction)
         }
@@ -520,8 +521,8 @@ impl Automerge {
         key: Key,
         obj_type: ObjType,
         insert: bool,
-    ) -> Result<(), AutomergeError> {
-        self.make_op(obj, key, OpType::Make(obj_type), insert)
+    ) -> Result<ObjId, AutomergeError> {
+        Ok(ObjId(self.make_op(obj, key, OpType::Make(obj_type), insert)?))
     }
 
     pub fn set(
@@ -531,7 +532,8 @@ impl Automerge {
         value: ScalarValue,
         insert: bool,
     ) -> Result<(), AutomergeError> {
-        self.make_op(obj, key, OpType::Set(value), insert)
+        self.make_op(obj, key, OpType::Set(value), insert)?;
+        Ok(())
     }
 
     pub fn inc(&mut self, obj: ObjId, key: Key, value: i64) -> Result<(), AutomergeError> {
@@ -539,7 +541,8 @@ impl Automerge {
     }
 
     pub fn del(&mut self, obj: ObjId, key: Key) -> Result<(), AutomergeError> {
-        self.make_op(obj, key, OpType::Del, false)
+        self.make_op(obj, key, OpType::Del, false)?;
+        Ok(())
     }
 
     pub fn splice(&mut self, path: &str, range: Range<usize>, replace: Vec<ScalarValue>) {

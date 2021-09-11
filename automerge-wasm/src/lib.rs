@@ -87,7 +87,10 @@ impl Automerge {
         self.0.rollback();
     }
 
-    pub fn make(&mut self, path: JsValue, objtype: JsValue) -> Result<(), JsValue> {
+    pub fn makeMap(&mut self, obj: &ObjId, prop: JsValue) -> Result<ObjId, JsValue> {
+        let key = self.prop_to_key(prop)?;
+        let obj = self.0.make(obj.0, key, am::ObjType::Map, false).map_err(to_js_err)?;
+        Ok(obj)
         /*
         match objtype.as_string().as_deref() {
             Some("map") => self.0.make(ObjType::Map),
@@ -98,7 +101,6 @@ impl Automerge {
             None => Err("object type required".into())
         }
         */
-        unimplemented!()
     }
 
     fn prop_to_key(&mut self, prop: JsValue) -> Result<Key, JsValue> {

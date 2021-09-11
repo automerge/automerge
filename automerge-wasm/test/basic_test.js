@@ -51,6 +51,21 @@ describe('Automerge', () => {
       result = doc.value(root,"number")
       assert.deepEqual(result,["uint",5])
 
+      //doc.dump()
+    })
+
+    it('should be able to make sub objects', () => {
+      let doc = Automerge.init()
+      let root = Automerge.root()
+      let result
+
+      doc.begin()
+      let submap = doc.makeMap(root, "submap")
+      doc.commit()
+
+      result = doc.value(root,"submap")
+      assert.deepEqual(result,["map","world"])
+
       doc.dump()
     })
   })
