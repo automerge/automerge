@@ -465,20 +465,21 @@ where
         }
     }
 
-    pub fn get(&self, mut index: usize) -> Option<(OpId, &T)> {
+    pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
         if self.is_leaf() {
             return self.elements.get(index).map(|b| (b.0.clone(), &b.1));
         } else {
+            let mut cumulative_len = 0;
             for (child_index, child) in self.children.iter().enumerate() {
-                match index.cmp(&child.len()) {
+                match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
-                        return child.get(index);
+                        cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
                         return self.elements.get(child_index).map(|b| (b.0.clone(), &b.1));
                     }
                     Ordering::Greater => {
-                        index -= child.len() + 1;
+                        return child.get(index - cumulative_len);
                     }
                 }
             }
@@ -486,17 +487,18 @@ where
         None
     }
 
-    pub fn get_mut(&mut self, mut index: usize) -> Option<(OpId, &mut T)> {
+    pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
         if self.is_leaf() {
             return self
                 .elements
                 .get_mut(index)
                 .map(|b| (b.0.clone(), &mut b.1));
         } else {
+            let mut cumulative_len = 0;
             for (child_index, child) in self.children.iter_mut().enumerate() {
-                match index.cmp(&child.len()) {
+                match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
-                        return child.get_mut(index);
+                        cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
                         return self
@@ -505,7 +507,7 @@ where
                             .map(|b| (b.0.clone(), &mut b.1));
                     }
                     Ordering::Greater => {
-                        index -= child.len() + 1;
+                        return child.get_mut(index - cumulative_len);
                     }
                 }
             }
