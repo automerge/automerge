@@ -219,7 +219,7 @@ where
     {
         let mut s = SequenceTree::new();
         for i in i {
-            s.push_back(i.default_opid(), SequenceElement::original(i))
+            s.push(i.default_opid(), SequenceElement::original(i))
         }
         DiffableSequence {
             underlying: Box::new(s),
@@ -342,7 +342,7 @@ where
                     let node = T::construct(op_id, value);
                     if (index as usize) == self.underlying.len() {
                         self.underlying
-                            .push_back(node.default_opid(), SequenceElement::new(node));
+                            .push(node.default_opid(), SequenceElement::new(node));
                     } else {
                         self.underlying.insert(
                             index as usize,

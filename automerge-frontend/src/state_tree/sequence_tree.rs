@@ -24,18 +24,22 @@ impl<T, const B: usize> SequenceTreeInternal<T, B>
 where
     T: Clone + Debug,
 {
+    /// Construct a new, empty, sequence.
     pub fn new() -> Self {
         Self { root_node: None }
     }
 
+    /// Get the length of the sequence.
     pub fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
+    /// Check if the sequence is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Create an iterator through the sequence.
     pub fn iter(&self) -> Iter<'_, T, B> {
         Iter {
             inner: self,
@@ -43,6 +47,11 @@ where
         }
     }
 
+    /// Insert the `opid` and `element` into the sequence at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > len`.
     pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
@@ -83,19 +92,27 @@ where
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
     }
 
-    pub fn push_back(&mut self, opid: OpId, element: T) {
+    /// Push the `opid` and `element` onto the back of the sequence.
+    pub fn push(&mut self, opid: OpId, element: T) {
         let l = self.len();
         self.insert(l, opid, element)
     }
 
+    /// Get the `OpId` and `element` at `index` in the sequence.
     pub fn get(&self, index: usize) -> Option<(OpId, &T)> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
+    /// Get the `OpId` and `element` at `index` in the sequence.
     pub fn get_mut(&mut self, index: usize) -> Option<(OpId, &mut T)> {
         self.root_node.as_mut().and_then(|n| n.get_mut(index))
     }
 
+    /// Removes the element at `index` from the sequence.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     pub fn remove(&mut self, index: usize) -> T {
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -118,6 +135,11 @@ where
         }
     }
 
+    /// Update the `element` at `index` in the sequence, returning the old value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > len`
     pub fn set(&mut self, index: usize, element: T) -> T {
         self.root_node.as_mut().unwrap().set(index, element)
     }
@@ -552,14 +574,14 @@ mod tests {
         let mut t = SequenceTree::new();
         let actor = ActorId::random();
 
-        t.push_back(actor.op_id_at(1), ());
-        t.push_back(actor.op_id_at(2), ());
-        t.push_back(actor.op_id_at(3), ());
-        t.push_back(actor.op_id_at(4), ());
-        t.push_back(actor.op_id_at(5), ());
-        t.push_back(actor.op_id_at(6), ());
-        t.push_back(actor.op_id_at(8), ());
-        t.push_back(actor.op_id_at(100), ());
+        t.push(actor.op_id_at(1), ());
+        t.push(actor.op_id_at(2), ());
+        t.push(actor.op_id_at(3), ());
+        t.push(actor.op_id_at(4), ());
+        t.push(actor.op_id_at(5), ());
+        t.push(actor.op_id_at(6), ());
+        t.push(actor.op_id_at(8), ());
+        t.push(actor.op_id_at(100), ());
     }
 
     #[test]
