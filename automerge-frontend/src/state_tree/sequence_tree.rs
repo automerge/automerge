@@ -169,41 +169,40 @@ where
         self.elements.len() >= 2 * B - 1
     }
 
+    /// Returns the child index and the given index adjusted for the cumulative index before that
+    /// child.
+    fn find_child_index(&self, index: usize) -> (usize, usize) {
+        let mut cumulative_len = 0;
+        for (child_index, child) in self.children.iter().enumerate() {
+            if cumulative_len + child.len() >= index {
+                return (child_index, index - cumulative_len);
+            } else {
+                cumulative_len += child.len() + 1;
+            }
+        }
+        panic!("index not found in node")
+    }
+
     fn insert_into_non_full_node(&mut self, index: usize, opid: OpId, element: T) {
         assert!(!self.is_full());
         if self.is_leaf() {
             self.length += 1;
             self.elements.insert(index, Box::new((opid, element)));
         } else {
-            let mut cumulative_len = 0;
-            for (child_index, child) in self.children.iter_mut().enumerate() {
-                if cumulative_len + child.len() >= index {
-                    if child.is_full() {
-                        self.split_child(child_index);
+            let (child_index, sub_index) = self.find_child_index(index);
+            let child = &mut self.children[child_index];
 
-                        let mut cumulative_len = 0;
-                        for child in self.children.iter_mut() {
-                            if cumulative_len + child.len() >= index {
-                                child.insert_into_non_full_node(
-                                    index - cumulative_len,
-                                    opid,
-                                    element,
-                                );
-                                self.length += 1;
-                                break;
-                            } else {
-                                cumulative_len += child.len() + 1;
-                            }
-                        }
-                    } else {
-                        child.insert_into_non_full_node(index - cumulative_len, opid, element);
-                        self.length += 1;
-                    }
-                    break;
-                } else {
-                    cumulative_len += child.len() + 1
-                }
+            if child.is_full() {
+                self.split_child(child_index);
+
+                // child structure has changed so we need to find the index again
+                let (child_index, sub_index) = self.find_child_index(index);
+                let child = &mut self.children[child_index];
+                child.insert_into_non_full_node(sub_index, opid, element);
+            } else {
+                child.insert_into_non_full_node(sub_index, opid, element);
             }
+            self.length += 1;
         }
     }
 
