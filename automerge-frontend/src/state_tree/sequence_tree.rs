@@ -52,7 +52,7 @@ where
     /// # Panics
     ///
     /// Panics if `index > len`.
-    pub fn insert(&mut self, mut index: usize, opid: OpId, element: T) {
+    pub fn insert(&mut self, index: usize, opid: OpId, element: T) {
         let old_len = self.len();
         if let Some(root) = self.root_node.as_mut() {
             #[cfg(debug_assertions)]
@@ -69,16 +69,18 @@ where
                 root.children.push(old_root);
                 root.split_child(0);
 
+                assert_eq!(original_len, root.len());
+
                 // after splitting the root has one element and two children, find which child the
                 // index is in
-                let mut i = 0;
-                if root.children[0].len() < index {
-                    i += 1;
-                    index -= root.children[0].len() + 1
-                }
-                assert_eq!(original_len, root.len());
+                let first_child_len = root.children[0].len();
+                let (child, insertion_index) = if first_child_len < index {
+                    (&mut root.children[1], index - (first_child_len + 1))
+                } else {
+                    (&mut root.children[0], index)
+                };
                 root.length += 1;
-                root.children[i].insert_into_non_full_node(index, opid, element)
+                child.insert_into_non_full_node(insertion_index, opid, element)
             } else {
                 root.insert_into_non_full_node(index, opid, element)
             }
