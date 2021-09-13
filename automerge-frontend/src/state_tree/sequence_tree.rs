@@ -441,22 +441,23 @@ where
         assert!(self.is_full());
     }
 
-    pub fn set(&mut self, mut index: usize, element: T) -> T {
+    pub fn set(&mut self, index: usize, element: T) -> T {
         if self.is_leaf() {
             let (_, old_element) = &mut **self.elements.get_mut(index).unwrap();
             mem::replace(old_element, element)
         } else {
+            let mut cumulative_len = 0;
             for (child_index, child) in self.children.iter_mut().enumerate() {
-                match index.cmp(&child.len()) {
+                match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
-                        return child.set(index, element);
+                        cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
                         let (_, old_element) = &mut **self.elements.get_mut(child_index).unwrap();
                         return mem::replace(old_element, element);
                     }
                     Ordering::Greater => {
-                        index -= child.len() + 1;
+                        return child.set(index - cumulative_len, element);
                     }
                 }
             }
