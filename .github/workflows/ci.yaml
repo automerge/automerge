@@ -35,8 +35,36 @@ jobs:
 
       - uses: actions-rs/cargo@v1
         with:
+          command: doc
+          args: --workspace --all-features
+
+      - uses: actions-rs/cargo@v1
+        with:
           command: build
+          args: --all-targets --workspace
 
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --workspace
+
+      - name: Install wasm-pack binary crate
+        uses: actions-rs/install@v0.1
+        with:
+          crate: wasm-pack
+          version: latest
+          use-tool-cache: true
+
+      - run: wasm-pack test --node automerge-frontend
+
+      - name: Use Node.js 12
+        uses: actions/setup-node@v2
+        with:
+          node-version: 12
+          cache: 'yarn'
+
+      - run: |
+          cd automerge-backend-wasm
+          yarn dev
+          yarn test:js
+
