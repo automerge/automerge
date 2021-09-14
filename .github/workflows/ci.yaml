@@ -24,6 +24,9 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+
       - name: Format
         uses: actions-rs/cargo@v1
         with:
@@ -79,4 +82,3 @@ jobs:
         run: |
           cd automerge-backend-wasm
           yarn test:js
-
