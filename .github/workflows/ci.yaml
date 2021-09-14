@@ -16,34 +16,40 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - uses: actions-rs/toolchain@v1
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.rust }}
           override: true
           components: rustfmt, clippy
 
-      - uses: actions-rs/cargo@v1
+      - name: Format
+        uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
 
-      - uses: actions-rs/clippy-check@v1
+      - name: Clippy
+        uses: actions-rs/clippy-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-targets --all-features -- -D warnings
 
-      - uses: actions-rs/cargo@v1
+      - name: Doc
+        uses: actions-rs/cargo@v1
         with:
           command: doc
           args: --workspace --all-features
 
-      - uses: actions-rs/cargo@v1
+      - name: Build
+        uses: actions-rs/cargo@v1
         with:
           command: build
           args: --all-targets --workspace
 
-      - uses: actions-rs/cargo@v1
+      - name: Test
+        uses: actions-rs/cargo@v1
         with:
           command: test
           args: --workspace
@@ -55,7 +61,8 @@ jobs:
           version: latest
           use-tool-cache: true
 
-      - run: wasm-pack test --node automerge-frontend
+      - name: Test the frontend in wasm
+        run: wasm-pack test --node automerge-frontend
 
       - name: Use Node.js 12
         uses: actions/setup-node@v2
@@ -63,8 +70,13 @@ jobs:
           node-version: 12
           cache: 'yarn'
 
-      - run: |
+      - name: Build backend wasm
+        run: |
           cd automerge-backend-wasm
           yarn dev
+
+      - name: Test backend wasm
+        run: |
+          cd automerge-backend-wasm
           yarn test:js
 
