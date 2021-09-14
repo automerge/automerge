@@ -627,7 +627,7 @@ mod tests {
     }
 
     fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
-        proptest::collection::vec(any::<usize>(), 0..1000).prop_map(|v| {
+        proptest::collection::vec(any::<usize>(), 0..100).prop_map(|v| {
             let mut len = 0;
             v.into_iter()
                 .map(|i| {
