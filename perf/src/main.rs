@@ -320,6 +320,7 @@ fn trace(edits: Vec<(u32, u32, Option<String>)>) {
         let (patch, _) = backend.apply_local_change(change).unwrap();
         doc.apply_patch(patch).unwrap();
     }
+    println!("processed all changes in {:?}", loop_start.elapsed());
 
     let save = Instant::now();
     let bytes = backend.save().unwrap();
