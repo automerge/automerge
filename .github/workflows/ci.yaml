@@ -106,11 +106,7 @@ jobs:
         uses: Swatinem/rust-cache@v1
 
       - name: Install wasm-pack binary crate
-        uses: actions-rs/install@v0.1
-        with:
-          crate: wasm-pack
-          version: latest
-          use-tool-cache: true
+        run:  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Test the frontend in wasm
         run: wasm-pack test --node automerge-frontend
@@ -123,11 +119,9 @@ jobs:
           cache-dependency-path: automerge-backend-wasm/yarn.lock
 
       - name: Build backend wasm
-        run: |
-          cd automerge-backend-wasm
-          yarn dev
+        working-directory: automerge-backend-wasm
+        run: yarn dev
 
       - name: Test backend wasm
-        run: |
-          cd automerge-backend-wasm
-          yarn test:js
+        working-directory: automerge-backend-wasm
+        run: yarn test:js
