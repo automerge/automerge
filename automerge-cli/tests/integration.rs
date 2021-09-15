@@ -2,37 +2,37 @@ use std::env;
 
 use duct::cmd;
 
-#[test]
-fn import_stdin() {
-    let bin = env!("CARGO_BIN_EXE_automerge");
-    let initial_state_json = serde_json::json!({
-        "birds": {
-            "wrens": 3.0,
-            "sparrows": 15.0
-        }
-    });
-    let json_bytes = serde_json::to_string_pretty(&initial_state_json).unwrap();
+// #[test]
+// fn import_stdin() {
+//     let bin = env!("CARGO_BIN_EXE_automerge");
+//     let initial_state_json = serde_json::json!({
+//         "birds": {
+//             "wrens": 3.0,
+//             "sparrows": 15.0
+//         }
+//     });
+//     let json_bytes = serde_json::to_string_pretty(&initial_state_json).unwrap();
 
-    let no_pipe_no_file = cmd!(bin, "import").stdin_bytes(json_bytes.clone()).run();
+//     let no_pipe_no_file = cmd!(bin, "import").stdin_bytes(json_bytes.clone()).run();
 
-    assert!(no_pipe_no_file.is_err());
+//     assert!(no_pipe_no_file.is_err());
 
-    let pipe_no_file = cmd!(bin, "import")
-        .stdin_bytes(json_bytes.clone())
-        .stdout_capture()
-        .run();
+//     let pipe_no_file = cmd!(bin, "import")
+//         .stdin_bytes(json_bytes.clone())
+//         .stdout_capture()
+//         .run();
 
-    assert!(pipe_no_file.is_ok());
+//     assert!(pipe_no_file.is_ok());
 
-    let mut temp_file = std::env::temp_dir();
-    temp_file.push("import_test.mpl");
-    let no_pipe_file = cmd!(bin, "import", "--out", &temp_file)
-        .stdin_bytes(json_bytes)
-        .run();
+//     let mut temp_file = std::env::temp_dir();
+//     temp_file.push("import_test.mpl");
+//     let no_pipe_file = cmd!(bin, "import", "--out", &temp_file)
+//         .stdin_bytes(json_bytes)
+//         .run();
 
-    assert!(no_pipe_file.is_ok());
-    std::fs::remove_file(temp_file).unwrap();
-}
+//     assert!(no_pipe_file.is_ok());
+//     std::fs::remove_file(temp_file).unwrap();
+// }
 
 #[test]
 fn export_stdout() {
