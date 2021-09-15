@@ -3,7 +3,7 @@ on: push
 name: Continuous integration
 
 jobs:
-  ci:
+  format-clippy-doc:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -45,6 +45,30 @@ jobs:
           command: doc
           args: --workspace --all-features
 
+  build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+          # - 1.31.0  # MSRV
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+
       - name: Build
         uses: actions-rs/cargo@v1
         with:
@@ -56,6 +80,30 @@ jobs:
         with:
           command: test
           args: --workspace
+
+  wasm-build-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+          # - 1.31.0  # MSRV
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
 
       - name: Install wasm-pack binary crate
         uses: actions-rs/install@v0.1
