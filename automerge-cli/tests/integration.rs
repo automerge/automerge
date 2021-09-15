@@ -34,13 +34,13 @@ fn import_stdin() {
     std::fs::remove_file(temp_file).unwrap();
 }
 
-// #[test]
-// fn export_stdout() {
-//     let bin = env!("CARGO_BIN_EXE_automerge");
-//     let no_pipe_no_file = cmd!(bin, "export").stdout_capture().run();
+#[test]
+fn export_stdout() {
+    let bin = env!("CARGO_BIN_EXE_automerge");
+    let no_pipe_no_file = cmd!(bin, "export").stdout_capture().run();
 
-//     assert!(no_pipe_no_file.is_err());
-// }
+    assert!(no_pipe_no_file.is_err());
+}
 
 #[test]
 fn import_export_isomorphic() {
