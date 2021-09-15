@@ -119,7 +119,6 @@ jobs:
         uses: actions/setup-node@v2
         with:
           node-version: 12
-          cache: 'yarn'
 
       - name: Build backend wasm
         run: |
