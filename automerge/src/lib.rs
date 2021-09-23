@@ -12,6 +12,7 @@ macro_rules! log {
     }
 }
 
+use std::fmt::Display;
 use core::ops::Range;
 use std::cmp::{Eq, Ordering};
 use std::collections::HashMap;
@@ -27,6 +28,31 @@ pub enum AutomergeError {
     MismatchedCommit,
     #[error("change made outside of a transaction")]
     OpOutsideOfTransaction,
+    #[error("invalid opid format")]
+    InvalidOpId,
+}
+
+pub trait Exportable {
+    fn special(&self) -> Option<&'static str>;
+    fn counter(&self) -> u64;
+    fn actor(&self) -> usize;
+}
+
+pub trait Importable {
+    fn wrap(id: OpId) -> Self;
+    fn from(s: &str) -> Option<Self>  where Self: std::marker::Sized;
+}
+
+
+impl OpId {
+    #[inline]
+    fn counter(&self) -> u64 {
+        self.0
+    }
+    #[inline]
+    fn actor(&self) -> usize {
+        self.1
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +79,46 @@ pub enum ScalarValue {
     //    Cursor(OpId),
     Boolean(bool),
     Null,
+}
+
+pub const HEAD: ElemId = ElemId(OpId(0, 0));
+pub const ROOT: ObjId = ObjId(OpId(0, 0));
+
+const ROOT_STR : &str = "_root";
+const HEAD_STR : &str = "_head";
+
+
+impl Exportable for ObjId {
+    fn special(&self) -> Option<&'static str> { Some(ROOT_STR) }
+    fn counter(&self) -> u64 { self.0.counter() }
+    fn actor(&self) -> usize { self.0.actor() }
+}
+
+impl Exportable for ElemId {
+    fn special(&self) -> Option<&'static str> { Some(HEAD_STR) }
+    fn counter(&self) -> u64 { self.0.counter() }
+    fn actor(&self) -> usize { self.0.actor() }
+}
+
+impl Exportable for OpId {
+    fn special(&self) -> Option<&'static str> { None }
+    fn counter(&self) -> u64 { self.counter() }
+    fn actor(&self) -> usize { self.actor() }
+}
+
+impl Importable for ObjId {
+    fn wrap(id: OpId) -> Self { ObjId(id) }
+    fn from(s: &str) -> Option<Self> { if s == ROOT_STR { Some(ROOT) } else { None } }
+}
+
+impl Importable for ElemId {
+    fn wrap(id: OpId) -> Self { ElemId(id) }
+    fn from(s: &str) -> Option<Self> { if s == HEAD_STR { Some(HEAD) } else { None } }
+}
+
+impl Importable for OpId {
+    fn wrap(id: OpId) -> Self { id }
+    fn from(s: &str) -> Option<Self> { None }
 }
 
 impl From<&str> for ScalarValue {
@@ -101,13 +167,13 @@ pub enum ObjType {
     Text,
 }
 
-impl ObjType {
-    pub fn to_string(&self) -> String {
+impl Display for ObjType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ObjType::Map => "map".into(),
-            ObjType::List => "list".into(),
-            ObjType::Table => "table".into(),
-            ObjType::Text => "text".into(),
+            ObjType::Map => write!(f, "map"),
+            ObjType::List => write!(f, "list"),
+            ObjType::Table => write!(f, "table"),
+            ObjType::Text => write!(f, "text"),
         }
     }
 }
@@ -196,9 +262,6 @@ pub struct ObjId(OpId);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord)]
 pub struct ElemId(OpId);
-
-pub const HEAD: ElemId = ElemId(OpId(0, 0));
-pub const ROOT: ObjId = ObjId(OpId(0, 0));
 
 #[derive(Debug, Clone)]
 pub(crate) struct Op {
@@ -579,21 +642,39 @@ impl Automerge {
         unimplemented!()
     }
 
-    fn export(&self, id: &OpId) -> String {
-        format!("{}@{}",id.0, self.actors[id.1])
+    pub fn import<I: Importable>(&self, s: &str) -> Result<I,AutomergeError> {
+        if let Some(x) = I::from(s) {
+            Ok(x) 
+        } else {
+            let n = s.find('@').ok_or(AutomergeError::InvalidOpId)?;
+            let counter = s[0..n].parse().map_err(|_| AutomergeError::InvalidOpId)?;
+            let actor = &s.as_bytes()[n..];
+            // FIXME - unneeded to_vec()
+            let actor = self.actors.lookup(Actor(actor.to_vec())).ok_or(AutomergeError::InvalidOpId)?;
+            Ok(I::wrap(OpId(counter,actor)))
+        }
+    }
+
+    pub fn export<E: Exportable>(&self, id: E) -> String {
+        if let Some(s) = id.special() {
+            s.to_owned()
+        } else {
+            format!("{}@{}",id.counter(), self.actors[id.actor()])
+        }
     }
 
     pub fn dump(&self) {
         log!("  {:12} {:12} {:12} {}" , "id", "obj", "key", "value");
         for i in self.ops.iter() {
-            let id = self.export(&i.id);
-            let obj = self.export(&i.obj.0);
+            let id = self.export(i.id);
+            let obj = self.export(i.obj);
             let key = match i.key {
                 Key::Map(n) => &self.props[n],
                 Key::Seq(n) => unimplemented!(),
             };
-            let value = match &i.action {
-                OpType::Set(value) => value,
+            let value : String = match &i.action {
+                OpType::Set(value) => format!("{}",value),
+                OpType::Make(obj) => format!("make{}",obj),
                 _ => unimplemented!(),
             };
             log!("  {:12} {:12} {:12} {}" , id, obj, key, value);

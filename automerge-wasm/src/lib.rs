@@ -19,10 +19,6 @@ macro_rules! log {
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-#[wasm_bindgen]
-#[derive(Debug)]
-pub struct ObjId(automerge::ObjId);
-
 #[derive(Debug)]
 pub struct ScalarValue(am::ScalarValue);
 
@@ -87,20 +83,20 @@ impl Automerge {
         self.0.rollback();
     }
 
-    pub fn makeMap(&mut self, obj: &ObjId, prop: JsValue) -> Result<ObjId, JsValue> {
+    fn import<I: automerge::Importable>(&self, id: JsValue) -> Result<I, JsValue> {
+        let id_str = id.as_string().ok_or("invalid opid/objid/elemid").map_err(to_js_err)?;
+        Ok(self.0.import(&id_str).map_err(to_js_err)?)
+    }
+
+    #[wasm_bindgen(js_name = makeMap)]
+    pub fn make_map(&mut self, obj: JsValue, prop: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
         let key = self.prop_to_key(prop)?;
-        let obj = self.0.make(obj.0, key, am::ObjType::Map, false).map_err(to_js_err)?;
-        Ok(obj)
-        /*
-        match objtype.as_string().as_deref() {
-            Some("map") => self.0.make(ObjType::Map),
-            Some("list") => Ok(()),
-            Some("text") => Ok(()),
-            Some("table") => Ok(()),
-            Some(v) => Err(std::format!("invalid object type '{}'", v).into()),
-            None => Err("object type required".into())
-        }
-        */
+        let obj = self
+            .0
+            .make(obj, key, am::ObjType::Map, false)
+            .map_err(to_js_err)?;
+        Ok(self.0.export(obj).into())
     }
 
     fn prop_to_key(&mut self, prop: JsValue) -> Result<Key, JsValue> {
@@ -115,11 +111,12 @@ impl Automerge {
 
     pub fn set(
         &mut self,
-        obj: &ObjId,
+        obj: JsValue,
         prop: JsValue,
         value: JsValue,
         datatype: JsValue,
     ) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
         let datatype = datatype.as_string();
         let key = self.prop_to_key(prop)?;
         let value = match datatype.as_deref() {
@@ -164,24 +161,25 @@ impl Automerge {
                 }
             }
         }?;
-        self.0.set(obj.0, key, value, false).map_err(to_js_err)
+        self.0.set(obj, key, value, false).map_err(to_js_err)
     }
 
     pub fn value(
         &mut self,
-        obj: &ObjId,
+        obj: JsValue,
         prop: JsValue,
         value: JsValue,
         datatype: JsValue,
     ) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
         let prop = prop
             .as_string()
             .ok_or(JsErr("prop must be a string".into()))?;
         let result = Array::new();
-        match self.0.map_value(&obj.0, &prop) {
+        match self.0.map_value(&obj, &prop) {
             Some(Value::Object(obj_type, obj_id)) => {
                 result.push(&obj_type.to_string().into());
-                result.push(&ObjId(obj_id).into());
+                result.push(&self.0.export(obj_id).into());
             }
             Some(Value::Scalar(value)) => {
                 result.push(&value.datatype().into());
@@ -224,8 +222,8 @@ pub fn init() -> Result<Automerge, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn root() -> Result<ObjId, JsValue> {
-    Ok(ObjId(automerge::ROOT))
+pub fn root() -> Result<JsValue, JsValue> {
+    Ok("_root".into())
 }
 
 fn to_js_err<T: Display>(err: T) -> JsValue {

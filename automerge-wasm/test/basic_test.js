@@ -64,7 +64,7 @@ describe('Automerge', () => {
       doc.commit()
 
       result = doc.value(root,"submap")
-      assert.deepEqual(result,["map","world"])
+      assert.deepEqual(result,["map",submap])
 
       doc.dump()
     })
