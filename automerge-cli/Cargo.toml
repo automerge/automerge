@@ -3,6 +3,7 @@ name = "automerge-cli"
 version = "0.1.0"
 authors = ["Alex Good <alex@memoryandthought.me>"]
 edition = "2018"
+license = "MIT"
 
 [[bin]]
 name = "automerge"
