@@ -96,6 +96,7 @@ impl Automerge {
             .0
             .make(obj, key, am::ObjType::Map, false)
             .map_err(to_js_err)?;
+        log!("EXPORT MAKEMAP {:?}",obj);
         Ok(self.0.export(obj).into())
     }
 
@@ -116,7 +117,9 @@ impl Automerge {
         value: JsValue,
         datatype: JsValue,
     ) -> Result<(), JsValue> {
+        log!("set obj1={:?}",obj);
         let obj = self.import(obj)?;
+        log!("set obj2={:?}",obj);
         let datatype = datatype.as_string();
         let key = self.prop_to_key(prop)?;
         let value = match datatype.as_deref() {

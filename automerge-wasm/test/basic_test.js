@@ -61,10 +61,15 @@ describe('Automerge', () => {
 
       doc.begin()
       let submap = doc.makeMap(root, "submap")
+      console.log("SUBMAP",submap);
+      doc.set(submap, "number", 6, "uint")
       doc.commit()
 
       result = doc.value(root,"submap")
       assert.deepEqual(result,["map",submap])
+
+      result = doc.value(submap,"number")
+      assert.deepEqual(result,["uint",6])
 
       doc.dump()
     })

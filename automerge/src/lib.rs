@@ -89,13 +89,13 @@ const HEAD_STR : &str = "_head";
 
 
 impl Exportable for ObjId {
-    fn special(&self) -> Option<&'static str> { Some(ROOT_STR) }
+    fn special(&self) -> Option<&'static str> { if self == &ROOT { Some(ROOT_STR) } else { None } }
     fn counter(&self) -> u64 { self.0.counter() }
     fn actor(&self) -> usize { self.0.actor() }
 }
 
 impl Exportable for ElemId {
-    fn special(&self) -> Option<&'static str> { Some(HEAD_STR) }
+    fn special(&self) -> Option<&'static str> { if self == &HEAD { Some(HEAD_STR) } else { None } }
     fn counter(&self) -> u64 { self.0.counter() }
     fn actor(&self) -> usize { self.0.actor() }
 }
@@ -595,6 +595,7 @@ impl Automerge {
         value: ScalarValue,
         insert: bool,
     ) -> Result<(), AutomergeError> {
+        log!("SET {:?}={:?}", obj, value);
         self.make_op(obj, key, OpType::Set(value), insert)?;
         Ok(())
     }
@@ -667,6 +668,7 @@ impl Automerge {
         log!("  {:12} {:12} {:12} {}" , "id", "obj", "key", "value");
         for i in self.ops.iter() {
             let id = self.export(i.id);
+            log!("EXPORT {:?}", i.obj);
             let obj = self.export(i.obj);
             let key = match i.key {
                 Key::Map(n) => &self.props[n],
@@ -699,5 +701,10 @@ mod tests {
         doc.set(ROOT, key, "world".into(), false).unwrap();
         doc.commit().unwrap();
         doc.map_value(&ROOT, "hello").unwrap();
+    }
+    #[test]
+    fn exports() {
+        let mut doc = Automerge::new();
+        assert_eq!()
     }
 }
