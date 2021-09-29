@@ -3,7 +3,7 @@
 #![allow(unused_variables)]
 use automerge as am;
 use automerge::{Key, Value};
-use js_sys::Array;
+use js_sys::{Array};
 //use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
@@ -83,6 +83,10 @@ impl Automerge {
         self.0.rollback();
     }
 
+    fn export<E: automerge::Exportable>(&self, val: E) -> JsValue {
+        self.0.export(val).into()
+    }
+
     fn import<I: automerge::Importable>(&self, id: JsValue) -> Result<I, JsValue> {
         let id_str = id.as_string().ok_or("invalid opid/objid/elemid").map_err(to_js_err)?;
         Ok(self.0.import(&id_str).map_err(to_js_err)?)
@@ -96,8 +100,13 @@ impl Automerge {
             .0
             .make(obj, key, am::ObjType::Map, false)
             .map_err(to_js_err)?;
-        log!("EXPORT MAKEMAP {:?}",obj);
-        Ok(self.0.export(obj).into())
+        Ok(self.export(obj))
+    }
+
+    pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let result = self.0.keys(&obj).iter().map(|k| self.export(*k)).collect();
+        Ok(result)
     }
 
     fn prop_to_key(&mut self, prop: JsValue) -> Result<Key, JsValue> {
@@ -117,9 +126,7 @@ impl Automerge {
         value: JsValue,
         datatype: JsValue,
     ) -> Result<(), JsValue> {
-        log!("set obj1={:?}",obj);
         let obj = self.import(obj)?;
-        log!("set obj2={:?}",obj);
         let datatype = datatype.as_string();
         let key = self.prop_to_key(prop)?;
         let value = match datatype.as_deref() {
@@ -171,8 +178,6 @@ impl Automerge {
         &mut self,
         obj: JsValue,
         prop: JsValue,
-        value: JsValue,
-        datatype: JsValue,
     ) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let prop = prop
@@ -182,7 +187,7 @@ impl Automerge {
         match self.0.map_value(&obj, &prop) {
             Some(Value::Object(obj_type, obj_id)) => {
                 result.push(&obj_type.to_string().into());
-                result.push(&self.0.export(obj_id).into());
+                result.push(&self.export(obj_id));
             }
             Some(Value::Scalar(value)) => {
                 result.push(&value.datatype().into());
@@ -203,8 +208,15 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn del(&mut self, path: JsValue, field: JsValue) -> Result<(), JsValue> {
-        unimplemented!()
+    pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
+        /*
+        let prop = prop
+            .as_string()
+            .ok_or(JsErr("prop must be a string".into()))?;
+            */
+        let key = self.prop_to_key(prop)?;
+        self.0.del(obj, key).map_err(to_js_err)
     }
 
     pub fn dump(&self) {

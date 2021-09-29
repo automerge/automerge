@@ -4,6 +4,9 @@
 extern crate hex;
 extern crate web_sys;
 
+// compute Succ Pred
+// implement del
+
 // this is needed for print debugging via WASM
 #[allow(unused_macros)]
 macro_rules! log {
@@ -28,14 +31,19 @@ pub enum AutomergeError {
     MismatchedCommit,
     #[error("change made outside of a transaction")]
     OpOutsideOfTransaction,
-    #[error("invalid opid format")]
-    InvalidOpId,
+    #[error("invalid opid format `{0}`")]
+    InvalidOpId(String),
+}
+
+#[derive(Debug)]
+pub enum Export {
+    Id(OpId),
+    Special(String),
+    Prop(usize),
 }
 
 pub trait Exportable {
-    fn special(&self) -> Option<&'static str>;
-    fn counter(&self) -> u64;
-    fn actor(&self) -> usize;
+    fn export(&self) -> Export;
 }
 
 pub trait Importable {
@@ -89,21 +97,43 @@ const HEAD_STR : &str = "_head";
 
 
 impl Exportable for ObjId {
-    fn special(&self) -> Option<&'static str> { if self == &ROOT { Some(ROOT_STR) } else { None } }
+    fn export(&self) -> Export {
+        if self == &ROOT { Export::Special(ROOT_STR.to_owned()) } else { Export::Id(self.0) } 
+    }
+/*
+    fn special(&self) -> ExportSpecial { if self == &ROOT { ExportSpecial::Str(ROOT_STR.to_owned()) } else { ExportSpecial::None } }
     fn counter(&self) -> u64 { self.0.counter() }
     fn actor(&self) -> usize { self.0.actor() }
+    */
 }
 
 impl Exportable for ElemId {
-    fn special(&self) -> Option<&'static str> { if self == &HEAD { Some(HEAD_STR) } else { None } }
+    fn export(&self) -> Export {
+        if self == &HEAD { Export::Special(HEAD_STR.to_owned()) } else { Export::Id(self.0) }
+    }
+/*
+    fn special(&self) -> ExportSpecial { if self == &HEAD { ExportSpecial::Str(HEAD_STR.to_owned()) } else { ExportSpecial::None } }
     fn counter(&self) -> u64 { self.0.counter() }
     fn actor(&self) -> usize { self.0.actor() }
+    */
 }
 
 impl Exportable for OpId {
-    fn special(&self) -> Option<&'static str> { None }
+    fn export(&self) -> Export { Export::Id(*self) }
+    /*
+    fn special(&self) -> ExportSpecial { ExportSpecial::None }
     fn counter(&self) -> u64 { self.counter() }
     fn actor(&self) -> usize { self.actor() }
+    */
+}
+
+impl Exportable for Key {
+    fn export(&self) -> Export { 
+        match self {
+            Key::Map(p) => Export::Prop(*p),
+            Key::Seq(e) => e.export(),
+        }
+    }
 }
 
 impl Importable for ObjId {
@@ -447,6 +477,29 @@ impl Automerge {
         }
     }
 
+    fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
+        while *pos < self.ops.len()
+            && &self.ops[*pos].obj == obj
+            && !self.ops[*pos].visible()
+        {
+            *pos += 1
+        }
+    }
+
+    fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
+        while *pos < self.ops.len()
+            && &self.ops[*pos].obj == obj
+            && &self.ops[*pos].key == key
+        {
+            *pos += 1
+        }
+    }
+
+    fn scan_to_next_visible_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
+        self.scan_to_next_prop(obj, key, pos);
+        self.scan_to_visible(obj, pos);
+    }
+
     fn scan_to_prop_insertion_point(&self, op: &Op, pos: &mut usize) {
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
@@ -561,6 +614,28 @@ impl Automerge {
         // FIXME : gen patch info
     }
 
+    pub fn keys(&self, obj: &ObjId) -> Vec<Key> {
+        let mut pos = 0;
+        let mut result = vec![];
+        self.scan_to_obj(obj, &mut pos);
+        self.scan_to_visible(obj, &mut pos);
+        loop {
+            if let Some(op) = self.ops.get(pos) {
+                // we reached the next object
+                if &op.obj != obj {
+                    break;
+                }
+                let key = &op.key;
+                result.push(key.clone());
+                self.scan_to_next_visible_prop(obj, key, &mut pos);
+            } else {
+                // we reached the end of document
+               break 
+            }
+        }
+        result
+    }
+
     pub fn map_value(&self, obj: &ObjId, prop: &str) -> Option<Value> {
         let mut pos = 0;
         let prop = Key::Map(self.props.lookup(prop.to_owned())?);
@@ -595,7 +670,6 @@ impl Automerge {
         value: ScalarValue,
         insert: bool,
     ) -> Result<(), AutomergeError> {
-        log!("SET {:?}={:?}", obj, value);
         self.make_op(obj, key, OpType::Set(value), insert)?;
         Ok(())
     }
@@ -647,20 +721,20 @@ impl Automerge {
         if let Some(x) = I::from(s) {
             Ok(x) 
         } else {
-            let n = s.find('@').ok_or(AutomergeError::InvalidOpId)?;
-            let counter = s[0..n].parse().map_err(|_| AutomergeError::InvalidOpId)?;
-            let actor = &s.as_bytes()[n..];
-            // FIXME - unneeded to_vec()
-            let actor = self.actors.lookup(Actor(actor.to_vec())).ok_or(AutomergeError::InvalidOpId)?;
+            let n = s.find('@').ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+            let counter = s[0..n].parse().map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
+            // - FIXME - unneeded to_vec()
+            let actor = Actor(hex::decode(&s[(n + 1)..]).unwrap());
+            let actor = self.actors.lookup(actor).ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
             Ok(I::wrap(OpId(counter,actor)))
         }
     }
 
     pub fn export<E: Exportable>(&self, id: E) -> String {
-        if let Some(s) = id.special() {
-            s.to_owned()
-        } else {
-            format!("{}@{}",id.counter(), self.actors[id.actor()])
+        match id.export() {
+            Export::Id(id) => format!("{}@{}",id.counter(), self.actors[id.actor()]),
+            Export::Prop(index) => self.props[index].clone(),
+            Export::Special(s) => s,
         }
     }
 
@@ -668,7 +742,6 @@ impl Automerge {
         log!("  {:12} {:12} {:12} {}" , "id", "obj", "key", "value");
         for i in self.ops.iter() {
             let id = self.export(i.id);
-            log!("EXPORT {:?}", i.obj);
             let obj = self.export(i.obj);
             let key = match i.key {
                 Key::Map(n) => &self.props[n],
@@ -690,6 +763,24 @@ impl Default for Automerge {
     }
 }
 
+impl Default for OpId {
+    fn default() -> Self {
+        OpId(0,0)
+    }
+}
+
+impl Default for ObjId {
+    fn default() -> Self {
+        ObjId(Default::default())
+    }
+}
+
+impl Default for ElemId {
+    fn default() -> Self {
+        ElemId(Default::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{Automerge, ROOT};
@@ -705,6 +796,5 @@ mod tests {
     #[test]
     fn exports() {
         let mut doc = Automerge::new();
-        assert_eq!()
     }
 }

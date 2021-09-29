@@ -61,7 +61,6 @@ describe('Automerge', () => {
 
       doc.begin()
       let submap = doc.makeMap(root, "submap")
-      console.log("SUBMAP",submap);
       doc.set(submap, "number", 6, "uint")
       doc.commit()
 
