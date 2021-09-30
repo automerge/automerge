@@ -210,11 +210,6 @@ impl Automerge {
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
-        /*
-        let prop = prop
-            .as_string()
-            .ok_or(JsErr("prop must be a string".into()))?;
-            */
         let key = self.prop_to_key(prop)?;
         self.0.del(obj, key).map_err(to_js_err)
     }

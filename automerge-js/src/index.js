@@ -2,34 +2,38 @@
 let AutomergeWASM = require("automerge-wasm")
 
 let { rootProxy  } = require("./proxies")
+let { STATE, FROZEN  } = require("./constants")
 
 function init() {
-  return AutomergeWASM.init()
+  const state = AutomergeWASM.init()
+  //return rootProxy(state, true);
+  return state
 }
 
 function clone(doc) {
+  //const state = doc[STATE].clone()
+  //return rootProxy(state, true);
   return doc.clone()
 }
 
 function free(doc) {
-  return doc.free()
+  //return doc[STATE].free()
+  doc.free()
 }
 
 function from() {
 }
 
 function change(doc, func) {
-  //console.log("BEGIN")
   doc.begin()
   try {
     let root = rootProxy(doc);
     func(root)
-    //console.log("COMMIT")
     doc.commit()
     return doc
   } catch (e) {
-    console.log("ROLLBACK", e)
     doc.rollback()
+    throw e 
   }
 }
 
@@ -78,14 +82,17 @@ function receiveSyncMessage() {
 function initSyncState() {
 }
 
-function dump(doc, datatype, value) {
+function dump(doc) {
+  doc.dump()
+}
+
+function ex(doc, datatype, value) {
   switch (datatype) {
     case "map":
       let val = {}
       for (const key of doc.keys(value)) {
         let subval = doc.value(value,key)
-        //console.log(`dump key=${key} subval=${subval}`)
-        val[key] = dump(doc, subval[0], subval[1])
+        val[key] = ex(doc, subval[0], subval[1])
       }
       return val
     case "str":
@@ -101,7 +108,7 @@ function dump(doc, datatype, value) {
 }
 
 function toJS(doc) {
-  return dump(doc, "map", "_root")
+  return ex(doc, "map", "_root")
 }
 
 module.exports = {
@@ -109,7 +116,7 @@ module.exports = {
     load, save, merge, getChanges, getAllChanges, applyChanges,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
-    toJS,
+    toJS, dump,
 }
 
 // depricated

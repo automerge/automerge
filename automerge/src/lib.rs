@@ -398,6 +398,7 @@ impl Automerge {
 
     pub fn commit(&mut self) -> Result<(), AutomergeError> {
         if let Some(tx) = self.transaction.take() {
+            self.max_op = tx.max_op;
             self.changes.push(tx);
             self.seq += 1;
             Ok(())
@@ -431,6 +432,10 @@ impl Automerge {
             (Key::Map(a), Key::Map(b)) => Some(self.props[*a].cmp(&self.props[*b])),
             _ => None,
         }
+    }
+
+    fn calc_pred(&self, obj: &ObjId, key: &Key, insert: bool) -> Vec<OpId> {
+        Default::default()
     }
 
     fn make_op(
@@ -500,12 +505,16 @@ impl Automerge {
         self.scan_to_visible(obj, pos);
     }
 
-    fn scan_to_prop_insertion_point(&self, op: &Op, pos: &mut usize) {
+    fn scan_to_prop_insertion_point(&mut self, op: &mut Op, pos: &mut usize) {
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
             && self.ops[*pos].key == op.key
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
+            if self.ops[*pos].succ.is_empty() {
+                self.ops[*pos].succ.push(op.id);
+                op.pred.push(self.ops[*pos].id);
+            }
             *pos += 1
         }
     }
@@ -591,7 +600,7 @@ impl Automerge {
         Cursor { pos, seen }
     }
 
-    fn seek_to_map_op(&self, op: &Op) -> Cursor {
+    fn seek_to_map_op(&mut self, op: &mut Op) -> Cursor {
         let mut pos = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_prop_start(&op.obj, &op.key, &mut pos);
@@ -599,7 +608,7 @@ impl Automerge {
         Cursor { pos, seen: 0 }
     }
 
-    fn seek_to_op(&self, op: &Op) -> Cursor {
+    fn seek_to_op(&mut self, op: &mut Op) -> Cursor {
         match (&op.key, op.insert) {
             (Key::Map(_), _) => self.seek_to_map_op(op),
             (Key::Seq(elem), true) => self.seek_to_insert_elem(op, elem),
@@ -607,11 +616,26 @@ impl Automerge {
         }
     }
 
-    fn insert_op(&mut self, op: Op) {
-        let cursor = self.seek_to_op(&op);
+    fn insert_op(&mut self, mut op: Op) {
+        let cursor = self.seek_to_op(&mut op); //mut to collect pred
+        /*
+        if !op.insert  {
+            let mut pos = cursor.pos;
+            let mut pred : Vec<OpId> = Vec::new();
+            while pos < self.ops.len()
+                && self.ops[pos].obj == op.obj
+                && self.ops[pos].key == op.key
+            {
+                if self.ops[pos].succ.is_empty() {
+                    self.ops[pos].succ.push(op.id);
+                    pred.push(self.ops[pos].id);
+                }
+                pos += 1
+            }
+            op.pred = pred;
+        }
+        */
         self.ops.insert(cursor.pos, op);
-        // FIXME : update succ?
-        // FIXME : gen patch info
     }
 
     pub fn keys(&self, obj: &ObjId) -> Vec<Key> {
@@ -739,7 +763,7 @@ impl Automerge {
     }
 
     pub fn dump(&self) {
-        log!("  {:12} {:12} {:12} {}" , "id", "obj", "key", "value");
+        log!("  {:12} {:12} {:12} {} {} {}" , "id", "obj", "key", "value", "pred", "succ");
         for i in self.ops.iter() {
             let id = self.export(i.id);
             let obj = self.export(i.obj);
@@ -752,7 +776,9 @@ impl Automerge {
                 OpType::Make(obj) => format!("make{}",obj),
                 _ => unimplemented!(),
             };
-            log!("  {:12} {:12} {:12} {}" , id, obj, key, value);
+            let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
+            let succ : Vec<_>= i.succ.iter().map(|id| self.export(*id)).collect();
+            log!("  {:12} {:12} {:12} {} {:?} {:?}" , id, obj, key, value, pred,succ);
         }
     }
 }

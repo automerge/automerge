@@ -1,4 +1,5 @@
 
+const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter } = require("./counter");
 
@@ -31,6 +32,7 @@ function map_get(target, key) {
 
 const MapHandler = {
   get (target, key) {
+    if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     return map_get(target, key)
   },
 
@@ -179,7 +181,7 @@ function listProxy(context, objectId, path) {
 
 function rootProxy(context) {
   //context.instantiateObject = instantiateProxy
-  return mapProxy(context, '_root', [])
+  return mapProxy(context, AutomergeWASM.root(), [])
 }
 
 module.exports = { rootProxy } 
