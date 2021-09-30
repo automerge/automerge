@@ -44,6 +44,7 @@ const MapHandler = {
     switch (typeof value) {
       case 'object':
         if (value == null) {
+          context.set(objectId, key, null, "null");
         } else if (value instanceof Array) {
           throw new RangeError("set array value unsupported");
         } else if (value instanceof Uint) {

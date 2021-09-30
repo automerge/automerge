@@ -2,6 +2,7 @@
 let AutomergeWASM = require("automerge-wasm")
 
 let { rootProxy  } = require("./proxies")
+let { Counter  } = require("./counter")
 let { STATE, FROZEN  } = require("./constants")
 
 function init() {
@@ -90,11 +91,16 @@ function ex(doc, datatype, value) {
   switch (datatype) {
     case "map":
       let val = {}
+      console.log("mapkeys",doc.keys(value))
       for (const key of doc.keys(value)) {
         let subval = doc.value(value,key)
         val[key] = ex(doc, subval[0], subval[1])
       }
       return val
+    case "counter":
+      return new Counter(value)
+    case "timestamp":
+      return new Date(value)
     case "str":
     case "uint":
     case "int":
@@ -116,7 +122,7 @@ module.exports = {
     load, save, merge, getChanges, getAllChanges, applyChanges,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
-    toJS, dump,
+    toJS, dump, Counter
 }
 
 // depricated

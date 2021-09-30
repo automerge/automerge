@@ -24,20 +24,22 @@ describe('Automerge', () => {
 
         it('handle basic sets over many changes', () => {
             let doc1 = Automerge.init()
+            let timestamp = new Date();
+            let counter = new Automerge.Counter(100);
             let doc2 = Automerge.change(doc1, (d) => {
               d.hello = "world"
             })
             let doc3 = Automerge.change(doc2, (d) => {
-              d.big = "little"
+              d.counter1 = counter
             })
             let doc4 = Automerge.change(doc3, (d) => {
-              d.zip = "zop"
+              d.timestamp1 = timestamp
             })
             let doc5 = Automerge.change(doc4, (d) => {
-              d.app = "dap"
+              d.app = null
             })
-            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world", big: "little", zip: "zop", app: "dap" })
             Automerge.dump(doc5)
+            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world", counter1: counter, timestamp1: timestamp, app: null })
         })
 
         it('handle overwrites to values', () => {
