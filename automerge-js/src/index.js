@@ -97,6 +97,8 @@ function ex(doc, datatype, value) {
         val[key] = ex(doc, subval[0], subval[1])
       }
       return val
+    case "bytes":
+      return value
     case "counter":
       return new Counter(value)
     case "timestamp":

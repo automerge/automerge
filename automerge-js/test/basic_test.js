@@ -26,6 +26,8 @@ describe('Automerge', () => {
             let doc1 = Automerge.init()
             let timestamp = new Date();
             let counter = new Automerge.Counter(100);
+            let bytes = new Uint8Array([10,11,12]);
+            //let bytes = "010101"
             let doc2 = Automerge.change(doc1, (d) => {
               d.hello = "world"
             })
@@ -38,8 +40,11 @@ describe('Automerge', () => {
             let doc5 = Automerge.change(doc4, (d) => {
               d.app = null
             })
+            let doc6 = Automerge.change(doc5, (d) => {
+              d.bytes1 = bytes
+            })
             Automerge.dump(doc5)
-            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world", counter1: counter, timestamp1: timestamp, app: null })
+            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world", counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
         })
 
         it('handle overwrites to values', () => {

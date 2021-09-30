@@ -3,7 +3,8 @@
 #![allow(unused_variables)]
 use automerge as am;
 use automerge::{Key, Value};
-use js_sys::{Array};
+use wasm_bindgen::JsCast;
+use js_sys::{Array , Uint8Array };
 //use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
@@ -146,6 +147,9 @@ impl Automerge {
                 .as_f64()
                 .ok_or("value must be a number".into())
                 .map(|v| am::ScalarValue::F64(v)),
+            Some("bytes") => {
+                log!("BYTES {:?}",value);
+                Ok( am::ScalarValue::Bytes(value.dyn_into::<Uint8Array>().unwrap().to_vec())) },
             Some("counter") => value
                 .as_f64()
                 .ok_or("value must be a number".into())

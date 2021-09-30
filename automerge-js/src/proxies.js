@@ -57,6 +57,8 @@ const MapHandler = {
           context.set(objectId, key, value.value, "counter");
         } else if (value instanceof Date) {
           context.set(objectId, key, value.getTime(), "timestamp");
+        } else if (value instanceof Uint8Array) {
+          context.set(objectId, key, value, "bytes");
         } else {
           const childID = context.makeMap(objectId, key)
           const child = mapProxy(context, childID, [ ... path, key ]);
