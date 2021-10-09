@@ -3,4 +3,4 @@ pub use automerge_frontend::{
     value_ref, AutomergeFrontendError as FrontendError, Frontend, InvalidChangeRequest,
     InvalidPatch, LocalChange, MutableDocument, Path, Primitive, Value,
 };
-pub use automerge_protocol::{MapType, ObjType, ScalarValue, SequenceType};
+pub use automerge_protocol::{ChangeHash, MapType, ObjType, ScalarValue, SequenceType};
