@@ -4,3 +4,7 @@ pub use automerge_frontend::{
     InvalidPatch, LocalChange, MutableDocument, Path, Primitive, Value,
 };
 pub use automerge_protocol::{ChangeHash, MapType, ObjType, ScalarValue, SequenceType};
+
+mod combined;
+
+pub use combined::{Automerge, AutomergeError};
