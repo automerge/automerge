@@ -18,6 +18,55 @@ pub enum AutomergeError {
     InvalidPatch(#[from] InvalidPatch),
 }
 
+/// A more advanced way of building an [`Automerge`] from constituent parts.
+pub struct AutomergeBuilder {
+    frontend: Option<Frontend>,
+    backend: Option<Backend>,
+}
+
+impl Default for AutomergeBuilder {
+    fn default() -> Self {
+        Self {
+            frontend: Default::default(),
+            backend: Default::default(),
+        }
+    }
+}
+
+impl AutomergeBuilder {
+    /// Set the frontend, consuming the builder and returning it for chaining.
+    pub fn with_frontend(mut self, frontend: Frontend) -> Self {
+        self.frontend = Some(frontend);
+        self
+    }
+
+    /// Set the frontend, taking a mutable reference to the builder and returning it.
+    pub fn set_frontend(&mut self, frontend: Frontend) -> &mut Self {
+        self.frontend = Some(frontend);
+        self
+    }
+
+    /// Set the backend, consuming the builder and returning it for chaining.
+    pub fn with_backend(mut self, backend: Backend) -> Self {
+        self.backend = Some(backend);
+        self
+    }
+
+    /// Set the backend, taking a mutable reference to the builder and returning it.
+    pub fn set_backend(&mut self, backend: Backend) -> &mut Self {
+        self.backend = Some(backend);
+        self
+    }
+
+    /// Build this builder, setting any unset fields to their defaults.
+    pub fn build(self) -> Automerge {
+        Automerge {
+            frontend: self.frontend.unwrap_or_default(),
+            backend: self.backend.unwrap_or_default(),
+        }
+    }
+}
+
 /// The core automerge document.
 ///
 /// In reality this combines both the [`Frontend`] and [`Backend`] and handles synchronising the frontend
@@ -32,6 +81,8 @@ impl Automerge {
     /// Construct a new, empty, automerge instance.
     ///
     /// To build a new document from a previously saved one see [`load`](Self::load).
+    ///
+    /// For using a pre-built frontend and/or backend see [`AutomergeBuilder`].
     pub fn new() -> Self {
         Self {
             frontend: Frontend::new(),

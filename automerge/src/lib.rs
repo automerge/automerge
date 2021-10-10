@@ -7,4 +7,4 @@ pub use automerge_protocol::{ChangeHash, MapType, ObjType, ScalarValue, Sequence
 
 mod combined;
 
-pub use combined::{Automerge, AutomergeError};
+pub use combined::{Automerge, AutomergeBuilder, AutomergeError};
