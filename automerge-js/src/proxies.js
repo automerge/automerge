@@ -74,7 +74,7 @@ const MapHandler = {
         if (Number.isInteger(value)) {
           context.set(objectId, key, value, "int");
         } else {
-          context.set(objectId, key, value, "float");
+          context.set(objectId, key, value, "f64");
         }
         break;
       case 'string':
