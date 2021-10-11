@@ -3,6 +3,7 @@ let AutomergeWASM = require("automerge-wasm")
 
 let { rootProxy  } = require("./proxies")
 let { Counter  } = require("./counter")
+let { Int, Uint, Float64  } = require("./numbers")
 let { STATE, FROZEN  } = require("./constants")
 
 function init() {
@@ -106,7 +107,8 @@ function ex(doc, datatype, value) {
     case "str":
     case "uint":
     case "int":
-    case "bool":
+    case "f64":
+    case "boolean":
       return value
     case "null":
       return null
@@ -124,7 +126,7 @@ module.exports = {
     load, save, merge, getChanges, getAllChanges, applyChanges,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
-    toJS, dump, Counter
+    toJS, dump, Counter, Int, Uint, Float64
 }
 
 // depricated

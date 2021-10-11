@@ -52,7 +52,7 @@ const MapHandler = {
         } else if (value instanceof Int) {
           context.set(objectId, key, value.value, "int");
         } else if (value instanceof Float64) {
-          context.set(objectId, key, value.value, "float64");
+          context.set(objectId, key, value.value, "f64");
         } else if (value instanceof Counter) {
           context.set(objectId, key, value.value, "counter");
         } else if (value instanceof Date) {

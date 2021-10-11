@@ -43,8 +43,15 @@ describe('Automerge', () => {
             let doc6 = Automerge.change(doc5, (d) => {
               d.bytes1 = bytes
             })
-            Automerge.dump(doc5)
-            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world", counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
+            let doc7 = Automerge.change(doc6, (d) => {
+              d.uint = new Automerge.Uint(1)
+              d.int = new Automerge.Int(-1)
+              d.float64 = new Automerge.Float64(5.5)
+              d.true = true
+              d.false = false
+            })
+            Automerge.dump(doc7)
+            assert.deepEqual(Automerge.toJS(doc6), {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
         })
 
         it('handle overwrites to values', () => {
@@ -72,5 +79,13 @@ describe('Automerge', () => {
             })
             assert.deepEqual(Automerge.toJS(doc2), { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
         })
+
+      /*
+        it('handle set with object value', () => {
+            let doc1 = Automerge.init()
+            let doc2 = Automerge.change(doc1, (d) => { d.hello = "world" })
+            assert.deepEqual(Automerge.toJS(doc2), { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
+        })
+        */
     })
 })
