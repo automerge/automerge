@@ -15,7 +15,7 @@ serde_json = "^1.0"
 wasm-bindgen = "^0.2"
 js-sys = "^0.3"
 hex = "^0.4.2"
-rand = { version = "^0.7.3", features=["small_rng"] }
+rand = { version = "^0.8", features=["small_rng"] }
 maplit = "^1.0.2"
 sha2 = "0.9.5"
 leb128 = "^0.2.4"

@@ -27,7 +27,7 @@ uuid = { version = "0.8.1", features = ["wasm-bindgen", "v4", "serde"] }
 [dev-dependencies]
 automerge-backend = { path = "../automerge-backend" }
 criterion = "0.3.3"
-rand = "0.8.2"
+rand = "^0.8"
 env_logger = "0.8.3"
 log = "0.4.14"
 wasm-bindgen-test = "0.3.22"
