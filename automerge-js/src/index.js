@@ -8,33 +8,38 @@ let { STATE, FROZEN  } = require("./constants")
 
 function init() {
   const state = AutomergeWASM.init()
-  //return rootProxy(state, true);
-  return state
+  return rootProxy(state, true);
 }
 
 function clone(doc) {
-  //const state = doc[STATE].clone()
-  //return rootProxy(state, true);
-  return doc.clone()
+  const state = doc[STATE].clone()
+  return rootProxy(state, true);
 }
 
 function free(doc) {
-  //return doc[STATE].free()
-  doc.free()
+  return doc[STATE].free()
 }
 
-function from() {
+function from(data) {
+    let doc1 = init()
+    let doc2 = change(doc1, (d) => {
+      //Object.keys(data).forEach(key => d[key] = data[key])
+      Object.assign(d, data)
+    })
+    return doc2
 }
 
 function change(doc, func) {
-  doc.begin()
+  const state = doc[STATE]
+  // FREEZE
+  state.begin()
   try {
-    let root = rootProxy(doc);
+    let root = rootProxy(state);
     func(root)
-    doc.commit()
-    return doc
+    state.commit()
+    return rootProxy(state, true);
   } catch (e) {
-    doc.rollback()
+    state.rollback()
     throw e 
   }
 }
@@ -85,7 +90,8 @@ function initSyncState() {
 }
 
 function dump(doc) {
-  doc.dump()
+  const state = doc[STATE]
+  state.dump()
 }
 
 function ex(doc, datatype, value) {
@@ -118,7 +124,8 @@ function ex(doc, datatype, value) {
 }
 
 function toJS(doc) {
-  return ex(doc, "map", "_root")
+  const state = doc[STATE].clone()
+  return ex(state, "map", "_root")
 }
 
 module.exports = {

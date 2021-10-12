@@ -2,12 +2,14 @@
 const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter } = require("./counter");
+const { STATE, FROZEN  } = require("./constants")
 
 function map_get(target, key) {
-    const { context, objectId, path } = target
+    const { context, objectId, path, readonly } = target
     //if (key === OBJECT_ID) return objectId
     //if (key === CHANGE) return context
     //if (key === STATE) return {actorId: context.actorId}
+    if (key === STATE) return context;
     const value = context.value(objectId, key)
     const datatype = value[0]
     const val = value[1]
@@ -24,7 +26,12 @@ function map_get(target, key) {
       case "str": return val;
       case "uint": return val;
       case "int": return val;
+      case "f64": return val;
+      case "boolean": return val;
       case "null": return null;
+      case "bytes": return val;
+      case "counter": return new Counter(val);
+      case "timestamp": return new Date(val);
       default:
         throw RangeError(`datatype ${datatype} unimplemented`)
     }

@@ -19,7 +19,7 @@ describe('Automerge', () => {
               d.app = "dap"
             assert.deepEqual(d, {  hello: "world", big: "little", zip: "zop", app: "dap" })
             })
-            assert.deepEqual(Automerge.toJS(doc2), {  hello: "world", big: "little", zip: "zop", app: "dap" })
+            assert.deepEqual(doc2, {  hello: "world", big: "little", zip: "zop", app: "dap" })
         })
 
         it('handle basic sets over many changes', () => {
@@ -52,7 +52,8 @@ describe('Automerge', () => {
               d.false = false
             })
             Automerge.dump(doc7)
-            assert.deepEqual(Automerge.toJS(doc6), {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
+            //assert.deepEqual(Automerge.toJS(doc6), {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
+            assert.deepEqual(doc6, {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
         })
 
         it('handle overwrites to values', () => {
@@ -69,7 +70,7 @@ describe('Automerge', () => {
             let doc5 = Automerge.change(doc4, (d) => {
               d.hello = "world4"
             })
-            assert.deepEqual(Automerge.toJS(doc5), {  hello: "world4" } )
+            assert.deepEqual(doc5, {  hello: "world4" } )
             Automerge.dump(doc5)
         })
 
@@ -78,7 +79,8 @@ describe('Automerge', () => {
             let doc2 = Automerge.change(doc1, (d) => {
               d.subobj = { hello: "world", subsubobj: { zip: "zop" } }
             })
-            assert.deepEqual(Automerge.toJS(doc2), { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
+            //assert.deepEqual(Automerge.toJS(doc2), { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
+            assert.deepEqual(doc2, { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
         })
 
       /*
