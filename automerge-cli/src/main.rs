@@ -7,6 +7,7 @@ mod change;
 mod examine;
 mod export;
 mod import;
+mod merge;
 
 #[derive(Debug, Clap)]
 #[clap(about = "Automerge CLI")]
@@ -44,6 +45,10 @@ enum Command {
         /// Path that contains Automerge changes
         #[clap(parse(from_os_str))]
         changes_file: Option<PathBuf>,
+
+        /// The file to write to. If omitted assumes stdout
+        #[clap(parse(from_os_str), long("out"), short('o'))]
+        output_file: Option<PathBuf>,
     },
 
     Import {
@@ -99,6 +104,15 @@ enum Command {
 
     /// Read an automerge document and print a JSON representation of the changes in it to stdout
     Examine { input_file: Option<PathBuf> },
+
+    /// Read one or more automerge documents and output a merged, compacted version of them
+    Merge {
+        /// The file to write to. If omitted assumes stdout
+        #[clap(parse(from_os_str), long("out"), short('o'))]
+        output_file: Option<PathBuf>,
+        /// The file(s) to compact. If empty assumes stdin
+        input: Vec<PathBuf>,
+    },
 }
 
 fn open_file_or_stdin(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io::Read>> {
@@ -133,18 +147,17 @@ fn main() -> Result<()> {
         Command::Export {
             changes_file,
             format,
-        } => match format {
-            ExportFormat::Json => {
-                let mut in_buffer = open_file_or_stdin(changes_file)?;
-                export::export_json(
-                    &mut in_buffer,
-                    &mut std::io::stdout(),
-                    atty::is(atty::Stream::Stdout),
-                )
+            output_file,
+        } => {
+            let output = create_file_or_stdout(output_file)?;
+            match format {
+                ExportFormat::Json => {
+                    let mut in_buffer = open_file_or_stdin(changes_file)?;
+                    export::export_json(&mut in_buffer, output, atty::is(atty::Stream::Stdout))
+                }
+                ExportFormat::Toml => unimplemented!(),
             }
-            ExportFormat::Toml => unimplemented!(),
-        },
-
+        }
         Command::Import {
             format,
             input_file,
@@ -176,6 +189,16 @@ fn main() -> Result<()> {
                     eprintln!("Error: {:?}", e);
                 }
             }
+            Ok(())
+        }
+        Command::Merge { input, output_file } => {
+            let out_buffer = create_file_or_stdout(output_file)?;
+            match merge::merge(input.into(), out_buffer) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Failed to merge: {}", e);
+                }
+            };
             Ok(())
         }
     }
