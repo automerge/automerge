@@ -369,6 +369,13 @@ impl Backend {
         Ok(backend)
     }
 
+    pub fn load_without_hash_verification(data: &[u8]) -> Result<Self, AutomergeError> {
+        let changes = Change::load_document_without_hash_verification(data)?;
+        let mut backend = Self::new();
+        backend.load_changes(changes)?;
+        Ok(backend)
+    }
+
     pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();

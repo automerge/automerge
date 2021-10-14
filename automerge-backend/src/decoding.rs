@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
+use std::{borrow::Cow, collections::HashSet, convert::TryFrom, io, io::Read, str};
 
 use automerge_protocol as amp;
 use smol_str::SmolStr;
@@ -41,8 +41,11 @@ pub enum Error {
     NoDocChanges,
     #[error("An overflow would have occurred, the data may be corrupt")]
     Overflow,
-    #[error("Calculated heads differed from actual heads")]
-    MismatchedHeads,
+    #[error("Calculated heads differed from actual heads. Calculated: {derived_heads:?} != stated {stated_heads:?}")]
+    MismatchedHeads {
+        derived_heads: HashSet<amp::ChangeHash>,
+        stated_heads: HashSet<amp::ChangeHash>,
+    },
     #[error("Failed to read leb128 number {0}")]
     Leb128(#[from] leb128::read::Error),
     #[error(transparent)]

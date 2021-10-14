@@ -8,6 +8,7 @@ use std::{
     iter::FromIterator,
     num::NonZeroU32,
     slice::Iter,
+    str::FromStr,
 };
 
 use error::InvalidScalarValues;
@@ -24,6 +25,10 @@ use tinyvec::TinyVec;
 ///
 /// In the event that users want to use their own type of identifier that is longer than a uuid
 /// then they will likely end up pushing it onto the heap which is still fine.
+/// 
+// Note that change encoding relies on the Ord implementation for the ActorId being implemented in
+// terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
+// changing the ActorId implementation in ways which might affect the Ord implementation
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(TinyVec<[u8; 16]>);
@@ -120,6 +125,10 @@ pub struct OpId(pub u64, pub ActorId);
 impl OpId {
     pub fn new(seq: u64, actor: &ActorId) -> OpId {
         OpId(seq, actor.clone())
+    }
+
+    pub fn actor(&self) -> &ActorId {
+        &self.1
     }
 
     pub fn counter(&self) -> u64 {
@@ -615,6 +624,29 @@ impl fmt::Debug for ChangeHash {
         f.debug_tuple("ChangeHash")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ParseChangeHashError {
+    #[error(transparent)]
+    HexDecode(#[from] hex::FromHexError),
+    #[error("incorrect length, change hash should be 32 bytes, got {actual}")]
+    IncorrectLength { actual: usize },
+}
+
+impl FromStr for ChangeHash {
+    type Err = ParseChangeHashError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = hex::decode(s)?;
+        if bytes.len() == 32 {
+            Ok(ChangeHash(bytes.try_into().unwrap()))
+        } else {
+            Err(ParseChangeHashError::IncorrectLength {
+                actual: bytes.len(),
+            })
+        }
     }
 }
 
