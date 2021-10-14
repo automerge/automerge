@@ -51,7 +51,7 @@ impl Backend {
             self.op_set.deps.iter().copied().collect()
         };
         deps.sort_unstable();
-        let pending_changes = self.get_missing_deps(&[]).len();
+        let pending_changes = self.queue.len();
         Ok(amp::Patch {
             diffs,
             deps,

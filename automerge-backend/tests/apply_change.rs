@@ -1433,3 +1433,83 @@ fn test_updating_sequences_updates_referring_cursors_with_deleted_items() {
     };
     assert_eq!(patch, expected_patch);
 }
+
+#[test]
+fn test_report_missing_dependencies_with_out_of_order_apply_changes() {
+    let actor = ActorId::random();
+    let change1 = automerge_protocol::Change {
+        actor_id: actor.clone(),
+        message: None,
+        time: 0,
+        start_op: 1,
+        hash: None,
+        seq: 1,
+        deps: Vec::new(),
+        extra_bytes: Vec::new(),
+        operations: vec![
+            amp::Op {
+                pred: SortedVec::new(),
+                insert: false,
+                key: "test".into(),
+                obj: ObjectId::Root,
+                action: amp::OpType::Make(amp::ObjType::Map),
+            },
+            amp::Op {
+                pred: SortedVec::new(),
+                insert: true,
+                key: amp::ElementId::Head.into(),
+                obj: actor.op_id_at(1).into(),
+                action: amp::OpType::Set("a".into()),
+            },
+        ],
+    };
+    let change1_hash = hash(&change1);
+    let change2 = automerge_protocol::Change {
+        actor_id: actor.clone(),
+        message: None,
+        time: 0,
+        start_op: 3,
+        hash: None,
+        seq: 2,
+        deps: vec![change1_hash],
+        extra_bytes: Vec::new(),
+        operations: vec![amp::Op {
+            pred: SortedVec::new(),
+            insert: true,
+            key: amp::ElementId::Head.into(),
+            obj: actor.op_id_at(1).into(),
+            action: amp::OpType::Set("b".into()),
+        }],
+    };
+    let change2_hash = hash(&change2);
+    let change3 = automerge_protocol::Change {
+        actor_id: actor.clone(),
+        message: None,
+        time: 0,
+        start_op: 4,
+        hash: None,
+        seq: 3,
+        deps: vec![change2_hash],
+        extra_bytes: Vec::new(),
+        operations: vec![amp::Op {
+            pred: SortedVec::new(),
+            insert: true,
+            key: amp::ElementId::Head.into(),
+            obj: actor.op_id_at(1).into(),
+            action: amp::OpType::Set("c".into()),
+        }],
+    };
+    let mut backend = Backend::new();
+    backend.apply_changes(vec![change3.into()]).unwrap();
+    let patch = backend.apply_changes(vec![change2.into()]).unwrap();
+    let missing_deps = backend.get_missing_deps(&[change1_hash, change2_hash]);
+    assert_eq!(
+        missing_deps,
+        vec![automerge_backend::Change::from(change1).hash]
+    );
+    assert_eq!(patch.pending_changes, 2);
+}
+
+fn hash(change: &automerge_protocol::Change) -> automerge_protocol::ChangeHash {
+    automerge_backend::Change::from(change).hash
+}
