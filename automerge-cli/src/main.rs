@@ -149,7 +149,11 @@ fn main() -> Result<()> {
             format,
             output_file,
         } => {
-            let output = create_file_or_stdout(output_file)?;
+            let output: Box<dyn std::io::Write> = if let Some(output_file) = output_file {
+                Box::new(File::create(&output_file)?)
+            } else {
+                Box::new(std::io::stdout())
+            };
             match format {
                 ExportFormat::Json => {
                     let mut in_buffer = open_file_or_stdin(changes_file)?;
