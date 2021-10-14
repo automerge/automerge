@@ -44,5 +44,6 @@ features = ["console"]
 
 [dev-dependencies]
 futures = "^0.1"
+hex = "^0.4.3"
 wasm-bindgen-futures = "^0.3"
 wasm-bindgen-test = "^0.3"

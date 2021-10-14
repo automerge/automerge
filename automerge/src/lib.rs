@@ -3,6 +3,7 @@
 
 extern crate hex;
 extern crate web_sys;
+extern crate uuid;
 
 // compute Succ Pred
 // implement del
@@ -15,6 +16,7 @@ macro_rules! log {
     }
 }
 
+use uuid::{Uuid};
 use std::fmt::Display;
 use core::ops::Range;
 use std::cmp::{Eq, Ordering};
@@ -31,8 +33,12 @@ pub enum AutomergeError {
     MismatchedCommit,
     #[error("change made outside of a transaction")]
     OpOutsideOfTransaction,
+    #[error("begin() called with actor not set")]
+    ActorNotSet,
     #[error("invalid opid format `{0}`")]
     InvalidOpId(String),
+    #[error("invalid actor format `{0}`")]
+    InvalidActor(String),
 }
 
 #[derive(Debug)]
@@ -342,6 +348,18 @@ pub(crate) struct Change {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Actor(Vec<u8>);
 
+impl Actor {
+    pub fn from(s: &str) -> Result<Actor,AutomergeError> {
+        Ok(Actor(hex::decode(&s).map_err(|_| AutomergeError::InvalidActor(s.to_owned()))?))
+    }
+
+    pub fn random() -> Actor {
+       let my_uuid = Uuid::new_v4();
+       Actor(my_uuid.as_bytes().to_vec())
+
+    }
+}
+
 impl std::fmt::Display for Actor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", hex::encode(&self.0))
@@ -357,6 +375,7 @@ pub struct Automerge {
     props: IndexedCache<String>,
     changes: Vec<Change>,
     ops: Vec<Op>,
+    actor: Option<usize>,
     seq: u64,
     max_op: u64,
     transaction: Option<Change>,
@@ -365,10 +384,33 @@ pub struct Automerge {
 impl Automerge {
     pub fn new() -> Self {
         Automerge {
-            actors: IndexedCache::from(vec![Actor(hex::decode("aabbccdd").unwrap())]),
+            actors: IndexedCache::from(vec![]),
             props: IndexedCache::new(),
             changes: Default::default(),
             ops: Default::default(),
+            actor: None,
+            seq: 0,
+            max_op: 0,
+            transaction: None,
+        }
+    }
+
+    pub fn set_actor(&mut self, actor: Actor) {
+        // TODO - could change seq
+        self.actor = Some(self.actors.cache(actor))
+    }
+
+    pub fn get_actor(self) -> Option<Actor> {
+        self.actor.map(|a| self.actors[a].clone())
+    }
+
+    pub fn new_with_actor_id(actor: Actor) -> Self {
+        Automerge {
+            actors: IndexedCache::from(vec![actor]),
+            props: IndexedCache::new(),
+            changes: Default::default(),
+            ops: Default::default(),
+            actor: None,
             seq: 0,
             max_op: 0,
             transaction: None,
@@ -384,6 +426,9 @@ impl Automerge {
             return Err(AutomergeError::MismatchedBegin);
         }
 
+        let actor = self.actor.ok_or(AutomergeError::ActorNotSet)?;
+
+        // TODO - seq might not start at zero (load)
         self.transaction = Some(Change {
             actor: 0,
             seq: self.seq + 1,
@@ -809,10 +854,11 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, ROOT};
+    use crate::{Automerge, Actor, ROOT};
     #[test]
     fn insert_op() {
         let mut doc = Automerge::new();
+        doc.set_actor(Actor::random());
         doc.begin(None, None).unwrap();
         let key = doc.prop_to_key("hello".into());
         doc.set(ROOT, key, "world".into(), false).unwrap();
@@ -821,6 +867,6 @@ mod tests {
     }
     #[test]
     fn exports() {
-        let mut doc = Automerge::new();
+        let doc = Automerge::new();
     }
 }

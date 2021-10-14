@@ -22,10 +22,7 @@ function free(doc) {
 
 function from(data) {
     let doc1 = init()
-    let doc2 = change(doc1, (d) => {
-      //Object.keys(data).forEach(key => d[key] = data[key])
-      Object.assign(d, data)
-    })
+    let doc2 = change(doc1, (d) => Object.assign(d, data))
     return doc2
 }
 

@@ -9,6 +9,7 @@ use js_sys::{Array , Uint8Array };
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
+extern crate hex;
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
@@ -60,8 +61,12 @@ impl<'a> From<&'a str> for JsErr {
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new() -> Self {
-        Automerge(automerge::Automerge::new())
+    pub fn new() -> Result<Automerge, JsValue> {
+        let actor = automerge::Actor::from("aabbccdd").map_err(to_js_err)?;
+        let automerge = automerge::Automerge::new();
+        automerge.set_actor(actor);
+        Ok(Automerge(automerge))
+
     }
 
     pub fn clone(&self) -> Self {
