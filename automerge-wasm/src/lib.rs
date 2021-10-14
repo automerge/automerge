@@ -9,7 +9,7 @@ use js_sys::{Array , Uint8Array };
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
-extern crate hex;
+//extern crate hex;
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
@@ -63,7 +63,7 @@ impl<'a> From<&'a str> for JsErr {
 impl Automerge {
     pub fn new() -> Result<Automerge, JsValue> {
         let actor = automerge::Actor::from("aabbccdd").map_err(to_js_err)?;
-        let automerge = automerge::Automerge::new();
+        let mut automerge = automerge::Automerge::new();
         automerge.set_actor(actor);
         Ok(Automerge(automerge))
 
@@ -228,16 +228,18 @@ impl Automerge {
     }
 }
 
+/*
 impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
 }
+*/
 
 #[wasm_bindgen]
 pub fn init() -> Result<Automerge, JsValue> {
     console_error_panic_hook::set_once();
-    Ok(Automerge::new())
+    Automerge::new()
 }
 
 #[wasm_bindgen]
