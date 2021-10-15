@@ -3,6 +3,7 @@
 //const CACHE     = Symbol('_cache')     // map from objectId to immutable object
 const STATE      = Symbol('_state')     // object containing metadata about current state (e.g. sequence numbers)
 const OBJECT_ID  = Symbol('_objectId')     // object containing metadata about current state (e.g. sequence numbers)
+const READ_ONLY  = Symbol('_readOnly')     // object containing metadata about current state (e.g. sequence numbers)
 const FROZEN     = Symbol('_frozen')     // object containing metadata about current state (e.g. sequence numbers)
 
 // Properties of all Automerge objects
@@ -12,5 +13,5 @@ const FROZEN     = Symbol('_frozen')     // object containing metadata about cur
 //const ELEM_IDS  = Symbol('_elemIds')   // list containing the element ID of each list element
 
 module.exports = {
-  STATE, OBJECT_ID, FROZEN
+  STATE, OBJECT_ID, READ_ONLY, FROZEN
 }

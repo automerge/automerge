@@ -4,7 +4,7 @@ let AutomergeWASM = require("automerge-wasm")
 let { rootProxy  } = require("./proxies")
 let { Counter  } = require("./counter")
 let { Int, Uint, Float64  } = require("./numbers")
-let { STATE, FROZEN  } = require("./constants")
+let { STATE, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
 
 function init() {
   const state = AutomergeWASM.init()
@@ -26,18 +26,32 @@ function from(data) {
     return doc2
 }
 
-function change(doc, func) {
+function change(doc, options, callback) {
+  if (callback === undefined) {
+    // FIXME implement options
+    callback = options
+    options = {}
+  }
+  if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
+    throw new RangeError("must be the document root");
+  }
+  if (doc[FROZEN] === true) {
+    throw new RangeError("Attempting to use an outdated Automerge document")
+  }
+  if (doc[READ_ONLY] === false) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
   const state = doc[STATE]
-  // FREEZE
   state.begin()
   try {
+    doc[FROZEN] = true
     let root = rootProxy(state);
-    func(root)
+    callback(root)
     state.commit()
     return rootProxy(state, true);
   } catch (e) {
     state.rollback()
-    throw e 
+    throw e
   }
 }
 

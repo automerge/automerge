@@ -2,12 +2,13 @@
 const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter } = require("./counter");
-const { STATE, FROZEN  } = require("./constants")
+const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 
 function map_get(target, key) {
-    const { context, objectId, path, readonly } = target
-    //if (key === OBJECT_ID) return objectId
-    //if (key === CHANGE) return context
+    const { context, objectId, path, readonly, frozen } = target
+    if (key === OBJECT_ID) return objectId
+    if (key === READ_ONLY) return readonly
+    if (key === FROZEN) return frozen
     //if (key === STATE) return {actorId: context.actorId}
     if (key === STATE) return context;
     const value = context.value(objectId, key)
@@ -39,12 +40,21 @@ function map_get(target, key) {
 
 const MapHandler = {
   get (target, key) {
+    //console.log("get",key);
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     return map_get(target, key)
   },
 
   set (target, key, value) {
-    const { context, objectId, path, readonly } = target
+    //console.log("set",key);
+    const { context, objectId, path, readonly, frozen } = target
+    if (frozen) {
+      throw new RangeError("Attempting to use an outdated Automerge document")
+    }
+    if (key === FROZEN) {
+      target.frozen = value
+      return
+    }
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
@@ -103,11 +113,13 @@ const MapHandler = {
   },
 
   has (target, key) {
+    //console.log("has",key);
     const value = map_get(target, key)
-    return value.length !== 0
+    return value !== undefined
   },
 
   getOwnPropertyDescriptor (target, key) {
+    //console.log("getOwnPropertyDescriptor",key);
     const { context, objectId } = target
     const value = map_get(target, key)
     if (typeof value !== 'undefined') {
@@ -118,6 +130,7 @@ const MapHandler = {
   },
 
   ownKeys (target) {
+    //console.log("ownKeys");
     const { context, objectId } = target
     return context.keys(objectId)
   },
@@ -182,16 +195,16 @@ const ListHandler = {
 }
 
 function mapProxy(context, objectId, path, readonly) {
-  return new Proxy({context, objectId, path, readonly}, MapHandler)
+  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false}, MapHandler)
 }
 
 function listProxy(context, objectId, path) {
   return new Proxy([context, objectId, path], ListHandler)
 }
 
-function rootProxy(context) {
+function rootProxy(context, readonly) {
   //context.instantiateObject = instantiateProxy
-  return mapProxy(context, AutomergeWASM.root(), [])
+  return mapProxy(context, AutomergeWASM.root(), [], readonly)
 }
 
 module.exports = { rootProxy } 

@@ -7,6 +7,28 @@ const Automerge = require('../src')
 //const UUID_PATTERN = /^[0-9a-f]{32}$/
 //const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 
+// TODO - stale automerge has state
+// TODO -   change returns same object if nothing changed (commit returns ops committed?)
+// TODO -     ignores changes that dont make a change
+// TODO -     does not ignore a change if it resolves a conflict
+// TODO - getLastLocalChange
+// TODO - merge
+// TODO - getConflicts
+// TODO - getAllChanges
+// TODO - patchCallback
+// TODO - emptyChange
+// TODO - getHistory
+
+        let sq1 = Automerge.init();
+        let sq2 = Automerge.init();
+console.log("XX1")
+        try {
+          let zz = assert.strictEqual(sq1, sq2)
+          console.log("XX2",zz)
+        } catch (e) {
+          console.log("XX3",e)
+        }
+
 describe('Automerge', () => {
 
   describe('initialization ', () => {
@@ -14,7 +36,7 @@ describe('Automerge', () => {
       const doc = Automerge.init()
       assert.deepStrictEqual(doc, {})
     })
- 
+
     it('should allow instantiating from an existing object', () => {
       const initialState = { birds: { wrens: 3, magpies: 4 } }
       const doc = Automerge.from(initialState)
@@ -72,12 +94,8 @@ describe('Automerge', () => {
       assert.strictEqual(s1.foo, undefined)
       assert.strictEqual(s2.foo, 'bar')
     })
-  })
-})
-/*
-  })
 
-    it('changes should be retrievable', () => {
+    it.skip('changes should be retrievable', () => {
       const change1 = Automerge.getLastLocalChange(s1)
       s2 = Automerge.change(s1, doc => doc.foo = 'bar')
       const change2 = Automerge.getLastLocalChange(s2)
@@ -90,7 +108,7 @@ describe('Automerge', () => {
       })
     })
 
-    it('should not register any conflicts on repeated assignment', () => {
+    it.skip('should not register any conflicts on repeated assignment', () => {
       assert.strictEqual(Automerge.getConflicts(s1, 'foo'), undefined)
       s1 = Automerge.change(s1, 'change', doc => doc.foo = 'one')
       assert.strictEqual(Automerge.getConflicts(s1, 'foo'), undefined)
@@ -99,7 +117,7 @@ describe('Automerge', () => {
     })
 
     describe('changes', () => {
-      it('should group several changes', () => {
+      it.skip('should group several changes', () => {
         s2 = Automerge.change(s1, 'change message', doc => {
           doc.first = 'one'
           assert.strictEqual(doc.first, 'one')
@@ -112,7 +130,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2, {first: 'one', second: 'two'})
       })
 
-      it('should freeze objects if desired', () => {
+      it.skip('should freeze objects if desired', () => {
         s1 = Automerge.init({freeze: true})
         s2 = Automerge.change(s1, doc => doc.foo = 'bar')
         try {
@@ -138,7 +156,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2.x, undefined)
       })
 
-      it('should allow repeated reading and writing of values', () => {
+      it.skip('should allow repeated reading and writing of values', () => {
         s2 = Automerge.change(s1, 'change message', doc => {
           doc.value = 'a'
           assert.strictEqual(doc.value, 'a')
@@ -150,7 +168,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2, {value: 'c'})
       })
 
-      it('should not record conflicts when writing the same field several times within one change', () => {
+      it.skip('should not record conflicts when writing the same field several times within one change', () => {
         s1 = Automerge.change(s1, 'change message', doc => {
           doc.value = 'a'
           doc.value = 'b'
@@ -160,18 +178,18 @@ describe('Automerge', () => {
         assert.strictEqual(Automerge.getConflicts(s1, 'value'), undefined)
       })
 
-      it('should return the unchanged state object if nothing changed', () => {
+      it.skip('should return the unchanged state object if nothing changed', () => {
         s2 = Automerge.change(s1, () => {})
         assert.strictEqual(s2, s1)
       })
 
-      it('should ignore field updates that write the existing value', () => {
+      it.skip('should ignore field updates that write the existing value', () => {
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.change(s1, doc => doc.field = 123)
         assert.strictEqual(s2, s1)
       })
 
-      it('should not ignore field updates that resolve a conflict', () => {
+      it.skip('should not ignore field updates that resolve a conflict', () => {
         s2 = Automerge.merge(Automerge.init(), s1)
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.change(s2, doc => doc.field = 321)
@@ -183,13 +201,13 @@ describe('Automerge', () => {
         assert.strictEqual(Automerge.getConflicts(resolved, 'field'), undefined)
       })
 
-      it('should ignore list element updates that write the existing value', () => {
+      it.skip('should ignore list element updates that write the existing value', () => {
         s1 = Automerge.change(s1, doc => doc.list = [123])
         s2 = Automerge.change(s1, doc => doc.list[0] = 123)
         assert.strictEqual(s2, s1)
       })
 
-      it('should not ignore list element updates that resolve a conflict', () => {
+      it.skip('should not ignore list element updates that resolve a conflict', () => {
         s1 = Automerge.change(s1, doc => doc.list = [1])
         s2 = Automerge.merge(Automerge.init(), s1)
         s1 = Automerge.change(s1, doc => doc.list[0] = 123)
@@ -255,7 +273,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s1, {stuff: {foo: 'bar', baz: 'updated!'}})
       })
 
-      it('should support Date objects in maps', () => {
+      it.skip('should support Date objects in maps', () => {
         const now = new Date()
         s1 = Automerge.change(s1, doc => doc.now = now)
         let changes = Automerge.getAllChanges(s1)
@@ -264,7 +282,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2.now.getTime(), now.getTime())
       })
 
-      it('should support Date objects in lists', () => {
+      it.skip('should support Date objects in lists', () => {
         const now = new Date()
         s1 = Automerge.change(s1, doc => doc.list = [now])
         let changes = Automerge.getAllChanges(s1)
@@ -273,7 +291,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2.list[0].getTime(), now.getTime())
       })
 
-      it('should call patchCallback if supplied', () => {
+      it.skip('should call patchCallback if supplied', () => {
         const callbacks = [], actor = Automerge.getActorId(s1)
         const s2 = Automerge.change(s1, {
           patchCallback: (patch, before, after, local) => callbacks.push({patch, before, after, local})
@@ -294,7 +312,7 @@ describe('Automerge', () => {
         assert.strictEqual(callbacks[0].local, true)
       })
 
-      it('should call a patchCallback set up on document initialisation', () => {
+      it.skip('should call a patchCallback set up on document initialisation', () => {
         const callbacks = []
         s1 = Automerge.init({
           patchCallback: (patch, before, after, local) => callbacks.push({patch, before, after, local})
@@ -313,7 +331,7 @@ describe('Automerge', () => {
     })
 
     describe('emptyChange()', () => {
-      it('should append an empty change to the history', () => {
+      it.skip('should append an empty change to the history', () => {
         s1 = Automerge.change(s1, 'first change', doc => doc.field = 123)
         s2 = Automerge.emptyChange(s1, 'empty change')
         assert.notStrictEqual(s2, s1)
@@ -322,7 +340,7 @@ describe('Automerge', () => {
                          ['first change', 'empty change'])
       })
 
-      it('should reference dependencies', () => {
+      it.skip('should reference dependencies', () => {
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.merge(Automerge.init(), s1)
         s2 = Automerge.change(s2, doc => doc.other = 'hello')
@@ -333,6 +351,9 @@ describe('Automerge', () => {
         assert.deepStrictEqual(emptyChange.ops, [])
       })
     })
+  })
+})
+/*
 
     describe('root object', () => {
       it('should handle single-property assignment', () => {
@@ -402,7 +423,7 @@ describe('Automerge', () => {
         Automerge.change(s1, doc => {
           assert.throws(() => { doc.foo = undefined },         /Unsupported type of value: undefined/)
           assert.throws(() => { doc.foo = {prop: undefined} }, /Unsupported type of value: undefined/)
-          assert.throws(() => { doc.foo = () => {} },          /Unsupported type of value: function/)
+            assert.throws(() => { doc.foo = () => {} },          /Unsupported type of value: function/)
           assert.throws(() => { doc.foo = Symbol('foo') },     /Unsupported type of value: symbol/)
         })
       })
