@@ -30,7 +30,7 @@ pub fn examine(
     input
         .read_to_end(&mut buf)
         .map_err(|e| ExamineError::ReadingChanges { source: e })?;
-    let changes = amb::Change::load_document(&buf)
+    let changes = amb::Change::load_document_without_hash_verification(&buf)
         .map_err(|e| ExamineError::ApplyingInitialChanges { source: e })?;
     let uncompressed_changes: Vec<amp::Change> = changes.iter().map(|c| c.decode()).collect();
     if is_tty {

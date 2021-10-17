@@ -38,13 +38,8 @@ impl Encodable for [amp::ActorId] {
     }
 }
 
-fn map_actor(actor: &amp::ActorId, actors: &mut Vec<amp::ActorId>) -> usize {
-    if let Some(pos) = actors.iter().position(|a| a == actor) {
-        pos
-    } else {
-        actors.push(actor.clone());
-        actors.len() - 1
-    }
+fn map_actor(actor: &amp::ActorId, actors: &[amp::ActorId]) -> usize {
+    actors.iter().position(|a| a == actor).unwrap()
 }
 
 impl Encodable for amp::ActorId {
@@ -562,7 +557,7 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &amp::ScalarValue, actors: &mut Vec<amp::ActorId>) {
+    fn append_value(&mut self, val: &amp::ScalarValue, actors: &[amp::ActorId]) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
@@ -648,7 +643,7 @@ impl KeyEncoder {
         }
     }
 
-    fn append(&mut self, key: amp::Key, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, key: amp::Key, actors: &[amp::ActorId]) {
         match key {
             amp::Key::Map(s) => {
                 self.actor.append_null();
@@ -726,7 +721,7 @@ impl PredEncoder {
         }
     }
 
-    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &[amp::ActorId]) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
@@ -758,7 +753,7 @@ impl ObjEncoder {
         }
     }
 
-    fn append(&mut self, obj: &amp::ObjectId, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, obj: &amp::ObjectId, actors: &[amp::ActorId]) {
         match obj {
             amp::ObjectId::Root => {
                 self.actor.append_null();
@@ -894,14 +889,9 @@ pub(crate) struct DocOpEncoder {
     succ: SuccEncoder,
 }
 
-// FIXME - actors should not be mut here
-
 impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
-    pub(crate) fn encode_doc_ops<'a, I>(
-        ops: I,
-        actors: &'a mut Vec<amp::ActorId>,
-    ) -> (Vec<u8>, Vec<u8>)
+    pub(crate) fn encode_doc_ops<'a, I>(ops: I, actors: &'a [amp::ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = DocOp>,
     {
@@ -923,7 +913,7 @@ impl DocOpEncoder {
         }
     }
 
-    fn encode<I>(&mut self, ops: I, actors: &mut Vec<amp::ActorId>)
+    fn encode<I>(&mut self, ops: I, actors: &[amp::ActorId])
     where
         I: IntoIterator<Item = DocOp>,
     {
@@ -1008,7 +998,7 @@ pub(crate) struct ColumnEncoder {
 impl ColumnEncoder {
     pub fn encode_ops<'a, 'b, I>(
         ops: I,
-        actors: &'a mut Vec<amp::ActorId>,
+        actors: &'a [amp::ActorId],
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = ExpandedOp<'b>>,
@@ -1029,7 +1019,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b [amp::ActorId])
     where
         I: IntoIterator<Item = ExpandedOp<'c>>,
     {
@@ -1038,7 +1028,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &[amp::ActorId]) {
         self.obj.append(&op.obj, actors);
         self.key.append(op.key.into_owned(), actors);
         self.insert.append(op.insert);
@@ -1340,7 +1330,7 @@ mod tests {
         };
 
         let mut column_encoder = ColumnEncoder::new();
-        column_encoder.encode(vec![col_op], &mut actors);
+        column_encoder.encode(vec![col_op], &actors);
         let (bytes, _) = column_encoder.finish();
 
         let col_op2 = ExpandedOp {
@@ -1352,7 +1342,7 @@ mod tests {
         };
 
         let mut column_encoder = ColumnEncoder::new();
-        column_encoder.encode(vec![col_op2], &mut actors);
+        column_encoder.encode(vec![col_op2], &actors);
         let (bytes2, _) = column_encoder.finish();
 
         assert_eq!(bytes, bytes2);

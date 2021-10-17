@@ -129,8 +129,9 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     }
 
     // encode first actor
-    let mut actors = vec![change.actor_id.clone()];
     change.actor_id.to_bytes().encode(&mut bytes).unwrap();
+
+    let actors = actor_ids_in_change(change);
 
     // encode seq, start_op, time, message
     change.seq.encode(&mut bytes).unwrap();
@@ -144,7 +145,7 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
         ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone());
 
     // encode ops into a side buffer - collect all other actors
-    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
+    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &actors);
 
     // encode all other actors
     actors[1..].encode(&mut bytes).unwrap();
@@ -169,6 +170,47 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
         ops,
         extra_bytes,
     }
+}
+
+/// When encoding a change we take all the actor IDs referenced by a change and place them in an
+/// array. The array has the actor who authored the change as the first element and all remaining
+/// actors (i.e. those referenced in object IDs in the target of an operation or in the `pred` of
+/// an operation) lexicographically ordered following the change author.
+fn actor_ids_in_change(change: &amp::Change) -> Vec<amp::ActorId> {
+    let mut other_ids: Vec<&amp::ActorId> = change
+        .operations
+        .iter()
+        .flat_map(opids_in_operation)
+        .filter(|a| *a != &change.actor_id)
+        .unique()
+        .collect();
+    other_ids.sort();
+    // Now prepend the change actor
+    std::iter::once(&change.actor_id)
+        .chain(other_ids.into_iter())
+        .cloned()
+        .collect()
+}
+
+fn opids_in_operation(op: &amp::Op) -> impl Iterator<Item = &amp::ActorId> {
+    let obj_actor_id = match &op.obj {
+        amp::ObjectId::Root => None,
+        amp::ObjectId::Id(opid) => Some(opid.actor()),
+    };
+    let pred_ids = op.pred.iter().map(amp::OpId::actor);
+    let key_actor = match &op.key {
+        amp::Key::Seq(amp::ElementId::Id(i)) => Some(i.actor()),
+        _ => None,
+    };
+    let action_opid = match &op.action {
+        amp::OpType::Set(amp::ScalarValue::Cursor(cid)) => Some(cid.actor()),
+        _ => None,
+    };
+    obj_actor_id
+        .into_iter()
+        .chain(key_actor.into_iter())
+        .chain(action_opid.into_iter())
+        .chain(pred_ids)
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -241,7 +283,13 @@ impl Change {
 
     #[instrument(level = "debug", skip(bytes))]
     pub fn load_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
-        load_blocks(bytes)
+        load_blocks(bytes, true)
+    }
+
+    pub fn load_document_without_hash_verification(
+        bytes: &[u8],
+    ) -> Result<Vec<Change>, AutomergeError> {
+        load_blocks(bytes, false)
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
@@ -492,10 +540,14 @@ fn decode_columns(
     ops
 }
 
-fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding::Error> {
+fn decode_block(
+    bytes: &[u8],
+    changes: &mut Vec<Change>,
+    validate_hashes: bool,
+) -> Result<(), decoding::Error> {
     match bytes[PREAMBLE_BYTES] {
         BLOCK_TYPE_DOC => {
-            changes.extend(decode_document(bytes)?);
+            changes.extend(decode_document(bytes, validate_hashes)?);
             Ok(())
         }
         BLOCK_TYPE_CHANGE | BLOCK_TYPE_DEFLATE => {
@@ -703,10 +755,10 @@ fn doc_changes_to_uncompressed_changes<'a>(
     })
 }
 
-fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+fn load_blocks(bytes: &[u8], validate_hashes: bool) -> Result<Vec<Change>, AutomergeError> {
     let mut changes = Vec::new();
     for slice in split_blocks(bytes)? {
-        decode_block(slice, &mut changes)?;
+        decode_block(slice, &mut changes, validate_hashes)?;
     }
     Ok(changes)
 }
@@ -746,7 +798,7 @@ fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
     Ok(Some(0..end))
 }
 
-fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
+fn decode_document(bytes: &[u8], validate_hashes: bool) -> Result<Vec<Change>, decoding::Error> {
     let (chunktype, _hash, mut cursor) = decode_header(bytes)?;
 
     // chunktype == 0 is a document, chunktype = 1 is a change
@@ -789,8 +841,14 @@ fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
         calculated_heads.insert(change.hash);
     }
 
-    if calculated_heads != heads.into_iter().collect::<HashSet<_>>() {
-        return Err(decoding::Error::MismatchedHeads);
+    if validate_hashes {
+        let stated_heads: HashSet<amp::ChangeHash> = heads.into_iter().collect();
+        if calculated_heads != stated_heads {
+            return Err(decoding::Error::MismatchedHeads {
+                derived_heads: calculated_heads,
+                stated_heads,
+            });
+        }
     }
 
     Ok(changes)
@@ -941,7 +999,7 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
 
     // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
     // so long as we have a full history
-    let mut actors: Vec<_> = changes
+    let actors: Vec<_> = changes
         .iter()
         .map(|c| &c.actor_id)
         .unique()
@@ -953,7 +1011,7 @@ pub(crate) fn encode_document(changes: &[amp::Change]) -> Result<Vec<u8>, encodi
 
     let doc_ops = group_doc_ops(changes, &actors);
 
-    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &mut actors);
+    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &actors);
 
     bytes.extend(&MAGIC_BYTES);
     bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
@@ -1342,7 +1400,7 @@ mod tests {
         doc[5] = 0;
         doc[6] = 0;
         doc[7] = 1;
-        let decode_result = decode_document(&doc);
+        let decode_result = decode_document(&doc, true);
         if let Err(decoding::Error::InvalidChecksum {
             found: [0, 0, 0, 1],
             calculated,

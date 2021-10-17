@@ -44,6 +44,8 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
                     if count.get() == 1 {
                         InternalOpType::Del
                     } else {
+                        // TODO this error should not cause a panic. Therefore this iterator should
+                        // be fallible
                         assert_eq!(
                             op.pred.len(),
                             1,

@@ -142,6 +142,7 @@ fn create_file_or_stdout(maybe_path: Option<PathBuf>) -> Result<Box<dyn std::io:
 }
 
 fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let opts = Opts::parse();
     match opts.cmd {
         Command::Export {
