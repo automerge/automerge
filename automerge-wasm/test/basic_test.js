@@ -1,5 +1,6 @@
 
 const assert = require('assert')
+const util = require('util')
 const Automerge = require('..')
 
 describe('Automerge', () => {
@@ -62,6 +63,7 @@ describe('Automerge', () => {
       doc.begin()
       let submap = doc.makeMap(root, "submap")
       doc.set(submap, "number", 6, "uint")
+      assert.strictEqual(doc.pending_ops(),2)
       doc.commit()
 
       result = doc.value(root,"submap")
@@ -71,6 +73,23 @@ describe('Automerge', () => {
       assert.deepEqual(result,["uint",6])
 
       doc.dump()
+    })
+
+    it('should be able to make lists', () => {
+      let doc = Automerge.init()
+      let root = Automerge.root()
+
+      doc.begin()
+      let submap = doc.makeList(root, "numbers")
+      doc.insert(submap, 0, "a");
+      doc.insert(submap, 1, "b");
+      doc.insert(submap, 2, "c");
+      doc.insert(submap, 0, "z");
+      doc.commit()
+      assert.deepEqual(doc.value(submap, 0),["str","z"])
+      assert.deepEqual(doc.value(submap, 1),["str","a"])
+      assert.deepEqual(doc.value(submap, 2),["str","b"])
+      assert.deepEqual(doc.value(submap, 3),["str","c"])
     })
   })
 })

@@ -75,13 +75,13 @@ struct Cursor {
     seen: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Object(ObjType, ObjId),
     Scalar(ScalarValue),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
     Str(String),
@@ -157,9 +157,31 @@ impl Importable for OpId {
     fn from(s: &str) -> Option<Self> { None }
 }
 
+impl From<OpId> for Key {
+    fn from(id: OpId) -> Self {
+        Key::Seq(ElemId(id))
+    }
+}
+
+impl From<ElemId> for Key {
+    fn from(e: ElemId) -> Self {
+        Key::Seq(e)
+    }
+}
+
 impl From<&str> for ScalarValue {
     fn from(s: &str) -> Self {
         ScalarValue::Str(s.to_owned())
+    }
+}
+
+impl From<&Op> for Value {
+    fn from(op: &Op) -> Self {
+        match &op.action {
+            OpType::Make(obj_type) => Value::Object(*obj_type, ObjId(op.id)),
+            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            _ => panic!("cant convert op into a value"),
+        }
     }
 }
 
@@ -195,7 +217,7 @@ impl std::fmt::Display for ScalarValue {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ObjType {
     Map,
     List,
@@ -417,6 +439,10 @@ impl Automerge {
         }
     }
 
+    pub fn pending_ops(&self) -> u64 {
+      self.transaction.as_ref().map(|t| t.max_op - self.max_op).unwrap_or(0)
+    }
+
     pub fn begin(
         &mut self,
         message: Option<String>,
@@ -536,6 +562,28 @@ impl Automerge {
         }
     }
 
+    fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Option<&Op> {
+        let mut seen = 0;
+        let mut seen_visible = false;
+        while *pos < self.ops.len()
+//            && &self.ops[*pos].obj == obj
+//            && !self.ops[*pos].visible()
+        {
+            let op = &self.ops[*pos];
+            if &op.obj != obj { break }
+            if op.insert {
+              seen_visible = false;
+            }
+            if op.visible() && !seen_visible {
+              seen += 1;
+              seen_visible = true;
+            }
+            if seen > n { return Some(op) }
+            *pos += 1;
+        }
+        None
+    }
+
     fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
         while *pos < self.ops.len()
             && &self.ops[*pos].obj == obj
@@ -588,11 +636,11 @@ impl Automerge {
                 seen_key = i.elemid(); // only count each elemid once
             }
 
+            *pos += 1;
+
             if i.insert && i.id == elem.0 {
                 break;
             }
-
-            *pos += 1
         }
     }
 
@@ -711,15 +759,26 @@ impl Automerge {
         self.scan_to_obj(obj, &mut pos);
         self.scan_to_prop_start(obj, &prop, &mut pos);
         self.scan_to_prop_value(obj, &prop, &mut pos);
-        match &self.ops[pos].action {
-            OpType::Make(obj_type) => Some(Value::Object(*obj_type, ObjId(self.ops[pos].id))),
-            OpType::Set(scalar) => Some(Value::Scalar(scalar.clone())),
-            _ => None,
-        }
+        self.ops.get(pos).map(|o| o.into())
     }
 
-    fn list_value(&self, index: usize) -> Value {
-        unimplemented!()
+    pub fn list_value(&self, obj: &ObjId, index: usize) -> Option<Value> {
+        let mut pos = 0;
+        self.scan_to_obj(obj, &mut pos);
+        let op = self.scan_to_nth_visible(obj, index, &mut pos);
+        op.map(|o| o.into())
+    }
+
+    pub fn insert_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
+        if index == 0 {
+          Some(HEAD.into())
+        } else {
+          let index = index - 1;
+          let mut pos = 0;
+          self.scan_to_obj(obj, &mut pos);
+          let op = self.scan_to_nth_visible(obj, index, &mut pos);
+          op.and_then(|o| o.elemid()).map(|e| e.into())
+        }
     }
 
     pub fn make(
@@ -732,15 +791,34 @@ impl Automerge {
         Ok(ObjId(self.make_op(obj, key, OpType::Make(obj_type), insert)?))
     }
 
+    pub fn map_make(
+        &mut self,
+        obj: ObjId,
+        prop: &str,
+        obj_type: ObjType,
+    ) -> Result<ObjId, AutomergeError> {
+        let key = self.prop_to_key(prop.into());
+        Ok(ObjId(self.make_op(obj, key, OpType::Make(obj_type), false)?))
+    }
+
+    pub fn map_set(
+        &mut self,
+        obj: ObjId,
+        prop: &str,
+        value: ScalarValue,
+    ) -> Result<OpId, AutomergeError> {
+        let key = self.prop_to_key(prop.into());
+        self.make_op(obj, key, OpType::Set(value), false)
+    }
+
     pub fn set(
         &mut self,
         obj: ObjId,
         key: Key,
         value: ScalarValue,
         insert: bool,
-    ) -> Result<(), AutomergeError> {
-        self.make_op(obj, key, OpType::Set(value), insert)?;
-        Ok(())
+    ) -> Result<OpId, AutomergeError> {
+        self.make_op(obj, key, OpType::Set(value), insert)
     }
 
     pub fn inc(&mut self, obj: ObjId, key: Key, value: i64) -> Result<(), AutomergeError> {
@@ -826,6 +904,30 @@ impl Automerge {
             log!("  {:12} {:12} {:12} {} {:?} {:?}" , id, obj, key, value, pred,succ);
         }
     }
+
+    pub fn dump2(&self) {
+        println!("  {:12} {:12} {:12} {} {} {}" , "id", "obj", "key", "value", "pred", "succ");
+        for i in self.ops.iter() {
+            let id = &self.export(i.id)[0..8];
+            let obj = &self.export(i.obj)[0..5];
+            let key = &self.export(i.key)[0..5];
+/*
+            let key = match i.key {
+                Key::Map(n) => &self.props[n],
+                Key::Seq(n) => unimplemented!(),
+            };
+*/
+            println!("{:?}",i.action);
+            let value : String = match &i.action {
+                OpType::Set(value) => format!("{}",value),
+                OpType::Make(obj) => format!("make{}",obj),
+                _ => unimplemented!(),
+            };
+            let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
+            let succ : Vec<_>= i.succ.iter().map(|id| self.export(*id)).collect();
+            println!("  {:12} {:12} {:12} {} {:?} {:?}" , id, obj, key, value, pred,succ);
+        }
+    }
 }
 
 impl Default for Automerge {
@@ -854,7 +956,8 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, Actor, ROOT};
+    use crate::{Automerge, Actor, ROOT, ObjType, Value, HEAD, Key};
+
     #[test]
     fn insert_op() {
         let mut doc = Automerge::new();
@@ -862,11 +965,32 @@ mod tests {
         doc.begin(None, None).unwrap();
         let key = doc.prop_to_key("hello".into());
         doc.set(ROOT, key, "world".into(), false).unwrap();
+        //doc.map_set(ROOT, "&hello", "world".into()).unwrap();
+        assert!(doc.pending_ops() == 1);
         doc.commit().unwrap();
         doc.map_value(&ROOT, "hello").unwrap();
     }
+
     #[test]
-    fn exports() {
-        let doc = Automerge::new();
+    fn test_list() {
+        let mut doc = Automerge::new();
+        doc.set_actor(Actor::random());
+        doc.begin(None, None).unwrap();
+        let list_id = doc.map_make(ROOT, "items", ObjType::List).unwrap();
+        doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();
+        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(ObjType::List,list_id)));
+        let aid = doc.set(list_id, Key::Seq(HEAD), "a".into(), true).unwrap();
+        let bid = doc.set(list_id, HEAD.into(), "b".into(), true).unwrap();
+        doc.set(list_id, aid.into(), "c".into(), true).unwrap();
+        doc.set(list_id, bid.into(), "d".into(), true).unwrap();
+        //doc.dump2();
+        //println!("0 {:?}",doc.list_value(&list_id, 0));
+        //println!("1 {:?}",doc.list_value(&list_id, 1));
+        //println!("2 {:?}",doc.list_value(&list_id, 2));
+        assert!(doc.list_value(&list_id, 0) == Some(Value::Scalar( "b".into())));
+        assert!(doc.list_value(&list_id, 1) == Some(Value::Scalar( "d".into())));
+        assert!(doc.list_value(&list_id, 2) == Some(Value::Scalar( "a".into())));
+        assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar( "c".into())));
+        doc.commit().unwrap();
     }
 }

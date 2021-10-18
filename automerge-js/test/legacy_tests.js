@@ -16,7 +16,7 @@ const Automerge = require('../src')
 // TODO - getConflicts
 // TODO - getAllChanges
 // TODO - patchCallback
-// TODO - emptyChange
+// TODO - x emptyChange
 // TODO - getHistory
 
         let sq1 = Automerge.init();

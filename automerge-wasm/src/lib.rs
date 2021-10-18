@@ -81,6 +81,10 @@ impl Automerge {
         self.0.begin(message, time).map_err(to_js_err)
     }
 
+    pub fn pending_ops(&self) -> JsValue {
+        (self.0.pending_ops() as u32).into()
+    }
+
     pub fn commit(&mut self) -> Result<(), JsValue> {
         self.0.commit().map_err(to_js_err)
     }
@@ -109,6 +113,18 @@ impl Automerge {
         Ok(self.export(obj))
     }
 
+    #[wasm_bindgen(js_name = makeList)]
+    pub fn make_list(&mut self, obj: JsValue, prop: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        //let key = self.prop_to_key(prop)?;
+        let key = prop.as_string().unwrap_or_default();
+        let obj = self
+            .0
+            .map_make(obj, &key, am::ObjType::List)
+            .map_err(to_js_err)?;
+        Ok(self.export(obj))
+    }
+
     pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = self.0.keys(&obj).iter().map(|k| self.export(*k)).collect();
@@ -125,16 +141,50 @@ impl Automerge {
         Ok(key)
     }
 
+    fn insert_pos_for_index(&mut self, obj: &am::ObjId, index: JsValue) -> Result<am::Key, JsValue> {
+        let index = index.as_f64();
+        if index.is_none() {
+            return Err("index must be a valid string".into());
+        }
+        let index = index.unwrap() as usize;
+        let key = self.0.insert_pos_for_index(obj, index)
+          .ok_or(JsErr("index out of bounds".into()))?;
+        Ok(key)
+    }
+
+    pub fn insert(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<JsValue, JsValue> {
+      let obj = self.import(obj)?;
+      let key = self.insert_pos_for_index(&obj,prop)?;
+      self.do_set(obj,key,value,datatype,true)
+    }
+
     pub fn set(
         &mut self,
         obj: JsValue,
         prop: JsValue,
         value: JsValue,
         datatype: JsValue,
-    ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+    ) -> Result<JsValue, JsValue> {
+      let obj = self.import(obj)?;
+      let key = self.prop_to_key(prop)?;
+      self.do_set(obj,key,value,datatype,false)
+    }
+
+    fn do_set(
+        &mut self,
+        obj: am::ObjId,
+        key: Key,
+        value: JsValue,
+        datatype: JsValue,
+        insert: bool
+    ) -> Result<JsValue, JsValue> {
         let datatype = datatype.as_string();
-        let key = self.prop_to_key(prop)?;
         let value = match datatype.as_deref() {
             Some("boolean") => value
                 .as_bool()
@@ -180,20 +230,28 @@ impl Automerge {
                 }
             }
         }?;
-        self.0.set(obj, key, value, false).map_err(to_js_err)
+        let opid = self.0.set(obj, key, value, insert).map_err(to_js_err)?;
+        Ok(self.export(opid))
     }
 
     pub fn value(
         &mut self,
         obj: JsValue,
-        prop: JsValue,
+        arg: JsValue,
     ) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
-        let prop = prop
-            .as_string()
-            .ok_or(JsErr("prop must be a string".into()))?;
+        let prop = arg.as_string();
+        let index = arg.as_f64().map(|v| v as usize);
+//            .ok_or(JsErr("prop must be a string".into()))?;
         let result = Array::new();
-        match self.0.map_value(&obj, &prop) {
+        let value = match (index,prop) {
+          (Some(n),_) => Ok(self.0.list_value(&obj, n)),
+          (_,Some(p)) => Ok(self.0.map_value(&obj, &p)),
+          _ => Err(JsErr("prop must be a string".into()))
+        }?;
+//        let value = self.0.map_value(&obj, &prop);
+  
+        match value {
             Some(Value::Object(obj_type, obj_id)) => {
                 result.push(&obj_type.to_string().into());
                 result.push(&self.export(obj_id));
@@ -205,16 +263,6 @@ impl Automerge {
             None => {}
         }
         Ok(result)
-    }
-
-    pub fn insert(
-        &mut self,
-        path: JsValue,
-        field: JsValue,
-        value: JsValue,
-        datatype: JsValue,
-    ) -> Result<(), JsValue> {
-        unimplemented!()
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {

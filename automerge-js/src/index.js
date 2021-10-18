@@ -47,15 +47,36 @@ function change(doc, options, callback) {
     doc[FROZEN] = true
     let root = rootProxy(state);
     callback(root)
-    state.commit()
-    return rootProxy(state, true);
+    if (state.pending_ops() === 0) {
+      state.rollback()
+      return doc
+    } else {
+      state.commit()
+      return rootProxy(state, true);
+    }
   } catch (e) {
     state.rollback()
     throw e
   }
 }
 
-function emptyChange() {
+function emptyChange(doc, options) {
+  // FIXME implement options
+
+  if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
+    throw new RangeError("must be the document root");
+  }
+  if (doc[FROZEN] === true) {
+    throw new RangeError("Attempting to use an outdated Automerge document")
+  }
+  if (doc[READ_ONLY] === false) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+
+  const state = doc[STATE]
+  state.begin()
+  state.commit()
+  return rootProxy(state, true);
 }
 
 function load() {

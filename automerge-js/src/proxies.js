@@ -4,12 +4,41 @@ const { Int, Uint, Float64 } = require("./numbers");
 const { Counter } = require("./counter");
 const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 
+function list_get(target, index) {
+    const { context, objectId, path, readonly, frozen } = target
+    if (index === OBJECT_ID) return objectId
+    if (index === READ_ONLY) return readonly
+    if (index === FROZEN) return frozen
+    if (index === STATE) return context;
+    const value = context.value(objectId, index)
+    const datatype = value[0]
+    const val = value[1]
+    switch (datatype) {
+      case undefined: return;
+      case "map": return mapProxy(context, val, [ ... path, index ], readonly);
+      case "list": return listProxy(context, val, [ ... path, index ], readonly);
+      //case "table":
+      //case "text":
+      //case "cursor":
+      case "str": return val;
+      case "uint": return val;
+      case "int": return val;
+      case "f64": return val;
+      case "boolean": return val;
+      case "null": return null;
+      case "bytes": return val;
+      case "counter": return new Counter(val);
+      case "timestamp": return new Date(val);
+      default:
+        throw RangeError(`datatype ${datatype} unimplemented`)
+    }
+}
+
 function map_get(target, key) {
     const { context, objectId, path, readonly, frozen } = target
     if (key === OBJECT_ID) return objectId
     if (key === READ_ONLY) return readonly
     if (key === FROZEN) return frozen
-    //if (key === STATE) return {actorId: context.actorId}
     if (key === STATE) return context;
     const value = context.value(objectId, key)
     const datatype = value[0]
@@ -17,13 +46,10 @@ function map_get(target, key) {
     switch (datatype) {
       case undefined: return;
       case "map": return mapProxy(context, val, [ ... path, key ], readonly);
-      //case "list":
+      case "list": return listProxy(context, val, [ ... path, key ], readonly);
       //case "table":
       //case "text":
-      //case "bytes":
       //case "cursor":
-      //case "timestamp":
-      //case "counter":
       case "str": return val;
       case "uint": return val;
       case "int": return val;
@@ -40,7 +66,6 @@ function map_get(target, key) {
 
 const MapHandler = {
   get (target, key) {
-    //console.log("get",key);
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     return map_get(target, key)
   },
@@ -62,8 +87,6 @@ const MapHandler = {
       case 'object':
         if (value == null) {
           context.set(objectId, key, null, "null");
-        } else if (value instanceof Array) {
-          throw new RangeError("set array value unsupported");
         } else if (value instanceof Uint) {
           context.set(objectId, key, value.value, "uint");
         } else if (value instanceof Int) {
@@ -76,6 +99,13 @@ const MapHandler = {
           context.set(objectId, key, value.getTime(), "timestamp");
         } else if (value instanceof Uint8Array) {
           context.set(objectId, key, value, "bytes");
+        } else if (value instanceof Array) {
+          const childID = context.makeList(objectId, key)
+          const child = listProxy(context, childID, [ ... path, key ]);
+          // FIXME use splice
+          for (const i = 0; i < value.length; i++) {
+            child[i] = value[i]
+          }
         } else {
           const childID = context.makeMap(objectId, key)
           const child = mapProxy(context, childID, [ ... path, key ]);
@@ -138,15 +168,7 @@ const MapHandler = {
 
 const ListHandler = {
   get (target, key) {
-    const [context, objectId, path] = target
-    if (key === Symbol.iterator) return context.getObject(objectId)[Symbol.iterator]
-    if (key === OBJECT_ID) return objectId
-    if (key === CHANGE) return context
-    if (key === 'length') return context.getObject(objectId).length
-    if (typeof key === 'string' && /^[0-9]+$/.test(key)) {
-      return context.getObjectField(path, objectId, parseListIndex(key))
-    }
-    return listMethods(context, objectId, path)[key]
+    return list_get(target, key)
   },
 
   set (target, key, value) {
