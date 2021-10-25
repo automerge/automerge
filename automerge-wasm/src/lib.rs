@@ -144,10 +144,21 @@ impl Automerge {
     fn insert_pos_for_index(&mut self, obj: &am::ObjId, index: JsValue) -> Result<am::Key, JsValue> {
         let index = index.as_f64();
         if index.is_none() {
-            return Err("index must be a valid string".into());
+            return Err("index must be a valid number".into());
         }
         let index = index.unwrap() as usize;
         let key = self.0.insert_pos_for_index(obj, index)
+          .ok_or(JsErr("index out of bounds".into()))?;
+        Ok(key)
+    }
+
+    fn set_pos_for_index(&mut self, obj: &am::ObjId, index: JsValue) -> Result<am::Key, JsValue> {
+        let index = index.as_f64();
+        if index.is_none() {
+            return Err("index must be a valid number".into());
+        }
+        let index = index.unwrap() as usize;
+        let key = self.0.set_pos_for_index(obj, index)
           .ok_or(JsErr("index out of bounds".into()))?;
         Ok(key)
     }
@@ -162,6 +173,25 @@ impl Automerge {
       let obj = self.import(obj)?;
       let key = self.insert_pos_for_index(&obj,prop)?;
       self.do_set(obj,key,value,datatype,true)
+    }
+
+    #[wasm_bindgen(js_name = setAt)]
+    pub fn set_at(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<JsValue, JsValue> {
+      let obj = self.import(obj)?;
+      let len = self.0.list_length(&obj);
+      if prop.as_f64().unwrap_or_default() as usize == len {
+          let key = self.insert_pos_for_index(&obj,prop)?;
+          self.do_set(obj,key,value,datatype,true)
+      } else {
+          let key = self.set_pos_for_index(&obj,prop)?;
+          self.do_set(obj,key,value,datatype,false)
+      }
     }
 
     pub fn set(
@@ -247,7 +277,7 @@ impl Automerge {
         let value = match (index,prop) {
           (Some(n),_) => Ok(self.0.list_value(&obj, n)),
           (_,Some(p)) => Ok(self.0.map_value(&obj, &p)),
-          _ => Err(JsErr("prop must be a string".into()))
+          _ => Err(JsErr("prop must be a string or number".into()))
         }?;
 //        let value = self.0.map_value(&obj, &prop);
   
@@ -263,6 +293,16 @@ impl Automerge {
             None => {}
         }
         Ok(result)
+    }
+
+    pub fn length(
+        &mut self,
+        obj: JsValue,
+        arg: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let len = self.0.list_length(&obj) as f64;
+        Ok(len.into())
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {

@@ -82,20 +82,34 @@ describe('Automerge', () => {
             assert.deepEqual(doc2, { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
         })
 
-        it.skip('handle simple lists', () => {
+        it('handle simple list creation', () => {
+            let doc1 = Automerge.init()
+            let doc2 = Automerge.change(doc1, (d) => d.list = [])
+            assert.deepEqual(doc2, { list: []})
+        })
+
+        it('handle simple lists', () => {
             let doc1 = Automerge.init()
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = [ 1, 2, 3 ]
             })
+            assert.deepEqual(doc2.list.length, 3)
+            assert.deepEqual(doc2.list[0], 1)
+            assert.deepEqual(doc2.list[1], 2)
+            assert.deepEqual(doc2.list[2], 3)
             assert.deepEqual(doc2, { list: [1,2,3] })
-        })
 
-      /*
-        it('handle set with object value', () => {
-            let doc1 = Automerge.init()
-            let doc2 = Automerge.change(doc1, (d) => { d.hello = "world" })
-            assert.deepEqual(Automerge.toJS(doc2), { subobj:  { hello: "world", subsubobj: { zip: "zop" } } })
+            let doc3 = Automerge.change(doc2, (d) => {
+              d.list[1] = "a"
+            })
+
+            Automerge.dump(doc3)
+
+            assert.deepEqual(doc3.list.length, 3)
+            assert.deepEqual(doc3.list[0], 1)
+            assert.deepEqual(doc3.list[1], "a")
+            assert.deepEqual(doc3.list[2], 3)
+            assert.deepEqual(doc3, { list: [1,"a",3] })
         })
-        */
     })
 })

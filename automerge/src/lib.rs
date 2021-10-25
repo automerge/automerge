@@ -39,6 +39,8 @@ pub enum AutomergeError {
     InvalidOpId(String),
     #[error("invalid actor format `{0}`")]
     InvalidActor(String),
+    #[error("invalid list pos `{0}:{1}`")]
+    InvalidListAt(String,usize),
 }
 
 #[derive(Debug)]
@@ -584,6 +586,25 @@ impl Automerge {
         None
     }
 
+    fn scan_visible(&self, obj: &ObjId, pos: &mut usize) -> usize {
+        let mut seen = 0;
+        let mut seen_visible = false;
+        while *pos < self.ops.len()
+            && &self.ops[*pos].obj == obj
+        {
+            let op = &self.ops[*pos];
+            if op.insert {
+              seen_visible = false;
+            }
+            if op.visible() && !seen_visible {
+              seen += 1;
+              seen_visible = true;
+            }
+            *pos += 1;
+        }
+        seen
+    }
+
     fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
         while *pos < self.ops.len()
             && &self.ops[*pos].obj == obj
@@ -622,7 +643,7 @@ impl Automerge {
         }
     }
 
-    fn scan_to_elem_insert_op(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_elem_insert_op1(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
         if *elem == HEAD {
             return;
         }
@@ -644,14 +665,40 @@ impl Automerge {
         }
     }
 
-    fn scan_to_elem_update_pos(&self, op: &Op, elem: &ElemId, pos: &mut usize) {
-        *pos += 1; // always step over the insert=true op
+    fn scan_to_elem_insert_op2(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+        if *elem == HEAD {
+            return;
+        }
+
+        let mut seen_key = None;
+
+        while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
+            let i = &self.ops[*pos];
+            if i.visible() && i.elemid() != seen_key {
+                *seen += 1;
+                seen_key = i.elemid(); // only count each elemid once
+            }
+
+            if i.insert && i.id == elem.0 {
+                break;
+            }
+
+            *pos += 1;
+        }
+    }
+
+    fn scan_to_elem_update_pos(&mut self, op: &mut Op, elem: &ElemId, pos: &mut usize) {
+       // *pos += 1; // always step over the insert=true op
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
-            && self.ops[*pos].key == op.key
-            && !self.ops[*pos].insert
+            && self.ops[*pos].elemid() == op.elemid()
+//            && !self.ops[*pos].insert
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
+            if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
+              self.ops[*pos].succ.push(op.id);
+              op.pred.push(self.ops[*pos].id);
+            }
             *pos += 1
         }
     }
@@ -675,11 +722,11 @@ impl Automerge {
         }
     }
 
-    fn seek_to_elem(&self, op: &Op, elem: &ElemId) -> Cursor {
+    fn seek_to_update_elem(&mut self, op: &mut Op, elem: &ElemId) -> Cursor {
         let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op(op, elem, &mut pos, &mut seen);
+        self.scan_to_elem_insert_op2(op, elem, &mut pos, &mut seen);
         self.scan_to_elem_update_pos(op, elem, &mut pos);
         Cursor { pos, seen }
     }
@@ -688,7 +735,7 @@ impl Automerge {
         let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op(op, elem, &mut pos, &mut seen);
+        self.scan_to_elem_insert_op1(op, elem, &mut pos, &mut seen);
         self.scan_to_lesser_insert(op, elem, &mut pos, &mut seen);
         Cursor { pos, seen }
     }
@@ -702,10 +749,10 @@ impl Automerge {
     }
 
     fn seek_to_op(&mut self, op: &mut Op) -> Cursor {
-        match (&op.key, op.insert) {
+        match (op.key.clone(), op.insert) {
             (Key::Map(_), _) => self.seek_to_map_op(op),
-            (Key::Seq(elem), true) => self.seek_to_insert_elem(op, elem),
-            (Key::Seq(elem), false) => self.seek_to_elem(op, elem),
+            (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem),
+            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem),
         }
     }
 
@@ -769,16 +816,26 @@ impl Automerge {
         op.map(|o| o.into())
     }
 
+    pub fn list_length(&self, obj: &ObjId) -> usize {
+        let mut pos = 0;
+        self.scan_to_obj(obj, &mut pos);
+        self.scan_visible(obj, &mut pos)
+    }
+
+    // TODO ? really export this ?
     pub fn insert_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
         if index == 0 {
           Some(HEAD.into())
         } else {
-          let index = index - 1;
+          self.set_pos_for_index(obj, index - 1)
+        }
+    }
+
+    pub fn set_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
           let mut pos = 0;
           self.scan_to_obj(obj, &mut pos);
           let op = self.scan_to_nth_visible(obj, index, &mut pos);
           op.and_then(|o| o.elemid()).map(|e| e.into())
-        }
     }
 
     pub fn make(
@@ -819,6 +876,32 @@ impl Automerge {
         insert: bool,
     ) -> Result<OpId, AutomergeError> {
         self.make_op(obj, key, OpType::Set(value), insert)
+    }
+
+    pub fn set_at(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: ScalarValue,
+    ) -> Result<OpId, AutomergeError> {
+        if let Some(key) = self.set_pos_for_index(&obj, index) {
+            self.make_op(obj, key, OpType::Set(value), false)
+        } else {
+            Err(AutomergeError::InvalidListAt(self.export(obj),index))
+        }
+    }
+
+    pub fn insert_at(
+        &mut self,
+        obj: ObjId,
+        index: usize,
+        value: ScalarValue,
+    ) -> Result<OpId, AutomergeError> {
+        if let Some(key) = self.insert_pos_for_index(&obj, index) {
+            self.make_op(obj, key, OpType::Set(value), true)
+        } else {
+            Err(AutomergeError::InvalidListAt(self.export(obj),index))
+        }
     }
 
     pub fn inc(&mut self, obj: ObjId, key: Key, value: i64) -> Result<(), AutomergeError> {
@@ -891,8 +974,8 @@ impl Automerge {
             let id = self.export(i.id);
             let obj = self.export(i.obj);
             let key = match i.key {
-                Key::Map(n) => &self.props[n],
-                Key::Seq(n) => unimplemented!(),
+                Key::Map(n) => self.props[n].clone(),
+                Key::Seq(n) => self.export(n),
             };
             let value : String = match &i.action {
                 OpType::Set(value) => format!("{}",value),
@@ -991,6 +1074,7 @@ mod tests {
         assert!(doc.list_value(&list_id, 1) == Some(Value::Scalar( "d".into())));
         assert!(doc.list_value(&list_id, 2) == Some(Value::Scalar( "a".into())));
         assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar( "c".into())));
+        assert!(doc.list_length(&list_id) == 4);
         doc.commit().unwrap();
     }
 }
