@@ -7,7 +7,10 @@ edition = "2018"
 
 [dependencies]
 hex = "^0.4.3"
-thiserror = "1.0.16"
+leb128 = "^0.2.4"
+sha2 = "^0.9.5"
+thiserror = "^1.0.16"
+itertools = "^0.9.0"
 uuid = { version = "^0.5.1", features = ["v4"] }
 
 [dependencies.web-sys]

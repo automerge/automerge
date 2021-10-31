@@ -5,6 +5,7 @@ extern crate hex;
 extern crate web_sys;
 extern crate uuid;
 
+
 // compute Succ Pred
 // implement del
 
@@ -16,9 +17,14 @@ macro_rules! log {
     }
 }
 
+mod encoding;
+
 use uuid::{Uuid};
+use itertools::Itertools;
+use std::fmt;
 use std::fmt::Display;
 use core::ops::Range;
+//use std::convert::{TryFrom, TryInto};
 use std::cmp::{Eq, Ordering};
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -41,6 +47,14 @@ pub enum AutomergeError {
     InvalidActor(String),
     #[error("invalid list pos `{0}:{1}`")]
     InvalidListAt(String,usize),
+    #[error("there was an encoding problem")]
+    Encoding
+}
+
+impl From<std::io::Error> for AutomergeError {
+    fn from(e: std::io::Error) -> Self {
+        AutomergeError::Encoding
+    }
 }
 
 #[derive(Debug)]
@@ -367,6 +381,17 @@ pub(crate) struct Change {
     pub time: i64,
     pub message: Option<String>,
     pub extra_bytes: Vec<u8>,
+}
+
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
+pub struct ChangeHash(pub [u8; 32]);
+
+impl fmt::Debug for ChangeHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ChangeHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
