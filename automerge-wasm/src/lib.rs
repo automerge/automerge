@@ -6,6 +6,7 @@ use automerge::{Key, Value};
 use wasm_bindgen::JsCast;
 use js_sys::{Array , Uint8Array };
 //use serde::{de::DeserializeOwned, Serialize};
+use rand::Rng;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
@@ -36,6 +37,7 @@ impl From<ScalarValue> for JsValue {
             am::ScalarValue::Timestamp(v) => (*v as f64).into(),
             am::ScalarValue::Boolean(v) => (*v).into(),
             am::ScalarValue::Null => JsValue::null(),
+            am::ScalarValue::Cursor(_) => unimplemented!(),
         }
     }
 }
@@ -309,6 +311,10 @@ impl Automerge {
         let obj = self.import(obj)?;
         let key = self.prop_to_key(prop)?;
         self.0.del(obj, key).map_err(to_js_err)
+    }
+
+    pub fn save(&self) -> Result<Uint8Array,JsValue> {
+        self.0.save().map(|v| js_sys::Uint8Array::from(v.as_slice())).map_err(to_js_err)
     }
 
     pub fn dump(&self) {

@@ -5,7 +5,6 @@ extern crate hex;
 extern crate web_sys;
 extern crate uuid;
 
-
 // compute Succ Pred
 // implement del
 
@@ -17,19 +16,30 @@ macro_rules! log {
     }
 }
 
+mod change;
+mod indexed_cache;
+//mod columnar;
+mod decoding;
 mod encoding;
+mod columnar;
 
+mod expanded_op;
+mod internal;
+
+use automerge_protocol as amp;
+use nonzero_ext::nonzero;
 use uuid::{Uuid};
-use itertools::Itertools;
+//use itertools::Itertools;
 use std::fmt;
-use std::fmt::Display;
 use core::ops::Range;
 //use std::convert::{TryFrom, TryInto};
 use std::cmp::{Eq, Ordering};
-use std::collections::HashMap;
+//use std::collections::HashMap;
 use std::hash::Hash;
-use std::ops::Index;
+//use std::ops::Index;
 use thiserror::Error;
+use indexed_cache::IndexedCache;
+use change::{ encode_document };
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
@@ -93,10 +103,11 @@ struct Cursor {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Object(ObjType, ObjId),
-    Scalar(ScalarValue),
+    Object(amp::ObjType, ObjId),
+    Scalar(amp::ScalarValue),
 }
 
+/*
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
@@ -106,10 +117,11 @@ pub enum ScalarValue {
     F64(f64),
     Counter(i64),
     Timestamp(i64),
-    //    Cursor(OpId),
+    Cursor(OpId),
     Boolean(bool),
     Null,
 }
+*/
 
 pub const HEAD: ElemId = ElemId(OpId(0, 0));
 pub const ROOT: ObjId = ObjId(OpId(0, 0));
@@ -185,22 +197,25 @@ impl From<ElemId> for Key {
     }
 }
 
+/*
 impl From<&str> for ScalarValue {
     fn from(s: &str) -> Self {
         ScalarValue::Str(s.to_owned())
     }
 }
+*/
 
 impl From<&Op> for Value {
     fn from(op: &Op) -> Self {
         match &op.action {
-            OpType::Make(obj_type) => Value::Object(*obj_type, ObjId(op.id)),
-            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            amp::OpType::Make(obj_type) => Value::Object(*obj_type, ObjId(op.id)),
+            amp::OpType::Set(scalar) => Value::Scalar(scalar.clone()),
             _ => panic!("cant convert op into a value"),
         }
     }
 }
 
+/*
 impl ScalarValue {
     pub fn datatype(&self) -> String {
         match self {
@@ -213,10 +228,13 @@ impl ScalarValue {
             ScalarValue::Timestamp(_) => "timestamp".into(),
             ScalarValue::Boolean(_) => "boolean".into(),
             ScalarValue::Null => "null".into(),
+            ScalarValue::Cursor(_) => "cursor".into(),
         }
     }
 }
+*/
 
+/*
 impl std::fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -229,10 +247,13 @@ impl std::fmt::Display for ScalarValue {
             ScalarValue::Timestamp(v) => write!(f,"Counter({})",v),
             ScalarValue::Boolean(v) => write!(f,"{}",v),
             ScalarValue::Null => write!(f,"null"),
+            ScalarValue::Cursor(v) => write!(f,"Cursor({:?})",v),
         }
     }
 }
+*/
 
+/*
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ObjType {
     Map,
@@ -251,7 +272,9 @@ impl Display for ObjType {
         }
     }
 }
+*/
 
+/*
 #[derive(Debug, Clone)]
 pub(crate) enum OpType {
     Make(ObjType),
@@ -259,7 +282,9 @@ pub(crate) enum OpType {
     Inc(i64),
     Set(ScalarValue),
 }
+*/
 
+/*
 #[derive(Debug, Clone)]
 struct IndexedCache<T> {
     cache: Vec<T>,
@@ -312,6 +337,7 @@ impl<T> Index<usize> for IndexedCache<T> {
         &self.cache[i]
     }
 }
+*/
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
 pub enum Key {
@@ -343,7 +369,7 @@ pub(crate) struct Op {
     pub id: OpId,
     //    pub actor: usize,
     //    pub ctr: u64,
-    pub action: OpType,
+    pub action: amp::OpType,
     pub obj: ObjId,
     pub key: Key,
     pub succ: Vec<OpId>,
@@ -377,14 +403,36 @@ impl Op {
 pub(crate) struct Change {
     pub actor: usize,
     pub seq: u64,
-    pub max_op: u64,
+    pub start_op: u64,
     pub time: i64,
     pub message: Option<String>,
     pub extra_bytes: Vec<u8>,
+    pub hash: Option<ChangeHash>,
+    pub deps: Vec<ChangeHash>,
+    pub operations: Vec<Op>,
+    pub len: usize,
 }
 
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
+
+impl From<&ChangeHash> for amp::ChangeHash {
+    fn from(c: &ChangeHash) -> Self {
+        amp::ChangeHash(c.0.clone())
+    }
+}
+
+impl ChangeHash {
+    pub(crate) fn random() -> ChangeHash {
+      let mut bytes : [u8; 32] = [0; 32];
+      let left = Uuid::new_v4();
+      let right = Uuid::new_v4();
+      let (one, two) = bytes.split_at_mut(left.as_bytes().len());
+      one.copy_from_slice(left.as_bytes().as_ref());
+      two.copy_from_slice(right.as_bytes().as_ref());
+      ChangeHash(bytes)
+    }
+}
 
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -394,7 +442,7 @@ impl fmt::Debug for ChangeHash {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Actor(Vec<u8>);
 
 impl Actor {
@@ -406,6 +454,10 @@ impl Actor {
        let my_uuid = Uuid::new_v4();
        Actor(my_uuid.as_bytes().to_vec())
 
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
     }
 }
 
@@ -467,7 +519,7 @@ impl Automerge {
     }
 
     pub fn pending_ops(&self) -> u64 {
-      self.transaction.as_ref().map(|t| t.max_op - self.max_op).unwrap_or(0)
+      self.transaction.as_ref().map(|t| t.len as u64).unwrap_or(0)
     }
 
     pub fn begin(
@@ -485,18 +537,23 @@ impl Automerge {
         self.transaction = Some(Change {
             actor: 0,
             seq: self.seq + 1,
-            max_op: self.max_op,
+            start_op: self.max_op + 1,
             time: time.unwrap_or(0),
             message,
             extra_bytes: Default::default(),
+            hash: None,
+            operations: vec![],
+            len: 0,
+            deps: vec![],
         });
 
         Ok(())
     }
 
     pub fn commit(&mut self) -> Result<(), AutomergeError> {
-        if let Some(tx) = self.transaction.take() {
-            self.max_op = tx.max_op;
+        if let Some(mut tx) = self.transaction.take() {
+            tx.hash = Some(ChangeHash::random());
+            self.max_op = tx.start_op + tx.len as u64 - 1;
             self.changes.push(tx);
             self.seq += 1;
             Ok(())
@@ -540,13 +597,13 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         key: Key,
-        action: OpType,
+        action: amp::OpType,
         insert: bool,
     ) -> Result<OpId, AutomergeError> {
         if let Some(mut tx) = self.transaction.take() {
-            tx.max_op += 1;
-            let id = OpId(tx.max_op, 0);
-            self.insert_op(Op {
+            tx.len += 1;
+            let id = OpId(tx.start_op + tx.len as u64, 0);
+            let op = Op {
                 change: self.changes.len(),
                 id,
                 action,
@@ -555,7 +612,9 @@ impl Automerge {
                 succ: vec![],
                 pred: vec![],
                 insert,
-            });
+            };
+            self.insert_op(op.clone());
+            tx.operations.push(op);
             self.transaction = Some(tx);
             Ok(id)
         } else {
@@ -867,50 +926,50 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         key: Key,
-        obj_type: ObjType,
+        obj_type: amp::ObjType,
         insert: bool,
     ) -> Result<ObjId, AutomergeError> {
-        Ok(ObjId(self.make_op(obj, key, OpType::Make(obj_type), insert)?))
+        Ok(ObjId(self.make_op(obj, key, amp::OpType::Make(obj_type), insert)?))
     }
 
     pub fn map_make(
         &mut self,
         obj: ObjId,
         prop: &str,
-        obj_type: ObjType,
+        obj_type: amp::ObjType,
     ) -> Result<ObjId, AutomergeError> {
         let key = self.prop_to_key(prop.into());
-        Ok(ObjId(self.make_op(obj, key, OpType::Make(obj_type), false)?))
+        Ok(ObjId(self.make_op(obj, key, amp::OpType::Make(obj_type), false)?))
     }
 
     pub fn map_set(
         &mut self,
         obj: ObjId,
         prop: &str,
-        value: ScalarValue,
+        value: amp::ScalarValue,
     ) -> Result<OpId, AutomergeError> {
         let key = self.prop_to_key(prop.into());
-        self.make_op(obj, key, OpType::Set(value), false)
+        self.make_op(obj, key, amp::OpType::Set(value), false)
     }
 
     pub fn set(
         &mut self,
         obj: ObjId,
         key: Key,
-        value: ScalarValue,
+        value: amp::ScalarValue,
         insert: bool,
     ) -> Result<OpId, AutomergeError> {
-        self.make_op(obj, key, OpType::Set(value), insert)
+        self.make_op(obj, key, amp::OpType::Set(value), insert)
     }
 
     pub fn set_at(
         &mut self,
         obj: ObjId,
         index: usize,
-        value: ScalarValue,
+        value: amp::ScalarValue,
     ) -> Result<OpId, AutomergeError> {
         if let Some(key) = self.set_pos_for_index(&obj, index) {
-            self.make_op(obj, key, OpType::Set(value), false)
+            self.make_op(obj, key, amp::OpType::Set(value), false)
         } else {
             Err(AutomergeError::InvalidListAt(self.export(obj),index))
         }
@@ -920,10 +979,10 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         index: usize,
-        value: ScalarValue,
+        value: amp::ScalarValue,
     ) -> Result<OpId, AutomergeError> {
         if let Some(key) = self.insert_pos_for_index(&obj, index) {
-            self.make_op(obj, key, OpType::Set(value), true)
+            self.make_op(obj, key, amp::OpType::Set(value), true)
         } else {
             Err(AutomergeError::InvalidListAt(self.export(obj),index))
         }
@@ -934,11 +993,11 @@ impl Automerge {
     }
 
     pub fn del(&mut self, obj: ObjId, key: Key) -> Result<(), AutomergeError> {
-        self.make_op(obj, key, OpType::Del, false)?;
+        self.make_op(obj, key,  amp::OpType::Del(nonzero!(1_u32)), false)?;
         Ok(())
     }
 
-    pub fn splice(&mut self, path: &str, range: Range<usize>, replace: Vec<ScalarValue>) {
+    pub fn splice(&mut self, path: &str, range: Range<usize>, replace: Vec<amp::ScalarValue>) {
         unimplemented!()
     }
 
@@ -965,8 +1024,8 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn save(&mut self) -> Vec<u8> {
-        unimplemented!()
+    pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
+        encode_document(&self.changes, &self.ops, &self.actors, &self.props.cache)
     }
     pub fn save_incremental(&mut self) -> Vec<u8> {
         unimplemented!()
@@ -1003,8 +1062,8 @@ impl Automerge {
                 Key::Seq(n) => self.export(n),
             };
             let value : String = match &i.action {
-                OpType::Set(value) => format!("{}",value),
-                OpType::Make(obj) => format!("make{}",obj),
+                amp::OpType::Set(value) => format!("{}",value),
+                amp::OpType::Make(obj) => format!("make{}",obj),
                 _ => unimplemented!(),
             };
             let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
@@ -1027,8 +1086,8 @@ impl Automerge {
 */
             println!("{:?}",i.action);
             let value : String = match &i.action {
-                OpType::Set(value) => format!("{}",value),
-                OpType::Make(obj) => format!("make{}",obj),
+                amp::OpType::Set(value) => format!("{}",value),
+                amp::OpType::Make(obj) => format!("make{}",obj),
                 _ => unimplemented!(),
             };
             let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
@@ -1064,7 +1123,8 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, Actor, ROOT, ObjType, Value, HEAD, Key};
+    use automerge_protocol as amp;
+    use crate::{Automerge, Actor, ROOT, Value, HEAD, Key};
 
     #[test]
     fn insert_op() {
@@ -1084,9 +1144,9 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(Actor::random());
         doc.begin(None, None).unwrap();
-        let list_id = doc.map_make(ROOT, "items", ObjType::List).unwrap();
+        let list_id = doc.map_make(ROOT, "items", amp::ObjType::List).unwrap();
         doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();
-        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(ObjType::List,list_id)));
+        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(amp::ObjType::List,list_id)));
         let aid = doc.set(list_id, Key::Seq(HEAD), "a".into(), true).unwrap();
         let bid = doc.set(list_id, HEAD.into(), "b".into(), true).unwrap();
         doc.set(list_id, aid.into(), "c".into(), true).unwrap();
@@ -1101,5 +1161,6 @@ mod tests {
         assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar( "c".into())));
         assert!(doc.list_length(&list_id) == 4);
         doc.commit().unwrap();
+        doc.save().unwrap();
     }
 }

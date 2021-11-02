@@ -9,10 +9,19 @@ edition = "2018"
 hex = "^0.4.3"
 leb128 = "^0.2.4"
 sha2 = "^0.9.5"
+rand = { version = "^0.6.5", features = ["wasm-bindgen"] }
 thiserror = "^1.0.16"
 itertools = "^0.9.0"
-uuid = { version = "^0.5.1", features = ["v4"] }
+flate2 = "^1.0.20"
+uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
+smol_str = "^0.1.17"
+tracing = { version = "^0.1.25", features = ["log"] }
+automerge-protocol = { path = "../../automerge-rs/automerge-protocol" }
+nonzero_ext = "^0.2.0"
 
 [dependencies.web-sys]
-version = "0.3.22"
+version = "^0.3.22"
 features = ["console"]
+
+[dev-dependencies]
+pretty_assertions = "^0.7.2"
