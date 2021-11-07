@@ -49,15 +49,30 @@ where
         self.lookup.get(&item).cloned()
     }
 
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
     pub fn get(&self, index: usize) -> &T {
         &self.cache[index]
     }
 
+    pub fn sorted(&self) -> IndexedCache<T> {
+        let mut sorted = Self::new();
+        self.cache.iter().sorted().cloned().for_each(|item| {
+            let n = sorted.cache.len();
+            sorted.cache.push(item.clone());
+            sorted.lookup.insert(item, n);
+        });
+        sorted
+    }
+
     pub fn encode_index(&self) -> Vec<usize> {
-        let sorted = self.sorted();
+        let sorted : Vec<_> = self.cache.iter().sorted().cloned().collect();
         self.cache.iter().map(|a| sorted.iter().position(|r| r == a).unwrap()).collect()
     }
 
+    /*
     pub fn decode_index(&self) -> Vec<usize> {
         let sorted = self.sorted();
         sorted.iter().map(|a| self.cache.iter().position(|r| r == a).unwrap()).collect()
@@ -65,6 +80,16 @@ where
 
     pub fn sorted(&self) -> Vec<T> {
         self.cache.iter().sorted().cloned().collect()
+    }
+    */
+}
+
+impl<T> IntoIterator for IndexedCache<T> {
+    type Item = T;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.cache.into_iter()
     }
 }
 

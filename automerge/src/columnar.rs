@@ -9,7 +9,7 @@ use std::{
     str,
 };
 
-use crate::{ Change, ChangeHash, OpId, ObjId, ElemId, Key, ROOT };
+use crate::{ OpId, ObjId, ElemId, Key, ROOT };
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -22,6 +22,7 @@ use crate::{
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
     expanded_op::ExpandedOp,
     internal::InternalOpType,
+    IndexedCache,
     Op,
 };
 
@@ -942,9 +943,9 @@ pub(crate) struct ChangeEncoder {
 
 impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
-    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [usize]) -> (Vec<u8>, Vec<u8>)
+    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a IndexedCache<amp::ActorId>) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'b Change>,
+        I: IntoIterator<Item = &'b amp::Change>,
     {
         let mut e = Self::new();
         e.encode(changes, actors);
@@ -965,20 +966,21 @@ impl ChangeEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [usize])
+    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<amp::ActorId>)
     where
-        I: IntoIterator<Item = &'c Change>,
+        I: IntoIterator<Item = &'c amp::Change>,
     {
-        let mut index_by_hash: HashMap<ChangeHash, usize> = HashMap::new();
+        let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
         for (index, change) in changes.into_iter().enumerate() {
             if let Some(hash) = change.hash {
                 index_by_hash.insert(hash, index);
             }
             self.actor
-                .append_value(actors[change.actor]);//actors.iter().position(|a| a == &change.actor_id).unwrap());
+                .append_value(actors.lookup(change.actor_id.clone()).unwrap());//actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq);
+            // FIXME iterops.count is crazy slow
             self.max_op
-                .append_value(change.start_op + change.len as u64 - 1);
+                .append_value(change.start_op + change.operations.len() as u64 - 1);
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message.clone());
             self.deps_num.append_value(change.deps.len());

@@ -27,19 +27,23 @@ mod expanded_op;
 mod internal;
 
 use automerge_protocol as amp;
+use std::collections::HashMap;
 use nonzero_ext::nonzero;
-use uuid::{Uuid};
 //use itertools::Itertools;
-use std::fmt;
 use core::ops::Range;
 //use std::convert::{TryFrom, TryInto};
 use std::cmp::{Eq, Ordering};
 //use std::collections::HashMap;
-use std::hash::Hash;
+use std::collections::HashSet;
 //use std::ops::Index;
 use thiserror::Error;
 use indexed_cache::IndexedCache;
-use change::{ encode_document };
+use change::{ encode_document, export_change };
+
+pub use change::EncodedChange;
+
+pub use amp::{ ObjType, ActorId, ScalarValue };
+
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
@@ -400,19 +404,20 @@ impl Op {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Change {
+pub(crate) struct Transaction {
     pub actor: usize,
     pub seq: u64,
     pub start_op: u64,
     pub time: i64,
     pub message: Option<String>,
     pub extra_bytes: Vec<u8>,
-    pub hash: Option<ChangeHash>,
-    pub deps: Vec<ChangeHash>,
+    pub hash: Option<amp::ChangeHash>,
+    pub deps: Vec<amp::ChangeHash>,
     pub operations: Vec<Op>,
     pub len: usize,
 }
 
+/*
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
 
@@ -441,7 +446,9 @@ impl fmt::Debug for ChangeHash {
             .finish()
     }
 }
+*/
 
+/*
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Actor(Vec<u8>);
 
@@ -466,20 +473,23 @@ impl std::fmt::Display for Actor {
         write!(f, "{}", hex::encode(&self.0))
     }
 }
+*/
 
 #[derive(Debug, Clone)]
 pub struct Peer {}
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    actors: IndexedCache<Actor>,
+    actors: IndexedCache<amp::ActorId>,
     props: IndexedCache<String>,
-    changes: Vec<Change>,
+    history: Vec<EncodedChange>,
+    history_index: HashMap<amp::ChangeHash, usize>,
+    deps: HashSet<amp::ChangeHash>,
     ops: Vec<Op>,
     actor: Option<usize>,
     seq: u64,
     max_op: u64,
-    transaction: Option<Change>,
+    transaction: Option<Transaction>,
 }
 
 impl Automerge {
@@ -487,8 +497,10 @@ impl Automerge {
         Automerge {
             actors: IndexedCache::from(vec![]),
             props: IndexedCache::new(),
-            changes: Default::default(),
+            history: vec![],
+            history_index: HashMap::new(),
             ops: Default::default(),
+            deps: Default::default(),
             actor: None,
             seq: 0,
             max_op: 0,
@@ -496,21 +508,23 @@ impl Automerge {
         }
     }
 
-    pub fn set_actor(&mut self, actor: Actor) {
+    pub fn set_actor(&mut self, actor: amp::ActorId) {
         // TODO - could change seq
         self.actor = Some(self.actors.cache(actor))
     }
 
-    pub fn get_actor(self) -> Option<Actor> {
+    pub fn get_actor(self) -> Option<amp::ActorId> {
         self.actor.map(|a| self.actors[a].clone())
     }
 
-    pub fn new_with_actor_id(actor: Actor) -> Self {
+    pub fn new_with_actor_id(actor: amp::ActorId) -> Self {
         Automerge {
             actors: IndexedCache::from(vec![actor]),
             props: IndexedCache::new(),
-            changes: Default::default(),
+            history: vec![],
+            history_index: HashMap::new(),
             ops: Default::default(),
+            deps: Default::default(),
             actor: None,
             seq: 0,
             max_op: 0,
@@ -534,7 +548,7 @@ impl Automerge {
         let actor = self.actor.ok_or(AutomergeError::ActorNotSet)?;
 
         // TODO - seq might not start at zero (load)
-        self.transaction = Some(Change {
+        self.transaction = Some(Transaction {
             actor: 0,
             seq: self.seq + 1,
             start_op: self.max_op + 1,
@@ -551,10 +565,13 @@ impl Automerge {
     }
 
     pub fn commit(&mut self) -> Result<(), AutomergeError> {
-        if let Some(mut tx) = self.transaction.take() {
-            tx.hash = Some(ChangeHash::random());
+        if let Some(tx) = self.transaction.take() {
+            // FIXME
+            // add change
+            // updates clock not seq
+            // updates max_op
             self.max_op = tx.start_op + tx.len as u64 - 1;
-            self.changes.push(tx);
+            self.history.push(export_change(&tx, &self.actors, &self.props));
             self.seq += 1;
             Ok(())
         } else {
@@ -573,7 +590,7 @@ impl Automerge {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].0.cmp(&self.actors[y].0),
+            (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
     }
@@ -604,7 +621,7 @@ impl Automerge {
             tx.len += 1;
             let id = OpId(tx.start_op + tx.len as u64, 0);
             let op = Op {
-                change: self.changes.len(),
+                change: self.history.len(),
                 id,
                 action,
                 obj,
@@ -1020,15 +1037,147 @@ impl Automerge {
         unimplemented!()
     }
 
+    pub fn apply_changes(&mut self, changes: &[amp::Change]) {
+        for c in changes {
+            self.apply_change(c)
+        }
+    }
+
+    pub fn apply_change(&mut self, change: &amp::Change) {
+        let ops = self.import_ops(change);
+        let change = self.import_change(change);
+    }
+
+    fn import_change(&mut self, change: &amp::Change) -> EncodedChange {
+        unimplemented!()
+    }
+
+    fn import_ops(&mut self, change: &amp::Change) -> Vec<Op> {
+        change.operations.iter().enumerate().map(|(i,c)| {
+            let actor = self.actors.cache(change.actor_id.clone());
+            let id = OpId(change.start_op + i as u64 , actor);
+            let obj : ObjId = self.import(&c.obj.to_string()).unwrap();
+            let pred = c.pred.iter().map(|i| self.import(&i.to_string()).unwrap()).collect();
+            let key = match &c.key {
+                amp::Key::Map(n) => Key::Map(self.props.cache(n.to_string())),
+                amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD.clone()),
+                amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(HEAD.clone()),
+            };
+            Op {
+                change: self.history.len(),
+                id,
+                action: c.action.clone(),
+                obj,
+                key,
+                succ: vec![],
+                pred,
+                insert: c.insert,
+            }
+        }).collect()
+    }
+
     pub fn apply(&mut self, data: &[u8]) {
         unimplemented!()
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        encode_document(&self.changes, &self.ops, &self.actors, &self.props.cache)
+        let c : Vec<_> = self.history.iter().map(|c| c.decode()).collect();
+        encode_document(&c, &self.ops, &self.actors, &self.props.cache)
     }
     pub fn save_incremental(&mut self) -> Vec<u8> {
         unimplemented!()
+    }
+
+    fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&EncodedChange>> {
+        if have_deps.is_empty() {
+            return Some(self.history.iter().collect());
+        }
+
+        let lowest_idx = have_deps
+            .iter()
+            .filter_map(|h| self.history_index.get(h))
+            .min()?
+            + 1;
+
+        let mut missing_changes = vec![];
+        let mut has_seen: HashSet<_> = have_deps.iter().collect();
+        for change in &self.history[lowest_idx..] {
+            let deps_seen = change.deps.iter().filter(|h| has_seen.contains(h)).count();
+            if deps_seen > 0 {
+                if deps_seen != change.deps.len() {
+                    // future change depends on something we haven't seen - fast path cant work
+                    return None;
+                }
+                missing_changes.push(change);
+                has_seen.insert(&change.hash);
+            }
+        }
+
+        // if we get to the end and there is a head we haven't seen then fast path cant work
+        if self.get_heads().iter().all(|h| has_seen.contains(h)) {
+            Some(missing_changes)
+        } else {
+            None
+        }
+    }
+
+    fn get_changes_slow(&self, have_deps: &[amp::ChangeHash]) -> Vec<&EncodedChange> {
+        let mut stack: Vec<_> = have_deps.iter().collect();
+        let mut has_seen = HashSet::new();
+        while let Some(hash) = stack.pop() {
+            if has_seen.contains(&hash) {
+                continue;
+            }
+            if let Some(change) = self
+                .history_index
+                .get(hash)
+                .and_then(|i| self.history.get(*i))
+            {
+                stack.extend(change.deps.iter());
+            }
+            has_seen.insert(hash);
+        }
+        self.history
+            .iter()
+            .filter(|change| !has_seen.contains(&change.hash))
+            .collect()
+    }
+
+    pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&EncodedChange> {
+        if let Some(changes) = self.get_changes_fast(have_deps) {
+            changes
+        } else {
+            self.get_changes_slow(have_deps)
+        }
+    }
+
+    pub fn get_heads(&self) -> Vec<amp::ChangeHash> {
+        let mut deps: Vec<_> = self.deps.iter().copied().collect();
+        deps.sort_unstable();
+        deps
+    }
+
+    fn update_history(&mut self, change: EncodedChange) -> usize {
+        let history_index = self.history.len();
+
+        /*
+        self.states
+            .entry(change.actor_id().clone())
+            .or_default()
+            .push(history_index);
+            */
+
+        self.history_index.insert(change.hash, history_index);
+        self.history.push(change);
+
+        history_index
+    }
+
+    fn update_deps(&mut self, change: &EncodedChange) {
+        for d in &change.deps {
+            self.deps.remove(d);
+        }
+        self.deps.insert(change.hash);
     }
 
     pub fn import<I: Importable>(&self, s: &str) -> Result<I,AutomergeError> {
@@ -1037,8 +1186,7 @@ impl Automerge {
         } else {
             let n = s.find('@').ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
             let counter = s[0..n].parse().map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
-            // - FIXME - unneeded to_vec()
-            let actor = Actor(hex::decode(&s[(n + 1)..]).unwrap());
+            let actor = amp::ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self.actors.lookup(actor).ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
             Ok(I::wrap(OpId(counter,actor)))
         }
@@ -1124,12 +1272,12 @@ impl Default for ElemId {
 #[cfg(test)]
 mod tests {
     use automerge_protocol as amp;
-    use crate::{Automerge, Actor, ROOT, Value, HEAD, Key};
+    use crate::{Automerge, ROOT, Value, HEAD, Key};
 
     #[test]
     fn insert_op() {
         let mut doc = Automerge::new();
-        doc.set_actor(Actor::random());
+        doc.set_actor(amp::ActorId::random());
         doc.begin(None, None).unwrap();
         let key = doc.prop_to_key("hello".into());
         doc.set(ROOT, key, "world".into(), false).unwrap();
@@ -1142,7 +1290,7 @@ mod tests {
     #[test]
     fn test_list() {
         let mut doc = Automerge::new();
-        doc.set_actor(Actor::random());
+        doc.set_actor(amp::ActorId::random());
         doc.begin(None, None).unwrap();
         let list_id = doc.map_make(ROOT, "items", amp::ObjType::List).unwrap();
         doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();

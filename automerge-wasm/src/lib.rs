@@ -6,7 +6,6 @@ use automerge::{Key, Value};
 use wasm_bindgen::JsCast;
 use js_sys::{Array , Uint8Array };
 //use serde::{de::DeserializeOwned, Serialize};
-use rand::Rng;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
@@ -22,6 +21,21 @@ macro_rules! log {
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+fn datatype(s: &am::ScalarValue) -> String {
+    match s {
+            am::ScalarValue::Bytes(_) => "bytes".into(),
+            am::ScalarValue::Str(_) => "str".into(),
+            am::ScalarValue::Int(_) => "int".into(),
+            am::ScalarValue::Uint(_) => "uint".into(),
+            am::ScalarValue::F64(_) => "f64".into(),
+            am::ScalarValue::Counter(_) => "counter".into(),
+            am::ScalarValue::Timestamp(_) => "timestamp".into(),
+            am::ScalarValue::Boolean(_) => "boolean".into(),
+            am::ScalarValue::Null => "null".into(),
+            am::ScalarValue::Cursor(_) => "cursor".into(),
+    }
+}
+
 #[derive(Debug)]
 pub struct ScalarValue(am::ScalarValue);
 
@@ -29,7 +43,7 @@ impl From<ScalarValue> for JsValue {
     fn from(val: ScalarValue) -> Self {
         match &val.0 {
             am::ScalarValue::Bytes(v) => js_sys::Uint8Array::from(v.as_slice()).into(),
-            am::ScalarValue::Str(v) => v.into(),
+            am::ScalarValue::Str(v) => v.to_string().into(),
             am::ScalarValue::Int(v) => (*v as f64).into(),
             am::ScalarValue::Uint(v) => (*v as f64).into(),
             am::ScalarValue::F64(v) => (*v).into(),
@@ -64,7 +78,7 @@ impl<'a> From<&'a str> for JsErr {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new() -> Result<Automerge, JsValue> {
-        let actor = automerge::Actor::from("aabbccdd").map_err(to_js_err)?;
+        let actor = automerge::ActorId::from(hex::decode("aabbccdd").map_err(to_js_err)?);
         let mut automerge = automerge::Automerge::new();
         automerge.set_actor(actor);
         Ok(Automerge(automerge))
@@ -289,7 +303,7 @@ impl Automerge {
                 result.push(&self.export(obj_id));
             }
             Some(Value::Scalar(value)) => {
-                result.push(&value.datatype().into());
+                result.push(&datatype(&value).into());
                 result.push(&ScalarValue(value).into());
             }
             None => {}

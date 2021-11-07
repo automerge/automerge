@@ -4,7 +4,7 @@ use std::convert::{ TryInto};
 use core::ops::Range;
 use nonzero_ext::nonzero;
 use std::collections::HashSet;
-use crate::{ Op, OpId, ElemId, ObjId, Key, Actor, Change, ChangeHash, IndexedCache, AutomergeError };
+use crate::{ Op, OpId, ElemId, ObjId, Key, Transaction, IndexedCache, AutomergeError, ROOT, HEAD };
 use sha2::Sha256;
 use itertools::Itertools;
 use tracing::instrument;
@@ -40,10 +40,10 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-fn get_heads(changes: &[Change]) -> HashSet<ChangeHash> {
+fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
     changes.iter().fold(HashSet::new(), |mut acc, c| {
-        if let Some(hash) = c.hash {
-            acc.insert(hash);
+        if let Some(h) = c.hash {
+            acc.insert(h.clone());
         }
         for dep in &c.deps {
             acc.remove(dep);
@@ -52,13 +52,13 @@ fn get_heads(changes: &[Change]) -> HashSet<ChangeHash> {
     })
 }
 
-pub(crate) fn encode_document(changes: &[Change], doc_ops: &[Op], actors_index: &IndexedCache<Actor>, props: &[String]) -> Result<Vec<u8>, AutomergeError> {
+pub(crate) fn encode_document(changes: &[amp::Change], doc_ops: &[Op], actors_index: &IndexedCache<amp::ActorId>, props: &[String]) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
 
     let heads = get_heads(changes);
 
-    let actors = actors_index.sorted();
     let actors_map = actors_index.encode_index();
+    let actors = actors_index.sorted();
 
     /*
     // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
@@ -72,8 +72,8 @@ pub(crate) fn encode_document(changes: &[Change], doc_ops: &[Op], actors_index: 
         .collect();
     */
 
-    let (change_bytes, change_info) = ChangeEncoder::encode_changes(changes, &actors_map);
-    //let (change_bytes, change_info) = encode_changes(changes, &actors_map);
+    let (change_bytes, change_info) = ChangeEncoder::encode_changes(changes, &actors);
+    //let (change_bytes, change_info) = encode_changes(changes, &actors);
 
     //let doc_ops = group_doc_ops(changes, &actors);
 
@@ -87,8 +87,8 @@ pub(crate) fn encode_document(changes: &[Change], doc_ops: &[Op], actors_index: 
 
     actors.len().encode(&mut chunk)?;
 
-    for a in &actors {
-        a.as_bytes().encode(&mut chunk)?;
+    for a in actors.into_iter() {
+        a.to_bytes().encode(&mut chunk)?;
     }
 
     heads.len().encode(&mut chunk)?;
@@ -430,20 +430,27 @@ fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
     }
 }
 
-fn export_objid(id: &ObjId, actors: &IndexedCache<Actor>) -> amp::ObjectId {
-    unimplemented!()
+fn export_objid(id: &ObjId, actors: &IndexedCache<amp::ActorId>) -> amp::ObjectId {
+    if id == &ROOT {
+        amp::ObjectId::Root
+    } else {
+        export_opid(&id.0, actors).into()
+    }
 }
 
-fn export_elemid(id: &ElemId, actors: &IndexedCache<Actor>) -> amp::ElementId {
-    unimplemented!()
+fn export_elemid(id: &ElemId, actors: &IndexedCache<amp::ActorId>) -> amp::ElementId {
+    if id == &HEAD {
+        amp::ElementId::Head
+    } else {
+        export_opid(&id.0, actors).into()
+    }
 }
 
-fn export_opid(id: &OpId, actors: &IndexedCache<Actor>) -> amp::OpId {
-    unimplemented!()
-    //amp::OpId(id.0, actors.get(id.1).into())
+fn export_opid(id: &OpId, actors: &IndexedCache<amp::ActorId>) -> amp::OpId {
+    amp::OpId(id.0, actors.get(id.1).clone())
 }
 
-fn export_op(op: &Op, actors: &IndexedCache<Actor>, props: &IndexedCache<String>) -> amp::Op {
+fn export_op(op: &Op, actors: &IndexedCache<amp::ActorId>, props: &IndexedCache<String>) -> amp::Op {
     let action = op.action.clone();
     let key = match &op.key {
         Key::Map(n) => amp::Key::Map(props.get(*n).clone().into()),
@@ -459,16 +466,17 @@ fn export_op(op: &Op, actors: &IndexedCache<Actor>, props: &IndexedCache<String>
         key,
     }
 }
-fn export_change(change: &Change, actors: &IndexedCache<Actor>, props: &IndexedCache<String>) -> amp::Change {
+
+pub(crate) fn export_change(change: &Transaction, actors: &IndexedCache<amp::ActorId>, props: &IndexedCache<String>) -> EncodedChange {
     amp::Change {
-        actor_id: actors.get(change.actor).0.clone().into(),
+        actor_id: actors.get(change.actor).clone(),
         seq: change.seq,
         start_op: change.start_op,
         time: change.time,
-        deps: change.deps.iter().map(|h| h.into()).collect(),
+        deps: change.deps.clone(),
         message: change.message.clone(),
-        hash: change.hash.map(|ref h| h.into()),
+        hash: change.hash.clone(),
         operations: change.operations.iter().map(|op| export_op(op, actors,props)).collect(),
         extra_bytes: change.extra_bytes.clone(),
-    }
+    }.into()
 }
