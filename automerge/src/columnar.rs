@@ -9,7 +9,7 @@ use std::{
     str,
 };
 
-use crate::{ OpId, ObjId, ElemId, Key, ROOT };
+use crate::{ElemId, Key, ObjId, OpId, ROOT};
 
 use amp::SortedVec;
 use automerge_protocol as amp;
@@ -22,8 +22,7 @@ use crate::{
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
     expanded_op::ExpandedOp,
     internal::InternalOpType,
-    IndexedCache,
-    Op,
+    IndexedCache, Op,
 };
 
 impl Encodable for Action {
@@ -715,12 +714,13 @@ impl KeyEncoder {
                 self.ctr.append_null();
                 self.str.append_value(props[i].clone());
             }
-            Key::Seq(ElemId(OpId(0,0))) => { // HEAD
+            Key::Seq(ElemId(OpId(0, 0))) => {
+                // HEAD
                 self.actor.append_null();
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Key::Seq(ElemId(OpId(ctr,actor))) => {
+            Key::Seq(ElemId(OpId(ctr, actor))) => {
                 self.actor.append_value(actors[actor]);
                 self.ctr.append_value(ctr);
                 self.str.append_null();
@@ -943,7 +943,10 @@ pub(crate) struct ChangeEncoder {
 
 impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
-    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a IndexedCache<amp::ActorId>) -> (Vec<u8>, Vec<u8>)
+    pub fn encode_changes<'a, 'b, I>(
+        changes: I,
+        actors: &'a IndexedCache<amp::ActorId>,
+    ) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::Change>,
     {
@@ -976,7 +979,7 @@ impl ChangeEncoder {
                 index_by_hash.insert(hash, index);
             }
             self.actor
-                .append_value(actors.lookup(change.actor_id.clone()).unwrap());//actors.iter().position(|a| a == &change.actor_id).unwrap());
+                .append_value(actors.lookup(change.actor_id.clone()).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq);
             // FIXME iterops.count is crazy slow
             self.max_op
@@ -1051,8 +1054,8 @@ impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
     pub(crate) fn encode_doc_ops<'a, I>(
         ops: I,
-        actors: &'a[usize], 
-        props: &'a[String],
+        actors: &'a [usize],
+        props: &'a [String],
     ) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'a Op>,
@@ -1355,7 +1358,6 @@ const COL_SUCC_ACTOR: u32 = 8 << 4 | COLUMN_TYPE_ACTOR_ID;
 const COL_SUCC_CTR: u32 = 8 << 4 | COLUMN_TYPE_INT_DELTA;
 const COL_REF_CTR: u32 = 6 << 4 | COLUMN_TYPE_INT_RLE;
 const COL_REF_ACTOR: u32 = 6 << 4 | COLUMN_TYPE_ACTOR_ID;
-
 
 const DOC_ACTOR: u32 = /* 0 << 4 */ COLUMN_TYPE_ACTOR_ID;
 const DOC_SEQ: u32 = /* 0 << 4 */ COLUMN_TYPE_INT_DELTA;

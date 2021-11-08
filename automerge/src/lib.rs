@@ -2,8 +2,8 @@
 #![allow(dead_code)]
 
 extern crate hex;
-extern crate web_sys;
 extern crate uuid;
+extern crate web_sys;
 
 // compute Succ Pred
 // implement del
@@ -17,33 +17,27 @@ macro_rules! log {
 }
 
 mod change;
-mod indexed_cache;
-//mod columnar;
+mod columnar;
 mod decoding;
 mod encoding;
-mod columnar;
+mod indexed_cache;
 
 mod expanded_op;
 mod internal;
 
 use automerge_protocol as amp;
-use std::collections::HashMap;
-use nonzero_ext::nonzero;
-//use itertools::Itertools;
+use change::{encode_document, export_change};
 use core::ops::Range;
-//use std::convert::{TryFrom, TryInto};
-use std::cmp::{Eq, Ordering};
-//use std::collections::HashMap;
-use std::collections::HashSet;
-//use std::ops::Index;
-use thiserror::Error;
 use indexed_cache::IndexedCache;
-use change::{ encode_document, export_change };
+use nonzero_ext::nonzero;
+use std::cmp::{Eq, Ordering};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use thiserror::Error;
 
 pub use change::EncodedChange;
 
-pub use amp::{ ObjType, ActorId, ScalarValue };
-
+pub use amp::{ActorId, ObjType, ScalarValue};
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
@@ -60,9 +54,9 @@ pub enum AutomergeError {
     #[error("invalid actor format `{0}`")]
     InvalidActor(String),
     #[error("invalid list pos `{0}:{1}`")]
-    InvalidListAt(String,usize),
+    InvalidListAt(String, usize),
     #[error("there was an encoding problem")]
-    Encoding
+    Encoding,
 }
 
 impl From<std::io::Error> for AutomergeError {
@@ -84,9 +78,10 @@ pub trait Exportable {
 
 pub trait Importable {
     fn wrap(id: OpId) -> Self;
-    fn from(s: &str) -> Option<Self>  where Self: std::marker::Sized;
+    fn from(s: &str) -> Option<Self>
+    where
+        Self: std::marker::Sized;
 }
-
 
 impl OpId {
     #[inline]
@@ -111,62 +106,40 @@ pub enum Value {
     Scalar(amp::ScalarValue),
 }
 
-/*
-#[derive(Debug, Clone, PartialEq)]
-pub enum ScalarValue {
-    Bytes(Vec<u8>),
-    Str(String),
-    Int(i64),
-    Uint(u64),
-    F64(f64),
-    Counter(i64),
-    Timestamp(i64),
-    Cursor(OpId),
-    Boolean(bool),
-    Null,
-}
-*/
-
 pub const HEAD: ElemId = ElemId(OpId(0, 0));
 pub const ROOT: ObjId = ObjId(OpId(0, 0));
 
-const ROOT_STR : &str = "_root";
-const HEAD_STR : &str = "_head";
-
+const ROOT_STR: &str = "_root";
+const HEAD_STR: &str = "_head";
 
 impl Exportable for ObjId {
     fn export(&self) -> Export {
-        if self == &ROOT { Export::Special(ROOT_STR.to_owned()) } else { Export::Id(self.0) } 
+        if self == &ROOT {
+            Export::Special(ROOT_STR.to_owned())
+        } else {
+            Export::Id(self.0)
+        }
     }
-/*
-    fn special(&self) -> ExportSpecial { if self == &ROOT { ExportSpecial::Str(ROOT_STR.to_owned()) } else { ExportSpecial::None } }
-    fn counter(&self) -> u64 { self.0.counter() }
-    fn actor(&self) -> usize { self.0.actor() }
-    */
 }
 
 impl Exportable for ElemId {
     fn export(&self) -> Export {
-        if self == &HEAD { Export::Special(HEAD_STR.to_owned()) } else { Export::Id(self.0) }
+        if self == &HEAD {
+            Export::Special(HEAD_STR.to_owned())
+        } else {
+            Export::Id(self.0)
+        }
     }
-/*
-    fn special(&self) -> ExportSpecial { if self == &HEAD { ExportSpecial::Str(HEAD_STR.to_owned()) } else { ExportSpecial::None } }
-    fn counter(&self) -> u64 { self.0.counter() }
-    fn actor(&self) -> usize { self.0.actor() }
-    */
 }
 
 impl Exportable for OpId {
-    fn export(&self) -> Export { Export::Id(*self) }
-    /*
-    fn special(&self) -> ExportSpecial { ExportSpecial::None }
-    fn counter(&self) -> u64 { self.counter() }
-    fn actor(&self) -> usize { self.actor() }
-    */
+    fn export(&self) -> Export {
+        Export::Id(*self)
+    }
 }
 
 impl Exportable for Key {
-    fn export(&self) -> Export { 
+    fn export(&self) -> Export {
         match self {
             Key::Map(p) => Export::Prop(*p),
             Key::Seq(e) => e.export(),
@@ -175,18 +148,38 @@ impl Exportable for Key {
 }
 
 impl Importable for ObjId {
-    fn wrap(id: OpId) -> Self { ObjId(id) }
-    fn from(s: &str) -> Option<Self> { if s == ROOT_STR { Some(ROOT) } else { None } }
+    fn wrap(id: OpId) -> Self {
+        ObjId(id)
+    }
+    fn from(s: &str) -> Option<Self> {
+        if s == ROOT_STR {
+            Some(ROOT)
+        } else {
+            None
+        }
+    }
 }
 
 impl Importable for ElemId {
-    fn wrap(id: OpId) -> Self { ElemId(id) }
-    fn from(s: &str) -> Option<Self> { if s == HEAD_STR { Some(HEAD) } else { None } }
+    fn wrap(id: OpId) -> Self {
+        ElemId(id)
+    }
+    fn from(s: &str) -> Option<Self> {
+        if s == HEAD_STR {
+            Some(HEAD)
+        } else {
+            None
+        }
+    }
 }
 
 impl Importable for OpId {
-    fn wrap(id: OpId) -> Self { id }
-    fn from(s: &str) -> Option<Self> { None }
+    fn wrap(id: OpId) -> Self {
+        id
+    }
+    fn from(s: &str) -> Option<Self> {
+        None
+    }
 }
 
 impl From<OpId> for Key {
@@ -201,14 +194,6 @@ impl From<ElemId> for Key {
     }
 }
 
-/*
-impl From<&str> for ScalarValue {
-    fn from(s: &str) -> Self {
-        ScalarValue::Str(s.to_owned())
-    }
-}
-*/
-
 impl From<&Op> for Value {
     fn from(op: &Op) -> Self {
         match &op.action {
@@ -218,130 +203,6 @@ impl From<&Op> for Value {
         }
     }
 }
-
-/*
-impl ScalarValue {
-    pub fn datatype(&self) -> String {
-        match self {
-            ScalarValue::Bytes(_) => "bytes".into(),
-            ScalarValue::Str(_) => "str".into(),
-            ScalarValue::Int(_) => "int".into(),
-            ScalarValue::Uint(_) => "uint".into(),
-            ScalarValue::F64(_) => "f64".into(),
-            ScalarValue::Counter(_) => "counter".into(),
-            ScalarValue::Timestamp(_) => "timestamp".into(),
-            ScalarValue::Boolean(_) => "boolean".into(),
-            ScalarValue::Null => "null".into(),
-            ScalarValue::Cursor(_) => "cursor".into(),
-        }
-    }
-}
-*/
-
-/*
-impl std::fmt::Display for ScalarValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScalarValue::Bytes(v) => write!(f, "Bytes({})", hex::encode(v)),
-            ScalarValue::Str(v) => write!(f,"{}",v),
-            ScalarValue::Int(v) => write!(f,"{}",v),
-            ScalarValue::Uint(v) => write!(f,"{}",v),
-            ScalarValue::F64(v) => write!(f,"{}",v),
-            ScalarValue::Counter(v) => write!(f,"Counter({})",v),
-            ScalarValue::Timestamp(v) => write!(f,"Counter({})",v),
-            ScalarValue::Boolean(v) => write!(f,"{}",v),
-            ScalarValue::Null => write!(f,"null"),
-            ScalarValue::Cursor(v) => write!(f,"Cursor({:?})",v),
-        }
-    }
-}
-*/
-
-/*
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ObjType {
-    Map,
-    List,
-    Table,
-    Text,
-}
-
-impl Display for ObjType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ObjType::Map => write!(f, "map"),
-            ObjType::List => write!(f, "list"),
-            ObjType::Table => write!(f, "table"),
-            ObjType::Text => write!(f, "text"),
-        }
-    }
-}
-*/
-
-/*
-#[derive(Debug, Clone)]
-pub(crate) enum OpType {
-    Make(ObjType),
-    Del,
-    Inc(i64),
-    Set(ScalarValue),
-}
-*/
-
-/*
-#[derive(Debug, Clone)]
-struct IndexedCache<T> {
-    cache: Vec<T>,
-    lookup: HashMap<T, usize>,
-}
-
-impl<T> IndexedCache<T>
-where
-    T: Clone + Eq + Hash,
-{
-    fn new() -> Self {
-        IndexedCache {
-            cache: Default::default(),
-            lookup: Default::default(),
-        }
-    }
-
-    fn from(cache: Vec<T>) -> Self {
-        let lookup = cache
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v.clone(), i))
-            .collect();
-        IndexedCache { cache, lookup }
-    }
-
-    fn cache(&mut self, item: T) -> usize {
-        if let Some(n) = self.lookup.get(&item) {
-            *n
-        } else {
-            let n = self.cache.len();
-            self.cache.push(item.clone());
-            self.lookup.insert(item, n);
-            n
-        }
-    }
-
-    fn lookup(&self, item: T) -> Option<usize> {
-        self.lookup.get(&item).cloned()
-    }
-
-    fn get(&self, index: usize) -> &T {
-        &self.cache[index]
-    }
-}
-
-impl<T> Index<usize> for IndexedCache<T> {
-    type Output = T;
-    fn index(&self, i: usize) -> &T {
-        &self.cache[i]
-    }
-}
-*/
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
 pub enum Key {
@@ -371,8 +232,6 @@ pub struct ElemId(OpId);
 pub(crate) struct Op {
     pub change: usize,
     pub id: OpId,
-    //    pub actor: usize,
-    //    pub ctr: u64,
     pub action: amp::OpType,
     pub obj: ObjId,
     pub key: Key,
@@ -417,64 +276,6 @@ pub(crate) struct Transaction {
     pub len: usize,
 }
 
-/*
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
-pub struct ChangeHash(pub [u8; 32]);
-
-impl From<&ChangeHash> for amp::ChangeHash {
-    fn from(c: &ChangeHash) -> Self {
-        amp::ChangeHash(c.0.clone())
-    }
-}
-
-impl ChangeHash {
-    pub(crate) fn random() -> ChangeHash {
-      let mut bytes : [u8; 32] = [0; 32];
-      let left = Uuid::new_v4();
-      let right = Uuid::new_v4();
-      let (one, two) = bytes.split_at_mut(left.as_bytes().len());
-      one.copy_from_slice(left.as_bytes().as_ref());
-      two.copy_from_slice(right.as_bytes().as_ref());
-      ChangeHash(bytes)
-    }
-}
-
-impl fmt::Debug for ChangeHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ChangeHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-*/
-
-/*
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Actor(Vec<u8>);
-
-impl Actor {
-    pub fn from(s: &str) -> Result<Actor,AutomergeError> {
-        Ok(Actor(hex::decode(&s).map_err(|_| AutomergeError::InvalidActor(s.to_owned()))?))
-    }
-
-    pub fn random() -> Actor {
-       let my_uuid = Uuid::new_v4();
-       Actor(my_uuid.as_bytes().to_vec())
-
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
-impl std::fmt::Display for Actor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
-*/
-
 #[derive(Debug, Clone)]
 pub struct Peer {}
 
@@ -509,7 +310,7 @@ impl Automerge {
     }
 
     pub fn set_actor(&mut self, actor: amp::ActorId) {
-        // TODO - could change seq
+        // TODO - could change seq - need a clock
         self.actor = Some(self.actors.cache(actor))
     }
 
@@ -533,7 +334,7 @@ impl Automerge {
     }
 
     pub fn pending_ops(&self) -> u64 {
-      self.transaction.as_ref().map(|t| t.len as u64).unwrap_or(0)
+        self.transaction.as_ref().map(|t| t.len as u64).unwrap_or(0)
     }
 
     pub fn begin(
@@ -571,7 +372,8 @@ impl Automerge {
             // updates clock not seq
             // updates max_op
             self.max_op = tx.start_op + tx.len as u64 - 1;
-            self.history.push(export_change(&tx, &self.actors, &self.props));
+            self.history
+                .push(export_change(&tx, &self.actors, &self.props));
             self.seq += 1;
             Ok(())
         } else {
@@ -630,7 +432,7 @@ impl Automerge {
                 pred: vec![],
                 insert,
             };
-            self.insert_op(op.clone());
+            self.insert_op(op.clone(), true);
             tx.operations.push(op);
             self.transaction = Some(tx);
             Ok(id)
@@ -657,10 +459,7 @@ impl Automerge {
     }
 
     fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
-        while *pos < self.ops.len()
-            && &self.ops[*pos].obj == obj
-            && !self.ops[*pos].visible()
-        {
+        while *pos < self.ops.len() && &self.ops[*pos].obj == obj && !self.ops[*pos].visible() {
             *pos += 1
         }
     }
@@ -668,20 +467,21 @@ impl Automerge {
     fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Option<&Op> {
         let mut seen = 0;
         let mut seen_visible = false;
-        while *pos < self.ops.len()
-//            && &self.ops[*pos].obj == obj
-//            && !self.ops[*pos].visible()
-        {
+        while *pos < self.ops.len() {
             let op = &self.ops[*pos];
-            if &op.obj != obj { break }
+            if &op.obj != obj {
+                break;
+            }
             if op.insert {
-              seen_visible = false;
+                seen_visible = false;
             }
             if op.visible() && !seen_visible {
-              seen += 1;
-              seen_visible = true;
+                seen += 1;
+                seen_visible = true;
             }
-            if seen > n { return Some(op) }
+            if seen > n {
+                return Some(op);
+            }
             *pos += 1;
         }
         None
@@ -690,16 +490,14 @@ impl Automerge {
     fn scan_visible(&self, obj: &ObjId, pos: &mut usize) -> usize {
         let mut seen = 0;
         let mut seen_visible = false;
-        while *pos < self.ops.len()
-            && &self.ops[*pos].obj == obj
-        {
+        while *pos < self.ops.len() && &self.ops[*pos].obj == obj {
             let op = &self.ops[*pos];
             if op.insert {
-              seen_visible = false;
+                seen_visible = false;
             }
             if op.visible() && !seen_visible {
-              seen += 1;
-              seen_visible = true;
+                seen += 1;
+                seen_visible = true;
             }
             *pos += 1;
         }
@@ -707,10 +505,7 @@ impl Automerge {
     }
 
     fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
-        while *pos < self.ops.len()
-            && &self.ops[*pos].obj == obj
-            && &self.ops[*pos].key == key
-        {
+        while *pos < self.ops.len() && &self.ops[*pos].obj == obj && &self.ops[*pos].key == key {
             *pos += 1
         }
     }
@@ -720,15 +515,19 @@ impl Automerge {
         self.scan_to_visible(obj, pos);
     }
 
-    fn scan_to_prop_insertion_point(&mut self, op: &mut Op, pos: &mut usize) {
+    fn scan_to_prop_insertion_point(&mut self, op: &mut Op, local: bool, pos: &mut usize) {
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
             && self.ops[*pos].key == op.key
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
-            if self.ops[*pos].succ.is_empty() {
+            if local {
+                if self.ops[*pos].visible() {
+                    self.ops[*pos].succ.push(op.id);
+                    op.pred.push(self.ops[*pos].id);
+                }
+            } else if self.ops[*pos].visible() && op.pred.iter().any(|i| i == &op.id) {
                 self.ops[*pos].succ.push(op.id);
-                op.pred.push(self.ops[*pos].id);
             }
             *pos += 1
         }
@@ -788,17 +587,28 @@ impl Automerge {
         }
     }
 
-    fn scan_to_elem_update_pos(&mut self, op: &mut Op, elem: &ElemId, pos: &mut usize) {
-       // *pos += 1; // always step over the insert=true op
+    fn scan_to_elem_update_pos(
+        &mut self,
+        op: &mut Op,
+        elem: &ElemId,
+        local: bool,
+        pos: &mut usize,
+    ) {
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
             && self.ops[*pos].elemid() == op.elemid()
-//            && !self.ops[*pos].insert
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
-            if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
-              self.ops[*pos].succ.push(op.id);
-              op.pred.push(self.ops[*pos].id);
+            if local {
+                if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
+                    self.ops[*pos].succ.push(op.id);
+                    op.pred.push(self.ops[*pos].id);
+                }
+            } else if self.ops[*pos].visible()
+                && self.ops[*pos].elemid() == op.elemid()
+                && op.pred.iter().any(|i| i == &op.id)
+            {
+                self.ops[*pos].succ.push(op.id);
             }
             *pos += 1
         }
@@ -823,12 +633,12 @@ impl Automerge {
         }
     }
 
-    fn seek_to_update_elem(&mut self, op: &mut Op, elem: &ElemId) -> Cursor {
+    fn seek_to_update_elem(&mut self, op: &mut Op, elem: &ElemId, local: bool) -> Cursor {
         let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_elem_insert_op2(op, elem, &mut pos, &mut seen);
-        self.scan_to_elem_update_pos(op, elem, &mut pos);
+        self.scan_to_elem_update_pos(op, elem, local, &mut pos);
         Cursor { pos, seen }
     }
 
@@ -841,41 +651,24 @@ impl Automerge {
         Cursor { pos, seen }
     }
 
-    fn seek_to_map_op(&mut self, op: &mut Op) -> Cursor {
+    fn seek_to_map_op(&mut self, op: &mut Op, local: bool) -> Cursor {
         let mut pos = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_prop_start(&op.obj, &op.key, &mut pos);
-        self.scan_to_prop_insertion_point(op, &mut pos);
+        self.scan_to_prop_insertion_point(op, local, &mut pos);
         Cursor { pos, seen: 0 }
     }
 
-    fn seek_to_op(&mut self, op: &mut Op) -> Cursor {
-        match (op.key.clone(), op.insert) {
-            (Key::Map(_), _) => self.seek_to_map_op(op),
+    fn seek_to_op(&mut self, op: &mut Op, local: bool) -> Cursor {
+        match (op.key, op.insert) {
+            (Key::Map(_), _) => self.seek_to_map_op(op, local),
             (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem),
-            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem),
+            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local),
         }
     }
 
-    fn insert_op(&mut self, mut op: Op) {
-        let cursor = self.seek_to_op(&mut op); //mut to collect pred
-        /*
-        if !op.insert  {
-            let mut pos = cursor.pos;
-            let mut pred : Vec<OpId> = Vec::new();
-            while pos < self.ops.len()
-                && self.ops[pos].obj == op.obj
-                && self.ops[pos].key == op.key
-            {
-                if self.ops[pos].succ.is_empty() {
-                    self.ops[pos].succ.push(op.id);
-                    pred.push(self.ops[pos].id);
-                }
-                pos += 1
-            }
-            op.pred = pred;
-        }
-        */
+    fn insert_op(&mut self, mut op: Op, local: bool) {
+        let cursor = self.seek_to_op(&mut op, local); //mut to collect pred
         self.ops.insert(cursor.pos, op);
     }
 
@@ -884,19 +677,14 @@ impl Automerge {
         let mut result = vec![];
         self.scan_to_obj(obj, &mut pos);
         self.scan_to_visible(obj, &mut pos);
-        loop {
-            if let Some(op) = self.ops.get(pos) {
-                // we reached the next object
-                if &op.obj != obj {
-                    break;
-                }
-                let key = &op.key;
-                result.push(key.clone());
-                self.scan_to_next_visible_prop(obj, key, &mut pos);
-            } else {
-                // we reached the end of document
-               break 
+        while let Some(op) = self.ops.get(pos) {
+            // we reached the next object
+            if &op.obj != obj {
+                break;
             }
+            let key = &op.key;
+            result.push(*key);
+            self.scan_to_next_visible_prop(obj, key, &mut pos);
         }
         result
     }
@@ -926,17 +714,17 @@ impl Automerge {
     // TODO ? really export this ?
     pub fn insert_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
         if index == 0 {
-          Some(HEAD.into())
+            Some(HEAD.into())
         } else {
-          self.set_pos_for_index(obj, index - 1)
+            self.set_pos_for_index(obj, index - 1)
         }
     }
 
     pub fn set_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
-          let mut pos = 0;
-          self.scan_to_obj(obj, &mut pos);
-          let op = self.scan_to_nth_visible(obj, index, &mut pos);
-          op.and_then(|o| o.elemid()).map(|e| e.into())
+        let mut pos = 0;
+        self.scan_to_obj(obj, &mut pos);
+        let op = self.scan_to_nth_visible(obj, index, &mut pos);
+        op.and_then(|o| o.elemid()).map(|e| e.into())
     }
 
     pub fn make(
@@ -946,7 +734,12 @@ impl Automerge {
         obj_type: amp::ObjType,
         insert: bool,
     ) -> Result<ObjId, AutomergeError> {
-        Ok(ObjId(self.make_op(obj, key, amp::OpType::Make(obj_type), insert)?))
+        Ok(ObjId(self.make_op(
+            obj,
+            key,
+            amp::OpType::Make(obj_type),
+            insert,
+        )?))
     }
 
     pub fn map_make(
@@ -956,7 +749,12 @@ impl Automerge {
         obj_type: amp::ObjType,
     ) -> Result<ObjId, AutomergeError> {
         let key = self.prop_to_key(prop.into());
-        Ok(ObjId(self.make_op(obj, key, amp::OpType::Make(obj_type), false)?))
+        Ok(ObjId(self.make_op(
+            obj,
+            key,
+            amp::OpType::Make(obj_type),
+            false,
+        )?))
     }
 
     pub fn map_set(
@@ -988,7 +786,7 @@ impl Automerge {
         if let Some(key) = self.set_pos_for_index(&obj, index) {
             self.make_op(obj, key, amp::OpType::Set(value), false)
         } else {
-            Err(AutomergeError::InvalidListAt(self.export(obj),index))
+            Err(AutomergeError::InvalidListAt(self.export(obj), index))
         }
     }
 
@@ -1001,7 +799,7 @@ impl Automerge {
         if let Some(key) = self.insert_pos_for_index(&obj, index) {
             self.make_op(obj, key, amp::OpType::Set(value), true)
         } else {
-            Err(AutomergeError::InvalidListAt(self.export(obj),index))
+            Err(AutomergeError::InvalidListAt(self.export(obj), index))
         }
     }
 
@@ -1010,7 +808,7 @@ impl Automerge {
     }
 
     pub fn del(&mut self, obj: ObjId, key: Key) -> Result<(), AutomergeError> {
-        self.make_op(obj, key,  amp::OpType::Del(nonzero!(1_u32)), false)?;
+        self.make_op(obj, key, amp::OpType::Del(nonzero!(1_u32)), false)?;
         Ok(())
     }
 
@@ -1044,36 +842,45 @@ impl Automerge {
     }
 
     pub fn apply_change(&mut self, change: &amp::Change) {
-        let ops = self.import_ops(change);
-        let change = self.import_change(change);
+        let change_id = self.history.len();
+        self.history.push(change.into());
+        let ops = self.import_ops(change, change_id);
+        for op in ops {
+            self.insert_op(op, false)
+        }
     }
 
-    fn import_change(&mut self, change: &amp::Change) -> EncodedChange {
-        unimplemented!()
-    }
-
-    fn import_ops(&mut self, change: &amp::Change) -> Vec<Op> {
-        change.operations.iter().enumerate().map(|(i,c)| {
-            let actor = self.actors.cache(change.actor_id.clone());
-            let id = OpId(change.start_op + i as u64 , actor);
-            let obj : ObjId = self.import(&c.obj.to_string()).unwrap();
-            let pred = c.pred.iter().map(|i| self.import(&i.to_string()).unwrap()).collect();
-            let key = match &c.key {
-                amp::Key::Map(n) => Key::Map(self.props.cache(n.to_string())),
-                amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD.clone()),
-                amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(HEAD.clone()),
-            };
-            Op {
-                change: self.history.len(),
-                id,
-                action: c.action.clone(),
-                obj,
-                key,
-                succ: vec![],
-                pred,
-                insert: c.insert,
-            }
-        }).collect()
+    fn import_ops(&mut self, change: &amp::Change, change_id: usize) -> Vec<Op> {
+        change
+            .operations
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let actor = self.actors.cache(change.actor_id.clone());
+                let id = OpId(change.start_op + i as u64, actor);
+                let obj: ObjId = self.import(&c.obj.to_string()).unwrap();
+                let pred = c
+                    .pred
+                    .iter()
+                    .map(|i| self.import(&i.to_string()).unwrap())
+                    .collect();
+                let key = match &c.key {
+                    amp::Key::Map(n) => Key::Map(self.props.cache(n.to_string())),
+                    amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD),
+                    amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(HEAD),
+                };
+                Op {
+                    change: change_id,
+                    id,
+                    action: c.action.clone(),
+                    obj,
+                    key,
+                    succ: vec![],
+                    pred,
+                    insert: c.insert,
+                }
+            })
+            .collect()
     }
 
     pub fn apply(&mut self, data: &[u8]) {
@@ -1081,7 +888,7 @@ impl Automerge {
     }
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
-        let c : Vec<_> = self.history.iter().map(|c| c.decode()).collect();
+        let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         encode_document(&c, &self.ops, &self.actors, &self.props.cache)
     }
     pub fn save_incremental(&mut self) -> Vec<u8> {
@@ -1180,28 +987,43 @@ impl Automerge {
         self.deps.insert(change.hash);
     }
 
-    pub fn import<I: Importable>(&self, s: &str) -> Result<I,AutomergeError> {
+    pub fn import<I: Importable>(&self, s: &str) -> Result<I, AutomergeError> {
         if let Some(x) = I::from(s) {
-            Ok(x) 
+            Ok(x)
         } else {
-            let n = s.find('@').ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
-            let counter = s[0..n].parse().map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
+            let n = s
+                .find('@')
+                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+            let counter = s[0..n]
+                .parse()
+                .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
             let actor = amp::ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
-            let actor = self.actors.lookup(actor).ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
-            Ok(I::wrap(OpId(counter,actor)))
+            let actor = self
+                .actors
+                .lookup(actor)
+                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+            Ok(I::wrap(OpId(counter, actor)))
         }
     }
 
     pub fn export<E: Exportable>(&self, id: E) -> String {
         match id.export() {
-            Export::Id(id) => format!("{}@{}",id.counter(), self.actors[id.actor()]),
+            Export::Id(id) => format!("{}@{}", id.counter(), self.actors[id.actor()]),
             Export::Prop(index) => self.props[index].clone(),
             Export::Special(s) => s,
         }
     }
 
     pub fn dump(&self) {
-        log!("  {:12} {:12} {:12} {} {} {}" , "id", "obj", "key", "value", "pred", "succ");
+        log!(
+            "  {:12} {:12} {:12} {} {} {}",
+            "id",
+            "obj",
+            "key",
+            "value",
+            "pred",
+            "succ"
+        );
         for i in self.ops.iter() {
             let id = self.export(i.id);
             let obj = self.export(i.obj);
@@ -1209,38 +1031,49 @@ impl Automerge {
                 Key::Map(n) => self.props[n].clone(),
                 Key::Seq(n) => self.export(n),
             };
-            let value : String = match &i.action {
-                amp::OpType::Set(value) => format!("{}",value),
-                amp::OpType::Make(obj) => format!("make{}",obj),
+            let value: String = match &i.action {
+                amp::OpType::Set(value) => format!("{}", value),
+                amp::OpType::Make(obj) => format!("make{}", obj),
                 _ => unimplemented!(),
             };
-            let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
-            let succ : Vec<_>= i.succ.iter().map(|id| self.export(*id)).collect();
-            log!("  {:12} {:12} {:12} {} {:?} {:?}" , id, obj, key, value, pred,succ);
+            let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
+            let succ: Vec<_> = i.succ.iter().map(|id| self.export(*id)).collect();
+            log!(
+                "  {:12} {:12} {:12} {} {:?} {:?}",
+                id,
+                obj,
+                key,
+                value,
+                pred,
+                succ
+            );
         }
     }
 
     pub fn dump2(&self) {
-        println!("  {:12} {:12} {:12} {} {} {}" , "id", "obj", "key", "value", "pred", "succ");
+        println!("  {:12} {:12} {:12} value pred succ", "id", "obj", "key",);
         for i in self.ops.iter() {
             let id = &self.export(i.id)[0..8];
             let obj = &self.export(i.obj)[0..5];
             let key = &self.export(i.key)[0..5];
-/*
-            let key = match i.key {
-                Key::Map(n) => &self.props[n],
-                Key::Seq(n) => unimplemented!(),
-            };
-*/
-            println!("{:?}",i.action);
-            let value : String = match &i.action {
-                amp::OpType::Set(value) => format!("{}",value),
-                amp::OpType::Make(obj) => format!("make{}",obj),
+            /*
+                        let key = match i.key {
+                            Key::Map(n) => &self.props[n],
+                            Key::Seq(n) => unimplemented!(),
+                        };
+            */
+            println!("{:?}", i.action);
+            let value: String = match &i.action {
+                amp::OpType::Set(value) => format!("{}", value),
+                amp::OpType::Make(obj) => format!("make{}", obj),
                 _ => unimplemented!(),
             };
-            let pred : Vec<_>= i.pred.iter().map(|id| self.export(*id)).collect();
-            let succ : Vec<_>= i.succ.iter().map(|id| self.export(*id)).collect();
-            println!("  {:12} {:12} {:12} {} {:?} {:?}" , id, obj, key, value, pred,succ);
+            let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
+            let succ: Vec<_> = i.succ.iter().map(|id| self.export(*id)).collect();
+            println!(
+                "  {:12} {:12} {:12} {} {:?} {:?}",
+                id, obj, key, value, pred, succ
+            );
         }
     }
 }
@@ -1253,7 +1086,7 @@ impl Default for Automerge {
 
 impl Default for OpId {
     fn default() -> Self {
-        OpId(0,0)
+        OpId(0, 0)
     }
 }
 
@@ -1271,8 +1104,8 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
+    use crate::{Automerge, Key, Value, HEAD, ROOT};
     use automerge_protocol as amp;
-    use crate::{Automerge, ROOT, Value, HEAD, Key};
 
     #[test]
     fn insert_op() {
@@ -1294,7 +1127,7 @@ mod tests {
         doc.begin(None, None).unwrap();
         let list_id = doc.map_make(ROOT, "items", amp::ObjType::List).unwrap();
         doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();
-        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(amp::ObjType::List,list_id)));
+        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(amp::ObjType::List, list_id)));
         let aid = doc.set(list_id, Key::Seq(HEAD), "a".into(), true).unwrap();
         let bid = doc.set(list_id, HEAD.into(), "b".into(), true).unwrap();
         doc.set(list_id, aid.into(), "c".into(), true).unwrap();
@@ -1303,10 +1136,10 @@ mod tests {
         //println!("0 {:?}",doc.list_value(&list_id, 0));
         //println!("1 {:?}",doc.list_value(&list_id, 1));
         //println!("2 {:?}",doc.list_value(&list_id, 2));
-        assert!(doc.list_value(&list_id, 0) == Some(Value::Scalar( "b".into())));
-        assert!(doc.list_value(&list_id, 1) == Some(Value::Scalar( "d".into())));
-        assert!(doc.list_value(&list_id, 2) == Some(Value::Scalar( "a".into())));
-        assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar( "c".into())));
+        assert!(doc.list_value(&list_id, 0) == Some(Value::Scalar("b".into())));
+        assert!(doc.list_value(&list_id, 1) == Some(Value::Scalar("d".into())));
+        assert!(doc.list_value(&list_id, 2) == Some(Value::Scalar("a".into())));
+        assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar("c".into())));
         assert!(doc.list_length(&list_id) == 4);
         doc.commit().unwrap();
         doc.save().unwrap();

@@ -1,12 +1,11 @@
-
 extern crate hex;
-extern crate web_sys;
 extern crate uuid;
+extern crate web_sys;
 
-use std::ops::Index;
-use std::collections::HashMap;
 use itertools::Itertools;
+use std::collections::HashMap;
 use std::hash::Hash;
+use std::ops::Index;
 
 #[derive(Debug, Clone)]
 pub(crate) struct IndexedCache<T> {
@@ -68,8 +67,11 @@ where
     }
 
     pub fn encode_index(&self) -> Vec<usize> {
-        let sorted : Vec<_> = self.cache.iter().sorted().cloned().collect();
-        self.cache.iter().map(|a| sorted.iter().position(|r| r == a).unwrap()).collect()
+        let sorted: Vec<_> = self.cache.iter().sorted().cloned().collect();
+        self.cache
+            .iter()
+            .map(|a| sorted.iter().position(|r| r == a).unwrap())
+            .collect()
     }
 
     /*
@@ -99,4 +101,3 @@ impl<T> Index<usize> for IndexedCache<T> {
         &self.cache[i]
     }
 }
-
