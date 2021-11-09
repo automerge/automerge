@@ -9,7 +9,8 @@ use std::{
     str,
 };
 
-use crate::{ElemId, Key, ObjId, OpId, ROOT};
+use crate::protocol::{ElemId, Key, ObjId, OpId};
+use crate::ROOT;
 
 use amp::SortedVec;
 use automerge_protocol as amp;
