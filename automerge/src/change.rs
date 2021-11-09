@@ -5,13 +5,11 @@ use crate::decoding;
 use crate::decoding::Decodable;
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
-use crate::internal::InternalOpType;
 use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use automerge_protocol as amp;
 use core::ops::Range;
 use flate2::{bufread::DeflateEncoder, Compression};
 use itertools::Itertools;
-use nonzero_ext::nonzero;
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
@@ -347,12 +345,7 @@ impl EncodedChange {
             operations: self
                 .iter_ops()
                 .map(|op| amp::Op {
-                    action: match op.action {
-                        InternalOpType::Make(obj_type) => amp::OpType::Make(obj_type),
-                        InternalOpType::Del => amp::OpType::Del(nonzero!(1_u32)),
-                        InternalOpType::Inc(i) => amp::OpType::Inc(i),
-                        InternalOpType::Set(value) => amp::OpType::Set(value),
-                    },
+                    action: op.action.into(),
                     obj: op.obj.clone().into_owned(),
                     key: op.key.into_owned(),
                     pred: op.pred.into_owned(),

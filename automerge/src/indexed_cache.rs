@@ -73,17 +73,6 @@ where
             .map(|a| sorted.iter().position(|r| r == a).unwrap())
             .collect()
     }
-
-    /*
-    pub fn decode_index(&self) -> Vec<usize> {
-        let sorted = self.sorted();
-        sorted.iter().map(|a| self.cache.iter().position(|r| r == a).unwrap()).collect()
-    }
-
-    pub fn sorted(&self) -> Vec<T> {
-        self.cache.iter().sorted().cloned().collect()
-    }
-    */
 }
 
 impl<T> IntoIterator for IndexedCache<T> {

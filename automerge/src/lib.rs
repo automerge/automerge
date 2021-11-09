@@ -69,7 +69,7 @@ impl Automerge {
             ops: Default::default(),
             deps: Default::default(),
             actor: None,
-            seq: 0,
+            seq: 0, // FIXME - need a clock
             max_op: 0,
             transaction: None,
         }
@@ -601,28 +601,26 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn apply_changes(&mut self, changes: &[amp::Change]) {
+    pub fn apply_changes(&mut self, changes: &[EncodedChange]) {
         for c in changes {
-            self.apply_change(c)
+            self.apply_change(c.clone())
         }
     }
 
-    pub fn apply_change(&mut self, change: &amp::Change) {
-        let change_id = self.history.len();
-        self.history.push(change.into());
-        let ops = self.import_ops(change, change_id);
+    pub fn apply_change(&mut self, change: EncodedChange) {
+        let ops = self.import_ops(&change, self.history.len());
+        self.history.push(change);
         for op in ops {
             self.insert_op(op, false)
         }
     }
 
-    fn import_ops(&mut self, change: &amp::Change, change_id: usize) -> Vec<Op> {
+    fn import_ops(&mut self, change: &EncodedChange, change_id: usize) -> Vec<Op> {
         change
-            .operations
-            .iter()
+            .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                let actor = self.actors.cache(change.actor_id.clone());
+                let actor = self.actors.cache(change.actor_id().clone());
                 let id = OpId(change.start_op + i as u64, actor);
                 let obj: ObjId = self.import(&c.obj.to_string()).unwrap();
                 let pred = c
@@ -630,7 +628,7 @@ impl Automerge {
                     .iter()
                     .map(|i| self.import(&i.to_string()).unwrap())
                     .collect();
-                let key = match &c.key {
+                let key = match &c.key.as_ref() {
                     amp::Key::Map(n) => Key::Map(self.props.cache(n.to_string())),
                     amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD),
                     amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(HEAD),
@@ -638,7 +636,7 @@ impl Automerge {
                 Op {
                     change: change_id,
                     id,
-                    action: c.action.clone(),
+                    action: c.action.into(),
                     obj,
                     key,
                     succ: vec![],
@@ -738,7 +736,7 @@ impl Automerge {
             .entry(change.actor_id().clone())
             .or_default()
             .push(history_index);
-            */
+        */
 
         self.history_index.insert(change.hash, history_index);
         self.history.push(change);
