@@ -318,10 +318,13 @@ impl EncodedChange {
         //decode_change(bytes)
     }
 
-    pub fn max_op(&self) -> u64 {
+    pub fn len(&self) -> usize {
         // TODO - this could be a lot more efficient
-        let len = self.iter_ops().count();
-        self.start_op + (len as u64) - 1
+        self.iter_ops().count()
+    }
+
+    pub fn max_op(&self) -> u64 {
+        self.start_op + (self.len() as u64) - 1
     }
 
     fn message(&self) -> Option<String> {

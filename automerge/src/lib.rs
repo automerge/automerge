@@ -51,10 +51,10 @@ pub struct Automerge {
     props: IndexedCache<String>,
     history: Vec<EncodedChange>,
     history_index: HashMap<amp::ChangeHash, usize>,
+    states: HashMap<usize,Vec<usize>>,
     deps: HashSet<amp::ChangeHash>,
     ops: Vec<Op>,
     actor: Option<usize>,
-    seq: u64,
     max_op: u64,
     transaction: Option<Transaction>,
 }
@@ -66,17 +66,16 @@ impl Automerge {
             props: IndexedCache::new(),
             history: vec![],
             history_index: HashMap::new(),
+            states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
             actor: None,
-            seq: 0, // FIXME - need a clock
             max_op: 0,
             transaction: None,
         }
     }
 
     pub fn set_actor(&mut self, actor: amp::ActorId) {
-        // TODO - could change seq - need a clock
         self.actor = Some(self.actors.cache(actor))
     }
 
@@ -90,10 +89,10 @@ impl Automerge {
             props: IndexedCache::new(),
             history: vec![],
             history_index: HashMap::new(),
+            states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
             actor: None,
-            seq: 0,
             max_op: 0,
             transaction: None,
         }
@@ -114,10 +113,9 @@ impl Automerge {
 
         let actor = self.actor.ok_or(AutomergeError::ActorNotSet)?;
 
-        // TODO - seq might not start at zero (load)
         self.transaction = Some(Transaction {
-            actor: 0,
-            seq: self.seq + 1,
+            actor: actor,
+            seq: self.states.entry(actor).or_default().len() as u64,
             start_op: self.max_op + 1,
             time: time.unwrap_or(0),
             message,
@@ -133,14 +131,7 @@ impl Automerge {
 
     pub fn commit(&mut self) -> Result<(), AutomergeError> {
         if let Some(tx) = self.transaction.take() {
-            // FIXME
-            // add change
-            // updates clock not seq
-            // updates max_op
-            self.max_op = tx.start_op + tx.len as u64 - 1;
-            self.history
-                .push(export_change(&tx, &self.actors, &self.props));
-            self.seq += 1;
+            self.update_history(export_change(&tx, &self.actors, &self.props));
             Ok(())
         } else {
             Err(AutomergeError::MismatchedCommit)
@@ -148,9 +139,16 @@ impl Automerge {
     }
 
     pub fn rollback(&mut self) {
-        // remove all ops where change == self.changes.len()
-        // remove all pred where (id >= self.max_op, 0)
-        self.transaction = None
+        if let Some(tx) = self.transaction.take() {
+            for op in &tx.operations {
+                for pred_id in &op.pred {
+                    self.ops.iter_mut().find(|o| o.id == *pred_id).map(|o| o.succ.retain(|i| i != pred_id));
+                }
+                if let Some(pos) = self.ops.iter().position(|o| o.id == op.id) {
+                    self.ops.remove(pos);
+                }
+            }
+        }
     }
 
     fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
@@ -609,7 +607,7 @@ impl Automerge {
 
     pub fn apply_change(&mut self, change: EncodedChange) {
         let ops = self.import_ops(&change, self.history.len());
-        self.history.push(change);
+        self.update_history(change);
         for op in ops {
             self.insert_op(op, false)
         }
@@ -729,14 +727,14 @@ impl Automerge {
     }
 
     fn update_history(&mut self, change: EncodedChange) -> usize {
+        self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
+
         let history_index = self.history.len();
 
-        /*
         self.states
-            .entry(change.actor_id().clone())
+            .entry(self.actors.cache(change.actor_id().clone()))
             .or_default()
             .push(history_index);
-        */
 
         self.history_index.insert(change.hash, history_index);
         self.history.push(change);
