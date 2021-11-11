@@ -981,10 +981,11 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                     cur_multiset_start = None;
                     new_ops.push(v);
                 }
-                (Some(typ), Some(scalar)) => match typ == discriminant(&scalar) {
-                    // there is a multiset in progress & the current op could be part of it
-                    true => cur_prim_vals.push(scalar),
-                    false => {
+                (Some(typ), Some(scalar)) => {
+                    if typ == discriminant(&scalar) && v.insert {
+                        // there is a multiset in progress & the current op could be part of it
+                        cur_prim_vals.push(scalar)
+                    } else {
                         cur_multiset_start = Some(discriminant(&scalar));
                         // there is a multiset in progress and the current op cannot be part of it
                         // but it could be part of a new multiset
@@ -1002,7 +1003,7 @@ fn condense_insert_ops(ops: Vec<amp::Op>) -> Vec<amp::Op> {
                         obj = v.obj.clone();
                         insert_if_not_condensed = v.insert;
                     }
-                },
+                }
             }
         }
         finish_multiset(
@@ -1036,5 +1037,41 @@ fn prim_from_op_action(action: &amp::OpType) -> Option<amp::ScalarValue> {
             amp::ScalarValue::Null => Some(v.clone()),
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn condense_single_insert_makemap() {
+        let actor: amp::ActorId = "5449baf817ab4b76a0a6c5e3ab86e445".try_into().unwrap();
+        let oid: amp::ObjectId = actor.op_id_at(2).into();
+        let ops = vec![
+            amp::Op {
+                action: amp::OpType::Make(amp::ObjType::Map),
+                obj: oid.clone(),
+                key: amp::Key::Seq(amp::ElementId::Head),
+                pred: SortedVec::new(),
+                insert: true,
+            },
+            amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Str("some author".into())),
+                obj: oid.clone(),
+                key: amp::Key::Map("author".into()),
+                pred: SortedVec::new(),
+                insert: false,
+            },
+            amp::Op {
+                action: amp::OpType::Set(amp::ScalarValue::Str("some comment".into())),
+                obj: oid,
+                key: amp::Key::Map("comment".into()),
+                pred: SortedVec::new(),
+                insert: false,
+            },
+        ];
+        let condensed_ops = condense_insert_ops(ops.clone());
+        assert_eq!(ops, condensed_ops);
     }
 }
