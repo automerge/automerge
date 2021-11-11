@@ -41,7 +41,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-pub use change::EncodedChange;
+pub use amp::ChangeHash;
+pub use change::{ decode_change, Change };
 
 pub use amp::{ActorId, ObjType, ScalarValue};
 
@@ -49,10 +50,10 @@ pub use amp::{ActorId, ObjType, ScalarValue};
 pub struct Automerge {
     actors: IndexedCache<amp::ActorId>,
     props: IndexedCache<String>,
-    history: Vec<EncodedChange>,
-    history_index: HashMap<amp::ChangeHash, usize>,
+    history: Vec<Change>,
+    history_index: HashMap<ChangeHash, usize>,
     states: HashMap<usize,Vec<usize>>,
-    deps: HashSet<amp::ChangeHash>,
+    deps: HashSet<ChangeHash>,
     ops: Vec<Op>,
     actor: Option<usize>,
     max_op: u64,
@@ -99,7 +100,10 @@ impl Automerge {
     }
 
     pub fn pending_ops(&self) -> u64 {
-        self.transaction.as_ref().map(|t| t.len as u64).unwrap_or(0)
+        match &self.transaction {
+            Some(t) => t.operations.len() as u64,
+            None => 0,
+        }
     }
 
     pub fn begin(
@@ -122,7 +126,6 @@ impl Automerge {
             extra_bytes: Default::default(),
             hash: None,
             operations: vec![],
-            len: 0,
             deps: vec![],
         });
 
@@ -184,8 +187,7 @@ impl Automerge {
         insert: bool,
     ) -> Result<OpId, AutomergeError> {
         if let Some(mut tx) = self.transaction.take() {
-            tx.len += 1;
-            let id = OpId(tx.start_op + tx.len as u64, 0);
+            let id = OpId(tx.start_op + tx.operations.len() as u64, 0);
             let op = Op {
                 change: self.history.len(),
                 id,
@@ -599,13 +601,13 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn apply_changes(&mut self, changes: &[EncodedChange]) {
+    pub fn apply_changes(&mut self, changes: &[Change]) {
         for c in changes {
             self.apply_change(c.clone())
         }
     }
 
-    pub fn apply_change(&mut self, change: EncodedChange) {
+    pub fn apply_change(&mut self, change: Change) {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
@@ -613,13 +615,14 @@ impl Automerge {
         }
     }
 
-    fn import_ops(&mut self, change: &EncodedChange, change_id: usize) -> Vec<Op> {
+    fn import_ops(&mut self, change: &Change, change_id: usize) -> Vec<Op> {
         change
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
                 let actor = self.actors.cache(change.actor_id().clone());
                 let id = OpId(change.start_op + i as u64, actor);
+                // FIXME dont need to_string()
                 let obj: ObjId = self.import(&c.obj.to_string()).unwrap();
                 let pred = c
                     .pred
@@ -629,7 +632,8 @@ impl Automerge {
                 let key = match &c.key.as_ref() {
                     amp::Key::Map(n) => Key::Map(self.props.cache(n.to_string())),
                     amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD),
-                    amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(HEAD),
+                    // FIXME dont need to_string()
+                    amp::Key::Seq(amp::ElementId::Id(i)) => Key::Seq(self.import(&i.to_string()).unwrap()),
                 };
                 Op {
                     change: change_id,
@@ -657,7 +661,7 @@ impl Automerge {
         unimplemented!()
     }
 
-    fn get_changes_fast(&self, have_deps: &[amp::ChangeHash]) -> Option<Vec<&EncodedChange>> {
+    fn get_changes_fast(&self, have_deps: &[ChangeHash]) -> Option<Vec<&Change>> {
         if have_deps.is_empty() {
             return Some(self.history.iter().collect());
         }
@@ -690,7 +694,7 @@ impl Automerge {
         }
     }
 
-    fn get_changes_slow(&self, have_deps: &[amp::ChangeHash]) -> Vec<&EncodedChange> {
+    fn get_changes_slow(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         let mut stack: Vec<_> = have_deps.iter().collect();
         let mut has_seen = HashSet::new();
         while let Some(hash) = stack.pop() {
@@ -712,7 +716,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_changes(&self, have_deps: &[amp::ChangeHash]) -> Vec<&EncodedChange> {
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
         } else {
@@ -720,13 +724,13 @@ impl Automerge {
         }
     }
 
-    pub fn get_heads(&self) -> Vec<amp::ChangeHash> {
+    pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
 
-    fn update_history(&mut self, change: EncodedChange) -> usize {
+    fn update_history(&mut self, change: Change) -> usize {
         self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
 
         let history_index = self.history.len();
@@ -742,7 +746,7 @@ impl Automerge {
         history_index
     }
 
-    fn update_deps(&mut self, change: &EncodedChange) {
+    fn update_deps(&mut self, change: &Change) {
         for d in &change.deps {
             self.deps.remove(d);
         }
@@ -848,10 +852,9 @@ pub(crate) struct Transaction {
     pub time: i64,
     pub message: Option<String>,
     pub extra_bytes: Vec<u8>,
-    pub hash: Option<amp::ChangeHash>,
-    pub deps: Vec<amp::ChangeHash>,
+    pub hash: Option<ChangeHash>,
+    pub deps: Vec<ChangeHash>,
     pub operations: Vec<Op>,
-    pub len: usize,
 }
 
 #[derive(Debug, Clone)]

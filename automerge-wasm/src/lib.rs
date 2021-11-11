@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
-//extern crate hex;
+
 #[allow(unused_macros)]
 macro_rules! log {
     ( $( $t:tt )* ) => {
@@ -260,7 +260,6 @@ impl Automerge {
                 .ok_or_else(|| "value must be a number".into())
                 .map(am::ScalarValue::F64),
             Some("bytes") => {
-                log!("BYTES {:?}", value);
                 Ok(am::ScalarValue::Bytes(
                     value.dyn_into::<Uint8Array>().unwrap().to_vec(),
                 ))
@@ -338,6 +337,30 @@ impl Automerge {
             .save()
             .map(|v| js_sys::Uint8Array::from(v.as_slice()))
             .map_err(to_js_err)
+    }
+
+    #[wasm_bindgen(js_name = applyChanges)]
+    pub fn apply_changes(&mut self, changes: Array) -> Result<(), JsValue> {
+        let deps: Result<Vec<js_sys::Uint8Array>,_> = changes.iter().map(|j| j.dyn_into()).collect();
+        let deps = deps?;
+        let deps: Result<Vec<am::Change>,_> = deps.iter().map(|a| am::decode_change(a.to_vec())).collect();
+        let deps = deps.map_err(to_js_err)?;
+        self.0.apply_changes(deps.as_ref());
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = getChanges)]
+    pub fn get_changes(&mut self, have_deps: Array) -> Result<Array, JsValue> {
+        let deps: Result<Vec<am::ChangeHash>,_> = have_deps.iter().map(|j| j.into_serde()).collect();
+        let deps = deps.map_err(to_js_err)?;
+        let changes = self.0.get_changes(&deps);
+        let changes : Array = changes.iter().map(|c| js_sys::Uint8Array::from(c.raw_bytes())).collect();
+        Ok(changes)
+    }
+
+    #[wasm_bindgen(js_name = getChangesAdded)]
+    pub fn get_changes_added(&mut self, other: &Automerge) -> Result<JsValue, JsValue> {
+        unimplemented!()
     }
 
     pub fn dump(&self) {

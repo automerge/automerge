@@ -88,13 +88,28 @@ function save() {
 function merge() {
 }
 
-function getChanges() {
+function getChanges(doc, heads) {
+  const state = doc[STATE]
+  return state.getChanges(heads)
 }
 
-function getAllChanges() {
+function getAllChanges(doc) {
+  return getChanges(doc, [])
 }
 
-function applyChanges() {
+function applyChanges(doc, changes) {
+  if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
+    throw new RangeError("must be the document root");
+  }
+  if (doc[FROZEN] === true) {
+    throw new RangeError("Attempting to use an outdated Automerge document")
+  }
+  if (doc[READ_ONLY] === false) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const state = doc[STATE]
+  state.applyChanges(changes)
+  return rootProxy(state, true);
 }
 
 function encodeChange() {
@@ -127,13 +142,22 @@ function dump(doc) {
 }
 
 function ex(doc, datatype, value) {
+  let val;
   switch (datatype) {
     case "map":
-      let val = {}
-      console.log("mapkeys",doc.keys(value))
+      val = {}
       for (const key of doc.keys(value)) {
         let subval = doc.value(value,key)
         val[key] = ex(doc, subval[0], subval[1])
+      }
+      return val
+    case "list":
+      val = []
+      let len = doc.length(value);
+      //console.log("LEN",len);
+      for (let i = 0; i < len; i++) {
+        let subval = doc.value(value, i)
+        val.push(ex(doc, subval[0], subval[1]))
       }
       return val
     case "bytes":

@@ -51,9 +51,13 @@ describe('Automerge', () => {
               d.true = true
               d.false = false
             })
-            Automerge.dump(doc7)
-            //assert.deepEqual(Automerge.toJS(doc6), {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
-            assert.deepEqual(doc6, {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
+
+            assert.deepEqual(doc7, {  hello: "world", true: true, false: false, int: -1, uint: 1, float64: 5.5, number1: 100, number2: -45.67, counter1: counter, timestamp1: timestamp, bytes1: bytes, app: null })
+
+            let changes = Automerge.getAllChanges(doc7)
+            let t1 = Automerge.init()
+            let t2 = Automerge.applyChanges(t1, changes)
+            assert.deepEqual(doc7,t2)
         })
 
         it('handle overwrites to values', () => {
@@ -110,6 +114,16 @@ describe('Automerge', () => {
             assert.deepEqual(doc3.list[1], "a")
             assert.deepEqual(doc3.list[2], 3)
             assert.deepEqual(doc3, { list: [1,"a",3] })
+        })
+        it('handle simple lists', () => {
+            let doc1 = Automerge.init()
+            let doc2 = Automerge.change(doc1, (d) => {
+              d.list = [ 1, 2, 3 ]
+            })
+            let changes = Automerge.getChanges(doc2, []) 
+            let docB1 = Automerge.init()
+            let docB2 = Automerge.applyChanges(docB1, changes)
+            assert.deepEqual(docB2, doc2);
         })
     })
 })

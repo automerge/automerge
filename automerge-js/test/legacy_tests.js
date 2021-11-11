@@ -21,7 +21,6 @@ const Automerge = require('../src')
 
         let sq1 = Automerge.init();
         let sq2 = Automerge.init();
-console.log("XX1")
 //        try {
 //          let zz = assert.strictEqual(sq1, sq2)
 //          console.log("XX2",zz)
