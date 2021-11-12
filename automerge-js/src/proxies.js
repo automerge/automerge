@@ -15,14 +15,19 @@ function parseListIndex(key) {
   return key
 }
 
-function valueAt(context, objectId, prop, path, readonly) {
-      let value = context.value(objectId, prop)
+function valueAt(context, objectId, prop, path, readonly, conflicts) {
+      let values = context.conflicts(objectId, prop)
+      if (values.length === 0) {
+        return
+      }
+      let value = values[0]
+      let local_conflict = values.length > 1
       const datatype = value[0]
       const val = value[1]
       switch (datatype) {
         case undefined: return;
-        case "map": return mapProxy(context, val, [ ... path, prop ], readonly);
-        case "list": return listProxy(context, val, [ ... path, prop ], readonly);
+        case "map": return mapProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
+        case "list": return listProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
         //case "table":
         //case "text":
         //case "cursor":
@@ -67,7 +72,7 @@ function am2js(value, context, path, index, readonly) {
 */
 
 function list_get(target, index) {
-    const [context, objectId, path, readonly, frozen] = target
+    const [context, objectId, path, readonly, frozen, conflicts] = target
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
@@ -80,19 +85,27 @@ function list_get(target, index) {
       let i = 0;
       return function *() {
         // FIXME - ugly
-        let value = valueAt(context, objectId, i, path, readonly)
+        let value = valueAt(context, objectId, i, path, readonly, conflicts)
         while (value !== undefined) {
             yield value
             i += 1
-            value = valueAt(context, objectId, i, path, readonly)
+            value = valueAt(context, objectId, i, path, readonly, conflicts)
         }
       }
     }
     if (typeof index === 'number') {
-      return valueAt(context, objectId, index, path, readonly)
+      return valueAt(context, objectId, index, path, readonly, conflicts)
     } else {
       return listMethods(target)[index]
     }
+}
+
+function local_conflicts(target, key) {
+    const { context, objectId } = target
+    if (!context) {
+      return false
+    }
+    return context.conflicts(objectId, key).length > 1
 }
 
 function map_get(target, key) {
@@ -113,61 +126,35 @@ function import_value(value) {
           return [ null, "null"]
         } else if (value instanceof Uint) {
           return [ value.value, "uint" ]
-          //context.set(objectId, key, value.value, "uint");
         } else if (value instanceof Int) {
           return [ value.value, "int" ]
-          //context.set(objectId, key, value.value, "int");
         } else if (value instanceof Float64) {
           return [ value.value, "f64" ]
-          //context.set(objectId, key, value.value, "f64");
         } else if (value instanceof Counter) {
           return [ value.value, "counter" ]
-          //context.set(objectId, key, value.value, "counter");
         } else if (value instanceof Date) {
           return [ value.getTime(), "timestamp" ]
-          //context.set(objectId, key, value.getTime(), "timestamp");
         } else if (value instanceof Uint8Array) {
           return [ value, "bytes" ]
-          //context.set(objectId, key, value, "bytes");
         } else if (value instanceof Array) {
           return [ value, "list" ]
-          /*
-          const childID = context.makeList(objectId, key)
-          const child = listProxy(context, childID, [ ... path, key ]);
-          // FIXME use splice
-          for (const i = 0; i < value.length; i++) {
-            child[i] = value[i]
-          }
-          */
         } else if (value[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
         } else {
           return [ value, "map" ]
-          /*
-          const childID = context.makeMap(objectId, key)
-          const child = mapProxy(context, childID, [ ... path, key ]);
-          for (const key in value) {
-            child[key] = value[key]
-          }
-          */
         }
         break;
       case 'boolean':
         return [ value, "boolean" ]
-        //context.set(objectId, key, value, "boolean");
-        //break;
       case 'number':
         if (Number.isInteger(value)) {
           return [ value, "int" ]
-         // context.set(objectId, key, value, "int");
         } else {
           return [ value, "f64" ]
-          //context.set(objectId, key, value, "f64");
         }
         break;
       case 'string':
         return [ value ]
-        //context.set(objectId, key, value);
         break;
       default:
         throw new RangeError(`Unsupported type of value: ${typeof value}`)
@@ -181,10 +168,14 @@ const MapHandler = {
   },
 
   set (target, key, val) {
-    const { context, objectId, path, readonly, frozen } = target
+    let { context, objectId, path, readonly, frozen, conflicts } = target
     let [ value, datatype] = import_value(val)
     if (key === FROZEN) {
       target.frozen = val
+      return
+    }
+    conflicts = conflicts || local_conflicts(target, key)
+    if (map_get(target,key) === val && !conflicts) {
       return
     }
     if (frozen) {
@@ -196,7 +187,7 @@ const MapHandler = {
     switch (datatype) {
       case "list":
         const list = context.makeList(objectId, key)
-        const proxyList = listProxy(context, list, [ ... path, key ]);
+        const proxyList = listProxy(context, list, [ ... path, key ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
@@ -204,7 +195,7 @@ const MapHandler = {
         break;
       case "map":
         const map = context.makeMap(objectId, key)
-        const proxyMap = mapProxy(context, map, [ ... path, key ]);
+        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -304,10 +295,14 @@ const ListHandler = {
   },
 
   set (target, index, val) {
-    const [context, objectId, path, readonly, frozen ] = target
+    let [context, objectId, path, readonly, frozen , conflicts ] = target
     const [ value, datatype] = import_value(val)
     if (index === FROZEN) {
       target.frozen = val
+      return
+    }
+    conflicts = conflicts || local_conflicts(target, index)
+    if (list_get(target,index) === val && !conflicts) {
       return
     }
     if (frozen) {
@@ -319,7 +314,7 @@ const ListHandler = {
     switch (datatype) {
       case "list":
         const list = context.makeList(objectId, index)
-        const proxyList = listProxy(context, list, [ ... path, index ]);
+        const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
         for (const i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
@@ -327,7 +322,7 @@ const ListHandler = {
         break;
       case "map":
         const map = context.makeMap(objectId, index)
-        const proxyMap = mapProxy(context, map, [ ... path, index ]);
+        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -378,23 +373,23 @@ const ListHandler = {
   }
 }
 
-function mapProxy(context, objectId, path, readonly) {
-  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false}, MapHandler)
+function mapProxy(context, objectId, path, readonly, conflicts) {
+  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, conflicts}, MapHandler)
 }
 
-function listProxy(context, objectId, path, readonly) {
+function listProxy(context, objectId, path, readonly, conflict) {
   readonly = !!readonly
   let frozen = false
-  return new Proxy([context, objectId, path, readonly, frozen], ListHandler)
+  return new Proxy([context, objectId, path, readonly, frozen, conflict], ListHandler)
 }
 
 function rootProxy(context, readonly) {
   //context.instantiateObject = instantiateProxy
-  return mapProxy(context, AutomergeWASM.root(), [], readonly)
+  return mapProxy(context, AutomergeWASM.root(), [], readonly, false)
 }
 
 function listMethods(target) {
-  const [context, objectId, path, readonly, frozen] = target
+  const [context, objectId, path, readonly, frozen, conflicts] = target
   const methods = {
     deleteAt(index, numDelete) {
       context.splice(path, parseListIndex(index), numDelete || 1, [])
@@ -481,7 +476,7 @@ function listMethods(target) {
         next: () => {
           //let rawVal = context.value(objectId, i)
           //let value = am2js(rawVal, context, path, i, readonly)
-          let value = valueAt(context, objectId, i, path, readonly)
+          let value = valueAt(context, objectId, i, path, readonly, conflicts)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
@@ -497,7 +492,7 @@ function listMethods(target) {
       const iterator = {
         next: () => {
           // TODO - use len not value
-          let value = valueAt(context, objectId, i, path, readonly)
+          let value = valueAt(context, objectId, i, path, readonly, conflicts)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
@@ -513,7 +508,7 @@ function listMethods(target) {
       let i = 0;
       const iterator = {
         next: () => {
-          let value = valueAt(context, objectId, i, path, readonly)
+          let value = valueAt(context, objectId, i, path, readonly, conflicts)
           if (value === undefined) {
             return { value: undefined, done: true }
           } else {
@@ -538,7 +533,7 @@ function listMethods(target) {
       while (true) {
         //let rawVal = context.value(objectId, list.length)
         //let value = am2js(rawVal, context, path, list.length, readonly)
-        let value =  valueAt(context, objectId, list.length, path, readonly)
+        let value =  valueAt(context, objectId, list.length, path, readonly, conflicts)
         if (value == undefined) {
           break
         }

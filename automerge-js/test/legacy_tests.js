@@ -182,7 +182,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2, s1)
       })
 
-      it.skip('should ignore field updates that write the existing value', () => {
+      it('should ignore field updates that write the existing value', () => {
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.change(s1, doc => doc.field = 123)
         assert.strictEqual(s2, s1)
@@ -206,7 +206,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2, s1)
       })
 
-      it('should not ignore list element updates that resolve a conflict', () => {
+      it.skip('should not ignore list element updates that resolve a conflict', () => {
         s1 = Automerge.change(s1, doc => doc.list = [1])
         s2 = Automerge.merge(Automerge.init(), s1)
         s1 = Automerge.change(s1, doc => doc.list[0] = 123)
