@@ -303,23 +303,56 @@ impl Automerge {
         let index = arg.as_f64().map(|v| v as usize);
         //            .ok_or(JsErr("prop must be a string".into()))?;
         let result = Array::new();
-        let value = match (index, prop) {
+        let values = match (index, prop) {
             (Some(n), _) => Ok(self.0.list_value(&obj, n)),
             (_, Some(p)) => Ok(self.0.map_value(&obj, &p)),
             _ => Err(JsErr("prop must be a string or number".into())),
         }?;
         //        let value = self.0.map_value(&obj, &prop);
 
-        match value {
+        match values.get(0) {
             Some(Value::Object(obj_type, obj_id)) => {
                 result.push(&obj_type.to_string().into());
-                result.push(&self.export(obj_id));
+                result.push(&self.export(*obj_id));
             }
-            Some(Value::Scalar(value)) => {
+            Some(Value::Scalar(value, _)) => {
                 result.push(&datatype(&value).into());
-                result.push(&ScalarValue(value).into());
+                result.push(&ScalarValue(value.clone()).into());
             }
             None => {}
+        }
+        Ok(result)
+    }
+
+    pub fn conflicts(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let prop = arg.as_string();
+        let index = arg.as_f64().map(|v| v as usize);
+        //            .ok_or(JsErr("prop must be a string".into()))?;
+        let result = Array::new();
+        let values = match (index, prop) {
+            (Some(n), _) => Ok(self.0.list_value(&obj, n)),
+            (_, Some(p)) => Ok(self.0.map_value(&obj, &p)),
+            _ => Err(JsErr("prop must be a string or number".into())),
+        }?;
+        //        let value = self.0.map_value(&obj, &prop);
+       
+        for value in values {
+            match value {
+                Value::Object(obj_type, obj_id) => {
+                    let sub = Array::new();
+                    sub.push(&obj_type.to_string().into());
+                    sub.push(&self.export(obj_id));
+                    result.push(&sub.into());
+                }
+                Value::Scalar(value, id) => {
+                    let sub = Array::new();
+                    sub.push(&datatype(&value).into());
+                    sub.push(&ScalarValue(value).into());
+                    sub.push(&self.export(id));
+                    result.push(&sub.into());
+                }
+            }
         }
         Ok(result)
     }
@@ -349,7 +382,7 @@ impl Automerge {
         let deps = deps?;
         let deps: Result<Vec<am::Change>,_> = deps.iter().map(|a| am::decode_change(a.to_vec())).collect();
         let deps = deps.map_err(to_js_err)?;
-        self.0.apply_changes(deps.as_ref());
+        self.0.apply_changes(deps.as_ref()).map_err(to_js_err)?;
         Ok(())
     }
 

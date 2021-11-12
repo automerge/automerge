@@ -12,7 +12,6 @@ const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 // TODO - Cursors
 // TODO - inc, del
 // TODO - load()
-// TODO - generateSyncMessage, receiveSyncMessage
 // TODO - micro-patches (needed for fully hydrated object in js)
 // 
 // AUTOMERGE PRIMARY FEATURES
@@ -108,7 +107,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should not register any conflicts on repeated assignment', () => {
+    it('should not register any conflicts on repeated assignment', () => {
       assert.strictEqual(Automerge.getConflicts(s1, 'foo'), undefined)
       s1 = Automerge.change(s1, 'change', doc => doc.foo = 'one')
       assert.strictEqual(Automerge.getConflicts(s1, 'foo'), undefined)
@@ -130,7 +129,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2, {first: 'one', second: 'two'})
       })
 
-      it.skip('should freeze objects if desired', () => {
+      it('should freeze objects if desired', () => {
         s1 = Automerge.init({freeze: true})
         s2 = Automerge.change(s1, doc => doc.foo = 'bar')
         try {
@@ -168,7 +167,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2, {value: 'c'})
       })
 
-      it.skip('should not record conflicts when writing the same field several times within one change', () => {
+      it('should not record conflicts when writing the same field several times within one change', () => {
         s1 = Automerge.change(s1, 'change message', doc => {
           doc.value = 'a'
           doc.value = 'b'
@@ -189,7 +188,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2, s1)
       })
 
-      it.skip('should not ignore field updates that resolve a conflict', () => {
+      it('should not ignore field updates that resolve a conflict', () => {
         s2 = Automerge.merge(Automerge.init(), s1)
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.change(s2, doc => doc.field = 321)
@@ -207,7 +206,7 @@ describe('Automerge', () => {
         assert.strictEqual(s2, s1)
       })
 
-      it.skip('should not ignore list element updates that resolve a conflict', () => {
+      it('should not ignore list element updates that resolve a conflict', () => {
         s1 = Automerge.change(s1, doc => doc.list = [1])
         s2 = Automerge.merge(Automerge.init(), s1)
         s1 = Automerge.change(s1, doc => doc.list[0] = 123)
@@ -331,7 +330,7 @@ describe('Automerge', () => {
     })
 
     describe('emptyChange()', () => {
-      it.skip('should append an empty change to the history', () => {
+      it('should append an empty change to the history', () => {
         s1 = Automerge.change(s1, 'first change', doc => doc.field = 123)
         s2 = Automerge.emptyChange(s1, 'empty change')
         assert.notStrictEqual(s2, s1)
@@ -339,7 +338,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(Automerge.getHistory(s2).map(state => state.change.message), ['first change', 'empty change'])
       })
 
-      it.skip('should reference dependencies', () => {
+      it('should reference dependencies', () => {
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.merge(Automerge.init(), s1)
         s2 = Automerge.change(s2, doc => doc.other = 'hello')

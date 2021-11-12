@@ -46,7 +46,23 @@ impl OpId {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Object(amp::ObjType, ObjId),
-    Scalar(amp::ScalarValue),
+    Scalar(amp::ScalarValue, OpId),
+}
+
+impl Value {
+    pub fn to_obj_id(&self) -> Option<ObjId> {
+        match self {
+            Value::Object(_, id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn to_string(&self) -> Option<String> {
+        match self {
+            Value::Scalar(val, _) => Some(val.to_string()),
+            _ => None,
+        }
+    }
 }
 
 impl Exportable for ObjId {
@@ -135,7 +151,7 @@ impl From<&Op> for Value {
     fn from(op: &Op) -> Self {
         match &op.action {
             amp::OpType::Make(obj_type) => Value::Object(*obj_type, ObjId(op.id)),
-            amp::OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            amp::OpType::Set(scalar) => Value::Scalar(scalar.clone(), op.id),
             _ => panic!("cant convert op into a value"),
         }
     }

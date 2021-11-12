@@ -33,6 +33,9 @@ function change(doc, options, callback) {
     callback = options
     options = {}
   }
+  if (typeof options === "string") {
+    options = { message: options }
+  }
   if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
     throw new RangeError("must be the document root");
   }
@@ -43,7 +46,7 @@ function change(doc, options, callback) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const state = doc[STATE].clone()
-  state.begin()
+  state.begin(options.message, options.time)
   try {
     doc[FROZEN] = true
     let root = rootProxy(state);
@@ -64,7 +67,12 @@ function change(doc, options, callback) {
 }
 
 function emptyChange(doc, options) {
-  // FIXME implement options
+  if (options === undefined) {
+    options = {}
+  }
+  if (typeof options === "string") {
+    options = { message: options }
+  }
 
   if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
     throw new RangeError("must be the document root");
@@ -77,7 +85,7 @@ function emptyChange(doc, options) {
   }
 
   const state = doc[STATE]
-  state.begin()
+  state.begin(options.message, options.time)
   state.commit()
   return rootProxy(state, true);
 }
@@ -101,6 +109,53 @@ function merge(local, remote) {
 function getActorId(doc) {
   const state = doc[STATE]
   return state.getActorId()
+}
+
+function conflictAt(context, objectId, prop) {
+      let values = context.conflicts(objectId, prop)
+      if (values.length <= 1) {
+        return
+      }
+      let result = {}
+      for (const conflict of values) {
+        const datatype = conflict[0]
+        const value = conflict[1]
+        switch (datatype) {
+          case "map": 
+            result[val] = { type: "map" }
+            break;
+          case "list":
+            result[val] = { type: "list" }
+            break;
+          //case "table":
+          //case "text":
+          //case "cursor":
+          case "str": 
+          case "uint": 
+          case "int": 
+          case "f64": 
+          case "boolean": 
+          case "bytes":
+          case "null":
+            result[conflict[2]] = value
+            break;
+          case "counter":
+            result[conflict[2]] = new Counter(value)
+            break;
+          case "timestamp":
+            result[conflict[2]] = new Date(value)
+            break;
+          default:
+            throw RangeError(`datatype ${datatype} unimplemented`)
+        }
+      }
+      return result
+}
+
+function getConflicts(doc, prop) {
+  const state = doc[STATE]
+  const objectId = doc[OBJECT_ID]
+  return conflictAt(state, objectId, prop)
 }
 
 function getLastLocalChange(doc) {
@@ -139,7 +194,19 @@ function applyChanges(doc, changes) {
 function equals() {
 }
 
-function getHistory() {
+function getHistory(doc) {
+  const actor = getActorId(doc)
+  const history = getAllChanges(doc)
+  return history.map((change, index) => ({
+      get change () {
+        return decodeChange(change)
+      },
+      get snapshot () {
+        const state = applyChanges(init(), history.slice(0, index + 1))
+        return rootProxy(state, true)
+      }
+    })
+  )
 }
 
 function uuid() {
@@ -204,7 +271,7 @@ function toJS(doc) {
 module.exports = {
     init, from, change, emptyChange, clone, free,
     load, save, merge, getChanges, getAllChanges, applyChanges,
-    getLastLocalChange, getObjectId, getActorId,
+    getLastLocalChange, getObjectId, getActorId, getConflicts,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
     toJS, dump, Counter, Int, Uint, Float64
@@ -216,7 +283,7 @@ module.exports = {
 // more...
 /*
 for (let name of ['getObjectId', 'getObjectById',
-       'setActorId', 'getConflicts',
+       'setActorId',
        'Text', 'Table', 'Counter', 'Observable' ]) {
     module.exports[name] = Frontend[name]
 }

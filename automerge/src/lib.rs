@@ -36,7 +36,7 @@ use nonzero_ext::nonzero;
 use protocol::Op;
 use sync::BloomFilter;
 pub use protocol::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Peer, Value, HEAD, ROOT, Patch
+    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Value, Peer, HEAD, ROOT, Patch
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -121,16 +121,25 @@ impl Automerge {
 
         let actor = self.actor.ok_or(AutomergeError::ActorNotSet)?;
 
+        let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+        let mut deps = self.get_heads();
+        if seq > 1 {
+            let last_hash = self.get_hash(actor, seq - 1)?;
+            if !deps.contains(&last_hash) {
+                deps.push(last_hash);
+            }
+        }
+
         self.transaction = Some(Transaction {
-            actor: actor,
-            seq: self.states.entry(actor).or_default().len() as u64 + 1,
+            actor,
+            seq,
             start_op: self.max_op + 1,
             time: time.unwrap_or(0),
             message,
             extra_bytes: Default::default(),
             hash: None,
             operations: vec![],
-            deps: vec![],
+            deps,
         });
 
         Ok(())
@@ -233,9 +242,10 @@ impl Automerge {
         }
     }
 
-    fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Option<&Op> {
+    fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Vec<&Op> {
         let mut seen = 0;
         let mut seen_visible = false;
+        let mut result = vec![];
         while *pos < self.ops.len() {
             let op = &self.ops[*pos];
             if &op.obj != obj {
@@ -248,12 +258,15 @@ impl Automerge {
                 seen += 1;
                 seen_visible = true;
             }
-            if seen > n {
-                return Some(op);
+            if seen == n + 1 {
+                result.push(op)
+            }
+            if seen > n + 1 {
+                break
             }
             *pos += 1;
         }
-        None
+        result
     }
 
     fn scan_visible(&self, obj: &ObjId, pos: &mut usize) -> usize {
@@ -302,18 +315,18 @@ impl Automerge {
         }
     }
 
-    fn scan_to_prop_value(&self, obj: &ObjId, key: &Key, _clock: &Clock, pos: &mut usize) -> Option<&Op> {
+    fn scan_to_prop_value(&self, obj: &ObjId, key: &Key, _clock: &Clock, pos: &mut usize) -> Vec<&Op> {
+        let mut result = vec![];
         while *pos < self.ops.len()
             && &self.ops[*pos].obj == obj
             && &self.ops[*pos].key == key
         {
-            if !self.ops[*pos].visible() {
-                *pos += 1
-            } else {
-                return Some(&self.ops[*pos])
+            if self.ops[*pos].visible() {
+                result.push(&self.ops[*pos])
             }
+            *pos += 1
         }
-        None
+        result
     }
 
     fn scan_to_elem_insert_op1(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
@@ -461,25 +474,29 @@ impl Automerge {
         result
     }
 
-    pub fn map_value(&self, obj: &ObjId, prop: &str) -> Option<Value> {
+    pub fn map_value(&self, obj: &ObjId, prop: &str) -> Vec<Value> {
         self.map_value_at(obj, prop, &[])
     }
 
-    pub fn map_value_at(&self, obj: &ObjId, prop: &str, heads: &[amp::ChangeHash]) -> Option<Value> {
+    pub fn map_value_at(&self, obj: &ObjId, prop: &str, heads: &[amp::ChangeHash]) -> Vec<Value> {
         let clock = self.clock_at(heads);
         let mut pos = 0;
-        let prop = Key::Map(self.props.lookup(prop.to_owned())?);
+        let prop = self.props.lookup(prop.to_owned());
+        if prop.is_none() {
+            return vec![]
+        }
+        let prop = Key::Map(prop.unwrap());
         self.scan_to_obj(obj, &mut pos);
         self.scan_to_prop_start(obj, &prop, &mut pos);
-        let op = self.scan_to_prop_value(obj, &prop, &clock, &mut pos);
-        op.map(|o| o.into())
+        let ops = self.scan_to_prop_value(obj, &prop, &clock, &mut pos);
+        ops.into_iter().map(|o| o.into()).collect()
     }
 
-    pub fn list_value(&self, obj: &ObjId, index: usize) -> Option<Value> {
+    pub fn list_value(&self, obj: &ObjId, index: usize) -> Vec<Value> {
         let mut pos = 0;
         self.scan_to_obj(obj, &mut pos);
-        let op = self.scan_to_nth_visible(obj, index, &mut pos);
-        op.map(|o| o.into())
+        let ops = self.scan_to_nth_visible(obj, index, &mut pos);
+        ops.into_iter().map(|o| o.into()).collect()
     }
 
     pub fn list_length(&self, obj: &ObjId) -> usize {
@@ -500,8 +517,8 @@ impl Automerge {
     pub fn set_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<Key> {
         let mut pos = 0;
         self.scan_to_obj(obj, &mut pos);
-        let op = self.scan_to_nth_visible(obj, index, &mut pos);
-        op.and_then(|o| o.elemid()).map(|e| e.into())
+        let ops = self.scan_to_nth_visible(obj, index, &mut pos);
+        ops.get(0).and_then(|o| o.elemid()).map(|e| e.into())
     }
 
     pub fn make(
@@ -654,19 +671,16 @@ impl Automerge {
             .collect()
     }
 
-    pub fn apply(&mut self, _data: &[u8]) {
-        unimplemented!()
-    }
-
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         encode_document(&c, &self.ops, &self.actors, &self.props.cache)
     }
+
     pub fn save_incremental(&mut self) -> Vec<u8> {
         unimplemented!()
     }
 
-        /// Filter the changes down to those that are not transitive dependencies of the heads.
+    /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
     pub(crate) fn filter_changes(
@@ -883,6 +897,15 @@ impl Automerge {
         deps
     }
 
+    fn get_hash(&self, actor: usize, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+        self.states
+            .get(&actor)
+            .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|&i| self.history.get(i))
+            .map(|c| c.hash)
+            .ok_or(AutomergeError::InvalidSeq(seq))
+    }
+
     fn update_history(&mut self, change: Change) -> usize {
         self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
 
@@ -1050,7 +1073,7 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, Key, Value, HEAD, ROOT};
+    use crate::{Automerge, Key, HEAD, ROOT};
     use automerge_protocol as amp;
 
     #[test]
@@ -1058,12 +1081,12 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
         doc.begin(None, None).unwrap();
-        let key = doc.prop_to_key("hello".into());
+        let key = doc.prop_to_key("hello".into()).unwrap();
         doc.set(ROOT, key, "world".into(), false).unwrap();
         //doc.map_set(ROOT, "&hello", "world".into()).unwrap();
         assert!(doc.pending_ops() == 1);
         doc.commit().unwrap();
-        doc.map_value(&ROOT, "hello").unwrap();
+        doc.map_value(&ROOT, "hello").get(0).unwrap();
     }
 
     #[test]
@@ -1073,7 +1096,7 @@ mod tests {
         doc.begin(None, None).unwrap();
         let list_id = doc.map_make(ROOT, "items", amp::ObjType::List).unwrap();
         doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();
-        assert!(doc.map_value(&ROOT, "items") == Some(Value::Object(amp::ObjType::List, list_id)));
+        assert!(doc.map_value(&ROOT, "items")[0].to_obj_id() ==Some(list_id));
         let aid = doc.set(list_id, Key::Seq(HEAD), "a".into(), true).unwrap();
         let bid = doc.set(list_id, HEAD.into(), "b".into(), true).unwrap();
         doc.set(list_id, aid.into(), "c".into(), true).unwrap();
@@ -1081,11 +1104,11 @@ mod tests {
         //doc.dump2();
         //println!("0 {:?}",doc.list_value(&list_id, 0));
         //println!("1 {:?}",doc.list_value(&list_id, 1));
-        //println!("2 {:?}",doc.list_value(&list_id, 2));
-        assert!(doc.list_value(&list_id, 0) == Some(Value::Scalar("b".into())));
-        assert!(doc.list_value(&list_id, 1) == Some(Value::Scalar("d".into())));
-        assert!(doc.list_value(&list_id, 2) == Some(Value::Scalar("a".into())));
-        assert!(doc.list_value(&list_id, 3) == Some(Value::Scalar("c".into())));
+        // FIXME - this is terrible
+        assert!(doc.list_value(&list_id, 0)[0].to_string() == Some("\"b\"".into()));
+        assert!(doc.list_value(&list_id, 1)[0].to_string() == Some("\"d\"".into()));
+        assert!(doc.list_value(&list_id, 2)[0].to_string() == Some("\"a\"".into()));
+        assert!(doc.list_value(&list_id, 3)[0].to_string() == Some("\"c\"".into()));
         assert!(doc.list_length(&list_id) == 4);
         doc.commit().unwrap();
         doc.save().unwrap();

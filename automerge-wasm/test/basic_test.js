@@ -51,8 +51,6 @@ describe('Automerge', () => {
 
       result = doc.value(root,"number")
       assert.deepEqual(result,["uint",5])
-
-      //doc.dump()
     })
 
     it('should be able to make sub objects', () => {
@@ -71,8 +69,6 @@ describe('Automerge', () => {
 
       result = doc.value(submap,"number")
       assert.deepEqual(result,["uint",6])
-
-      doc.dump()
     })
 
     it('should be able to make lists', () => {
@@ -92,8 +88,8 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(submap, 3),["str","c"])
       assert.deepEqual(doc.length(submap),4)
 
-      let b = doc.save()
-      console.log(b)
+      //let b = doc.save()
+      //console.log(b)
     })
   })
 })

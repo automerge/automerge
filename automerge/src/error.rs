@@ -23,6 +23,8 @@ pub enum AutomergeError {
     Encoding,
     #[error("key must not be an empty string")]
     EmptyStringKey,
+    #[error("invalid seq {0}")]
+    InvalidSeq(u64),
 }
 
 impl From<std::io::Error> for AutomergeError {
