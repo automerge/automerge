@@ -147,6 +147,10 @@ pub enum Key {
     Seq(ElemId),
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+pub struct Patch { }
+
+
 impl Key {
     fn elemid(&self) -> Option<ElemId> {
         match self {

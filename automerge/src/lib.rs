@@ -19,6 +19,7 @@ mod columnar;
 mod decoding;
 mod encoding;
 mod indexed_cache;
+mod sync;
 
 mod error;
 mod expanded_op;
@@ -26,14 +27,16 @@ mod internal;
 mod protocol;
 
 use automerge_protocol as amp;
+use std::collections::VecDeque;
 use change::{encode_document, export_change};
 use core::ops::Range;
 use error::AutomergeError;
 use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
 use protocol::Op;
+use sync::BloomFilter;
 pub use protocol::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Peer, Value, HEAD, ROOT,
+    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Peer, Value, HEAD, ROOT, Patch
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -47,6 +50,7 @@ pub use amp::{ActorId, ObjType, ScalarValue};
 #[derive(Debug, Clone)]
 pub struct Automerge {
     actors: IndexedCache<amp::ActorId>,
+    queue: Vec<Change>,
     props: IndexedCache<String>,
     history: Vec<Change>,
     history_index: HashMap<ChangeHash, usize>,
@@ -63,6 +67,7 @@ impl Automerge {
         Automerge {
             actors: IndexedCache::from(vec![]),
             props: IndexedCache::new(),
+            queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
             states: HashMap::new(),
@@ -86,6 +91,7 @@ impl Automerge {
         Automerge {
             actors: IndexedCache::from(vec![actor]),
             props: IndexedCache::new(),
+            queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
             states: HashMap::new(),
@@ -595,21 +601,15 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn generate_sync_message(&self, _peer: &Peer) -> Option<Vec<u8>> {
-        unimplemented!()
-    }
-    pub fn receive_sync_message(&mut self, _peer: &Peer, _msg: &[u8]) {
-        unimplemented!()
-    }
-
     pub fn load(_data: &[u8]) -> Self {
         unimplemented!()
     }
 
-    pub fn apply_changes(&mut self, changes: &[Change]) {
+    pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
         for c in changes {
             self.apply_change(c.clone())
         }
+        Ok(Patch {})
     }
 
     pub fn apply_change(&mut self, change: Change) {
@@ -664,6 +664,96 @@ impl Automerge {
     }
     pub fn save_incremental(&mut self) -> Vec<u8> {
         unimplemented!()
+    }
+
+        /// Filter the changes down to those that are not transitive dependencies of the heads.
+    ///
+    /// Thus a graph with these heads has not seen the remaining changes.
+    pub(crate) fn filter_changes(
+        &self,
+        heads: &[amp::ChangeHash],
+        changes: &mut HashSet<amp::ChangeHash>,
+    ) {
+        // Reduce the working set to find to those which we may be able to find.
+        // This filters out those hashes that are successors of or concurrent with all of the
+        // heads.
+        // This can help in avoiding traversing the entire graph back to the roots when we try to
+        // search for a hash we can know won't be found there.
+        let max_head_index = heads
+            .iter()
+            .map(|h| self.history_index.get(h).unwrap_or(&0))
+            .max()
+            .unwrap_or(&0);
+        let mut may_find: HashSet<ChangeHash> = changes
+            .iter()
+            .filter(|hash| {
+                let change_index = self.history_index.get(hash).unwrap_or(&0);
+                change_index <= max_head_index
+            })
+            .copied()
+            .collect();
+
+        if may_find.is_empty() {
+            return;
+        }
+
+        let mut queue: VecDeque<_> = heads.iter().collect();
+        let mut seen = HashSet::new();
+        while let Some(hash) = queue.pop_front() {
+            if seen.contains(hash) {
+                continue;
+            }
+            seen.insert(hash);
+
+            let removed = may_find.remove(hash);
+            changes.remove(hash);
+            if may_find.is_empty() {
+                break;
+            }
+
+            for dep in self
+                .history_index
+                .get(hash)
+                .and_then(|i| self.history.get(*i))
+                .map(|c| c.deps.as_slice())
+                .unwrap_or_default()
+            {
+                // if we just removed something from our hashes then it is likely there is more
+                // down here so do a quick inspection on the children.
+                // When we don't remove anything it is less likely that there is something down
+                // that chain so delay it.
+                if removed {
+                    queue.push_front(dep);
+                } else {
+                    queue.push_back(dep);
+                }
+            }
+        }
+    }
+
+    pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+        let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
+        let mut missing = HashSet::new();
+
+        for head in self.queue.iter().flat_map(|change| &change.deps) {
+            if !self.history_index.contains_key(head) {
+                missing.insert(head);
+            }
+        }
+
+        for head in heads {
+            if !self.history_index.contains_key(head) {
+                missing.insert(head);
+            }
+        }
+
+        let mut missing = missing
+            .into_iter()
+            .filter(|hash| !in_queue.contains(hash))
+            .copied()
+            .collect::<Vec<_>>();
+        missing.sort();
+        missing
     }
 
     fn get_changes_fast(&self, have_deps: &[ChangeHash]) -> Option<Vec<&Change>> {
