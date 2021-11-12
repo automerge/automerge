@@ -76,6 +76,18 @@ function list_get(target, index) {
     if (typeof index === 'string' && /^[0-9]+$/.test(index)) {
       index = parseListIndex(index)
     }
+    if (index === Symbol.iterator) { 
+      let i = 0;
+      return function *() {
+        // FIXME - ugly
+        let value = valueAt(context, objectId, i, path, readonly)
+        while (value !== undefined) {
+            yield value
+            i += 1
+            value = valueAt(context, objectId, i, path, readonly)
+        }
+      }
+    }
     if (typeof index === 'number') {
       return valueAt(context, objectId, index, path, readonly)
     } else {
@@ -127,6 +139,8 @@ function import_value(value) {
             child[i] = value[i]
           }
           */
+        } else if (value[OBJECT_ID]) {
+          throw new RangeError('Cannot create a reference to an existing document object')
         } else {
           return [ value, "map" ]
           /*
@@ -156,7 +170,7 @@ function import_value(value) {
         //context.set(objectId, key, value);
         break;
       default:
-        throw new RangeError(`cant handle value of type "${typeof value}"`)
+        throw new RangeError(`Unsupported type of value: ${typeof value}`)
     }
 }
 
@@ -167,19 +181,18 @@ const MapHandler = {
   },
 
   set (target, key, val) {
-    //console.log("set",key);
     const { context, objectId, path, readonly, frozen } = target
-    if (frozen) {
-      throw new RangeError("Attempting to use an outdated Automerge document")
-    }
+    let [ value, datatype] = import_value(val)
     if (key === FROZEN) {
       target.frozen = val
       return
     }
+    if (frozen) {
+      throw new RangeError("Attempting to use an outdated Automerge document")
+    }
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
-    let [ value, datatype] = import_value(val)
     switch (datatype) {
       case "list":
         const list = context.makeList(objectId, key)
@@ -292,17 +305,17 @@ const ListHandler = {
 
   set (target, index, val) {
     const [context, objectId, path, readonly, frozen ] = target
-    if (frozen) {
-      throw new RangeError("Attempting to use an outdated Automerge document")
-    }
+    const [ value, datatype] = import_value(val)
     if (index === FROZEN) {
       target.frozen = val
       return
     }
+    if (frozen) {
+      throw new RangeError("Attempting to use an outdated Automerge document")
+    }
     if (readonly) {
       throw new RangeError(`Object property "${index}" cannot be modified`)
     }
-    const [ value, datatype] = import_value(val)
     switch (datatype) {
       case "list":
         const list = context.makeList(objectId, index)
@@ -332,6 +345,7 @@ const ListHandler = {
   },
 
   has (target, key) {
+    console.log("HAS",key);
     const [context, objectId, /* path, readonly, frozen */] = target
     if (typeof key === 'string' && /^[0-9]+$/.test(key)) {
       return parseListIndex(key) < context.length(objectId)
@@ -343,7 +357,7 @@ const ListHandler = {
     const [context, objectId, path, readonly, frozen ] = target
 
     if (index === 'length') return {writable: true, value: context.length(objectId) }
-    //if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
+    if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
 
     if (typeof index === 'string' && /^[0-9]+$/.test(index)) {
       index = parseListIndex(index)
@@ -383,13 +397,11 @@ function listMethods(target) {
   const [context, objectId, path, readonly, frozen] = target
   const methods = {
     deleteAt(index, numDelete) {
-      console.log("DELETE AT");
       context.splice(path, parseListIndex(index), numDelete || 1, [])
       return this
     },
 
     fill(value, start, end) {
-      console.log("FILL");
       let list = context.getObject(objectId)
       for (let index = parseListIndex(start || 0); index < parseListIndex(end || list.length); index++) {
         context.setListIndex(path, index, value)
@@ -398,7 +410,6 @@ function listMethods(target) {
     },
 
     indexOf(o, start = 0) {
-      console.log("INDEX OF");
       const id = o[OBJECT_ID]
       if (id) {
         const list = context.getObject(objectId)
@@ -414,7 +425,6 @@ function listMethods(target) {
     },
 
     insertAt(index, ...values) {
-      console.log("INSERT AT");
       context.splice(path, parseListIndex(index), 0, values)
       return this
     },
@@ -446,7 +456,6 @@ function listMethods(target) {
     },
 
     splice(start, deleteCount, ...values) {
-      console.log("SPLICE");
       let list = context.getObject(objectId)
       start = parseListIndex(start)
       if (deleteCount === undefined || deleteCount > list.length - start) {
@@ -504,8 +513,6 @@ function listMethods(target) {
       let i = 0;
       const iterator = {
         next: () => {
-          //let rawVal = context.value(objectId, i)
-          //let value = am2js(rawVal, context, path, i, readonly)
           let value = valueAt(context, objectId, i, path, readonly)
           if (value === undefined) {
             return { value: undefined, done: true }

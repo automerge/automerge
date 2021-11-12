@@ -1,3 +1,4 @@
+#![allow(unused_variables)]
 use crate::columnar::ColumnEncoder;
 use crate::columnar::OperationIterator;
 use crate::columnar::COLUMN_TYPE_DEFLATE;

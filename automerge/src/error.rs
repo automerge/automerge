@@ -21,6 +21,8 @@ pub enum AutomergeError {
     InvalidListAt(String, usize),
     #[error("there was an encoding problem")]
     Encoding,
+    #[error("key must not be an empty string")]
+    EmptyStringKey,
 }
 
 impl From<std::io::Error> for AutomergeError {

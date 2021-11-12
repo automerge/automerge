@@ -56,7 +56,7 @@ describe('Automerge', () => {
 
             let changes = Automerge.getAllChanges(doc7)
             let t1 = Automerge.init()
-            let t2 = Automerge.applyChanges(t1, changes)
+            ;let [t2] = Automerge.applyChanges(t1, changes)
             assert.deepEqual(doc7,t2)
         })
 
@@ -75,7 +75,6 @@ describe('Automerge', () => {
               d.hello = "world4"
             })
             assert.deepEqual(doc5, {  hello: "world4" } )
-            Automerge.dump(doc5)
         })
 
         it('handle set with object value', () => {
@@ -107,8 +106,6 @@ describe('Automerge', () => {
               d.list[1] = "a"
             })
 
-            Automerge.dump(doc3)
-
             assert.deepEqual(doc3.list.length, 3)
             assert.deepEqual(doc3.list[0], 1)
             assert.deepEqual(doc3.list[1], "a")
@@ -122,7 +119,7 @@ describe('Automerge', () => {
             })
             let changes = Automerge.getChanges(doc2, []) 
             let docB1 = Automerge.init()
-            let docB2 = Automerge.applyChanges(docB1, changes)
+            ;let [docB2] = Automerge.applyChanges(docB1, changes)
             assert.deepEqual(docB2, doc2);
         })
     })

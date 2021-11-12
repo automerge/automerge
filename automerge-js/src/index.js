@@ -1,13 +1,14 @@
 
 let AutomergeWASM = require("automerge-wasm")
+const { encodeChange, decodeChange } = require('./columnar')
 
 let { rootProxy  } = require("./proxies")
 let { Counter  } = require("./counter")
 let { Int, Uint, Float64  } = require("./numbers")
 let { STATE, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
 
-function init() {
-  const state = AutomergeWASM.init()
+function init(actor) {
+  const state = AutomergeWASM.init(actor)
   return rootProxy(state, true);
 }
 
@@ -20,8 +21,8 @@ function free(doc) {
   return doc[STATE].free()
 }
 
-function from(data) {
-    let doc1 = init()
+function from(data, actor) {
+    let doc1 = init(actor)
     let doc2 = change(doc1, (d) => Object.assign(d, data))
     return doc2
 }
@@ -41,7 +42,7 @@ function change(doc, options, callback) {
   if (doc[READ_ONLY] === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = doc[STATE]
+  const state = doc[STATE].clone()
   state.begin()
   try {
     doc[FROZEN] = true
@@ -49,12 +50,14 @@ function change(doc, options, callback) {
     callback(root)
     if (state.pending_ops() === 0) {
       state.rollback()
+      doc[FROZEN] = false
       return doc
     } else {
       state.commit()
       return rootProxy(state, true);
     }
   } catch (e) {
+    doc[FROZEN] = false
     state.rollback()
     throw e
   }
@@ -82,10 +85,31 @@ function emptyChange(doc, options) {
 function load() {
 }
 
-function save() {
+function save(doc) {
+  const state = doc[STATE]
+  return state.save()
 }
 
-function merge() {
+function merge(local, remote) {
+  const localState = local[STATE]
+  const remoteState = remote[STATE]
+  const changes = localState.getChangesAdded(remoteState)
+  localState.applyChanges(changes)
+  return rootProxy(localState, true);
+}
+
+function getActorId(doc) {
+  const state = doc[STATE]
+  return state.getActorId()
+}
+
+function getLastLocalChange(doc) {
+  const state = doc[STATE]
+  return state.getLastLocalChange()
+}
+
+function getObjectId(doc) {
+  return doc[OBJECT_ID]
 }
 
 function getChanges(doc, heads) {
@@ -109,13 +133,7 @@ function applyChanges(doc, changes) {
   }
   const state = doc[STATE]
   state.applyChanges(changes)
-  return rootProxy(state, true);
-}
-
-function encodeChange() {
-}
-
-function decodeChange() {
+  return [rootProxy(state, true)];
 }
 
 function equals() {
@@ -154,7 +172,6 @@ function ex(doc, datatype, value) {
     case "list":
       val = []
       let len = doc.length(value);
-      //console.log("LEN",len);
       for (let i = 0; i < len; i++) {
         let subval = doc.value(value, i)
         val.push(ex(doc, subval[0], subval[1]))
@@ -187,6 +204,7 @@ function toJS(doc) {
 module.exports = {
     init, from, change, emptyChange, clone, free,
     load, save, merge, getChanges, getAllChanges, applyChanges,
+    getLastLocalChange, getObjectId, getActorId,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
     toJS, dump, Counter, Int, Uint, Float64
@@ -197,9 +215,9 @@ module.exports = {
 
 // more...
 /*
-for (let name of ['getObjectId', 'getObjectById', 'getActorId',
-       'setActorId', 'getConflicts', 'getLastLocalChange',
-       'Text', 'Table', 'Counter', 'Observable', 'Int', 'Uint', 'Float64']) {
+for (let name of ['getObjectId', 'getObjectById',
+       'setActorId', 'getConflicts',
+       'Text', 'Table', 'Counter', 'Observable' ]) {
     module.exports[name] = Frontend[name]
 }
 */

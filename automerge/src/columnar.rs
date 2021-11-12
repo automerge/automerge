@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
 use core::fmt::Debug;
 use std::{
     borrow::Cow,

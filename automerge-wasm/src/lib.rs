@@ -77,8 +77,12 @@ impl<'a> From<&'a str> for JsErr {
 
 #[wasm_bindgen]
 impl Automerge {
-    pub fn new() -> Result<Automerge, JsValue> {
-        let actor = automerge::ActorId::from(hex::decode("aabbccdd").map_err(to_js_err)?);
+    pub fn new(actor: JsValue) -> Result<Automerge, JsValue> {
+        let actor = match actor.as_string() {
+            Some(a) => automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec()),
+            _ => automerge::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec()),
+        };
+        //let actor = automerge::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
         let mut automerge = automerge::Automerge::new();
         automerge.set_actor(actor);
         Ok(Automerge(automerge))
@@ -156,7 +160,7 @@ impl Automerge {
             return Err("prop must be a valid string".into());
         }
         let prop = prop.unwrap();
-        let key = self.0.prop_to_key(prop);
+        let key = self.0.prop_to_key(prop).map_err(to_js_err)?;
         Ok(key)
     }
 
@@ -173,7 +177,7 @@ impl Automerge {
         let key = self
             .0
             .insert_pos_for_index(obj, index)
-            .ok_or_else(|| JsErr("index out of bounds".into()))?;
+            .ok_or_else(|| JsErr("index is out of bounds".into()))?;
         Ok(key)
     }
 
@@ -186,7 +190,7 @@ impl Automerge {
         let key = self
             .0
             .set_pos_for_index(obj, index)
-            .ok_or_else(|| JsErr("index out of bounds".into()))?;
+            .ok_or_else(|| JsErr("index is out of bounds".into()))?;
         Ok(key)
     }
 
@@ -359,8 +363,28 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getChangesAdded)]
-    pub fn get_changes_added(&mut self, other: &Automerge) -> Result<JsValue, JsValue> {
-        unimplemented!()
+    pub fn get_changes_added(&mut self, other: &Automerge) -> Result<Array, JsValue> {
+        let changes = self.0.get_changes_added(&other.0);
+        let changes : Array = changes.iter().map(|c| js_sys::Uint8Array::from(c.raw_bytes())).collect();
+        Ok(changes)
+    }
+
+    #[wasm_bindgen(js_name = getActorId)]
+    pub fn get_actor_id(&self) -> Result<JsValue, JsValue> {
+        if let Some(actor) = self.0.get_actor() {
+            Ok(actor.to_string().into())
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
+    #[wasm_bindgen(js_name = getLastLocalChange)]
+    pub fn get_last_local_change(&mut self) -> Result<JsValue, JsValue> {
+        if let Some(change) = self.0.get_last_local_change() {
+            Ok(js_sys::Uint8Array::from(change.raw_bytes()).into())
+        } else {
+            Ok(JsValue::null())
+        }
     }
 
     pub fn dump(&self) {
@@ -369,9 +393,9 @@ impl Automerge {
 }
 
 #[wasm_bindgen]
-pub fn init() -> Result<Automerge, JsValue> {
+pub fn init(actor: JsValue) -> Result<Automerge, JsValue> {
     console_error_panic_hook::set_once();
-    Automerge::new()
+    Automerge::new(actor)
 }
 
 #[wasm_bindgen]

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use automerge_protocol as amp;
 use nonzero_ext::nonzero;
 use smol_str::SmolStr;

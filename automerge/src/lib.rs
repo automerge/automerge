@@ -1,5 +1,3 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
 
 extern crate hex;
 extern crate uuid;
@@ -80,7 +78,7 @@ impl Automerge {
         self.actor = Some(self.actors.cache(actor))
     }
 
-    pub fn get_actor(self) -> Option<amp::ActorId> {
+    pub fn get_actor(&self) -> Option<amp::ActorId> {
         self.actor.map(|a| self.actors[a].clone())
     }
 
@@ -119,7 +117,7 @@ impl Automerge {
 
         self.transaction = Some(Transaction {
             actor: actor,
-            seq: self.states.entry(actor).or_default().len() as u64,
+            seq: self.states.entry(actor).or_default().len() as u64 + 1,
             start_op: self.max_op + 1,
             time: time.unwrap_or(0),
             message,
@@ -164,8 +162,11 @@ impl Automerge {
         }
     }
 
-    pub fn prop_to_key(&mut self, prop: String) -> Key {
-        Key::Map(self.props.cache(prop))
+    pub fn prop_to_key(&mut self, prop: String) -> Result<Key,AutomergeError> {
+        if prop == "" {
+            return Err(AutomergeError::EmptyStringKey)
+        }
+        Ok(Key::Map(self.props.cache(prop)))
     }
 
     fn key_cmp(&self, left: &Key, right: &Key) -> Option<Ordering> {
@@ -173,10 +174,6 @@ impl Automerge {
             (Key::Map(a), Key::Map(b)) => Some(self.props[*a].cmp(&self.props[*b])),
             _ => None,
         }
-    }
-
-    fn calc_pred(&self, obj: &ObjId, key: &Key, insert: bool) -> Vec<OpId> {
-        Default::default()
     }
 
     fn make_op(
@@ -292,21 +289,25 @@ impl Automerge {
                     self.ops[*pos].succ.push(op.id);
                     op.pred.push(self.ops[*pos].id);
                 }
-            } else if self.ops[*pos].visible() && op.pred.iter().any(|i| i == &op.id) {
+            } else if op.pred.iter().any(|i| i == &op.id) {
                 self.ops[*pos].succ.push(op.id);
             }
             *pos += 1
         }
     }
 
-    fn scan_to_prop_value(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
+    fn scan_to_prop_value(&self, obj: &ObjId, key: &Key, _clock: &Clock, pos: &mut usize) -> Option<&Op> {
         while *pos < self.ops.len()
             && &self.ops[*pos].obj == obj
             && &self.ops[*pos].key == key
-            && !self.ops[*pos].succ.is_empty()
         {
-            *pos += 1
+            if !self.ops[*pos].visible() {
+                *pos += 1
+            } else {
+                return Some(&self.ops[*pos])
+            }
         }
+        None
     }
 
     fn scan_to_elem_insert_op1(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
@@ -356,7 +357,6 @@ impl Automerge {
     fn scan_to_elem_update_pos(
         &mut self,
         op: &mut Op,
-        elem: &ElemId,
         local: bool,
         pos: &mut usize,
     ) {
@@ -380,7 +380,7 @@ impl Automerge {
         }
     }
 
-    fn scan_to_lesser_insert(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_lesser_insert(&self, op: &Op, pos: &mut usize, seen: &mut usize) {
         let mut seen_key = None;
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
@@ -404,7 +404,7 @@ impl Automerge {
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_elem_insert_op2(op, elem, &mut pos, &mut seen);
-        self.scan_to_elem_update_pos(op, elem, local, &mut pos);
+        self.scan_to_elem_update_pos(op, local, &mut pos);
         Cursor { pos, seen }
     }
 
@@ -413,7 +413,7 @@ impl Automerge {
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_elem_insert_op1(op, elem, &mut pos, &mut seen);
-        self.scan_to_lesser_insert(op, elem, &mut pos, &mut seen);
+        self.scan_to_lesser_insert(op, &mut pos, &mut seen);
         Cursor { pos, seen }
     }
 
@@ -456,12 +456,17 @@ impl Automerge {
     }
 
     pub fn map_value(&self, obj: &ObjId, prop: &str) -> Option<Value> {
+        self.map_value_at(obj, prop, &[])
+    }
+
+    pub fn map_value_at(&self, obj: &ObjId, prop: &str, heads: &[amp::ChangeHash]) -> Option<Value> {
+        let clock = self.clock_at(heads);
         let mut pos = 0;
         let prop = Key::Map(self.props.lookup(prop.to_owned())?);
         self.scan_to_obj(obj, &mut pos);
         self.scan_to_prop_start(obj, &prop, &mut pos);
-        self.scan_to_prop_value(obj, &prop, &mut pos);
-        self.ops.get(pos).map(|o| o.into())
+        let op = self.scan_to_prop_value(obj, &prop, &clock, &mut pos);
+        op.map(|o| o.into())
     }
 
     pub fn list_value(&self, obj: &ObjId, index: usize) -> Option<Value> {
@@ -514,7 +519,7 @@ impl Automerge {
         prop: &str,
         obj_type: amp::ObjType,
     ) -> Result<ObjId, AutomergeError> {
-        let key = self.prop_to_key(prop.into());
+        let key = self.prop_to_key(prop.into())?;
         Ok(ObjId(self.make_op(
             obj,
             key,
@@ -529,7 +534,7 @@ impl Automerge {
         prop: &str,
         value: amp::ScalarValue,
     ) -> Result<OpId, AutomergeError> {
-        let key = self.prop_to_key(prop.into());
+        let key = self.prop_to_key(prop.into())?;
         self.make_op(obj, key, amp::OpType::Set(value), false)
     }
 
@@ -569,7 +574,7 @@ impl Automerge {
         }
     }
 
-    pub fn inc(&mut self, obj: ObjId, key: Key, value: i64) -> Result<(), AutomergeError> {
+    pub fn inc(&mut self, _obj: ObjId, _key: Key, _value: i64) -> Result<(), AutomergeError> {
         unimplemented!()
     }
 
@@ -578,26 +583,26 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn splice(&mut self, path: &str, range: Range<usize>, replace: Vec<amp::ScalarValue>) {
+    pub fn splice(&mut self, _path: &str, _range: Range<usize>, _replace: Vec<amp::ScalarValue>) {
         unimplemented!()
     }
 
-    pub fn text(&self, path: &str) -> String {
+    pub fn text(&self, _path: &str) -> String {
         unimplemented!()
     }
 
-    pub fn value(&self, path: &str) -> Value {
+    pub fn value(&self, _path: &str) -> Value {
         unimplemented!()
     }
 
-    pub fn generate_sync_message(&self, peer: &Peer) -> Option<Vec<u8>> {
+    pub fn generate_sync_message(&self, _peer: &Peer) -> Option<Vec<u8>> {
         unimplemented!()
     }
-    pub fn receive_sync_message(&mut self, peer: &Peer, msg: &[u8]) {
+    pub fn receive_sync_message(&mut self, _peer: &Peer, _msg: &[u8]) {
         unimplemented!()
     }
 
-    pub fn load(data: &[u8]) -> Self {
+    pub fn load(_data: &[u8]) -> Self {
         unimplemented!()
     }
 
@@ -649,7 +654,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn apply(&mut self, data: &[u8]) {
+    pub fn apply(&mut self, _data: &[u8]) {
         unimplemented!()
     }
 
@@ -716,12 +721,70 @@ impl Automerge {
             .collect()
     }
 
+    pub fn get_last_local_change(&self) -> Option<&Change> {
+        if let Some(actor) = &self.actor {
+            let actor = &self.actors[*actor];
+            return self.history.iter().rev().find(|c| c.actor_id() == actor)
+        }
+        return None
+    }
+
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
         } else {
             self.get_changes_slow(have_deps)
         }
+    }
+
+    fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
+        if heads.is_empty() {
+            return Clock::Head
+        }
+        // FIXME - could be way faster
+        let changes = self.get_changes(heads);
+        let mut clock = HashMap::new();
+        for c in changes {
+            let actor = self.actors.lookup(c.actor_id().clone()).unwrap();
+            if let Some(val) = clock.get(&actor) {
+                if val < &c.seq {
+                    clock.insert(actor,c.seq);
+                }
+            } else {
+                clock.insert(actor,c.seq);
+            }
+        }
+        Clock::At(clock)
+
+    }
+
+    pub fn get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
+        self.history_index
+            .get(hash)
+            .and_then(|index| self.history.get(*index))
+    }
+
+    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
+        // Depth-first traversal from the heads through the dependency graph,
+        // until we reach a change that is already present in other
+        let mut stack: Vec<_> = other.get_heads();
+        let mut seen_hashes = HashSet::new();
+        let mut added_change_hashes = Vec::new();
+        while let Some(hash) = stack.pop() {
+            if !seen_hashes.contains(&hash) && self.get_change_by_hash(&hash).is_none() {
+                seen_hashes.insert(hash);
+                added_change_hashes.push(hash);
+                if let Some(change) = other.get_change_by_hash(&hash) {
+                    stack.extend(&change.deps);
+                }
+            }
+        }
+        // Return those changes in the reverse of the order in which the depth-first search
+        // found them. This is not necessarily a topological sort, but should usually be close.
+        added_change_hashes
+            .into_iter()
+            .filter_map(|h| other.get_change_by_hash(&h))
+            .collect()
     }
 
     pub fn get_heads(&self) -> Vec<ChangeHash> {
@@ -732,6 +795,8 @@ impl Automerge {
 
     fn update_history(&mut self, change: Change) -> usize {
         self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
+
+        self.update_deps(&change);
 
         let history_index = self.history.len();
 
@@ -855,6 +920,12 @@ pub(crate) struct Transaction {
     pub hash: Option<ChangeHash>,
     pub deps: Vec<ChangeHash>,
     pub operations: Vec<Op>,
+}
+
+#[derive(Debug)]
+enum Clock {
+    Head,
+    At(HashMap<usize,u64>),
 }
 
 #[derive(Debug, Clone)]
