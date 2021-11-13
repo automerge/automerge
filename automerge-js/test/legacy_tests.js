@@ -12,7 +12,9 @@ const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 // TODO - Cursors
 // TODO - inc, del
 // TODO - load()
+// TODO - reconstruct change from opset
 // TODO - micro-patches (needed for fully hydrated object in js)
+// TODO - valueAt(heads)
 // 
 // AUTOMERGE PRIMARY FEATURES
 //
@@ -761,9 +763,7 @@ describe('Automerge', () => {
         }, /Cannot create a reference to an existing document object/)
       })
     })
-  })
-})
-/*
+
     describe('counters', () => {
       it.skip('should allow deleting counters from maps', () => {
         const s1 = Automerge.change(Automerge.init(), doc => doc.birds = {wrens: new Automerge.Counter(1)})
@@ -790,7 +790,7 @@ describe('Automerge', () => {
       s3 = Automerge.init()
     })
 
-    it.skip('should merge concurrent updates of different properties', () => {
+    it('should merge concurrent updates of different properties', () => {
       s1 = Automerge.change(s1, doc => doc.foo = 'bar')
       s2 = Automerge.change(s2, doc => doc.hello = 'world')
       s3 = Automerge.merge(s1, s2)
@@ -862,7 +862,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should handle assignment conflicts of different types', () => {
+    it('should handle assignment conflicts of different types', () => {
       s1 = Automerge.change(s1, doc => doc.field = 'string')
       s2 = Automerge.change(s2, doc => doc.field = ['list'])
       s3 = Automerge.change(s3, doc => doc.field = {thing: 'map'})
@@ -875,7 +875,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should handle changes within a conflicting map field', () => {
+    it('should handle changes within a conflicting map field', () => {
       s1 = Automerge.change(s1, doc => doc.field = 'string')
       s2 = Automerge.change(s2, doc => doc.field = {})
       s2 = Automerge.change(s2, doc => doc.field.innerKey = 42)
@@ -906,7 +906,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should not merge concurrently assigned nested maps', () => {
+    it('should not merge concurrently assigned nested maps', () => {
       s1 = Automerge.change(s1, doc => doc.config = {background: 'blue'})
       s2 = Automerge.change(s2, doc => doc.config = {logo_url: 'logo.png'})
       s3 = Automerge.merge(s1, s2)
@@ -1041,10 +1041,9 @@ describe('Automerge', () => {
         ['to', 'do', 'is', 'to', 'be', 'to', 'be', 'is', 'to', 'do'])
       // In case you're wondering: http://quoteinvestigator.com/2013/09/16/do-be-do/
     })
-  })
 
     describe('multiple insertions at the same list position', () => {
-      it('should handle insertion by greater actor ID', () => {
+      it.skip('should handle insertion by greater actor ID', () => {
         s1 = Automerge.init('aaaa')
         s2 = Automerge.init('bbbb')
         s1 = Automerge.change(s1, doc => doc.list = ['two'])
@@ -1053,7 +1052,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2.list, ['one', 'two'])
       })
 
-      it('should handle insertion by lesser actor ID', () => {
+      it.skip('should handle insertion by lesser actor ID', () => {
         s1 = Automerge.init('bbbb')
         s2 = Automerge.init('aaaa')
         s1 = Automerge.change(s1, doc => doc.list = ['two'])
@@ -1062,14 +1061,14 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2.list, ['one', 'two'])
       })
 
-      it('should handle insertion regardless of actor ID', () => {
+      it.skip('should handle insertion regardless of actor ID', () => {
         s1 = Automerge.change(s1, doc => doc.list = ['two'])
         s2 = Automerge.merge(s2, s1)
         s2 = Automerge.change(s2, doc => doc.list.splice(0, 0, 'one'))
         assert.deepStrictEqual(s2.list, ['one', 'two'])
       })
 
-      it('should make insertion order consistent with causality', () => {
+      it.skip('should make insertion order consistent with causality', () => {
         s1 = Automerge.change(s1, doc => doc.list = ['four'])
         s2 = Automerge.merge(s2, s1)
         s2 = Automerge.change(s2, doc => doc.list.unshift('three'))
@@ -1080,6 +1079,9 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s2.list, ['one', 'two', 'three', 'four'])
       })
     })
+  })
+})
+/*
   })
 
   describe('saving and loading', () => {

@@ -2,7 +2,7 @@
 let AutomergeWASM = require("automerge-wasm")
 const { encodeChange, decodeChange } = require('./columnar')
 
-let { rootProxy  } = require("./proxies")
+let { rootProxy, listProxy, mapProxy } = require("./proxies")
 let { Counter  } = require("./counter")
 let { Int, Uint, Float64  } = require("./numbers")
 let { STATE, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
@@ -121,20 +121,20 @@ function conflictAt(context, objectId, prop) {
         const datatype = conflict[0]
         const value = conflict[1]
         switch (datatype) {
-          case "map": 
-            result[val] = { type: "map" }
+          case "map":
+            result[value] = mapProxy(context, value, [ prop ], true, true)
             break;
           case "list":
-            result[val] = { type: "list" }
+            result[value] = listProxy(context, value, [ prop ], true, true)
             break;
           //case "table":
           //case "text":
           //case "cursor":
-          case "str": 
-          case "uint": 
-          case "int": 
-          case "f64": 
-          case "boolean": 
+          case "str":
+          case "uint":
+          case "int":
+          case "f64":
+          case "boolean":
           case "bytes":
           case "null":
             result[conflict[2]] = value

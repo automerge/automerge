@@ -79,7 +79,7 @@ function list_get(target, index) {
     if (index === FROZEN) return frozen
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId);
-    if (index === Symbol.iterator) { 
+    if (index === Symbol.iterator) {
       let i = 0;
       return function *() {
         // FIXME - ugly
@@ -319,7 +319,7 @@ const ListHandler = {
         const list = context.makeAt(objectId, index, "list")
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
-        for (const i = 0; i < value.length; i++) {
+        for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
         break;
@@ -544,4 +544,4 @@ function listMethods(target) {
   return methods
 }
 
-module.exports = { rootProxy } 
+module.exports = { rootProxy, listProxy, mapProxy }

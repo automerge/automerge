@@ -117,7 +117,7 @@ describe('Automerge', () => {
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = [ 1, 2, 3 ]
             })
-            let changes = Automerge.getChanges(doc2, []) 
+            let changes = Automerge.getChanges(doc2, [])
             let docB1 = Automerge.init()
             ;let [docB2] = Automerge.applyChanges(docB1, changes)
             assert.deepEqual(docB2, doc2);
