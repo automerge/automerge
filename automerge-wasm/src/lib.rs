@@ -7,6 +7,8 @@ use js_sys::{Array, Uint8Array};
 use wasm_bindgen::JsCast;
 //use serde::{de::DeserializeOwned, Serialize};
 use std::fmt::Display;
+use std::convert::TryFrom;
+use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 extern crate web_sys;
 
@@ -125,26 +127,29 @@ impl Automerge {
         self.0.import(&id_str).map_err(to_js_err)
     }
 
-    #[wasm_bindgen(js_name = makeMap)]
-    pub fn make_map(&mut self, obj: JsValue, prop: JsValue) -> Result<JsValue, JsValue> {
+    pub fn make(&mut self, obj: JsValue, prop: JsValue, obj_type: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let key = self.prop_to_key(prop)?;
+        let ObjType(obj_type) = &obj_type.try_into()?;
         let obj = self
             .0
-            .make(obj, key, am::ObjType::Map, false)
+            .make(obj, key, *obj_type, false)
             .map_err(to_js_err)?;
         Ok(self.export(obj))
     }
 
-    #[wasm_bindgen(js_name = makeList)]
-    pub fn make_list(&mut self, obj: JsValue, prop: JsValue) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = makeAt)]
+    pub fn make_at(&mut self, obj: JsValue, prop: JsValue, obj_type: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        //let key = self.prop_to_key(prop)?;
-        let key = prop.as_string().unwrap_or_default();
-        let obj = self
-            .0
-            .map_make(obj, &key, am::ObjType::List)
-            .map_err(to_js_err)?;
+        let ObjType(obj_type) = &obj_type.try_into()?;
+        let len = self.0.list_length(&obj);
+        if prop.as_f64().unwrap_or_default() as usize == len {
+            let key = self.insert_pos_for_index(&obj, prop)?;
+            self.0.make(obj, key, *obj_type, true).map_err(to_js_err)?;
+        } else {
+            let key = self.set_pos_for_index(&obj, prop)?;
+            self.0.make(obj, key, *obj_type, false).map_err(to_js_err)?;
+        }
         Ok(self.export(obj))
     }
 
@@ -424,6 +429,22 @@ impl Automerge {
         self.0.dump()
     }
 }
+
+struct ObjType(am::ObjType);
+
+impl TryFrom<JsValue> for ObjType {
+    type Error = JsValue;
+
+    fn try_from(val: JsValue) -> Result<Self, Self::Error> {
+        match &val.as_string() {
+            Some(o) if o == "map" => Ok(ObjType(am::ObjType::Map)),
+            Some(o) if o == "list" => Ok(ObjType(am::ObjType::List)),
+            Some(o) => Err(format!("unknown obj type {}",o).into()),
+            _ => Err(format!("obj type must be a string").into()),
+        }
+    }
+}
+
 
 #[wasm_bindgen]
 pub fn init(actor: JsValue) -> Result<Automerge, JsValue> {

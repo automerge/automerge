@@ -59,7 +59,7 @@ describe('Automerge', () => {
       let result
 
       doc.begin()
-      let submap = doc.makeMap(root, "submap")
+      let submap = doc.make(root, "submap", "map")
       doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pending_ops(),2)
       doc.commit()
@@ -76,7 +76,7 @@ describe('Automerge', () => {
       let root = Automerge.root()
 
       doc.begin()
-      let submap = doc.makeList(root, "numbers")
+      let submap = doc.make(root, "numbers", "list")
       doc.insert(submap, 0, "a");
       doc.insert(submap, 1, "b");
       doc.insert(submap, 2, "c");

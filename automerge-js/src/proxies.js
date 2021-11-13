@@ -7,7 +7,8 @@ const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
   if (typeof key !== 'number') {
-    throw new TypeError('A list index must be a number, but you passed ' + JSON.stringify(key))
+    // throw new TypeError('A list index must be a number, but you passed ' + JSON.stringify(key))
+    return key
   }
   if (key < 0 || isNaN(key) || key === Infinity || key === -Infinity) {
     throw new RangeError('A list index must be positive, but you passed ' + key)
@@ -78,9 +79,6 @@ function list_get(target, index) {
     if (index === FROZEN) return frozen
     if (index === STATE) return context;
     if (index === 'length') return context.length(objectId);
-    if (typeof index === 'string' && /^[0-9]+$/.test(index)) {
-      index = parseListIndex(index)
-    }
     if (index === Symbol.iterator) { 
       let i = 0;
       return function *() {
@@ -100,12 +98,12 @@ function list_get(target, index) {
     }
 }
 
-function local_conflicts(target, key) {
-    const { context, objectId } = target
-    if (!context) {
-      return false
+function local_conflicts(context, objectId, key) {
+    if (typeof key === "string" || typeof key === "number") {
+      const c = context.conflicts(objectId, key)
+      return c.length > 1
     }
-    return context.conflicts(objectId, key).length > 1
+    return false
 }
 
 function map_get(target, key) {
@@ -163,18 +161,20 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) {
+    //console.log("MAP.GET", key)
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     return map_get(target, key)
   },
 
   set (target, key, val) {
+    //console.log("MAP.SET", key, val)
     let { context, objectId, path, readonly, frozen, conflicts } = target
     let [ value, datatype] = import_value(val)
     if (key === FROZEN) {
       target.frozen = val
       return
     }
-    conflicts = conflicts || local_conflicts(target, key)
+    conflicts = conflicts || local_conflicts(context, objectId, key)
     if (map_get(target,key) === val && !conflicts) {
       return
     }
@@ -186,7 +186,7 @@ const MapHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.makeList(objectId, key)
+        const list = context.make(objectId, key, "list")
         const proxyList = listProxy(context, list, [ ... path, key ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
@@ -194,7 +194,7 @@ const MapHandler = {
         }
         break;
       case "map":
-        const map = context.makeMap(objectId, key)
+        const map = context.make(objectId, key, "map")
         const proxyMap = mapProxy(context, map, [ ... path, key ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -282,26 +282,29 @@ const MapHandler = {
   },
 
   ownKeys (target) {
-    //console.log("ownKeys");
     const { context, objectId } = target
     return context.keys(objectId)
   },
 }
 
 const ListHandler = {
-  get (target, key) {
-    if (key === Symbol.toStringTag) { return [][Symbol.toStringTag] }
-    return list_get(target, key)
+  get (target, index) {
+    index = parseListIndex(index)
+    //console.log("GET", index)
+    if (index === Symbol.toStringTag) { return [][Symbol.toStringTag] }
+    return list_get(target, index)
   },
 
   set (target, index, val) {
     let [context, objectId, path, readonly, frozen , conflicts ] = target
+    //console.log("SET", index, val)
+    index = parseListIndex(index)
     const [ value, datatype] = import_value(val)
     if (index === FROZEN) {
       target.frozen = val
       return
     }
-    conflicts = conflicts || local_conflicts(target, index)
+    conflicts = conflicts || local_conflicts(context, objectId, index)
     if (list_get(target,index) === val && !conflicts) {
       return
     }
@@ -313,7 +316,7 @@ const ListHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.makeList(objectId, index)
+        const list = context.makeAt(objectId, index, "list")
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
         for (const i = 0; i < value.length; i++) {
@@ -321,7 +324,7 @@ const ListHandler = {
         }
         break;
       case "map":
-        const map = context.makeMap(objectId, index)
+        const map = context.makeAt(objectId, index, "map")
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -333,8 +336,9 @@ const ListHandler = {
     return true
   },
 
-  deleteProperty (target, key) {
+  deleteProperty (target, index) {
     const [context, objectId, /* path, readonly, frozen */] = target
+    index = parseListIndex(index)
     //context.splice(path, parseListIndex(key), 1, [])
     return true
   },
@@ -342,8 +346,9 @@ const ListHandler = {
   has (target, key) {
     console.log("HAS",key);
     const [context, objectId, /* path, readonly, frozen */] = target
-    if (typeof key === 'string' && /^[0-9]+$/.test(key)) {
-      return parseListIndex(key) < context.length(objectId)
+    key = parseListIndex(key)
+    if (typeof key === 'number') {
+      return key < context.length(objectId)
     }
     return key === 'length'
   },
@@ -354,21 +359,13 @@ const ListHandler = {
     if (index === 'length') return {writable: true, value: context.length(objectId) }
     if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
 
-    if (typeof index === 'string' && /^[0-9]+$/.test(index)) {
-      index = parseListIndex(index)
-    }
-    //if (index < object.length) {
-      //let rawVal = context.value(objectId, index);
-      //let value = am2js(rawVal, context, path, index, readonly)
+    index = parseListIndex(index)
+
     let value = valueAt(context, objectId, index, path, readonly)
     return { configurable: true, enumerable: true, value }
-    //}
   },
 
   ownKeys (target) {
-    //const [context, objectId, /* path, readonly, frozen */] = target
-    //let keys = ['length']
-    //return keys
     return ['length']
   }
 }

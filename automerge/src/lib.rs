@@ -536,6 +536,7 @@ impl Automerge {
         )?))
     }
 
+    /*
     pub fn map_make(
         &mut self,
         obj: ObjId,
@@ -550,6 +551,7 @@ impl Automerge {
             false,
         )?))
     }
+    */
 
     pub fn map_set(
         &mut self,
@@ -1094,7 +1096,8 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
         doc.begin(None, None).unwrap();
-        let list_id = doc.map_make(ROOT, "items", amp::ObjType::List).unwrap();
+        let key = doc.prop_to_key("items".into()).unwrap();
+        let list_id = doc.make(ROOT, key, amp::ObjType::List, false).unwrap();
         doc.map_set(ROOT, "zzz", "zzzval".into()).unwrap();
         assert!(doc.map_value(&ROOT, "items")[0].to_obj_id() ==Some(list_id));
         let aid = doc.set(list_id, Key::Seq(HEAD), "a".into(), true).unwrap();
