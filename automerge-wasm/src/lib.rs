@@ -176,7 +176,7 @@ impl Automerge {
     ) -> Result<am::Key, JsValue> {
         let index = index.as_f64();
         if index.is_none() {
-            return Err("index must be a valid number".into());
+            return Err("list index must be a number".into());
         }
         let index = index.unwrap() as usize;
         let key = self
@@ -189,7 +189,7 @@ impl Automerge {
     fn set_pos_for_index(&mut self, obj: &am::ObjId, index: JsValue) -> Result<am::Key, JsValue> {
         let index = index.as_f64();
         if index.is_none() {
-            return Err("index must be a valid number".into());
+            return Err("list index must be a number".into());
         }
         let index = index.unwrap() as usize;
         let key = self

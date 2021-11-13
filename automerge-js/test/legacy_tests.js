@@ -16,17 +16,13 @@ const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 // 
 // AUTOMERGE PRIMARY FEATURES
 //
-// TODO - change (message and time options)
 // TODO - list: splice(), push(), pop(), ...
 // TODO - Text & Table proxies
 //
 // AUTOMERGE SECONDARY FEATURES
 //
-// TODO - getConflicts
-// TODO - getHistory
 // TODO - patchCallback
 // TODO - option: freeze
-// TODO - ignores isomorphic changes
 
 
 describe('Automerge', () => {
@@ -572,7 +568,7 @@ describe('Automerge', () => {
         assert.strictEqual(s1.noodles.length, 3)
       })
 
-      it.skip('should handle assignment of a list literal', () => {
+      it('should handle assignment of a list literal', () => {
         s1 = Automerge.change(s1, doc => doc.noodles = ['udon', 'ramen', 'soba'])
         assert.deepStrictEqual(s1, {noodles: ['udon', 'ramen', 'soba']})
         assert.deepStrictEqual(s1.noodles, ['udon', 'ramen', 'soba'])
@@ -583,7 +579,7 @@ describe('Automerge', () => {
         assert.strictEqual(s1.noodles.length, 3)
       })
 
-      it.skip('should only allow numeric indexes', () => {
+      it('should only allow numeric indexes', () => {
         s1 = Automerge.change(s1, doc => doc.noodles = ['udon', 'ramen', 'soba'])
         s1 = Automerge.change(s1, doc => doc.noodles[1] = 'Ramen!')
         assert.strictEqual(s1.noodles[1], 'Ramen!')
