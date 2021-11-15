@@ -907,3 +907,68 @@ fn test_inserts_at_end_of_lists() {
     });
     assert_eq!(value, expected_value);
 }
+
+// The logic for condensing multiple inserts was faulty in that it did not take
+// into account the `insert` flag on the ops that were being condensed. This led
+// to an issue where multiple set operations on an object were converted into a
+// multi-insert operation in the patch. This test reproduces that issue for the
+// avoidance of regressions.
+#[test]
+fn reproduce_condense_op_issue() {
+    let mut doc = Frontend::new();
+    let mut backend = automerge_backend::Backend::new();
+    doc.apply_patch(backend.get_patch().unwrap()).unwrap();
+    let (_, change) = doc
+        .change::<_, _, automerge_frontend::InvalidChangeRequest>(None, |doc| {
+            let init = serde_json::json!({
+                "title": "some title",
+                "description": "description",
+                "author": "some author",
+                "comments": [],
+            });
+            doc.add_change(automerge_frontend::LocalChange::set(
+                automerge_frontend::Path::root(),
+                automerge_frontend::Value::from_json(&init),
+            ))?;
+            Ok(())
+        })
+        .unwrap();
+    let (patch, _) = backend.apply_local_change(change.unwrap()).unwrap();
+    doc.apply_patch(patch).unwrap();
+
+    let mut doc2 = Frontend::new();
+    let mut backend2 = automerge_backend::Backend::load(backend.save().unwrap()).unwrap();
+    doc2.apply_patch(backend2.get_patch().unwrap()).unwrap();
+    let (_, change2) = doc2
+        .change::<_, _, automerge_frontend::InvalidChangeRequest>(None, |doc| {
+            let new_comment = serde_json::json!({
+                "author": "someotherauthor",
+                "comment": "some comment",
+            });
+            doc.add_change(automerge_frontend::LocalChange::insert(
+                automerge_frontend::Path::root().key("comments").index(0),
+                automerge_frontend::Value::from_json(&new_comment),
+            ))
+        })
+        .unwrap();
+    let (patch2, _) = backend2.apply_local_change(change2.unwrap()).unwrap();
+    doc2.apply_patch(patch2).unwrap();
+
+    let backend3 = automerge_backend::Backend::load(backend2.save().unwrap()).unwrap();
+    let mut doc3 = automerge_frontend::Frontend::new();
+    doc3.apply_patch(backend3.get_patch().unwrap()).unwrap();
+
+    let state3 = doc3.state().to_json();
+    assert_eq!(
+        state3,
+        serde_json::json!({
+            "title": "some title",
+            "description": "description",
+            "author": "some author",
+            "comments": [{
+                "author": "someotherauthor",
+                "comment": "some comment"
+            }]
+        })
+    );
+}
