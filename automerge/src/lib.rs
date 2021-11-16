@@ -172,7 +172,7 @@ impl Automerge {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
+            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
     }
@@ -228,7 +228,7 @@ impl Automerge {
                 pred: vec![],
                 insert,
             };
-            self.insert_op(op.clone(), true);
+            let op = self.insert_op(op, true);
             tx.operations.push(op);
             self.transaction = Some(tx);
             Ok(id)
@@ -326,7 +326,7 @@ impl Automerge {
                     self.ops[*pos].succ.push(op.id);
                     op.pred.push(self.ops[*pos].id);
                 }
-            } else if op.pred.iter().any(|i| i == &op.id) {
+            } else if op.pred.iter().any(|i| i == &self.ops[*pos].id) {
                 self.ops[*pos].succ.push(op.id);
             }
             *pos += 1
@@ -409,7 +409,7 @@ impl Automerge {
                 }
             } else if self.ops[*pos].visible()
                 && self.ops[*pos].elemid() == op.elemid()
-                && op.pred.iter().any(|i| i == &op.id)
+                && op.pred.iter().any(|i| i == &self.ops[*pos].id)
             {
                 self.ops[*pos].succ.push(op.id);
             }
@@ -470,11 +470,12 @@ impl Automerge {
         }
     }
 
-    fn insert_op(&mut self, mut op: Op, local: bool) {
+    fn insert_op(&mut self, mut op: Op, local: bool) -> Op {
         let cursor = self.seek_to_op(&mut op, local); //mut to collect pred
         if !op.is_del() {
-            self.ops.insert(cursor.pos, op);
+            self.ops.insert(cursor.pos, op.clone());
         }
+        op
     }
 
     pub fn keys(&self, obj: &ObjId) -> Vec<Key> {
@@ -646,7 +647,7 @@ impl Automerge {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
-            self.insert_op(op, false)
+            self.insert_op(op, false);
         }
     }
 
@@ -898,6 +899,7 @@ impl Automerge {
         }
         // Return those changes in the reverse of the order in which the depth-first search
         // found them. This is not necessarily a topological sort, but should usually be close.
+        added_change_hashes.reverse();
         added_change_hashes
             .into_iter()
             .filter_map(|h| other.get_change_by_hash(&h))

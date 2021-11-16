@@ -100,7 +100,7 @@ function save(doc) {
 }
 
 function merge(local, remote) {
-  const localState = local[STATE]
+  const localState = local[STATE].clone()
   const remoteState = remote[STATE]
   const changes = localState.getChangesAdded(remoteState)
   localState.applyChanges(changes)
@@ -187,7 +187,7 @@ function applyChanges(doc, changes) {
   if (doc[READ_ONLY] === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = doc[STATE]
+  const state = doc[STATE].clone()
   state.applyChanges(changes)
   return [rootProxy(state, true)];
 }

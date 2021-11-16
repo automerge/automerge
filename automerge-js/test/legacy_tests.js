@@ -416,7 +416,7 @@ describe('Automerge', () => {
         Automerge.change(s1, doc => {
           assert.throws(() => { doc.foo = undefined },         /Unsupported type of value: undefined/)
           assert.throws(() => { doc.foo = {prop: undefined} }, /Unsupported type of value: undefined/)
-            assert.throws(() => { doc.foo = () => {} },          /Unsupported type of value: function/)
+          assert.throws(() => { doc.foo = () => {} },          /Unsupported type of value: function/)
           assert.throws(() => { doc.foo = Symbol('foo') },     /Unsupported type of value: symbol/)
         })
       })
@@ -750,7 +750,7 @@ describe('Automerge', () => {
         assert.deepStrictEqual(s1.maze[0][0][0][0][0][0][0][1][1], 'here')
       })
 
-      it.skip('should not allow several references to the same list object', () => {
+      it('should not allow several references to the same list object', () => {
         s1 = Automerge.change(s1, doc => doc.list = [])
         assert.throws(() => {
           Automerge.change(s1, doc => { doc.x = doc.list })
@@ -830,7 +830,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should detect concurrent updates of the same field', () => {
+    it('should detect concurrent updates of the same field', () => {
       s1 = Automerge.change(s1, doc => doc.field = 'one')
       s2 = Automerge.change(s2, doc => doc.field = 'two')
       s3 = Automerge.merge(s1, s2)
@@ -845,7 +845,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should detect concurrent updates of the same list element', () => {
+    it('should detect concurrent updates of the same list element', () => {
       s1 = Automerge.change(s1, doc => doc.birds = ['finch'])
       s2 = Automerge.merge(s2, s1)
       s1 = Automerge.change(s1, doc => doc.birds[0] = 'greenfinch')
@@ -887,7 +887,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should handle changes within a conflicting list element', () => {
+    it('should handle changes within a conflicting list element', () => {
       s1 = Automerge.change(s1, doc => doc.list = ['hello'])
       s2 = Automerge.merge(s2, s1)
       s1 = Automerge.change(s1, doc => doc.list[0] = {map1: true})
@@ -917,7 +917,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should clear conflicts after assigning a new value', () => {
+    it('should clear conflicts after assigning a new value', () => {
       s1 = Automerge.change(s1, doc => doc.field = 'one')
       s2 = Automerge.change(s2, doc => doc.field = 'two')
       s3 = Automerge.merge(s1, s2)

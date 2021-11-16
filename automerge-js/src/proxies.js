@@ -167,14 +167,16 @@ const MapHandler = {
   },
 
   set (target, key, val) {
-    //console.log("MAP.SET", key, val)
     let { context, objectId, path, readonly, frozen, conflicts } = target
-    let [ value, datatype] = import_value(val)
+    if (val && val[OBJECT_ID]) {
+          throw new RangeError('Cannot create a reference to an existing document object')
+    }
     if (key === FROZEN) {
       target.frozen = val
       return
     }
     conflicts = conflicts || local_conflicts(context, objectId, key)
+    let [ value, datatype ] = import_value(val)
     if (map_get(target,key) === val && !conflicts) {
       return
     }
@@ -290,7 +292,11 @@ const MapHandler = {
 function splice(target, index, del, vals) {
     const [context, objectId, path, readonly, frozen, conflicts] = target
     index = parseListIndex(index)
-    const values = vals.map((val) => import_value(val))
+    for (let val of vals) {
+      if (val && val[OBJECT_ID]) {
+            throw new RangeError('Cannot create a reference to an existing document object')
+      }
+    }
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -303,6 +309,7 @@ function splice(target, index, del, vals) {
       result.push(value)
       context.del(objectId, index)
     }
+    const values = vals.map((val) => import_value(val))
     for (let [value,datatype] of values) {
       switch (datatype) {
         case "list":
@@ -341,12 +348,15 @@ const ListHandler = {
     //console.log("SET", index, val, objectId)
     //console.log("len", context.length(objectId))
     index = parseListIndex(index)
-    const [ value, datatype] = import_value(val)
+    if (val && val[OBJECT_ID]) {
+          throw new RangeError('Cannot create a reference to an existing document object')
+    }
     if (index === FROZEN) {
       target.frozen = val
       return
     }
     conflicts = conflicts || local_conflicts(context, objectId, index)
+    const [ value, datatype] = import_value(val)
     if (list_get(target,index) === val && !conflicts) {
       return
     }
