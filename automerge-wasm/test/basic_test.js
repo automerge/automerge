@@ -87,9 +87,18 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(submap, 2),["str","b"])
       assert.deepEqual(doc.value(submap, 3),["str","c"])
       assert.deepEqual(doc.length(submap),4)
+    })
 
-      //let b = doc.save()
-      //console.log(b)
+    it('should be able to del', () => {
+      let doc = Automerge.init()
+      let root = Automerge.root()
+
+      doc.begin()
+      doc.set(root, "xxx", "xxx");
+      assert.deepEqual(doc.value(root, "xxx"),["str","xxx"])
+      doc.del(root, "xxx");
+      assert.deepEqual(doc.value(root, "xxx"),[])
+      doc.commit()
     })
   })
 })

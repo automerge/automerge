@@ -25,6 +25,8 @@ pub enum AutomergeError {
     EmptyStringKey,
     #[error("invalid seq {0}")]
     InvalidSeq(u64),
+    #[error("invalid index {0}")]
+    InvalidIndex(usize),
 }
 
 impl From<std::io::Error> for AutomergeError {

@@ -135,6 +135,30 @@ impl Importable for OpId {
     }
 }
 
+impl From<String> for Prop {
+    fn from(p: String) -> Self {
+        Prop::Map(p)
+    }
+}
+
+impl From<&str> for Prop {
+    fn from(p: &str) -> Self {
+        Prop::Map(p.to_owned())
+    }
+}
+
+impl From<usize> for Prop {
+    fn from(index: usize) -> Self {
+        Prop::Seq(index)
+    }
+}
+
+impl From<f64> for Prop {
+    fn from(index: f64) -> Self {
+        Prop::Seq(index as usize)
+    }
+}
+
 impl From<OpId> for Key {
     fn from(id: OpId) -> Self {
         Key::Seq(ElemId(id))
@@ -161,6 +185,12 @@ impl From<&Op> for Value {
 pub enum Key {
     Map(usize),
     Seq(ElemId),
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+pub enum Prop {
+    Map(String),
+    Seq(usize),
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
@@ -198,6 +228,13 @@ pub(crate) struct Op {
 }
 
 impl Op {
+    pub fn is_del(&self) -> bool {
+        match self.action {
+            amp::OpType::Del(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn visible(&self) -> bool {
         self.succ.is_empty()
     }

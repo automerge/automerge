@@ -256,11 +256,11 @@ const MapHandler = {
   },
 
   deleteProperty (target, key) {
-    const { context, path, readonly } = target
+    const { context, objectId, path, readonly, frozen, conflicts } = target
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
-    context.deleteMapKey(obectId, key)
+    context.del(objectId, key)
     return true
   },
 
@@ -287,6 +287,47 @@ const MapHandler = {
   },
 }
 
+function splice(target, index, del, vals) {
+    const [context, objectId, path, readonly, frozen, conflicts] = target
+    index = parseListIndex(index)
+    const values = vals.map((val) => import_value(val))
+    if (frozen) {
+      throw new RangeError("Attempting to use an outdated Automerge document")
+    }
+    if (readonly) {
+      throw new RangeError(`Object property "${index}" cannot be modified`)
+    }
+    let result = []
+    for (let i = 0; i < del; i++) {
+      let value = valueAt(context, objectId, index, path, readonly, conflicts)
+      result.push(value)
+      context.del(objectId, index)
+    }
+    for (let [value,datatype] of values) {
+      switch (datatype) {
+        case "list":
+          const list = context.insertMakeAt(objectId, index, "list")
+          const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
+          // FIXME use splice
+          for (let i = 0; i < value.length; i++) {
+            proxyList[i] = value[i]
+          }
+          break;
+        case "map":
+          const map = context.insertMakeAt(objectId, index, "map")
+          const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
+          for (const key in value) {
+            proxyMap[key] = value[key]
+          }
+          break;
+        default:
+          context.insert(objectId, parseListIndex(index), value, datatype)
+      }
+      index += 1
+    }
+    return result
+}
+
 const ListHandler = {
   get (target, index) {
     index = parseListIndex(index)
@@ -297,7 +338,8 @@ const ListHandler = {
 
   set (target, index, val) {
     let [context, objectId, path, readonly, frozen , conflicts ] = target
-    //console.log("SET", index, val)
+    //console.log("SET", index, val, objectId)
+    //console.log("len", context.length(objectId))
     index = parseListIndex(index)
     const [ value, datatype] = import_value(val)
     if (index === FROZEN) {
@@ -339,7 +381,7 @@ const ListHandler = {
   deleteProperty (target, index) {
     const [context, objectId, /* path, readonly, frozen */] = target
     index = parseListIndex(index)
-    //context.splice(path, parseListIndex(key), 1, [])
+    context.del(objectId, index)
     return true
   },
 
@@ -389,19 +431,21 @@ function listMethods(target) {
   const [context, objectId, path, readonly, frozen, conflicts] = target
   const methods = {
     deleteAt(index, numDelete) {
-      context.splice(path, parseListIndex(index), numDelete || 1, [])
+      context.del(objectId, parseListIndex(index))
       return this
     },
 
-    fill(value, start, end) {
+    fill(val, start, end) {
       let list = context.getObject(objectId)
+      let [value, datatype] = valueAt(context, objectId, index, path, readonly)
       for (let index = parseListIndex(start || 0); index < parseListIndex(end || list.length); index++) {
-        context.setListIndex(path, index, value)
+        context.setAt(objectId, index, value, datatype)
       }
       return this
     },
 
     indexOf(o, start = 0) {
+      // FIXME 
       const id = o[OBJECT_ID]
       if (id) {
         const list = context.getObject(objectId)
@@ -412,59 +456,44 @@ function listMethods(target) {
         }
         return -1
       } else {
-        return context.getObject(objectId).indexOf(o, start)
+        return context.indexOf(objectId, o, start)
       }
     },
 
     insertAt(index, ...values) {
-      context.splice(path, parseListIndex(index), 0, values)
+      splice(target, parseListIndex(index), 0, values)
       return this
     },
 
     pop() {
-      console.log("POP");
-      let list = context.getObject(objectId)
-      if (list.length == 0) return
-      const last = context.getObjectField(path, objectId, list.length - 1)
-      context.splice(path, list.length - 1, 1, [])
+      let length = context.length(objectId)
+      if (length == 0) {
+        return undefined
+      }
+      let last = valueAt(context, objectId, length - 1, path, readonly, conflicts)
+      context.del(objectId, length - 1)
       return last
     },
 
     push(...values) {
-      console.log("PUSH");
-      let list = context.getObject(objectId)
-      context.splice(path, list.length, 0, values)
-      // need to getObject() again because the list object above may be immutable
-      return context.getObject(objectId).length
+      splice(target, context.length(objectId), 0, values)
+      return context.length(objectId)
     },
 
     shift() {
-      console.log("SHIFT");
-      let list = context.getObject(objectId)
-      if (list.length == 0) return
-      const first = context.getObjectField(path, objectId, 0)
-      context.splice(path, 0, 1, [])
+      if (context.length(objectId) == 0) return
+      const first = valueAt(context, objectId, 0, path, readonly, conflicts)
+      context.del(objectId, 0)
       return first
     },
 
     splice(start, deleteCount, ...values) {
-      let list = context.getObject(objectId)
-      start = parseListIndex(start)
-      if (deleteCount === undefined || deleteCount > list.length - start) {
-        deleteCount = list.length - start
-      }
-      const deleted = []
-      for (let n = 0; n < deleteCount; n++) {
-        deleted.push(context.getObjectField(path, objectId, start + n))
-      }
-      context.splice(path, start, deleteCount, values)
-      return deleted
+      return splice(target, start, deleteCount, values)
     },
 
     unshift(...values) {
-      console.log("UNSHIFT");
-      context.splice(path, 0, 0, values)
-      return context.getObject(objectId).length
+      splice(target, 0, 0, values)
+      return context.length(objectId)
     },
 
     entries() {

@@ -36,7 +36,7 @@ use nonzero_ext::nonzero;
 use protocol::Op;
 use sync::BloomFilter;
 pub use protocol::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Value, Peer, HEAD, ROOT, Patch
+    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Value, Peer, HEAD, ROOT, Patch, Prop
 };
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -182,6 +182,24 @@ impl Automerge {
             return Err(AutomergeError::EmptyStringKey)
         }
         Ok(Key::Map(self.props.cache(prop)))
+    }
+
+    pub fn prop_to_key2(&mut self, obj: &ObjId, prop: Prop, insert: bool) -> Result<Key,AutomergeError> {
+        match prop {
+            Prop::Map(s) => {
+                if s == "" {
+                    return Err(AutomergeError::EmptyStringKey)
+                }
+                Ok(Key::Map(self.props.cache(s)))
+            },
+            Prop::Seq(n) => {
+                if insert {
+                    self.insert_pos_for_index(obj, n).ok_or_else(|| AutomergeError::InvalidIndex(n))
+                } else {
+                    self.set_pos_for_index(obj, n).ok_or_else(|| AutomergeError::InvalidIndex(n))
+                }
+            },
+        }
     }
 
     fn key_cmp(&self, left: &Key, right: &Key) -> Option<Ordering> {
@@ -454,7 +472,9 @@ impl Automerge {
 
     fn insert_op(&mut self, mut op: Op, local: bool) {
         let cursor = self.seek_to_op(&mut op, local); //mut to collect pred
-        self.ops.insert(cursor.pos, op);
+        if !op.is_del() {
+            self.ops.insert(cursor.pos, op);
+        }
     }
 
     pub fn keys(&self, obj: &ObjId) -> Vec<Key> {
@@ -536,22 +556,12 @@ impl Automerge {
         )?))
     }
 
-    /*
-    pub fn map_make(
-        &mut self,
-        obj: ObjId,
-        prop: &str,
-        obj_type: amp::ObjType,
-    ) -> Result<ObjId, AutomergeError> {
-        let key = self.prop_to_key(prop.into())?;
-        Ok(ObjId(self.make_op(
-            obj,
-            key,
-            amp::OpType::Make(obj_type),
-            false,
-        )?))
-    }
-    */
+    // idea!
+    // set(obj, prop, value) - value can be scalar or objtype
+    // insert(obj, prop, value)
+    // del(obj, prop)
+    // inc(obj, prop)
+    // what about AT?
 
     pub fn map_set(
         &mut self,
@@ -603,7 +613,8 @@ impl Automerge {
         unimplemented!()
     }
 
-    pub fn del(&mut self, obj: ObjId, key: Key) -> Result<(), AutomergeError> {
+    pub fn del(&mut self, obj: ObjId, prop: Prop) -> Result<(), AutomergeError> {
+        let key = self.prop_to_key2(&obj, prop, false)?;
         self.make_op(obj, key, amp::OpType::Del(nonzero!(1_u32)), false)?;
         Ok(())
     }
@@ -1075,7 +1086,7 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, Key, HEAD, ROOT};
+    use crate::{Automerge, Key, HEAD, ROOT, AutomergeError};
     use automerge_protocol as amp;
 
     #[test]
@@ -1115,5 +1126,18 @@ mod tests {
         assert!(doc.list_length(&list_id) == 4);
         doc.commit().unwrap();
         doc.save().unwrap();
+    }
+
+    #[test]
+    fn test_del() -> Result<(),AutomergeError> {
+        let mut doc = Automerge::new();
+        doc.set_actor(amp::ActorId::random());
+        doc.begin(None, None)?;
+        doc.map_set(ROOT, "xxx", "xxx".into())?;
+        assert!(doc.map_value(&ROOT, "xxx").len() > 0);
+        doc.del(ROOT, "xxx".into())?;
+        assert!(doc.map_value(&ROOT, "xxx").len() == 0);
+        doc.commit()?;
+        Ok(())
     }
 }

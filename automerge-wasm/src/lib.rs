@@ -145,12 +145,23 @@ impl Automerge {
         let len = self.0.list_length(&obj);
         if prop.as_f64().unwrap_or_default() as usize == len {
             let key = self.insert_pos_for_index(&obj, prop)?;
-            self.0.make(obj, key, *obj_type, true).map_err(to_js_err)?;
+            let id = self.0.make(obj, key, *obj_type, true).map_err(to_js_err)?;
+            Ok(self.export(id))
         } else {
             let key = self.set_pos_for_index(&obj, prop)?;
-            self.0.make(obj, key, *obj_type, false).map_err(to_js_err)?;
+            let id = self.0.make(obj, key, *obj_type, false).map_err(to_js_err)?;
+            Ok(self.export(id))
         }
-        Ok(self.export(obj))
+    }
+
+    #[wasm_bindgen(js_name = insertMakeAt)]
+    pub fn insert_make_at(&mut self, obj: JsValue, prop: JsValue, obj_type: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let ObjType(obj_type) = &obj_type.try_into()?;
+        let len = self.0.list_length(&obj);
+        let key = self.insert_pos_for_index(&obj, prop)?;
+        let id = self.0.make(obj, key, *obj_type, true).map_err(to_js_err)?;
+        Ok(self.export(id))
     }
 
     pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {
@@ -197,6 +208,21 @@ impl Automerge {
             .set_pos_for_index(obj, index)
             .ok_or_else(|| JsErr("index is out of bounds".into()))?;
         Ok(key)
+    }
+
+    pub fn splice(&mut self, obj: JsValue, start: JsValue, delete_count: JsValue, values: Array) -> Result<(),JsValue> {
+        let obj = self.import(obj)?;
+        let start = to_usize(start,"start")?;
+        let delete_count = to_usize(delete_count,"deleteCount")?;
+        for i in 0..delete_count {
+            log!("DELETE");
+            self.0.del(obj,start.into()).map_err(to_js_err)?;
+        }
+        for i in values.entries() {
+            log!("VAL {:?}",i);
+        }
+        unimplemented!()
+        //Ok(())
     }
 
     pub fn insert(
@@ -306,7 +332,6 @@ impl Automerge {
         let obj = self.import(obj)?;
         let prop = arg.as_string();
         let index = arg.as_f64().map(|v| v as usize);
-        //            .ok_or(JsErr("prop must be a string".into()))?;
         let result = Array::new();
         let values = match (index, prop) {
             (Some(n), _) => Ok(self.0.list_value(&obj, n)),
@@ -370,8 +395,14 @@ impl Automerge {
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
-        let key = self.prop_to_key(prop)?;
-        self.0.del(obj, key).map_err(to_js_err)
+        //let key = self.prop_to_key(prop)?;
+        if let Some(s) = prop.as_string() {
+            self.0.del(obj, s.into()).map_err(to_js_err)
+        } else if let Some(n) = prop.as_f64() {
+            self.0.del(obj, n.into()).map_err(to_js_err)
+        } else {
+            return Err(format!("invalid property {:?}",prop).into())
+        }
     }
 
     pub fn save(&self) -> Result<Uint8Array, JsValue> {
@@ -427,6 +458,13 @@ impl Automerge {
 
     pub fn dump(&self) {
         self.0.dump()
+    }
+}
+
+pub fn to_usize(val: JsValue, name: &str) -> Result<usize,JsValue> {
+    match val.as_f64() {
+        Some(n) => Ok(n as usize),
+        None => Err(format!("{} must be a number",name).into()),
     }
 }
 

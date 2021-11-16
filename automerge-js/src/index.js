@@ -60,6 +60,7 @@ function change(doc, options, callback) {
       return rootProxy(state, true);
     }
   } catch (e) {
+    //console.log("ERROR: ",e)
     doc[FROZEN] = false
     state.rollback()
     throw e
