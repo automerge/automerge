@@ -168,13 +168,15 @@ function getObjectId(doc) {
   return doc[OBJECT_ID]
 }
 
-function getChanges(doc, heads) {
-  const state = doc[STATE]
-  return state.getChanges(heads)
+function getChanges(oldState, newState) {
+  const o = oldState[STATE]
+  const n = newState[STATE]
+  return n.getChanges(o.getHeads())
 }
 
 function getAllChanges(doc) {
-  return getChanges(doc, [])
+  const state = doc[STATE]
+  return state.getChanges([])
 }
 
 function applyChanges(doc, changes) {
@@ -203,8 +205,8 @@ function getHistory(doc) {
         return decodeChange(change)
       },
       get snapshot () {
-        const state = applyChanges(init(), history.slice(0, index + 1))
-        return rootProxy(state, true)
+        const [state] = applyChanges(init(), history.slice(0, index + 1))
+        return state
       }
     })
   )

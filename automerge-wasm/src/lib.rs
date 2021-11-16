@@ -438,6 +438,13 @@ impl Automerge {
         Ok(changes)
     }
 
+    #[wasm_bindgen(js_name = getHeads)]
+    pub fn get_heads(&mut self) -> Result<Array, JsValue> {
+        let heads = self.0.get_heads();
+        let heads : Array = heads.iter().map(|h| JsValue::from_str(&hex::encode(&h.0))).collect();
+        Ok(heads)
+    }
+
     #[wasm_bindgen(js_name = getActorId)]
     pub fn get_actor_id(&self) -> Result<JsValue, JsValue> {
         if let Some(actor) = self.0.get_actor() {
