@@ -91,7 +91,9 @@ function emptyChange(doc, options) {
   return rootProxy(state, true);
 }
 
-function load() {
+function load(data, actor) {
+  const state = AutomergeWASM.load(data, actor)
+  return rootProxy(state, true);
 }
 
 function save(doc) {
@@ -229,55 +231,13 @@ function dump(doc) {
   state.dump()
 }
 
-function ex(doc, datatype, value) {
-  let val;
-  switch (datatype) {
-    case "map":
-      val = {}
-      for (const key of doc.keys(value)) {
-        let subval = doc.value(value,key)
-        val[key] = ex(doc, subval[0], subval[1])
-      }
-      return val
-    case "list":
-      val = []
-      let len = doc.length(value);
-      for (let i = 0; i < len; i++) {
-        let subval = doc.value(value, i)
-        val.push(ex(doc, subval[0], subval[1]))
-      }
-      return val
-    case "bytes":
-      return value
-    case "counter":
-      return new Counter(value)
-    case "timestamp":
-      return new Date(value)
-    case "str":
-    case "uint":
-    case "int":
-    case "f64":
-    case "boolean":
-      return value
-    case "null":
-      return null
-    default:
-      throw RangeError(`invalid datatype ${datatype}`)
-  }
-}
-
-function toJS(doc) {
-  const state = doc[STATE].clone()
-  return ex(state, "map", "_root")
-}
-
 module.exports = {
     init, from, change, emptyChange, clone, free,
     load, save, merge, getChanges, getAllChanges, applyChanges,
     getLastLocalChange, getObjectId, getActorId, getConflicts,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
-    toJS, dump, Counter, Int, Uint, Float64
+    dump, Counter, Int, Uint, Float64
 }
 
 // depricated

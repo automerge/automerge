@@ -257,10 +257,6 @@ impl Automerge {
             .map_err(to_js_err)
     }
 
-    pub fn load(data: Uint8Array) -> Result<Automerge, JsValue> {
-        unimplemented!()
-    }
-
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: Array) -> Result<(), JsValue> {
         let deps: Result<Vec<js_sys::Uint8Array>, _> =
@@ -307,12 +303,9 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getActorId)]
-    pub fn get_actor_id(&self) -> Result<JsValue, JsValue> {
-        if let Some(actor) = self.0.get_actor() {
-            Ok(actor.to_string().into())
-        } else {
-            Ok(JsValue::null())
-        }
+    pub fn get_actor_id(&mut self) -> Result<JsValue, JsValue> {
+        let actor = self.0.get_actor();
+        Ok(actor.to_string().into())
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
@@ -466,6 +459,17 @@ impl TryFrom<JsValue> for ObjType {
 pub fn init(actor: JsValue) -> Result<Automerge, JsValue> {
     console_error_panic_hook::set_once();
     Automerge::new(actor)
+}
+
+#[wasm_bindgen]
+pub fn load(data: Uint8Array, actor: JsValue) -> Result<Automerge, JsValue> {
+    let data = data.to_vec();
+    let mut automerge = am::Automerge::load(&data).map_err(to_js_err)?;
+    if let Some(s) = actor.as_string() {
+        let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+        automerge.set_actor(actor)
+    }
+    Ok(Automerge(automerge))
 }
 
 #[wasm_bindgen]

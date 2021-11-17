@@ -4,22 +4,19 @@ const Automerge = require('../src')
 const { assertEqualsOneOf } = require('./helpers')
 const { decodeChange } = require('../src/columnar')
 
-//const UUID_PATTERN = /^[0-9a-f]{32}$/
+const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 
 // CORE FEATURES
 //
 // TODO - Cursors
+// TODO - Text & Table proxies
 // TODO - inc
-// TODO - load()
+// TODO - fast load()
 // TODO - reconstruct change from opset
 // TODO - micro-patches (needed for fully hydrated object in js)
 // TODO - valueAt(heads)
 // 
-// AUTOMERGE PRIMARY FEATURES
-//
-// TODO - Text & Table proxies
-//
 // AUTOMERGE SECONDARY FEATURES
 //
 // TODO - patchCallback
@@ -1089,14 +1086,12 @@ describe('Automerge', () => {
   })
 
   describe('saving and loading', () => {
-    // LOAD
-    it.skip('should save and restore an empty document', () => {
+    it('should save and restore an empty document', () => {
       let s = Automerge.load(Automerge.save(Automerge.init()))
       assert.deepStrictEqual(s, {})
     })
 
-    // LOAD
-    it.skip('should generate a new random actor ID', () => {
+    it('should generate a new random actor ID', () => {
       let s1 = Automerge.init()
       let s2 = Automerge.load(Automerge.save(s1))
       assert.strictEqual(UUID_PATTERN.test(Automerge.getActorId(s1).toString()), true)
@@ -1104,25 +1099,24 @@ describe('Automerge', () => {
       assert.notEqual(Automerge.getActorId(s1), Automerge.getActorId(s2))
     })
 
-    // LOAD
-    it.skip('should allow a custom actor ID to be set', () => {
+    it('should allow a custom actor ID to be set', () => {
       let s = Automerge.load(Automerge.save(Automerge.init()), '333333')
       assert.strictEqual(Automerge.getActorId(s), '333333')
     })
 
-    it.skip('should reconstitute complex datatypes', () => {
+    it('should reconstitute complex datatypes', () => {
       let s1 = Automerge.change(Automerge.init(), doc => doc.todos = [{title: 'water plants', done: false}])
       let s2 = Automerge.load(Automerge.save(s1))
       assert.deepStrictEqual(s2, {todos: [{title: 'water plants', done: false}]})
     })
 
-    it.skip('should save and load maps with @ symbols in the keys', () => {
+    it('should save and load maps with @ symbols in the keys', () => {
       let s1 = Automerge.change(Automerge.init(), doc => doc["123@4567"] = "hello")
       let s2 = Automerge.load(Automerge.save(s1))
       assert.deepStrictEqual(s2, { "123@4567": "hello" })
     })
 
-    it.skip('should reconstitute conflicts', () => {
+    it('should reconstitute conflicts', () => {
       let s1 = Automerge.change(Automerge.init('111111'), doc => doc.x = 3)
       let s2 = Automerge.change(Automerge.init('222222'), doc => doc.x = 5)
       s1 = Automerge.merge(s1, s2)
@@ -1133,7 +1127,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(Automerge.getConflicts(s3, 'x'), {'1@111111': 3, '1@222222': 5})
     })
 
-    it.skip('should reconstitute element ID counters', () => {
+    it('should reconstitute element ID counters', () => {
       const s1 = Automerge.init('01234567')
       const s2 = Automerge.change(s1, doc => doc.list = ['a'])
       const listId = Automerge.getObjectId(s2.list)
@@ -1166,7 +1160,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(doc.foo, [1])
     })
 
-    it.skip('should reload a document containing deflated columns', () => {
+    it('should reload a document containing deflated columns', () => {
       // In this test, the keyCtr column is long enough for deflate compression to kick in, but the
       // keyStr column is short. Thus, the deflate bit gets set for keyCtr but not for keyStr.
       // When checking whether the columns appear in ascending order, we must ignore the deflate bit.

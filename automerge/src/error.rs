@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use thiserror::Error;
+use crate::decoding;
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
@@ -21,6 +22,8 @@ pub enum AutomergeError {
     InvalidListAt(String, usize),
     #[error("there was an encoding problem")]
     Encoding,
+    #[error("there was an decoding problem")]
+    Decoding,
     #[error("key must not be an empty string")]
     EmptyStringKey,
     #[error("invalid seq {0}")]
@@ -34,5 +37,11 @@ pub enum AutomergeError {
 impl From<std::io::Error> for AutomergeError {
     fn from(e: std::io::Error) -> Self {
         AutomergeError::Encoding
+    }
+}
+
+impl From<decoding::Error> for AutomergeError {
+    fn from(e: decoding::Error) -> Self {
+        AutomergeError::Decoding
     }
 }

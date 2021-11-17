@@ -1,9 +1,15 @@
 #![allow(unused_variables)]
+use crate::columnar::ChangeIterator;
+use crate::columnar::DepsIterator;
+use crate::columnar::DocOpIterator;
+use crate::columnar::DocChange;
 use crate::columnar::ColumnEncoder;
+use crate::columnar::DocOp;
 use crate::columnar::OperationIterator;
 use crate::columnar::COLUMN_TYPE_DEFLATE;
 use crate::columnar::{ChangeEncoder, DocOpEncoder};
 use crate::decoding;
+use crate::internal::InternalOpType;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
@@ -314,13 +320,11 @@ impl Change {
 
     #[instrument(level = "debug", skip(bytes))]
     pub fn load_document(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
-        unimplemented!()
-        //load_blocks(bytes)
+        load_blocks(bytes)
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
-        unimplemented!()
-        //decode_change(bytes)
+        decode_change(bytes)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -686,4 +690,254 @@ fn decode_header_without_hash(bytes: &[u8]) -> Result<(u8, Range<usize>), decodi
     let chunktype = bytes[PREAMBLE_BYTES];
 
     Ok((chunktype, body))
+}
+
+fn load_blocks(bytes: &[u8]) -> Result<Vec<Change>, AutomergeError> {
+    let mut changes = Vec::new();
+    for slice in split_blocks(bytes)? {
+        decode_block(slice, &mut changes)?;
+    }
+    Ok(changes)
+}
+
+fn split_blocks(bytes: &[u8]) -> Result<Vec<&[u8]>, decoding::Error> {
+    // split off all valid blocks - ignore the rest if its corrupted or truncated
+    let mut blocks = Vec::new();
+    let mut cursor = bytes;
+    while let Some(block) = pop_block(cursor)? {
+        blocks.push(&cursor[block.clone()]);
+        if cursor.len() <= block.end {
+            break;
+        }
+        cursor = &cursor[block.end..];
+    }
+    Ok(blocks)
+}
+
+fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
+    if bytes.len() < 4 || bytes[0..4] != MAGIC_BYTES {
+        // not reporting error here - file got corrupted?
+        return Ok(None);
+    }
+    let (val, len) = read_leb128(
+        &mut bytes
+            .get(HEADER_BYTES..)
+            .ok_or(decoding::Error::NotEnoughBytes)?,
+    )?;
+    // val is arbitrary so it could overflow
+    let end = (HEADER_BYTES + len)
+        .checked_add(val)
+        .ok_or(decoding::Error::Overflow)?;
+    if end > bytes.len() {
+        // not reporting error here - file got truncated?
+        return Ok(None);
+    }
+    Ok(Some(0..end))
+}
+
+fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding::Error>
+{
+    match bytes[PREAMBLE_BYTES] {
+        BLOCK_TYPE_DOC => {
+            changes.extend(decode_document(bytes)?);
+            Ok(())
+        }
+        BLOCK_TYPE_CHANGE | BLOCK_TYPE_DEFLATE => {
+            changes.push(decode_change(bytes.to_vec())?);
+            Ok(())
+        }
+        found => Err(decoding::Error::WrongType {
+            expected_one_of: vec![BLOCK_TYPE_DOC, BLOCK_TYPE_CHANGE, BLOCK_TYPE_DEFLATE],
+            found,
+        }),
+    }
+}
+
+fn decode_document(bytes: &[u8]) -> Result<Vec<Change>, decoding::Error> {
+    let (chunktype, _hash, mut cursor) = decode_header(bytes)?;
+
+    // chunktype == 0 is a document, chunktype = 1 is a change
+    if chunktype > 0 {
+        return Err(decoding::Error::WrongType {
+            expected_one_of: vec![0],
+            found: chunktype,
+        });
+    }
+
+    let actors = decode_actors(bytes, &mut cursor, None)?;
+
+    let heads = decode_hashes(bytes, &mut cursor)?;
+
+    let changes_info = decode_column_info(bytes, &mut cursor, true)?;
+    let ops_info = decode_column_info(bytes, &mut cursor, true)?;
+
+    let changes_data = decode_columns(&mut cursor, &changes_info);
+    let mut doc_changes = ChangeIterator::new(bytes, &changes_data).collect::<Vec<_>>();
+    let doc_changes_deps = DepsIterator::new(bytes, &changes_data);
+
+    let doc_changes_len = doc_changes.len();
+
+    let ops_data = decode_columns(&mut cursor, &ops_info);
+    let doc_ops: Vec<_> = DocOpIterator::new(bytes, &actors, &ops_data).collect();
+
+    group_doc_change_and_doc_ops(&mut doc_changes, doc_ops, &actors)?;
+
+    let uncompressed_changes =
+        doc_changes_to_uncompressed_changes(doc_changes.into_iter(), &actors);
+
+    let changes = compress_doc_changes(uncompressed_changes, doc_changes_deps, doc_changes_len)
+        .ok_or(decoding::Error::NoDocChanges)?;
+
+    let mut calculated_heads = HashSet::new();
+    for change in &changes {
+        for dep in &change.deps {
+            calculated_heads.remove(dep);
+        }
+        calculated_heads.insert(change.hash);
+    }
+
+    if calculated_heads != heads.into_iter().collect::<HashSet<_>>() {
+        return Err(decoding::Error::MismatchedHeads);
+    }
+
+    Ok(changes)
+}
+
+fn compress_doc_changes(
+    uncompressed_changes: impl Iterator<Item = amp::Change>,
+    doc_changes_deps: impl Iterator<Item = Vec<usize>>,
+    num_changes: usize,
+) -> Option<Vec<Change>> {
+    let mut changes: Vec<Change> = Vec::with_capacity(num_changes);
+
+    // fill out the hashes as we go
+    for (deps, mut uncompressed_change) in doc_changes_deps.zip_eq(uncompressed_changes) {
+        for idx in deps {
+            uncompressed_change.deps.push(changes.get(idx)?.hash);
+        }
+        changes.push(uncompressed_change.into());
+    }
+
+    Some(changes)
+}
+
+fn group_doc_change_and_doc_ops(
+    changes: &mut [DocChange],
+    mut ops: Vec<DocOp>,
+    actors: &[amp::ActorId],
+) -> Result<(), decoding::Error> {
+    let mut changes_by_actor: HashMap<usize, Vec<usize>> = HashMap::new();
+
+    for (i, change) in changes.iter().enumerate() {
+        let actor_change_index = changes_by_actor.entry(change.actor).or_default();
+        if change.seq != (actor_change_index.len() + 1) as u64 {
+            return Err(decoding::Error::ChangeDecompressFailed(
+                "Doc Seq Invalid".into(),
+            ));
+        }
+        if change.actor >= actors.len() {
+            return Err(decoding::Error::ChangeDecompressFailed(
+                "Doc Actor Invalid".into(),
+            ));
+        }
+        actor_change_index.push(i);
+    }
+
+    let mut op_by_id = HashMap::new();
+    ops.iter().enumerate().for_each(|(i, op)| {
+        op_by_id.insert((op.ctr, op.actor), i);
+    });
+
+    for i in 0..ops.len() {
+        let op = ops[i].clone(); // this is safe - avoid borrow checker issues
+                                 //let id = (op.ctr, op.actor);
+                                 //op_by_id.insert(id, i);
+        for succ in &op.succ {
+            if let Some(index) = op_by_id.get(succ) {
+                ops[*index].pred.push((op.ctr, op.actor));
+            } else {
+                let key = if op.insert {
+                    amp::OpId(op.ctr, actors[op.actor].clone()).into()
+                } else {
+                    op.key.clone()
+                };
+                let del = DocOp {
+                    actor: succ.1,
+                    ctr: succ.0,
+                    action: InternalOpType::Del,
+                    obj: op.obj.clone(),
+                    key,
+                    succ: Vec::new(),
+                    pred: vec![(op.ctr, op.actor)],
+                    insert: false,
+                };
+                op_by_id.insert(*succ, ops.len());
+                ops.push(del);
+            }
+        }
+    }
+
+    for op in ops {
+        // binary search for our change
+        let actor_change_index = changes_by_actor.entry(op.actor).or_default();
+        let mut left = 0;
+        let mut right = actor_change_index.len();
+        while left < right {
+            let seq = (left + right) / 2;
+            if changes[actor_change_index[seq]].max_op < op.ctr {
+                left = seq + 1;
+            } else {
+                right = seq;
+            }
+        }
+        if left >= actor_change_index.len() {
+            return Err(decoding::Error::ChangeDecompressFailed(
+                "Doc MaxOp Invalid".into(),
+            ));
+        }
+        changes[actor_change_index[left]].ops.push(op);
+    }
+
+    changes
+        .iter_mut()
+        .for_each(|change| change.ops.sort_unstable());
+
+    Ok(())
+}
+
+fn doc_changes_to_uncompressed_changes<'a>(
+    changes: impl Iterator<Item = DocChange> + 'a,
+    actors: &'a [amp::ActorId],
+) -> impl Iterator<Item = amp::Change> + 'a {
+    changes.map(move |change| amp::Change {
+        // we've already confirmed that all change.actor's are valid
+        actor_id: actors[change.actor].clone(),
+        seq: change.seq,
+        time: change.time,
+        start_op: change.max_op - change.ops.len() as u64 + 1,
+        hash: None,
+        message: change.message,
+        operations: change
+            .ops
+            .into_iter()
+            .map(|op| amp::Op {
+                action: (&op.action).into(),
+                insert: op.insert,
+                key: op.key,
+                obj: op.obj,
+                // we've already confirmed that all op.actor's are valid
+                pred: pred_into(op.pred.into_iter(), actors),
+            })
+            .collect(),
+        deps: Vec::new(),
+        extra_bytes: change.extra_bytes,
+    })
+}
+
+fn pred_into(
+    pred: impl Iterator<Item = (u64, usize)>,
+    actors: &[amp::ActorId],
+) -> amp::SortedVec<amp::OpId> {
+    pred.map(|(ctr, actor)| amp::OpId(ctr, actors[actor].clone()))
+        .collect()
 }

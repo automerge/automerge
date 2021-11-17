@@ -82,8 +82,18 @@ impl Automerge {
         self.actor = Some(self.actors.cache(actor))
     }
 
-    pub fn get_actor(&self) -> Option<amp::ActorId> {
-        self.actor.map(|a| self.actors[a].clone())
+    fn random_actor(&mut self) -> amp::ActorId {
+        let actor = amp::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
+        self.actor = Some(self.actors.cache(actor.clone()));
+        actor
+    }
+
+    pub fn get_actor(&mut self) -> amp::ActorId {
+        if let Some(actor) = self.actor {
+            self.actors[actor].clone()
+        } else {
+            self.random_actor()
+        }
     }
 
     pub fn new_with_actor_id(actor: amp::ActorId) -> Self {
@@ -118,7 +128,8 @@ impl Automerge {
             return Err(AutomergeError::MismatchedBegin);
         }
 
-        let actor = self.actor.ok_or(AutomergeError::ActorNotSet)?;
+        let actor = self.get_actor();
+        let actor = self.actors.lookup(actor).unwrap(); // FIXME - could be simpler
 
         let seq = self.states.entry(actor).or_default().len() as u64 + 1;
         let mut deps = self.get_heads();
@@ -641,8 +652,11 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn load(_data: &[u8]) -> Self {
-        unimplemented!()
+    pub fn load(data: &[u8]) -> Result<Self,AutomergeError> {
+        let changes = Change::load_document(data)?;
+        let mut doc = Self::new();
+        doc.apply_changes(&changes)?;
+        Ok(doc)
     }
 
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
