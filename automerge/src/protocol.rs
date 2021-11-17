@@ -45,21 +45,14 @@ impl OpId {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Object(amp::ObjType, ObjId),
-    Scalar(amp::ScalarValue, OpId),
+    Object(amp::ObjType),
+    Scalar(amp::ScalarValue),
 }
 
 impl Value {
-    pub fn to_obj_id(&self) -> Option<ObjId> {
-        match self {
-            Value::Object(_, id) => Some(*id),
-            _ => None,
-        }
-    }
-
     pub fn to_string(&self) -> Option<String> {
         match self {
-            Value::Scalar(val, _) => Some(val.to_string()),
+            Value::Scalar(val) => Some(val.to_string()),
             _ => None,
         }
     }
@@ -68,6 +61,16 @@ impl Value {
 impl Exportable for ObjId {
     fn export(&self) -> Export {
         if self == &ROOT {
+            Export::Special(ROOT_STR.to_owned())
+        } else {
+            Export::Id(self.0)
+        }
+    }
+}
+
+impl Exportable for &ObjId {
+    fn export(&self) -> Export {
+        if self == &&ROOT {
             Export::Special(ROOT_STR.to_owned())
         } else {
             Export::Id(self.0)
@@ -135,6 +138,12 @@ impl Importable for OpId {
     }
 }
 
+impl From<OpId> for ObjId {
+    fn from(o: OpId) -> Self {
+        ObjId(o)
+    }
+}
+
 impl From<String> for Prop {
     fn from(p: String) -> Self {
         Prop::Map(p)
@@ -171,11 +180,29 @@ impl From<ElemId> for Key {
     }
 }
 
-impl From<&Op> for Value {
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::Scalar(s.into())
+    }
+}
+
+impl From<amp::ObjType> for Value {
+    fn from(o: amp::ObjType) -> Self {
+        Value::Object(o)
+    }
+}
+
+impl From<amp::ScalarValue> for Value {
+    fn from(v: amp::ScalarValue) -> Self {
+        Value::Scalar(v)
+    }
+}
+
+impl From<&Op> for (Value, OpId) {
     fn from(op: &Op) -> Self {
         match &op.action {
-            amp::OpType::Make(obj_type) => Value::Object(*obj_type, ObjId(op.id)),
-            amp::OpType::Set(scalar) => Value::Scalar(scalar.clone(), op.id),
+            amp::OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
+            amp::OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
             _ => panic!("cant convert op into a value"),
         }
     }
@@ -194,8 +221,7 @@ pub enum Prop {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
-pub struct Patch { }
-
+pub struct Patch {}
 
 impl Key {
     fn elemid(&self) -> Option<ElemId> {
@@ -229,10 +255,7 @@ pub(crate) struct Op {
 
 impl Op {
     pub fn is_del(&self) -> bool {
-        match self.action {
-            amp::OpType::Del(_) => true,
-            _ => false,
-        }
+        matches!(self.action, amp::OpType::Del(_))
     }
 
     pub fn visible(&self) -> bool {

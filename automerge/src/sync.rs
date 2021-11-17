@@ -9,7 +9,8 @@ use std::{
 //use automerge_protocol::{ChangeHash, Patch};
 
 use crate::{
-    decoding, decoding::Decoder, encoding, encoding::Encodable, AutomergeError, Automerge, Change, ChangeHash, Patch
+    decoding, decoding::Decoder, encoding, encoding::Encodable, Automerge, AutomergeError, Change,
+    ChangeHash, Patch,
 };
 
 mod bloom;

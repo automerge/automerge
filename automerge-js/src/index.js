@@ -113,7 +113,7 @@ function getActorId(doc) {
 }
 
 function conflictAt(context, objectId, prop) {
-      let values = context.conflicts(objectId, prop)
+      let values = context.values(objectId, prop)
       if (values.length <= 1) {
         return
       }

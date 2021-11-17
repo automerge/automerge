@@ -107,7 +107,7 @@ impl From<InternalOpType> for amp::OpType {
         match i {
             InternalOpType::Del => amp::OpType::Del(nonzero!(1_u32)),
             InternalOpType::Make(ot) => amp::OpType::Make(ot),
-            InternalOpType::Set(v) => amp::OpType::Set(v.clone()),
+            InternalOpType::Set(v) => amp::OpType::Set(v),
             InternalOpType::Inc(i) => amp::OpType::Inc(i),
         }
     }

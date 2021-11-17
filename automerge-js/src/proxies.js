@@ -3,6 +3,7 @@ const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter } = require("./counter");
 const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
+const { MAP, LIST, TABLE, TEXT } = require("automerge-wasm")
 
 function parseListIndex(key) {
   if (typeof key === 'string' && /^[0-9]+$/.test(key)) key = parseInt(key, 10)
@@ -17,7 +18,7 @@ function parseListIndex(key) {
 }
 
 function valueAt(context, objectId, prop, path, readonly, conflicts) {
-      let values = context.conflicts(objectId, prop)
+      let values = context.values(objectId, prop)
       if (values.length === 0) {
         return
       }
@@ -100,7 +101,7 @@ function list_get(target, index) {
 
 function local_conflicts(context, objectId, key) {
     if (typeof key === "string" || typeof key === "number") {
-      const c = context.conflicts(objectId, key)
+      const c = context.values(objectId, key)
       return c.length > 1
     }
     return false
@@ -188,7 +189,7 @@ const MapHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.make(objectId, key, "list")
+        const list = context.set(objectId, key, LIST)
         const proxyList = listProxy(context, list, [ ... path, key ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
@@ -196,7 +197,8 @@ const MapHandler = {
         }
         break;
       case "map":
-        const map = context.make(objectId, key, "map")
+        //const map = context.make(objectId, key, "map")
+        const map = context.set(objectId, key, MAP)
         const proxyMap = mapProxy(context, map, [ ... path, key ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -313,7 +315,7 @@ function splice(target, index, del, vals) {
     for (let [value,datatype] of values) {
       switch (datatype) {
         case "list":
-          const list = context.insertMakeAt(objectId, index, "list")
+          const list = context.insert(objectId, index, LIST)
           const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
           // FIXME use splice
           for (let i = 0; i < value.length; i++) {
@@ -321,14 +323,14 @@ function splice(target, index, del, vals) {
           }
           break;
         case "map":
-          const map = context.insertMakeAt(objectId, index, "map")
+          const map = context.insert(objectId, index, MAP)
           const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
           for (const key in value) {
             proxyMap[key] = value[key]
           }
           break;
         default:
-          context.insert(objectId, parseListIndex(index), value, datatype)
+          context.insert(objectId, index, value, datatype)
       }
       index += 1
     }
@@ -368,7 +370,7 @@ const ListHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.makeAt(objectId, index, "list")
+        const list = context.set(objectId, index, LIST)
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
@@ -376,14 +378,14 @@ const ListHandler = {
         }
         break;
       case "map":
-        const map = context.makeAt(objectId, index, "map")
+        const map = context.set(objectId, index, MAP)
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
         break;
       default:
-        context.setAt(objectId, parseListIndex(index), value, datatype)
+        context.set(objectId, index, value, datatype)
     }
     return true
   },
@@ -449,7 +451,7 @@ function listMethods(target) {
       let list = context.getObject(objectId)
       let [value, datatype] = valueAt(context, objectId, index, path, readonly)
       for (let index = parseListIndex(start || 0); index < parseListIndex(end || list.length); index++) {
-        context.setAt(objectId, index, value, datatype)
+        context.set(objectId, index, value, datatype)
       }
       return this
     },

@@ -2,6 +2,7 @@
 const assert = require('assert')
 const util = require('util')
 const Automerge = require('..')
+const { MAP, LIST } = Automerge
 
 describe('Automerge', () => {
   describe('basics', () => {
@@ -59,7 +60,7 @@ describe('Automerge', () => {
       let result
 
       doc.begin()
-      let submap = doc.make(root, "submap", "map")
+      let submap = doc.set(root, "submap", MAP)
       doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pending_ops(),2)
       doc.commit()
@@ -76,7 +77,7 @@ describe('Automerge', () => {
       let root = Automerge.root()
 
       doc.begin()
-      let submap = doc.make(root, "numbers", "list")
+      let submap = doc.set(root, "numbers", LIST)
       doc.insert(submap, 0, "a");
       doc.insert(submap, 1, "b");
       doc.insert(submap, 2, "c");

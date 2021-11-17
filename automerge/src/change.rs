@@ -4,12 +4,16 @@ use crate::columnar::OperationIterator;
 use crate::columnar::COLUMN_TYPE_DEFLATE;
 use crate::columnar::{ChangeEncoder, DocOpEncoder};
 use crate::decoding;
-use crate::decoding::{ Decodable, InvalidChangeError };
+use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
 use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use automerge_protocol as amp;
 use core::ops::Range;
+use flate2::{
+    bufread::{DeflateDecoder, DeflateEncoder},
+    Compression,
+};
 use itertools::Itertools;
 use sha2::Digest;
 use sha2::Sha256;
@@ -20,10 +24,6 @@ use std::fmt::Debug;
 use std::io::Read;
 use std::io::Write;
 use std::str;
-use flate2::{
-    bufread::{DeflateDecoder, DeflateEncoder},
-    Compression,
-};
 use tracing::instrument;
 
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
@@ -321,6 +321,10 @@ impl Change {
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
         unimplemented!()
         //decode_change(bytes)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     pub fn len(&self) -> usize {
@@ -640,7 +644,6 @@ fn decode_columns(
     }
     ops
 }
-
 
 fn decode_header(bytes: &[u8]) -> Result<(u8, amp::ChangeHash, Range<usize>), decoding::Error> {
     let (chunktype, body) = decode_header_without_hash(bytes)?;
