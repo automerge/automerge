@@ -351,11 +351,14 @@ const ListHandler = {
     //console.log("len", context.length(objectId))
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
-          throw new RangeError('Cannot create a reference to an existing document object')
+      throw new RangeError('Cannot create a reference to an existing document object')
     }
     if (index === FROZEN) {
       target.frozen = val
       return
+    }
+    if (typeof index == "string") {
+      throw new RangeError('list index must be a number')
     }
     conflicts = conflicts || local_conflicts(context, objectId, index)
     const [ value, datatype] = import_value(val)

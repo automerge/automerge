@@ -17,10 +17,9 @@ const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 // TODO - micro-patches (needed for fully hydrated object in js)
 // TODO - valueAt(heads)
 // 
-// AUTOMERGE SECONDARY FEATURES
+// AUTOMERGE UNSUPPORTED
 //
 // TODO - patchCallback
-// TODO - option: freeze
 
 
 describe('Automerge', () => {
@@ -581,7 +580,7 @@ describe('Automerge', () => {
         assert.strictEqual(s1.noodles.length, 3)
       })
 
-      it.skip('should only allow numeric indexes', () => {
+      it('should only allow numeric indexes', () => {
         s1 = Automerge.change(s1, doc => doc.noodles = ['udon', 'ramen', 'soba'])
         s1 = Automerge.change(s1, doc => doc.noodles[1] = 'Ramen!')
         assert.strictEqual(s1.noodles[1], 'Ramen!')
@@ -1313,7 +1312,6 @@ describe('Automerge', () => {
     })
     */
 
-    // get missing deps
     it.skip('should report missing dependencies with out-of-order applyChanges', () => {
       let s0 = Automerge.init()
       let s1 = Automerge.change(s0, doc => doc.test = ['a'])
