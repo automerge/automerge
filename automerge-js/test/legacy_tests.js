@@ -1312,7 +1312,7 @@ describe('Automerge', () => {
     })
     */
 
-    it.skip('should report missing dependencies with out-of-order applyChanges', () => {
+    it('should report missing dependencies with out-of-order applyChanges', () => {
       let s0 = Automerge.init()
       let s1 = Automerge.change(s0, doc => doc.test = ['a'])
       let changes01 = Automerge.getAllChanges(s1)
@@ -1322,10 +1322,9 @@ describe('Automerge', () => {
       let changes23 = Automerge.getChanges(s2, s3)
       let s4 = Automerge.init()
       let [s5] = Automerge.applyChanges(s4, changes23)
-      let [s6, patch6] = Automerge.applyChanges(s5, changes12)
-      assert.deepStrictEqual(Automerge.Backend.getMissingDeps(Automerge.Frontend.getBackendState(s6)),
-                             [decodeChange(changes01[0]).hash])
-      assert.strictEqual(patch6.pendingChanges, 1)
+      let [s6] = Automerge.applyChanges(s5, changes12)
+//      assert.deepStrictEqual(Automerge.Backend.getMissingDeps(Automerge.Frontend.getBackendState(s6)), [decodeChange(changes01[0]).hash])
+      assert.deepStrictEqual(Automerge.getMissingDeps(s6), [decodeChange(changes01[0]).hash])
     })
 
     /*

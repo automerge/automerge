@@ -226,6 +226,14 @@ function receiveSyncMessage() {
 function initSyncState() {
 }
 
+function getMissingDeps(doc, heads) {
+  const state = doc[STATE]
+  if (!heads) {
+    heads = []
+  }
+  return state.getMissingDeps(heads)
+}
+
 function dump(doc) {
   const state = doc[STATE]
   state.dump()
@@ -237,6 +245,7 @@ module.exports = {
     getLastLocalChange, getObjectId, getActorId, getConflicts,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
+    getMissingDeps,
     dump, Counter, Int, Uint, Float64
 }
 

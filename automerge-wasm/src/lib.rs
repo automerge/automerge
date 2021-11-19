@@ -321,6 +321,18 @@ impl Automerge {
         self.0.dump()
     }
 
+    #[wasm_bindgen(js_name = getMissingDeps)]
+    pub fn get_missing_deps(&mut self, heads: Array) -> Result<Array, JsValue> {
+        let heads: Result<Vec<am::ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();
+        let heads = heads.map_err(to_js_err)?;
+        let deps = self.0.get_missing_deps(&heads);
+        let deps: Array = deps
+            .iter()
+            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .collect();
+        Ok(deps)
+    }
+
     fn export<E: automerge::Exportable>(&self, val: E) -> JsValue {
         self.0.export(val).into()
     }

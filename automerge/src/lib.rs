@@ -661,7 +661,14 @@ impl Automerge {
 
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
         for c in changes {
-            self.apply_change(c.clone())
+            if self.is_causally_ready(c) {
+                self.apply_change(c.clone());
+            } else {
+                self.queue.push(c.clone());
+                while let Some(c) = self.pop_next_causally_ready_change() {
+                    self.apply_change(c);
+                }
+            }
         }
         Ok(Patch {})
     }
@@ -672,6 +679,21 @@ impl Automerge {
         for op in ops {
             self.insert_op(op, false);
         }
+    }
+
+    fn is_causally_ready(&self, change: &Change) -> bool {
+        change.deps.iter().all(|d| self.history_index.contains_key(d))
+    }
+
+    fn pop_next_causally_ready_change(&mut self) -> Option<Change> {
+        let mut index = 0;
+        while index < self.queue.len() {
+            if self.is_causally_ready(&self.queue[index]) {
+                return Some(self.queue.swap_remove(index));
+            }
+            index += 1;
+        }
+        None
     }
 
     fn import_ops(&mut self, change: &Change, change_id: usize) -> Vec<Op> {
