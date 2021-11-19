@@ -31,6 +31,7 @@ getrandom = { version = "^0.2.2", features=["js"] }
 uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
 serde-wasm-bindgen = "0.1.3"
 serde_bytes = "0.11.5"
+automerge-protocol = { path = "../../automerge-rs/automerge-protocol" }
 
 [dependencies.wasm-bindgen]
 version = "^0.2"

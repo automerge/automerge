@@ -2,6 +2,7 @@
 
 #![allow(unused_variables)]
 use automerge as am;
+use automerge_protocol as amp;
 use automerge::{Prop, Value};
 use js_sys::{Array, Uint8Array};
 use std::convert::TryFrom;
@@ -399,15 +400,6 @@ impl Automerge {
                     Ok(am::ScalarValue::Str(s.into()).into())
                 } else if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
-                    /*
-                    if insert {
-                        let opid = self.0.insert(obj, key, o).map_err(to_js_err)?;
-                        return Ok(self.export(opid))
-                    } else {
-                        let opid = self.0.set2(obj, key, o).map_err(to_js_err)?;
-                        return Ok(self.export(opid))
-                    }
-                    */
                 } else {
                     Err("value is invalid".into())
                 }
@@ -487,6 +479,50 @@ pub fn load(data: Uint8Array, actor: JsValue) -> Result<Automerge, JsValue> {
 #[wasm_bindgen]
 pub fn root() -> Result<JsValue, JsValue> {
     Ok("_root".into())
+}
+
+#[wasm_bindgen(js_name = encodeChange)]
+pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
+    let change : amp::Change = change.into_serde().map_err(to_js_err)?;
+    let change : am::Change = change.into();
+    Ok(js_sys::Uint8Array::from(change.raw_bytes()))
+}
+
+#[wasm_bindgen(js_name = decodeChange)]
+pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
+    let change = am::Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
+    let change : amp::Change = change.decode();
+    JsValue::from_serde(&change).map_err(to_js_err)
+}
+
+#[wasm_bindgen(js_name = encodeDocument)]
+pub fn encode_document(document: JsValue) -> Result<Uint8Array, JsValue> {
+    unimplemented!()
+}
+
+#[wasm_bindgen(js_name = decodeDocument)]
+pub fn decode_document(document: Uint8Array) -> Result<JsValue, JsValue> {
+    unimplemented!()
+}
+
+#[wasm_bindgen(js_name = encodeSyncMessage)]
+pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
+    unimplemented!()
+}
+
+#[wasm_bindgen(js_name = decodeSyncMessage)]
+pub fn decode_sync_message(document: Uint8Array) -> Result<JsValue, JsValue> {
+    unimplemented!()
+}
+
+#[wasm_bindgen(js_name = encodeSyncState)]
+pub fn encode_sync_state(document: JsValue) -> Result<Uint8Array, JsValue> {
+    unimplemented!()
+}
+
+#[wasm_bindgen(js_name = decodeSyncState)]
+pub fn decode_sync_state(document: Uint8Array) -> Result<JsValue, JsValue> {
+    unimplemented!()
 }
 
 #[wasm_bindgen(js_name = MAP)]

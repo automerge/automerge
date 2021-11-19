@@ -43,6 +43,7 @@ use sync::BloomFilter;
 
 pub use amp::ChangeHash;
 pub use change::{decode_change, Change};
+pub use sync::{SyncState, SyncMessage};
 
 pub use amp::{ActorId, ObjType, ScalarValue};
 
@@ -907,9 +908,8 @@ impl Automerge {
             return Clock::Head;
         }
         // FIXME - could be way faster
-        let changes = self.get_changes(heads);
         let mut clock = HashMap::new();
-        for c in changes {
+        for c in self.get_changes(heads) {
             let actor = self.actors.lookup(c.actor_id().clone()).unwrap();
             if let Some(val) = clock.get(&actor) {
                 if val < &c.seq {

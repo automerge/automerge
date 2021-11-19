@@ -1,6 +1,6 @@
 
 let AutomergeWASM = require("automerge-wasm")
-const { encodeChange, decodeChange } = require('./columnar')
+//const { encodeChange, decodeChange } = require('./columnar')
 
 let { rootProxy, listProxy, mapProxy } = require("./proxies")
 let { Counter  } = require("./counter")
@@ -196,9 +196,6 @@ function applyChanges(doc, changes) {
   return [rootProxy(state, true)];
 }
 
-function equals() {
-}
-
 function getHistory(doc) {
   const actor = getActorId(doc)
   const history = getAllChanges(doc)
@@ -214,7 +211,30 @@ function getHistory(doc) {
   )
 }
 
+function equals() {
+  if (!isObject(val1) || !isObject(val2)) return val1 === val2
+  const keys1 = Object.keys(val1).sort(), keys2 = Object.keys(val2).sort()
+  if (keys1.length !== keys2.length) return false
+  for (let i = 0; i < keys1.length; i++) {
+    if (keys1[i] !== keys2[i]) return false
+    if (!equals(val1[keys1[i]], val2[keys2[i]])) return false
+  }
+  return true
+}
+
 function uuid() {
+}
+
+function encodeSyncMessage() {
+}
+
+function decodeSyncMessage() {
+}
+
+function encodeSyncState() {
+}
+
+function decodeSyncState() {
 }
 
 function generateSyncMessage() {
@@ -224,6 +244,36 @@ function receiveSyncMessage() {
 }
 
 function initSyncState() {
+}
+
+function encodeDocument() {
+}
+
+function decodeDocument() {
+}
+
+function encodeChange(change) {
+  return AutomergeWASM.encodeChange(change)
+}
+
+function decodeChange(data) {
+  return AutomergeWASM.decodeChange(data)
+}
+
+function encodeSyncMessage(change) {
+  return AutomergeWASM.encodeSyncMessage(change)
+}
+
+function decodeSyncMessage(data) {
+  return AutomergeWASM.decodeSyncMessage(data)
+}
+
+function encodeSyncState(change) {
+  return AutomergeWASM.encodeSyncState(change)
+}
+
+function decodeSyncState(data) {
+  return AutomergeWASM.decodeSyncState(data)
 }
 
 function getMissingDeps(doc, heads) {
@@ -245,6 +295,7 @@ module.exports = {
     getLastLocalChange, getObjectId, getActorId, getConflicts,
     encodeChange, decodeChange, equals, getHistory, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
+    decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState,
     getMissingDeps,
     dump, Counter, Int, Uint, Float64
 }

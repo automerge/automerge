@@ -3,17 +3,18 @@ const assert = require('assert')
 const Automerge = require('../src')
 const { assertEqualsOneOf } = require('./helpers')
 const { decodeChange } = require('../src/columnar')
+//const { decodeChange } = Automerge
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
 const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 
 // CORE FEATURES
 //
+// TODO - move the set/insert behavior our of the WASM
 // TODO - Cursors
 // TODO - Text & Table proxies
 // TODO - inc
-// TODO - fast load()
-// TODO - reconstruct change from opset
+// TODO - on-pass load() & reconstruct change from opset
 // TODO - micro-patches (needed for fully hydrated object in js)
 // TODO - valueAt(heads)
 // 
