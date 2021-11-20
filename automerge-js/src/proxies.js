@@ -289,7 +289,13 @@ const ListHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.set(objectId, index, LIST)
+        let list
+        if (index >= context.length(objectId)) {
+          list = context.insert(objectId, index, LIST)
+        } else {
+          list = context.set(objectId, index, LIST)
+        }
+        //const list = context.set(objectId, index, LIST)
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
@@ -297,14 +303,24 @@ const ListHandler = {
         }
         break;
       case "map":
-        const map = context.set(objectId, index, MAP)
+        let map
+        if (index >= context.length(objectId)) {
+          map = context.insert(objectId, index, MAP)
+        } else {
+          map = context.set(objectId, index, MAP)
+        }
+        //const map = context.set(objectId, index, MAP)
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
         break;
       default:
-        context.set(objectId, index, value, datatype)
+        if (index >= context.length(objectId)) {
+          context.insert(objectId, index, value, datatype)
+        } else {
+          context.set(objectId, index, value, datatype)
+        }
     }
     return true
   },
@@ -472,6 +488,7 @@ function listMethods(target) {
   }
 
   // Read-only methods that can delegate to the JavaScript built-in implementations
+  // FIXME - super slow
   for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach', 'includes',
                       'join', 'lastIndexOf', 'map', 'reduce', 'reduceRight',
                       'slice', 'some', 'toLocaleString', 'toString']) {

@@ -173,22 +173,8 @@ impl Automerge {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, datatype)?;
-        match prop {
-            Prop::Map(s) => {
-                let opid = self.0.set(&obj, s.into(), value).map_err(to_js_err)?;
-                Ok(self.export(opid))
-            }
-            Prop::Seq(n) => {
-                let len = self.0.length(&obj);
-                if len == n {
-                    let opid = self.0.insert(&obj, n, value).map_err(to_js_err)?;
-                    Ok(self.export(opid))
-                } else {
-                    let opid = self.0.set(&obj, n.into(), value).map_err(to_js_err)?;
-                    Ok(self.export(opid))
-                }
-            }
-        }
+        let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
+        Ok(self.export(opid))
     }
 
     pub fn value(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
