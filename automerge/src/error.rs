@@ -1,8 +1,8 @@
 #![allow(unused_variables)]
 #![allow(dead_code)]
 
-use thiserror::Error;
 use crate::decoding;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {

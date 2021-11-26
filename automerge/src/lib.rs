@@ -31,19 +31,18 @@ use core::ops::Range;
 use error::AutomergeError;
 use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
+use protocol::Key;
 use protocol::Op;
 pub use protocol::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, Value, HEAD, ROOT,
+    ElemId, Export, Exportable, Importable, ObjId, OpId, Patch, Peer, Prop, Value, HEAD, ROOT,
 };
 use std::cmp::Ordering;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
 
 pub use amp::ChangeHash;
 pub use change::{decode_change, Change};
-pub use sync::{SyncState, SyncMessage};
+pub use sync::{SyncMessage, SyncState};
 
 pub use amp::{ActorId, ObjType, ScalarValue};
 
@@ -97,6 +96,15 @@ impl Automerge {
         }
     }
 
+    fn get_actor_index(&mut self) -> usize {
+        if let Some(actor) = self.actor {
+            actor
+        } else {
+            self.random_actor();
+            self.actor.unwrap() // random_actor always sets actor to is_some()
+        }
+    }
+
     pub fn new_with_actor_id(actor: amp::ActorId) -> Self {
         Automerge {
             actors: IndexedCache::from(vec![actor]),
@@ -129,8 +137,7 @@ impl Automerge {
             return Err(AutomergeError::MismatchedBegin);
         }
 
-        let actor = self.get_actor();
-        let actor = self.actors.lookup(actor).unwrap(); // FIXME - could be simpler
+        let actor = self.get_actor_index();
 
         let seq = self.states.entry(actor).or_default().len() as u64 + 1;
         let mut deps = self.get_heads();
@@ -185,17 +192,13 @@ impl Automerge {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
+            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order
             (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
     }
 
-    fn prop_to_key(
-        &self,
-        obj: &ObjId,
-        prop: Prop,
-        insert: bool,
-    ) -> Result<Key, AutomergeError> {
+    fn prop_to_key(&self, obj: &ObjId, prop: Prop, insert: bool) -> Result<Key, AutomergeError> {
         match prop {
             Prop::Map(s) => {
                 if s.is_empty() {
@@ -219,7 +222,7 @@ impl Automerge {
         }
     }
 
-    pub fn prop_to_key3(
+    fn import_prop(
         &mut self,
         obj: &ObjId,
         prop: Prop,
@@ -296,6 +299,8 @@ impl Automerge {
     }
 
     fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
+        // FIXME - counter
+        //let mut counter_values = HashMap::new();
         while *pos < self.ops.len() && &self.ops[*pos].obj == obj && !self.ops[*pos].visible() {
             *pos += 1
         }
@@ -313,6 +318,7 @@ impl Automerge {
             if op.insert {
                 seen_visible = false;
             }
+            // FIXME - counter
             if op.visible() && !seen_visible {
                 seen += 1;
                 seen_visible = true;
@@ -336,6 +342,7 @@ impl Automerge {
             if op.insert {
                 seen_visible = false;
             }
+            // FIXME - counter
             if op.visible() && !seen_visible {
                 seen += 1;
                 seen_visible = true;
@@ -351,11 +358,6 @@ impl Automerge {
         }
     }
 
-    fn scan_to_next_visible_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
-        self.scan_to_next_prop(obj, key, pos);
-        self.scan_to_visible(obj, pos);
-    }
-
     fn scan_to_prop_insertion_point(&mut self, op: &mut Op, local: bool, pos: &mut usize) {
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
@@ -363,6 +365,7 @@ impl Automerge {
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
             if local {
+                // FIXME - counter
                 if self.ops[*pos].visible() {
                     self.ops[*pos].succ.push(op.id);
                     op.pred.push(self.ops[*pos].id);
@@ -383,6 +386,7 @@ impl Automerge {
     ) -> Vec<&Op> {
         let mut result = vec![];
         while *pos < self.ops.len() && &self.ops[*pos].obj == obj && &self.ops[*pos].key == key {
+            // FIXME - counter
             if self.ops[*pos].visible() {
                 result.push(&self.ops[*pos])
             }
@@ -400,6 +404,7 @@ impl Automerge {
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
+            // FIXME - counter
             if i.visible() && i.elemid() != seen_key {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
@@ -422,6 +427,7 @@ impl Automerge {
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
+            // FIXME - counter
             if i.visible() && i.elemid() != seen_key {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
@@ -442,10 +448,12 @@ impl Automerge {
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
             if local {
+                // FIXME - counter
                 if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
                     self.ops[*pos].succ.push(op.id);
                     op.pred.push(self.ops[*pos].id);
                 }
+            // FIXME - counter
             } else if self.ops[*pos].visible()
                 && self.ops[*pos].elemid() == op.elemid()
                 && op.pred.iter().any(|i| i == &self.ops[*pos].id)
@@ -462,6 +470,7 @@ impl Automerge {
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
 
+            // FIXME - counter
             if i.visible() && i.elemid() != seen_key {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
@@ -517,8 +526,7 @@ impl Automerge {
         op
     }
 
-    // FIXME - this should be props - not keys
-    pub fn keys(&self, obj: &ObjId) -> Vec<Key> {
+    pub fn keys(&self, obj: &ObjId) -> Vec<String> {
         let mut pos = 0;
         let mut result = vec![];
         self.scan_to_obj(obj, &mut pos);
@@ -529,8 +537,9 @@ impl Automerge {
                 break;
             }
             let key = &op.key;
-            result.push(*key);
-            self.scan_to_next_visible_prop(obj, key, &mut pos);
+            result.push(self.export(*key));
+            self.scan_to_next_prop(obj, key, &mut pos);
+            self.scan_to_visible(obj, &mut pos);
         }
         result
     }
@@ -565,8 +574,7 @@ impl Automerge {
     // what about AT?
 
     pub fn set(&mut self, obj: &ObjId, prop: Prop, value: Value) -> Result<OpId, AutomergeError> {
-        let key = self.prop_to_key3(obj, prop, false)?;
-        // FIXME clone?
+        let key = self.import_prop(obj, prop, false)?;
         match value {
             Value::Object(o) => self.make_op(obj, key, amp::OpType::Make(o), false),
             Value::Scalar(s) => self.make_op(obj, key, amp::OpType::Set(s), false),
@@ -579,7 +587,7 @@ impl Automerge {
         index: usize,
         value: Value,
     ) -> Result<OpId, AutomergeError> {
-        let key = self.prop_to_key3(obj, index.into(), true)?;
+        let key = self.import_prop(obj, index.into(), true)?;
         match value {
             Value::Object(o) => self.make_op(obj, key, amp::OpType::Make(o), true),
             Value::Scalar(s) => self.make_op(obj, key, amp::OpType::Set(s), true),
@@ -653,7 +661,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn load(data: &[u8]) -> Result<Self,AutomergeError> {
+    pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
         doc.apply_changes(&changes)?;
@@ -683,7 +691,10 @@ impl Automerge {
     }
 
     fn is_causally_ready(&self, change: &Change) -> bool {
-        change.deps.iter().all(|d| self.history_index.contains_key(d))
+        change
+            .deps
+            .iter()
+            .all(|d| self.history_index.contains_key(d))
     }
 
     fn pop_next_causally_ready_change(&mut self) -> Option<Change> {

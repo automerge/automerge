@@ -2,8 +2,8 @@
 
 #![allow(unused_variables)]
 use automerge as am;
-use automerge_protocol as amp;
 use automerge::{Prop, Value};
+use automerge_protocol as amp;
 use js_sys::{Array, Uint8Array};
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -117,7 +117,12 @@ impl Automerge {
 
     pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
-        let result = self.0.keys(&obj).iter().map(|k| self.export(*k)).collect();
+        let result = self
+            .0
+            .keys(&obj)
+            .iter()
+            .map(|s| JsValue::from_str(s))
+            .collect();
         Ok(result)
     }
 
@@ -469,15 +474,15 @@ pub fn root() -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
-    let change : amp::Change = change.into_serde().map_err(to_js_err)?;
-    let change : am::Change = change.into();
+    let change: amp::Change = change.into_serde().map_err(to_js_err)?;
+    let change: am::Change = change.into();
     Ok(js_sys::Uint8Array::from(change.raw_bytes()))
 }
 
 #[wasm_bindgen(js_name = decodeChange)]
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     let change = am::Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
-    let change : amp::Change = change.decode();
+    let change: amp::Change = change.decode();
     JsValue::from_serde(&change).map_err(to_js_err)
 }
 

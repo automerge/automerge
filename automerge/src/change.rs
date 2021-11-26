@@ -1,18 +1,13 @@
 #![allow(unused_variables)]
-use crate::columnar::ChangeIterator;
-use crate::columnar::DepsIterator;
-use crate::columnar::DocOpIterator;
-use crate::columnar::DocChange;
-use crate::columnar::ColumnEncoder;
-use crate::columnar::DocOp;
-use crate::columnar::OperationIterator;
-use crate::columnar::COLUMN_TYPE_DEFLATE;
-use crate::columnar::{ChangeEncoder, DocOpEncoder};
+use crate::columnar::{
+    ChangeEncoder, ChangeIterator, ColumnEncoder, DepsIterator, DocChange, DocOp, DocOpEncoder,
+    DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
+};
 use crate::decoding;
-use crate::internal::InternalOpType;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
+use crate::internal::InternalOpType;
 use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use automerge_protocol as amp;
 use core::ops::Range;
@@ -23,13 +18,10 @@ use flate2::{
 use itertools::Itertools;
 use sha2::Digest;
 use sha2::Sha256;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::Debug;
-use std::io::Read;
-use std::io::Write;
-use std::str;
+use std::io::{Read, Write};
 use tracing::instrument;
 
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
@@ -345,7 +337,7 @@ impl Change {
         if m.is_empty() {
             None
         } else {
-            str::from_utf8(m).map(ToString::to_string).ok()
+            std::str::from_utf8(m).map(ToString::to_string).ok()
         }
     }
 
@@ -735,8 +727,7 @@ fn pop_block(bytes: &[u8]) -> Result<Option<Range<usize>>, decoding::Error> {
     Ok(Some(0..end))
 }
 
-fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding::Error>
-{
+fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding::Error> {
     match bytes[PREAMBLE_BYTES] {
         BLOCK_TYPE_DOC => {
             changes.extend(decode_document(bytes)?);

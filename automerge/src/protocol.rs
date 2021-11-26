@@ -1,5 +1,5 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
+//#![allow(unused_variables)]
+//#![allow(dead_code)]
 
 extern crate hex;
 extern crate uuid;
@@ -133,7 +133,7 @@ impl Importable for OpId {
     fn wrap(id: OpId) -> Self {
         id
     }
-    fn from(s: &str) -> Option<Self> {
+    fn from(_: &str) -> Option<Self> {
         None
     }
 }
@@ -267,14 +267,6 @@ impl Op {
             Some(ElemId(self.id))
         } else {
             self.key.elemid()
-        }
-    }
-
-    pub fn ordering_key(&self) -> Key {
-        if self.insert {
-            Key::Seq(ElemId(self.id))
-        } else {
-            self.key
         }
     }
 }
