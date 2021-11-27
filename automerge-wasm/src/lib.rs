@@ -182,6 +182,18 @@ impl Automerge {
         Ok(self.export(opid))
     }
 
+    pub fn inc(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+    ) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
+        let prop = self.import_prop(prop)?;
+        let value : f64 = value.as_f64().ok_or("inc needs a numberic value").map_err(to_js_err)?;
+        self.0.inc(&obj, prop, value as i64).map_err(to_js_err)
+    }
+
     pub fn value(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();

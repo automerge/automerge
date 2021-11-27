@@ -1,7 +1,7 @@
 
 const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
-const { Counter } = require("./counter");
+const { Counter, getWriteableCounter } = require("./counter");
 const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 const { MAP, LIST, TABLE, TEXT } = require("automerge-wasm")
 
@@ -41,7 +41,13 @@ function valueAt(target, prop) {
         case "boolean": return val;
         case "null": return null;
         case "bytes": return val;
-        case "counter": return new Counter(val);
+        case "counter": {
+          if (readonly) {
+            return new Counter(val);
+          } else {
+            return getWriteableCounter(val, context, path, objectId, prop)
+          }
+        }
         case "timestamp": return new Date(val);
         default:
           throw RangeError(`datatype ${datatype} unimplemented`)
@@ -328,6 +334,9 @@ const ListHandler = {
   deleteProperty (target, index) {
     const {context, objectId} = target
     index = parseListIndex(index)
+    if (context.value(objectId, index)[0] == "counter") {
+      throw new TypeError('Unsupported operation: deleting a counter from a list')
+    }
     context.del(objectId, index)
     return true
   },
@@ -377,7 +386,11 @@ function listMethods(target) {
   const {context, objectId, path, readonly, frozen, conflicts} = target
   const methods = {
     deleteAt(index, numDelete) {
-      context.del(objectId, parseListIndex(index))
+      index = parseListIndex(index)
+      if (context.value(objectId, index)[0] == "counter") {
+        throw new TypeError('Unsupported operation: deleting a counter from a list')
+      }
+      context.del(objectId, index)
       return this
     },
 

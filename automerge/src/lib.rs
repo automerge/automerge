@@ -299,16 +299,18 @@ impl Automerge {
     }
 
     fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
-        // FIXME - counter
-        //let mut counter_values = HashMap::new();
-        while *pos < self.ops.len() && &self.ops[*pos].obj == obj && !self.ops[*pos].visible() {
+        let mut counters = Default::default();
+        // FIXME - counter - bool
+        //while *pos < self.ops.len() && &self.ops[*pos].obj == obj && !self.ops[*pos].visible() {
+        while *pos < self.ops.len() && &self.ops[*pos].obj == obj && !self.is_visible(*pos,&mut counters) {
             *pos += 1
         }
     }
 
-    fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Vec<&Op> {
+    fn scan_to_nth_visible(&self, obj: &ObjId, n: usize, pos: &mut usize) -> Vec<Op> {
         let mut seen = 0;
         let mut seen_visible = false;
+        let mut counters = Default::default();
         let mut result = vec![];
         while *pos < self.ops.len() {
             let op = &self.ops[*pos];
@@ -318,13 +320,15 @@ impl Automerge {
             if op.insert {
                 seen_visible = false;
             }
-            // FIXME - counter
-            if op.visible() && !seen_visible {
+            // FIXME - counter - bool
+            if !seen_visible && self.is_visible(*pos,&mut counters) {
                 seen += 1;
                 seen_visible = true;
             }
             if seen == n + 1 {
-                result.push(op)
+                let vop = self.visible_op(*pos,&counters);
+                result.push(vop)
+                //result.push(op)
             }
             if seen > n + 1 {
                 break;
@@ -337,13 +341,15 @@ impl Automerge {
     fn scan_visible(&self, obj: &ObjId, pos: &mut usize) -> usize {
         let mut seen = 0;
         let mut seen_visible = false;
+        let mut counters = Default::default();
         while *pos < self.ops.len() && &self.ops[*pos].obj == obj {
             let op = &self.ops[*pos];
             if op.insert {
                 seen_visible = false;
             }
-            // FIXME - counter
-            if op.visible() && !seen_visible {
+            // FIXME - counter - bool
+            //if op.visible() && !seen_visible {
+            if !seen_visible && self.is_visible(*pos,&mut counters) {
                 seen += 1;
                 seen_visible = true;
             }
@@ -359,16 +365,20 @@ impl Automerge {
     }
 
     fn scan_to_prop_insertion_point(&mut self, op: &mut Op, local: bool, pos: &mut usize) {
+        let mut counters = Default::default();
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
             && self.ops[*pos].key == op.key
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
+            // FIXME if i increment pos x and it has a counter and a non counter do i take both or one pred
             if local {
-                // FIXME - counter
-                if self.ops[*pos].visible() {
-                    self.ops[*pos].succ.push(op.id);
-                    op.pred.push(self.ops[*pos].id);
+                // FIXME - counter - need orig pos
+                //if self.ops[*pos].visible() {
+                if self.is_visible(*pos, &mut counters) {
+                    let vpos = self.visible_pos(*pos, &counters);
+                    self.ops[vpos].succ.push(op.id);
+                    op.pred.push(self.ops[vpos].id);
                 }
             } else if op.pred.iter().any(|i| i == &self.ops[*pos].id) {
                 self.ops[*pos].succ.push(op.id);
@@ -383,12 +393,15 @@ impl Automerge {
         key: &Key,
         _clock: &Clock,
         pos: &mut usize,
-    ) -> Vec<&Op> {
+    ) -> Vec<Op> {
+        let mut counters = Default::default();
         let mut result = vec![];
         while *pos < self.ops.len() && &self.ops[*pos].obj == obj && &self.ops[*pos].key == key {
-            // FIXME - counter
-            if self.ops[*pos].visible() {
-                result.push(&self.ops[*pos])
+            // FIXME - counter - need accumulated op
+            //if self.ops[*pos].visible() {
+            if self.is_visible(*pos, &mut counters) {
+                let vop = self.visible_op(*pos, &counters);
+                result.push(vop)
             }
             *pos += 1
         }
@@ -401,11 +414,14 @@ impl Automerge {
         }
 
         let mut seen_key = None;
+        let mut counters = Default::default();
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
-            // FIXME - counter
-            if i.visible() && i.elemid() != seen_key {
+            // FIXME - counter - need bool
+            //if i.visible() && i.elemid() != seen_key {
+            //if self.is_visible(*pos, &mut counters) && i.elemid() != seen_key {
+            if i.elemid() != seen_key && self.is_visible(*pos, &mut counters) {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
             }
@@ -424,11 +440,13 @@ impl Automerge {
         }
 
         let mut seen_key = None;
+        let mut counters = Default::default();
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
-            // FIXME - counter
-            if i.visible() && i.elemid() != seen_key {
+            // FIXME - counter - need bool
+            //if i.visible() && i.elemid() != seen_key {
+            if i.elemid() != seen_key && self.is_visible(*pos, &mut counters) {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
             }
@@ -442,18 +460,21 @@ impl Automerge {
     }
 
     fn scan_to_elem_update_pos(&mut self, op: &mut Op, local: bool, pos: &mut usize) {
+        let mut counters = Default::default();
         while *pos < self.ops.len()
             && self.ops[*pos].obj == op.obj
             && self.ops[*pos].elemid() == op.elemid()
             && self.lamport_cmp(op.id, self.ops[*pos].id) == Ordering::Greater
         {
             if local {
-                // FIXME - counter
-                if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
-                    self.ops[*pos].succ.push(op.id);
-                    op.pred.push(self.ops[*pos].id);
+                // FIXME - counter - need pos
+                //if self.ops[*pos].visible() && self.ops[*pos].elemid() == op.elemid() {
+                if self.ops[*pos].elemid() == op.elemid() && self.is_visible(*pos,&mut counters) {
+                    let vpos = self.visible_pos(*pos,&counters);
+                    self.ops[vpos].succ.push(op.id);
+                    op.pred.push(self.ops[vpos].id);
                 }
-            // FIXME - counter
+            // FIXME - do I need a visible check here?
             } else if self.ops[*pos].visible()
                 && self.ops[*pos].elemid() == op.elemid()
                 && op.pred.iter().any(|i| i == &self.ops[*pos].id)
@@ -466,12 +487,14 @@ impl Automerge {
 
     fn scan_to_lesser_insert(&self, op: &Op, pos: &mut usize, seen: &mut usize) {
         let mut seen_key = None;
+        let mut counters = Default::default();
 
         while *pos < self.ops.len() && self.ops[*pos].obj == op.obj {
             let i = &self.ops[*pos];
 
-            // FIXME - counter
-            if i.visible() && i.elemid() != seen_key {
+            // FIXME - counter - need bool
+            //if i.visible() && i.elemid() != seen_key {
+            if i.elemid() != seen_key && self.is_visible(*pos, &mut counters) {
                 *seen += 1;
                 seen_key = i.elemid(); // only count each elemid once
             }
@@ -516,6 +539,57 @@ impl Automerge {
             (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem),
             (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local),
         }
+    }
+
+    fn visible_pos(&self, pos: usize, counters: &HashMap<OpId,CounterData>) -> usize {
+      let op = &self.ops[pos];
+      for pred in &op.pred {
+        if let Some(entry) = counters.get(&pred) {
+          return entry.pos
+        }
+      }
+      pos
+    }
+
+    fn visible_op(&self, pos: usize, counters: &HashMap<OpId,CounterData>) -> Op {
+      let op = &self.ops[pos];
+      for pred in &op.pred {
+        if let Some(entry) = counters.get(&pred) {
+          return entry.op.clone()
+        }
+      }
+      op.clone()
+    }
+
+    fn is_visible(&self, pos: usize, counters: &mut HashMap<OpId,CounterData>) -> bool {
+      let op = &self.ops[pos];
+      let mut visible = false;
+      match op.action {
+        amp::OpType::Set(amp::ScalarValue::Counter(val)) => {
+          counters.insert(op.id, CounterData { pos, val, succ: op.succ.iter().cloned().collect(), op: op.clone() });
+          if op.succ.is_empty() {
+            visible = true;
+          }
+        },
+        amp::OpType::Inc(inc_val) => {
+          for id in &op.pred {
+            if let Some(mut entry) = counters.get_mut(&id) {
+              entry.succ.remove(&op.id);
+              entry.val += inc_val;
+              entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
+              if entry.succ.is_empty() {
+                visible = true;
+              }
+            }
+          }
+        },
+        _ => {
+          if op.succ.is_empty() {
+            visible = true;
+          }
+        }
+      };
+      visible
     }
 
     fn insert_op(&mut self, mut op: Op, local: bool) -> Op {
@@ -594,8 +668,10 @@ impl Automerge {
         }
     }
 
-    pub fn inc(&mut self, _obj: ObjId, _key: Key, _value: i64) -> Result<(), AutomergeError> {
-        unimplemented!()
+    pub fn inc(&mut self, obj: &ObjId, prop: Prop, value: i64) -> Result<(), AutomergeError> {
+        let key = self.import_prop(obj, prop, false)?;
+        self.make_op(obj, key, amp::OpType::Inc(value), false)?;
+        Ok(())
     }
 
     pub fn del(&mut self, obj: &ObjId, prop: Prop) -> Result<(), AutomergeError> {
@@ -1082,6 +1158,7 @@ impl Automerge {
             let value: String = match &i.action {
                 amp::OpType::Set(value) => format!("{}", value),
                 amp::OpType::Make(obj) => format!("make{}", obj),
+                amp::OpType::Inc(val) => format!("inc{}", val),
                 _ => unimplemented!(),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
@@ -1092,6 +1169,14 @@ impl Automerge {
             );
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct CounterData {
+  pos: usize,
+  val: i64,
+  succ: HashSet<OpId>,
+  op: Op
 }
 
 #[derive(Debug, Clone)]
@@ -1145,7 +1230,7 @@ impl Default for ElemId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, AutomergeError, ObjId, ROOT};
+    use crate::{Automerge, AutomergeError, ObjId, ROOT, Value};
     use automerge_protocol as amp;
 
     #[test]
@@ -1193,6 +1278,20 @@ mod tests {
         assert!(doc.values(&ROOT, "xxx".into())?.len() > 0);
         doc.del(&ROOT, "xxx".into())?;
         assert!(doc.values(&ROOT, "xxx".into())?.len() == 0);
+        doc.commit()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_inc() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+        doc.begin(None, None)?;
+        let id = doc.set(&ROOT, "counter".into(), Value::Scalar(amp::ScalarValue::Counter(10)))?;
+        assert!(doc.value(&ROOT, "counter".into())? == Some((Value::Scalar(amp::ScalarValue::Counter(10)),id)));
+        doc.inc(&ROOT, "counter".into(), 10)?;
+        assert!(doc.value(&ROOT, "counter".into())? == Some((Value::Scalar(amp::ScalarValue::Counter(20)),id)));
+        doc.inc(&ROOT, "counter".into(), -5)?;
+        assert!(doc.value(&ROOT, "counter".into())? == Some((Value::Scalar(amp::ScalarValue::Counter(15)),id)));
         doc.commit()?;
         Ok(())
     }

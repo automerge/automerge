@@ -101,5 +101,19 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(root, "xxx"),[])
       doc.commit()
     })
+
+    it('should be able to use counters', () => {
+      let doc = Automerge.init()
+      let root = Automerge.root()
+
+      doc.begin()
+      doc.set(root, "counter", 10, "counter");
+      assert.deepEqual(doc.value(root, "counter"),["counter",10])
+      doc.inc(root, "counter", 10);
+      assert.deepEqual(doc.value(root, "counter"),["counter",20])
+      doc.inc(root, "counter", -5);
+      assert.deepEqual(doc.value(root, "counter"),["counter",15])
+      doc.commit()
+    })
   })
 })

@@ -203,7 +203,17 @@ impl From<&Op> for (Value, OpId) {
         match &op.action {
             amp::OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
             amp::OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
-            _ => panic!("cant convert op into a value"),
+            _ => panic!("cant convert op into a value - {:?}", op),
+        }
+    }
+}
+
+impl From<Op> for (Value, OpId) {
+    fn from(op: Op) -> Self {
+        match &op.action {
+            amp::OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
+            amp::OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
 }
@@ -232,7 +242,7 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash)]
 pub struct OpId(pub u64, pub usize);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord)]

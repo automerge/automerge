@@ -766,7 +766,7 @@ describe('Automerge', () => {
 
     describe('counters', () => {
       // counter
-      it.skip('should allow deleting counters from maps', () => {
+      it('should allow deleting counters from maps', () => {
         const s1 = Automerge.change(Automerge.init(), doc => doc.birds = {wrens: new Automerge.Counter(1)})
         const s2 = Automerge.change(s1, doc => doc.birds.wrens.increment(2))
         const s3 = Automerge.change(s2, doc => delete doc.birds.wrens)
@@ -775,7 +775,7 @@ describe('Automerge', () => {
       })
 
       // counter
-      it.skip('should not allow deleting counters from lists', () => {
+      it('should not allow deleting counters from lists', () => {
         const s1 = Automerge.change(Automerge.init(), doc => doc.recordings = [new Automerge.Counter(1)])
         const s2 = Automerge.change(s1, doc => doc.recordings[0].increment(2))
         assert.deepStrictEqual(s2, {recordings: [new Automerge.Counter(3)]})
@@ -803,8 +803,7 @@ describe('Automerge', () => {
       assert.strictEqual(Automerge.getConflicts(s3, 'hello'), undefined)
     })
 
-    // counter
-    it.skip('should add concurrent increments of the same property', () => {
+    it('should add concurrent increments of the same property', () => {
       s1 = Automerge.change(s1, doc => doc.counter = new Automerge.Counter())
       s2 = Automerge.merge(s2, s1)
       s1 = Automerge.change(s1, doc => doc.counter.increment())
@@ -816,8 +815,7 @@ describe('Automerge', () => {
       assert.strictEqual(Automerge.getConflicts(s3, 'counter'), undefined)
     })
 
-    // counter
-    it.skip('should add increments only to the values they precede', () => {
+    it('should add increments only to the values they precede', () => {
       s1 = Automerge.change(s1, doc => doc.counter = new Automerge.Counter(0))
       s1 = Automerge.change(s1, doc => doc.counter.increment())
       s2 = Automerge.change(s2, doc => doc.counter = new Automerge.Counter(100))
