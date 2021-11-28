@@ -18,6 +18,8 @@
   "main": "./dev/index.js",
   "scripts": {
     "build": "rm -rf dev && wasm-pack build --target nodejs --dev --out-name index -d dev",
+    "release": "rm -rf dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt",
+    "opt": "wasm-opt -Oz dev/index_bg.wasm -o tmp.wasm && mv tmp.wasm dev/index_bg.wasm",
     "test": "yarn build && cargo test && wasm-pack test --node && mocha --bail --full-trace"
   },
   "dependencies": {},
