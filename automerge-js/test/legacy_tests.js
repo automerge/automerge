@@ -1150,7 +1150,7 @@ describe('Automerge', () => {
       })
     })
 
-    it.skip('should allow a reloaded list to be mutated', () => {
+    it('should allow a reloaded list to be mutated', () => {
       let doc = Automerge.change(Automerge.init(), doc => doc.foo = [])
       doc = Automerge.load(Automerge.save(doc))
       doc = Automerge.change(doc, 'add', doc => doc.foo.push(1))

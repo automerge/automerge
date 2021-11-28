@@ -58,13 +58,6 @@ describe('change encoding', () => {
       126, 139, 1, 0
     ])
     assert.throws(() => { decodeChange(change) }, /operation IDs are not in ascending order/)
-    /*
-    const decoded1 = decodeChange(change)
-    const change2 = encodeChange(decoded1)
-    const decoded2 = decodeChange(change2)
-    assert.deepStrictEqual(decoded1, decoded2)
-    assert.deepStrictEqual(change, change2)
-    */
   })
 
   describe('with trailing bytes', () => {

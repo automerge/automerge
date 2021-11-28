@@ -261,7 +261,7 @@ impl Automerge {
         insert: bool,
     ) -> Result<OpId, AutomergeError> {
         if let Some(mut tx) = self.transaction.take() {
-            let id = OpId(tx.start_op + tx.operations.len() as u64, 0);
+            let id = OpId(tx.start_op + tx.operations.len() as u64, tx.actor);
             let op = Op {
                 change: self.history.len(),
                 id,
