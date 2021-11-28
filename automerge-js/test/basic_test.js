@@ -88,7 +88,8 @@ describe('Automerge', () => {
         it('handle simple list creation', () => {
             let doc1 = Automerge.init()
             let doc2 = Automerge.change(doc1, (d) => d.list = [])
-            assert.deepEqual(doc2, { list: []})
+            console.log(doc2.list.map((x) => x))
+            //assert.deepEqual(doc2, { list: []})
         })
 
         it('handle simple lists', () => {
@@ -116,6 +117,18 @@ describe('Automerge', () => {
             let doc1 = Automerge.init()
             let doc2 = Automerge.change(doc1, (d) => {
               d.list = [ 1, 2, 3 ]
+            })
+            let changes = Automerge.getChanges(doc1, doc2)
+            let docB1 = Automerge.init()
+            ;let [docB2] = Automerge.applyChanges(docB1, changes)
+            assert.deepEqual(docB2, doc2);
+        })
+        it('handle text', () => {
+            let doc1 = Automerge.init()
+            let tmp = new Automerge.Text("hello")
+            let doc2 = Automerge.change(doc1, (d) => {
+              d.list = new Automerge.Text("hello")
+              d.list.insertAt(2,"Z")
             })
             let changes = Automerge.getChanges(doc1, doc2)
             let docB1 = Automerge.init()

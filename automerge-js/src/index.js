@@ -2,8 +2,9 @@
 let AutomergeWASM = require("automerge-wasm")
 //const { encodeChange, decodeChange } = require('./columnar')
 
-let { rootProxy, listProxy, mapProxy } = require("./proxies")
+let { rootProxy, listProxy, textProxy, mapProxy } = require("./proxies")
 let { Counter  } = require("./counter")
+let { Text } = require("./text")
 let { Int, Uint, Float64  } = require("./numbers")
 let { STATE, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
 
@@ -130,8 +131,10 @@ function conflictAt(context, objectId, prop) {
           case "list":
             result[value] = listProxy(context, value, [ prop ], true, true)
             break;
+          case "text":
+            result[value] = textProxy(context, value, [ prop ], true, true)
+            break;
           //case "table":
-          //case "text":
           //case "cursor":
           case "str":
           case "uint":
@@ -297,7 +300,7 @@ module.exports = {
     generateSyncMessage, receiveSyncMessage, initSyncState,
     decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState,
     getMissingDeps,
-    dump, Counter, Int, Uint, Float64
+    dump, Text, Counter, Int, Uint, Float64
 }
 
 // depricated

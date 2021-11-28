@@ -48,6 +48,8 @@ describe('change encoding', () => {
     assert.deepStrictEqual(decoded, Object.assign({hash: decoded.hash}, change1))
   })
 
+  // FIXME - skipping this b/c it was never implemented in the rust impl and isnt trivial
+/*
   it.skip('should require strict ordering of preds', () => {
     const change = new Uint8Array([
       133, 111, 74, 131, 31, 229, 112, 44, 1, 105, 1, 58, 30, 190, 100, 253, 180, 180, 66, 49, 126,
@@ -59,6 +61,7 @@ describe('change encoding', () => {
     ])
     assert.throws(() => { decodeChange(change) }, /operation IDs are not in ascending order/)
   })
+*/
 
   describe('with trailing bytes', () => {
     let change = new Uint8Array([

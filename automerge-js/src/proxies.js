@@ -2,6 +2,7 @@
 const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter, getWriteableCounter } = require("./counter");
+const { Text } = require("./text");
 const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 const { MAP, LIST, TABLE, TEXT } = require("automerge-wasm")
 
@@ -31,6 +32,7 @@ function valueAt(target, prop) {
         case undefined: return;
         case "map": return mapProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
         case "list": return listProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
+        case "text": return textProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
         //case "table":
         //case "text":
         //case "cursor":
@@ -54,47 +56,12 @@ function valueAt(target, prop) {
       }
 }
 
-function list_get(target, index) {
-    const {context, objectId, path, readonly, frozen, conflicts} = target
-    if (index === OBJECT_ID) return objectId
-    if (index === READ_ONLY) return readonly
-    if (index === FROZEN) return frozen
-    if (index === STATE) return context;
-    if (index === 'length') return context.length(objectId);
-    if (index === Symbol.iterator) {
-      let i = 0;
-      return function *() {
-        // FIXME - ugly
-        let value = valueAt(target, i)
-        while (value !== undefined) {
-            yield value
-            i += 1
-            value = valueAt(target, i)
-        }
-      }
-    }
-    if (typeof index === 'number') {
-      return valueAt(target, index)
-    } else {
-      return listMethods(target)[index]
-    }
-}
-
 function local_conflicts(context, objectId, key) {
     if (typeof key === "string" || typeof key === "number") {
       const c = context.values(objectId, key)
       return c.length > 1
     }
     return false
-}
-
-function map_get(target, key) {
-    const { context, objectId, path, readonly, frozen } = target
-    if (key === OBJECT_ID) return objectId
-    if (key === READ_ONLY) return readonly
-    if (key === FROZEN) return frozen
-    if (key === STATE) return context;
-    return valueAt(target, key)
 }
 
 function import_value(value) {
@@ -116,6 +83,8 @@ function import_value(value) {
           return [ value, "bytes" ]
         } else if (value instanceof Array) {
           return [ value, "list" ]
+        } else if (value instanceof Text) {
+          return [ value, "text" ]
         } else if (value[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
         } else {
@@ -141,8 +110,13 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) {
+    const { context, objectId, path, readonly, frozen } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
-    return map_get(target, key)
+    if (key === OBJECT_ID) return objectId
+    if (key === READ_ONLY) return readonly
+    if (key === FROZEN) return frozen
+    if (key === STATE) return context;
+    return valueAt(target, key)
   },
 
   set (target, key, val) {
@@ -156,7 +130,7 @@ const MapHandler = {
     }
     conflicts = conflicts || local_conflicts(context, objectId, key)
     let [ value, datatype ] = import_value(val)
-    if (map_get(target,key) === val && !conflicts) {
+    if (this.get(target,key) === val && !conflicts) {
       return
     }
     if (frozen) {
@@ -171,6 +145,13 @@ const MapHandler = {
         const proxyList = listProxy(context, list, [ ... path, key ], readonly, conflicts);
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
+        }
+        break;
+      case "text":
+        const text = context.set(objectId, key, TEXT)
+        const proxyText = textProxy(context, text, [ ... path, key ], readonly, conflicts);
+        for (let i = 0; i < value.length; i++) {
+          proxyText[i] = value.get(i)
         }
         break;
       case "map":
@@ -196,13 +177,13 @@ const MapHandler = {
   },
 
   has (target, key) {
-    const value = map_get(target, key)
+    const value = this.get(target, key)
     return value !== undefined
   },
 
   getOwnPropertyDescriptor (target, key) {
     const { context, objectId } = target
-    const value = map_get(target, key)
+    const value = this.get(target, key)
     if (typeof value !== 'undefined') {
       return {
         configurable: true, enumerable: true, value
@@ -247,6 +228,14 @@ function splice(target, index, del, vals) {
             proxyList[i] = value[i]
           }
           break;
+        case "text":
+          const text = context.insert(objectId, index, TEXT)
+          const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
+          // FIXME use splice
+          for (let i = 0; i < value.length; i++) {
+            proxyText[i] = value.get(i)
+          }
+          break;
         case "map":
           const map = context.insert(objectId, index, MAP)
           const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
@@ -264,9 +253,31 @@ function splice(target, index, del, vals) {
 
 const ListHandler = {
   get (target, index) {
+    const {context, objectId, path, readonly, frozen, conflicts} = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
-    return list_get(target, index)
+    if (index === OBJECT_ID) return objectId
+    if (index === READ_ONLY) return readonly
+    if (index === FROZEN) return frozen
+    if (index === STATE) return context;
+    if (index === 'length') return context.length(objectId);
+    if (index === Symbol.iterator) {
+      let i = 0;
+      return function *() {
+        // FIXME - ugly
+        let value = valueAt(target, i)
+        while (value !== undefined) {
+            yield value
+            i += 1
+            value = valueAt(target, i)
+        }
+      }
+    }
+    if (typeof index === 'number') {
+      return valueAt(target, index)
+    } else {
+      return listMethods(target)[index]
+    }
   },
 
   set (target, index, val) {
@@ -284,7 +295,7 @@ const ListHandler = {
     }
     conflicts = conflicts || local_conflicts(context, objectId, index)
     const [ value, datatype] = import_value(val)
-    if (list_get(target,index) === val && !conflicts) {
+    if (this.get(target,index) === val && !conflicts) {
       return
     }
     if (frozen) {
@@ -301,11 +312,22 @@ const ListHandler = {
         } else {
           list = context.set(objectId, index, LIST)
         }
-        //const list = context.set(objectId, index, LIST)
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
         // FIXME use splice
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
+        }
+        break;
+      case "text":
+        let text
+        if (index >= context.length(objectId)) {
+          text = context.insert(objectId, index, TEXT)
+        } else {
+          text = context.set(objectId, index, TEXT)
+        }
+        const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
+        for (let i = 0; i < value.length; i++) {
+          proxyText[i] = value.get(i)
         }
         break;
       case "map":
@@ -367,6 +389,36 @@ const ListHandler = {
   }
 }
 
+const TextHandler = Object.assign(ListHandler, {
+  get (target, index) {
+    // FIXME this is a one line change from ListHandler.get()
+    const {context, objectId, path, readonly, frozen, conflicts} = target
+    index = parseListIndex(index)
+    if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
+    if (index === OBJECT_ID) return objectId
+    if (index === READ_ONLY) return readonly
+    if (index === FROZEN) return frozen
+    if (index === STATE) return context;
+    if (index === 'length') return context.length(objectId);
+    if (index === Symbol.iterator) {
+      let i = 0;
+      return function *() {
+        let value = valueAt(target, i)
+        while (value !== undefined) {
+            yield value
+            i += 1
+            value = valueAt(target, i)
+        }
+      }
+    }
+    if (typeof index === 'number') {
+      return valueAt(target, index)
+    } else {
+      return textMethods(target)[index] || listMethods(target)[index]
+    }
+  },
+})
+
 function mapProxy(context, objectId, path, readonly, conflicts) {
   return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, conflicts}, MapHandler)
 }
@@ -375,6 +427,12 @@ function listProxy(context, objectId, path, readonly, conflicts) {
   let target = []
   Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, conflicts})
   return new Proxy(target, ListHandler)
+}
+
+function textProxy(context, objectId, path, readonly, conflicts) {
+  let target = []
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, conflicts})
+  return new Proxy(target, TextHandler)
 }
 
 function rootProxy(context, readonly) {
@@ -522,4 +580,51 @@ function listMethods(target) {
   return methods
 }
 
-module.exports = { rootProxy, listProxy, mapProxy }
+function textMethods(target) {
+  const {context, objectId, path, readonly, frozen, conflicts} = target
+  const methods = {
+    set (index, value) {
+      return this[index] = value
+    },
+    get (index) {
+      return this[index]
+    },
+    toString () {
+      let str = ''
+      let length = this.length
+      for (let i = 0; i < length; i++) {
+        const value = this.get(i)
+        if (typeof value === 'string') str += value
+      }
+      return str
+    },
+    toSpans () {
+      let spans = []
+      let chars = ''
+      let length = this.length
+      for (let i = 0; i < length; i++) {
+        const value = this[i]
+        if (typeof value === 'string') {
+          chars += value
+        } else {
+          if (chars.length > 0) {
+            spans.push(chars)
+            chars = ''
+          }
+          spans.push(value)
+        }
+      }
+      if (chars.length > 0) {
+        spans.push(chars)
+      }
+      return spans
+    },
+    toJSON () {
+      return this.toString()
+    }
+  }
+  return methods
+}
+    
+
+module.exports = { rootProxy, textProxy, listProxy, mapProxy }

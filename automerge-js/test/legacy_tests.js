@@ -1286,7 +1286,7 @@ describe('Automerge', () => {
     })
 
     // TEXT
-    it.skip('should handle updates to a text object', () => {
+    it('should handle updates to a text object', () => {
       let s1 = Automerge.change(Automerge.init(), doc => doc.text = new Automerge.Text('ab'))
       let s2 = Automerge.change(s1, doc => doc.text.set(0, 'A'))
       let [s3] = Automerge.applyChanges(Automerge.init(), Automerge.getAllChanges(s2))
