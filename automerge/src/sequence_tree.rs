@@ -548,10 +548,6 @@ where
         self.inner.get(self.index - 1)
     }
 
-    fn count(self) -> usize {
-        self.inner.len()
-    }
-
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
         self.index += n;
         self.inner.get(self.index - 1)

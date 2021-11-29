@@ -26,6 +26,8 @@ mod internal;
 mod protocol;
 mod sequence_tree;
 
+use sequence_tree::SequenceTree;
+
 use automerge_protocol as amp;
 use change::{encode_document, export_change};
 use core::ops::Range;
@@ -47,8 +49,6 @@ pub use sync::{SyncMessage, SyncState};
 
 pub use amp::{ActorId, ObjType, ScalarValue};
 
-type Itr<'a> = std::iter::Enumerate<std::slice::Iter<'a, protocol::Op>>;
-
 #[derive(Debug, Clone)]
 pub struct Automerge {
     actors: IndexedCache<amp::ActorId>,
@@ -59,6 +59,7 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
     ops: Vec<Op>,
+//    ops: SequenceTree<Op>,
     actor: Option<usize>,
     max_op: u64,
     transaction: Option<Transaction>,
@@ -318,8 +319,8 @@ impl Automerge {
                 seen_visible = true;
             }
             if seen == n + 1 {
-                let vop = self.visible_op(*pos, &counters);
-                result.push(vop)
+                let vop = visible_op(op, &counters);
+                result.push(vop.clone())
             }
             if seen > n + 1 {
                 break;
@@ -398,15 +399,15 @@ impl Automerge {
               break
             }
             if is_visible(op, *pos, &mut counters) {
-                let vop = self.visible_op(*pos, &counters);
-                result.push(vop)
+                let vop = visible_op(op, &counters);
+                result.push(vop.clone())
             }
             *pos += 1
         }
         result
     }
 
-    fn scan_to_elem_insert_op1(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_elem_insert_op1(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
         if *elem == HEAD {
             return;
         }
@@ -415,7 +416,7 @@ impl Automerge {
         let mut counters = Default::default();
 
         for op in self.ops.iter().skip(*pos) {
-            if op.obj != op.obj {
+            if &op.obj != obj {
               break;
             }
             if op.elemid() != seen_key && is_visible(op, *pos, &mut counters) {
@@ -431,7 +432,7 @@ impl Automerge {
         }
     }
 
-    fn scan_to_elem_insert_op2(&self, op: &Op, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_elem_insert_op2(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
         if *elem == HEAD {
             return;
         }
@@ -440,7 +441,7 @@ impl Automerge {
         let mut counters = Default::default();
 
         for op in self.ops.iter().skip(*pos) {
-            if op.obj != op.obj {
+            if &op.obj != obj {
               break
             }
             if op.elemid() != seen_key && is_visible(op, *pos, &mut counters) {
@@ -511,7 +512,7 @@ impl Automerge {
         let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op2(op, elem, &mut pos, &mut seen);
+        self.scan_to_elem_insert_op2(&op.obj, elem, &mut pos, &mut seen);
         self.scan_to_elem_update_pos(op, local, &mut pos);
         Cursor { pos, seen }
     }
@@ -520,7 +521,7 @@ impl Automerge {
         let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op1(op, elem, &mut pos, &mut seen);
+        self.scan_to_elem_insert_op1(&op.obj, elem, &mut pos, &mut seen);
         self.scan_to_lesser_insert(op, &mut pos, &mut seen);
         Cursor { pos, seen }
     }
@@ -539,16 +540,6 @@ impl Automerge {
             (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem),
             (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local),
         }
-    }
-
-    fn visible_op(&self, pos: usize, counters: &HashMap<OpId, CounterData>) -> Op {
-        let op = &self.ops[pos];
-        for pred in &op.pred {
-            if let Some(entry) = counters.get(&pred) {
-                return entry.op.clone();
-            }
-        }
-        op.clone()
     }
 
     fn insert_op(&mut self, mut op: Op, local: bool) -> Op {
@@ -781,7 +772,9 @@ impl Automerge {
 
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
-        encode_document(&c, &self.ops, &self.actors, &self.props.cache)
+        // FIXME
+        let ops : Vec<_> = self.ops.iter().cloned().collect();
+        encode_document(&c, ops.as_slice(), &self.actors, &self.props.cache)
     }
 
     pub fn save_incremental(&mut self) -> Vec<u8> {
@@ -1244,6 +1237,16 @@ fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) ->
         }
     };
     visible
+}
+
+
+fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
+    for pred in &op.pred {
+        if let Some(entry) = counters.get(&pred) {
+            return entry.op.clone()
+        }
+    }
+    op.clone()
 }
 
 #[cfg(test)]
