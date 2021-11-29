@@ -25,3 +25,5 @@ features = ["console"]
 
 [dev-dependencies]
 pretty_assertions = "^0.7.2"
+proptest = { version = "0.10.1", default-features = false, features = ["std"] }
+
