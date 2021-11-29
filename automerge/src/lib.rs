@@ -180,8 +180,10 @@ impl Automerge {
         if let Some(tx) = self.transaction.take() {
             for op in &tx.operations {
                 for pred_id in &op.pred {
-                    if let Some(o) = self.ops.iter_mut().find(|o| o.id == *pred_id) {
-                        o.succ.retain(|i| i != pred_id);
+                    if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
+                        if let Some(o) = self.ops.get_mut(p) {
+                          o.succ.retain(|i| i != pred_id);
+                        }
                     }
                 }
                 if let Some(pos) = self.ops.iter().position(|o| o.id == op.id) {
@@ -362,25 +364,27 @@ impl Automerge {
     fn scan_to_prop_insertion_point(&mut self, next: &mut Op, local: bool, pos: &mut usize) {
         let mut counters = Default::default();
         let mut succ = vec![];
-        for op in self.ops.iter_mut().skip(*pos) {
+        for op in self.ops.iter().skip(*pos) {
             if !(op.obj == next.obj && op.key == next.key && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater) {
               break
             }
             // FIXME if i increment pos x and it has a counter and a non counter do i take both or one pred
             if local {
                 if is_visible(op, *pos, &mut counters) {
-                    succ.push(visible_pos(op, *pos, &counters));
+                    succ.push((true,visible_pos(op, *pos, &counters)));
                 }
             } else if next.pred.iter().any(|i| i == &op.id) {
-                op.succ.push(next.id);
+                succ.push((false,*pos));
             }
             *pos += 1
         }
 
-        for vpos in succ {
+        for (local, vpos) in succ {
           if let Some(op) = self.ops.get_mut(vpos) {
             op.succ.push(next.id);
-            next.pred.push(op.id);
+            if local {
+              next.pred.push(op.id);
+            }
           }
         }
     }
@@ -460,28 +464,30 @@ impl Automerge {
     fn scan_to_elem_update_pos(&mut self, next: &mut Op, local: bool, pos: &mut usize) {
         let mut counters = Default::default();
         let mut succ = vec![];
-        for op in self.ops.iter_mut().skip(*pos) {
+        for op in self.ops.iter().skip(*pos) {
             if !(op.obj == next.obj && op.elemid() == next.elemid() && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater) {
               break
             }
             if local {
                 if op.elemid() == next.elemid() && is_visible(&op, *pos, &mut counters) {
-                    succ.push(visible_pos(&op, *pos, &counters));
+                    succ.push((true,visible_pos(&op, *pos, &counters)));
                 }
             // FIXME - do I need a visible check here?
             } else if op.visible()
                 && op.elemid() == next.elemid()
                 && next.pred.iter().any(|i| i == &op.id)
             {
-                op.succ.push(next.id);
+                succ.push((false,*pos));
             }
             *pos += 1
         }
 
-        for vpos in succ {
+        for (local, vpos) in succ {
           if let Some(op) = self.ops.get_mut(vpos) {
             op.succ.push(next.id);
-            next.pred.push(op.id);
+            if local {
+              next.pred.push(op.id);
+            }
           }
         }
     }
