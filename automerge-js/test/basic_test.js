@@ -135,5 +135,30 @@ describe('Automerge', () => {
             ;let [docB2] = Automerge.applyChanges(docB1, changes)
             assert.deepEqual(docB2, doc2);
         })
+
+        it('have many list methiods', () => {
+            let doc1 = Automerge.from({ list: [1,2,3] })
+            assert.deepEqual(doc1, { list: [1,2,3] });
+            let doc2 = Automerge.change(doc1, (d) => {
+              d.list.splice(1,1,9,10)
+            })
+            assert.deepEqual(doc2, { list: [1,9,10,3] });
+            let doc3 = Automerge.change(doc2, (d) => {
+              d.list.push(11,12)
+            })
+            assert.deepEqual(doc3, { list: [1,9,10,3,11,12] });
+            let doc4 = Automerge.change(doc3, (d) => {
+              d.list.unshift(2,2)
+            })
+            assert.deepEqual(doc4, { list: [2,2,1,9,10,3,11,12] });
+            let doc5 = Automerge.change(doc4, (d) => {
+              d.list.shift()
+            })
+            assert.deepEqual(doc5, { list: [2,1,9,10,3,11,12] });
+            let doc6 = Automerge.change(doc5, (d) => {
+              d.list.insertAt(3,100,101)
+            })
+            assert.deepEqual(doc6, { list: [2,1,9,100,101,10,3,11,12] });
+        })
     })
 })

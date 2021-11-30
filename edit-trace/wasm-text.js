@@ -16,10 +16,8 @@ for (let i = 0; i < edits.length; i++) {
   let edit = edits[i]
   if (i % 1000 === 0) {
     console.log(`Processed ${i} edits in ${new Date() - start} ms`)
-    //if (i > 50000) { break; }
   }
   doc.splice(text, ...edit)
-  //doc.splice(text, 0, edit[1], edit.slice(2))
 }
 doc.commit()
 

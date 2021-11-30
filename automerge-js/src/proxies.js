@@ -197,59 +197,6 @@ const MapHandler = {
   },
 }
 
-function splice(target, index, del, vals) {
-    const {context, objectId, path, readonly, frozen, conflicts} = target
-    index = parseListIndex(index)
-    for (let val of vals) {
-      if (val && val[OBJECT_ID]) {
-            throw new RangeError('Cannot create a reference to an existing document object')
-      }
-    }
-    if (frozen) {
-      throw new RangeError("Attempting to use an outdated Automerge document")
-    }
-    if (readonly) {
-      throw new RangeError(`Object property "${index}" cannot be modified`)
-    }
-    let result = []
-    for (let i = 0; i < del; i++) {
-      let value = valueAt(target, index)
-      result.push(value)
-      context.del(objectId, index)
-    }
-    const values = vals.map((val) => import_value(val))
-    for (let [value,datatype] of values) {
-      switch (datatype) {
-        case "list":
-          const list = context.insert(objectId, index, LIST)
-          const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
-          // FIXME use splice
-          for (let i = 0; i < value.length; i++) {
-            proxyList[i] = value[i]
-          }
-          break;
-        case "text":
-          const text = context.insert(objectId, index, TEXT)
-          const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
-          // FIXME use splice
-          for (let i = 0; i < value.length; i++) {
-            proxyText[i] = value.get(i)
-          }
-          break;
-        case "map":
-          const map = context.insert(objectId, index, MAP)
-          const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
-          for (const key in value) {
-            proxyMap[key] = value[key]
-          }
-          break;
-        default:
-          context.insert(objectId, index, value, datatype)
-      }
-      index += 1
-    }
-    return result
-}
 
 const ListHandler = {
   get (target, index) {
@@ -313,10 +260,7 @@ const ListHandler = {
           list = context.set(objectId, index, LIST)
         }
         const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
-        // FIXME use splice
-        for (let i = 0; i < value.length; i++) {
-          proxyList[i] = value[i]
-        }
+        proxyList.splice(0,0,...value)
         break;
       case "text":
         let text
@@ -326,9 +270,7 @@ const ListHandler = {
           text = context.set(objectId, index, TEXT)
         }
         const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
-        for (let i = 0; i < value.length; i++) {
-          proxyText[i] = value.get(i)
-        }
+        proxyText.splice(0,0,...value)
         break;
       case "map":
         let map
@@ -337,7 +279,6 @@ const ListHandler = {
         } else {
           map = context.set(objectId, index, MAP)
         }
-        //const map = context.set(objectId, index, MAP)
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -479,7 +420,7 @@ function listMethods(target) {
     },
 
     insertAt(index, ...values) {
-      splice(target, parseListIndex(index), 0, values)
+      this.splice(index, 0, ...values)
       return this
     },
 
@@ -494,7 +435,8 @@ function listMethods(target) {
     },
 
     push(...values) {
-      splice(target, context.length(objectId), 0, values)
+      let len = context.length(objectId)
+      this.splice(len, 0, ...values)
       return context.length(objectId)
     },
 
@@ -505,12 +447,56 @@ function listMethods(target) {
       return first
     },
 
-    splice(start, deleteCount, ...values) {
-      return splice(target, start, deleteCount, values)
+    splice(index, del, ...vals) {
+      index = parseListIndex(index)
+      del = parseListIndex(del)
+      for (let val of vals) {
+        if (val && val[OBJECT_ID]) {
+              throw new RangeError('Cannot create a reference to an existing document object')
+        }
+      }
+      if (frozen) {
+        throw new RangeError("Attempting to use an outdated Automerge document")
+      }
+      if (readonly) {
+        throw new RangeError(`Object property "${index}" cannot be modified`)
+      }
+      let result = []
+      for (let i = 0; i < del; i++) {
+        let value = valueAt(target, index)
+        result.push(value)
+        context.del(objectId, index)
+      }
+      const values = vals.map((val) => import_value(val))
+      for (let [value,datatype] of values) {
+        switch (datatype) {
+          case "list":
+            const list = context.insert(objectId, index, LIST)
+            const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
+            proxyList.splice(0,0,...value)
+            break;
+          case "text":
+            const text = context.insert(objectId, index, TEXT)
+            const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
+            proxyText.splice(0,0,...value)
+            break;
+          case "map":
+            const map = context.insert(objectId, index, MAP)
+            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
+            for (const key in value) {
+              proxyMap[key] = value[key]
+            }
+            break;
+          default:
+            context.insert(objectId, index, value, datatype)
+        }
+        index += 1
+      }
+      return result
     },
 
     unshift(...values) {
-      splice(target, 0, 0, values)
+      this.splice(0, 0, ...values)
       return context.length(objectId)
     },
 
