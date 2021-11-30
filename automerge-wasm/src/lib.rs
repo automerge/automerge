@@ -418,6 +418,8 @@ impl Automerge {
                     Ok(am::ScalarValue::Str(s.into()).into())
                 } else if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
+                } else if let Ok(o) = &value.dyn_into::<Uint8Array>() {
+                    Ok(am::ScalarValue::Bytes(o.to_vec()).into())
                 } else {
                     Err("value is invalid".into())
                 }
@@ -492,11 +494,6 @@ pub fn load(data: Uint8Array, actor: JsValue) -> Result<Automerge, JsValue> {
         automerge.set_actor(actor)
     }
     Ok(Automerge(automerge))
-}
-
-#[wasm_bindgen]
-pub fn root() -> Result<JsValue, JsValue> {
-    Ok("_root".into())
 }
 
 #[wasm_bindgen(js_name = encodeChange)]

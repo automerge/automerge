@@ -58,23 +58,23 @@ impl Value {
     }
 
     pub fn map() -> Value {
-      Value::Object(amp::ObjType::Map)
+        Value::Object(amp::ObjType::Map)
     }
 
     pub fn list() -> Value {
-      Value::Object(amp::ObjType::List)
+        Value::Object(amp::ObjType::List)
     }
 
     pub fn text() -> Value {
-      Value::Object(amp::ObjType::Text)
+        Value::Object(amp::ObjType::Text)
     }
 
     pub fn table() -> Value {
-      Value::Object(amp::ObjType::Table)
+        Value::Object(amp::ObjType::Table)
     }
 
     pub fn str(s: &str) -> Value {
-      Value::Scalar(amp::ScalarValue::Str(s.into()))
+        Value::Scalar(amp::ScalarValue::Str(s.into()))
     }
 }
 
@@ -277,7 +277,7 @@ pub struct ObjId(pub OpId);
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord)]
 pub struct ElemId(pub OpId);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
     pub change: usize,
     pub id: OpId,

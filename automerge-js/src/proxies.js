@@ -437,7 +437,7 @@ function textProxy(context, objectId, path, readonly, conflicts) {
 
 function rootProxy(context, readonly) {
   //context.instantiateObject = instantiateProxy
-  return mapProxy(context, AutomergeWASM.root(), [], readonly, false)
+  return mapProxy(context, "_root", [], readonly, false)
 }
 
 function listMethods(target) {

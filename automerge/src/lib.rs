@@ -24,9 +24,11 @@ mod error;
 mod expanded_op;
 mod internal;
 mod protocol;
-mod sequence_tree;
+//mod sequence_tree;
+//use sequence_tree::SequenceTree;
+mod op_tree;
 
-use sequence_tree::SequenceTree;
+use op_tree::OpTree;
 
 use automerge_protocol as amp;
 use change::{encode_document, export_change};
@@ -59,7 +61,8 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
     //ops: Vec<Op>,
-    ops: SequenceTree<Op>,
+    //ops: SequenceTree<Op>,
+    ops: OpTree,
     actor: Option<usize>,
     max_op: u64,
     transaction: Option<Transaction>,
@@ -132,8 +135,8 @@ impl Automerge {
         }
     }
 
-    pub fn begin(&mut self) -> Result<(),AutomergeError> {
-      self.begin_with_opts(None,None)
+    pub fn begin(&mut self) -> Result<(), AutomergeError> {
+        self.begin_with_opts(None, None)
     }
 
     pub fn begin_with_opts(
@@ -186,7 +189,7 @@ impl Automerge {
                 for pred_id in &op.pred {
                     if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
                         if let Some(o) = self.ops.get_mut(p) {
-                          o.succ.retain(|i| i != pred_id);
+                            o.succ.retain(|i| i != pred_id);
                         }
                     }
                 }
@@ -301,7 +304,7 @@ impl Automerge {
     fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
         let mut counters = Default::default();
         for op in self.ops.iter().skip(*pos) {
-            if !(&op.obj == obj && !is_visible(op, *pos, &mut counters)) {
+            if &op.obj != obj || is_visible(op, *pos, &mut counters) {
                 break;
             }
             *pos += 1
@@ -342,7 +345,7 @@ impl Automerge {
         let mut counters = Default::default();
         for op in self.ops.iter().skip(*pos) {
             if &op.obj != obj {
-              break;
+                break;
             }
             if op.insert {
                 seen_visible = false;
@@ -359,7 +362,7 @@ impl Automerge {
     fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
         for op in self.ops.iter().skip(*pos) {
             if !(&op.obj == obj && &op.key == key) {
-              break;
+                break;
             }
             *pos += 1
         }
@@ -369,27 +372,30 @@ impl Automerge {
         let mut counters = Default::default();
         let mut succ = vec![];
         for op in self.ops.iter().skip(*pos) {
-            if !(op.obj == next.obj && op.key == next.key && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater) {
-              break
+            if !(op.obj == next.obj
+                && op.key == next.key
+                && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater)
+            {
+                break;
             }
             // FIXME if i increment pos x and it has a counter and a non counter do i take both or one pred
             if local {
                 if is_visible(op, *pos, &mut counters) {
-                    succ.push((true,visible_pos(op, *pos, &counters)));
+                    succ.push((true, visible_pos(op, *pos, &counters)));
                 }
             } else if next.pred.iter().any(|i| i == &op.id) {
-                succ.push((false,*pos));
+                succ.push((false, *pos));
             }
             *pos += 1
         }
 
         for (local, vpos) in succ {
-          if let Some(op) = self.ops.get_mut(vpos) {
-            op.succ.push(next.id);
-            if local {
-              next.pred.push(op.id);
+            if let Some(op) = self.ops.get_mut(vpos) {
+                op.succ.push(next.id);
+                if local {
+                    next.pred.push(op.id);
+                }
             }
-          }
         }
     }
 
@@ -404,7 +410,7 @@ impl Automerge {
         let mut result = vec![];
         for op in self.ops.iter().skip(*pos) {
             if !(&op.obj == obj && &op.key == key) {
-              break
+                break;
             }
             if is_visible(op, *pos, &mut counters) {
                 let vop = visible_op(op, &counters);
@@ -415,7 +421,13 @@ impl Automerge {
         result
     }
 
-    fn scan_to_elem_insert_op1(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_elem_insert_op1(
+        &self,
+        obj: &ObjId,
+        elem: &ElemId,
+        pos: &mut usize,
+        seen: &mut usize,
+    ) {
         if *elem == HEAD {
             return;
         }
@@ -425,7 +437,7 @@ impl Automerge {
 
         for op in self.ops.iter().skip(*pos) {
             if &op.obj != obj {
-              break;
+                break;
             }
             if op.elemid() != seen_key && is_visible(op, *pos, &mut counters) {
                 *seen += 1;
@@ -440,7 +452,13 @@ impl Automerge {
         }
     }
 
-    fn scan_to_elem_insert_op2(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize, seen: &mut usize) {
+    fn scan_to_elem_insert_op2(
+        &self,
+        obj: &ObjId,
+        elem: &ElemId,
+        pos: &mut usize,
+        seen: &mut usize,
+    ) {
         if *elem == HEAD {
             return;
         }
@@ -450,7 +468,7 @@ impl Automerge {
 
         for op in self.ops.iter().skip(*pos) {
             if &op.obj != obj {
-              break
+                break;
             }
             if op.elemid() != seen_key && is_visible(op, *pos, &mut counters) {
                 *seen += 1;
@@ -469,30 +487,33 @@ impl Automerge {
         let mut counters = Default::default();
         let mut succ = vec![];
         for op in self.ops.iter().skip(*pos) {
-            if !(op.obj == next.obj && op.elemid() == next.elemid() && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater) {
-              break
+            if !(op.obj == next.obj
+                && op.elemid() == next.elemid()
+                && lamport_cmp(&self.actors, next.id, op.id) == Ordering::Greater)
+            {
+                break;
             }
             if local {
-                if op.elemid() == next.elemid() && is_visible(&op, *pos, &mut counters) {
-                    succ.push((true,visible_pos(&op, *pos, &counters)));
+                if op.elemid() == next.elemid() && is_visible(op, *pos, &mut counters) {
+                    succ.push((true, visible_pos(op, *pos, &counters)));
                 }
             // FIXME - do I need a visible check here?
             } else if op.visible()
                 && op.elemid() == next.elemid()
                 && next.pred.iter().any(|i| i == &op.id)
             {
-                succ.push((false,*pos));
+                succ.push((false, *pos));
             }
             *pos += 1
         }
 
         for (local, vpos) in succ {
-          if let Some(op) = self.ops.get_mut(vpos) {
-            op.succ.push(next.id);
-            if local {
-              next.pred.push(op.id);
+            if let Some(op) = self.ops.get_mut(vpos) {
+                op.succ.push(next.id);
+                if local {
+                    next.pred.push(op.id);
+                }
             }
-          }
         }
     }
 
@@ -502,7 +523,7 @@ impl Automerge {
 
         for op in self.ops.iter().skip(*pos) {
             if op.obj != next.obj {
-              break
+                break;
             }
 
             if op.elemid() != seen_key && is_visible(op, *pos, &mut counters) {
@@ -556,7 +577,6 @@ impl Automerge {
         let cursor = self.seek_to_op(&mut op, local); //mut to collect pred
         if !op.is_del() {
             self.ops.insert(cursor.pos, op.clone());
-            //self.ops.push(op.clone());
         }
         op
     }
@@ -642,15 +662,21 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn splice(&mut self, obj: &ObjId, mut pos: usize, del: usize, vals: Vec<Value>) -> Result<(), AutomergeError> {
-      for _ in 0..del {
-        self.del(obj, pos.into())?;
-      }
-      for v in vals {
-        self.insert(obj, pos.into(), v)?;
-        pos += 1;
-      }
-      Ok(())
+    pub fn splice(
+        &mut self,
+        obj: &ObjId,
+        mut pos: usize,
+        del: usize,
+        vals: Vec<Value>,
+    ) -> Result<(), AutomergeError> {
+        for _ in 0..del {
+            self.del(obj, pos.into())?;
+        }
+        for v in vals {
+            self.insert(obj, pos, v)?;
+            pos += 1;
+        }
+        Ok(())
     }
 
     pub fn text(&self, _path: &str) -> String {
@@ -791,7 +817,7 @@ impl Automerge {
     pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         // FIXME
-        let ops : Vec<_> = self.ops.iter().cloned().collect();
+        let ops: Vec<_> = self.ops.iter().cloned().collect();
         encode_document(&c, ops.as_slice(), &self.actors, &self.props.cache)
     }
 
@@ -1198,7 +1224,6 @@ impl Default for ElemId {
     }
 }
 
-
 fn lamport_cmp(actors: &IndexedCache<amp::ActorId>, left: OpId, right: OpId) -> Ordering {
     match (left, right) {
         (OpId(0, _), OpId(0, _)) => Ordering::Equal,
@@ -1212,7 +1237,7 @@ fn lamport_cmp(actors: &IndexedCache<amp::ActorId>, left: OpId, right: OpId) -> 
 
 fn visible_pos(op: &Op, pos: usize, counters: &HashMap<OpId, CounterData>) -> usize {
     for pred in &op.pred {
-        if let Some(entry) = counters.get(&pred) {
+        if let Some(entry) = counters.get(pred) {
             return entry.pos;
         }
     }
@@ -1238,7 +1263,7 @@ fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) ->
         }
         amp::OpType::Inc(inc_val) => {
             for id in &op.pred {
-                if let Some(mut entry) = counters.get_mut(&id) {
+                if let Some(mut entry) = counters.get_mut(id) {
                     entry.succ.remove(&op.id);
                     entry.val += inc_val;
                     entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
@@ -1257,11 +1282,10 @@ fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) ->
     visible
 }
 
-
 fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
     for pred in &op.pred {
-        if let Some(entry) = counters.get(&pred) {
-            return entry.op.clone()
+        if let Some(entry) = counters.get(pred) {
+            return entry.op.clone();
         }
     }
     op.clone()

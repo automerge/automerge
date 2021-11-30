@@ -8,3 +8,7 @@ edition = "2018"
 [dependencies]
 automerge = { path = "../automerge" }
 json = "0.12.4"
+
+[profile.release]
+debug = true
+

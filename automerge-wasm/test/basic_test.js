@@ -32,14 +32,14 @@ describe('Automerge', () => {
 
     it('getting a nonexistant prop does not throw an error', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
       let result = doc.value(root,"hello")
       assert.deepEqual(result,[])
     })
 
     it('should be able to set and get a simple value', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
       let result
 
       doc.begin()
@@ -54,9 +54,18 @@ describe('Automerge', () => {
       assert.deepEqual(result,["uint",5])
     })
 
+    it('should be able to use bytes', () => {
+      let doc = Automerge.init()
+      doc.begin()
+      doc.set("_root","data", new Uint8Array([10,11,12]));
+      doc.commit()
+      let value = doc.value("_root", "data")
+      assert.deepEqual(value, ["bytes", new Uint8Array([10,11,12])]);
+    })
+
     it('should be able to make sub objects', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
       let result
 
       doc.begin()
@@ -74,7 +83,7 @@ describe('Automerge', () => {
 
     it('should be able to make lists', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
 
       doc.begin()
       let submap = doc.set(root, "numbers", LIST)
@@ -92,7 +101,7 @@ describe('Automerge', () => {
 
     it('should be able to del', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
 
       doc.begin()
       doc.set(root, "xxx", "xxx");
@@ -104,7 +113,7 @@ describe('Automerge', () => {
 
     it('should be able to use counters', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root"
 
       doc.begin()
       doc.set(root, "counter", 10, "counter");
@@ -118,7 +127,7 @@ describe('Automerge', () => {
 
     it('should be able to splice text', () => {
       let doc = Automerge.init()
-      let root = Automerge.root()
+      let root = "_root";
 
       doc.begin()
       let text = doc.set(root, "text", Automerge.TEXT);
