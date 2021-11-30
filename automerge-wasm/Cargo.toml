@@ -32,6 +32,7 @@ uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
 serde-wasm-bindgen = "0.1.3"
 serde_bytes = "0.11.5"
 automerge-protocol = { path = "../../automerge-rs/automerge-protocol" }
+unicode-segmentation = "1.7.1"
 
 [dependencies.wasm-bindgen]
 version = "^0.2"
@@ -41,11 +42,15 @@ features = ["serde-serialize", "std"]
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
+[package.metadata.wasm-pack.profile.profiling]
+wasm-opt = false
+
 # The `web-sys` crate allows you to interact with the various browser APIs,
 # like the DOM.
 [dependencies.web-sys]
 version = "0.3.22"
 features = ["console"]
+
 
 
 [dev-dependencies]

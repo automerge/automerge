@@ -30,8 +30,8 @@ use sequence_tree::SequenceTree;
 
 use automerge_protocol as amp;
 use change::{encode_document, export_change};
-use core::ops::Range;
-use error::AutomergeError;
+//use core::ops::Range;
+pub use error::AutomergeError;
 use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
 use protocol::Key;
@@ -58,8 +58,8 @@ pub struct Automerge {
     history_index: HashMap<ChangeHash, usize>,
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
-    ops: Vec<Op>,
-//    ops: SequenceTree<Op>,
+    //ops: Vec<Op>,
+    ops: SequenceTree<Op>,
     actor: Option<usize>,
     max_op: u64,
     transaction: Option<Transaction>,
@@ -132,7 +132,11 @@ impl Automerge {
         }
     }
 
-    pub fn begin(
+    pub fn begin(&mut self) -> Result<(),AutomergeError> {
+      self.begin_with_opts(None,None)
+    }
+
+    pub fn begin_with_opts(
         &mut self,
         message: Option<String>,
         time: Option<i64>,
@@ -552,6 +556,7 @@ impl Automerge {
         let cursor = self.seek_to_op(&mut op, local); //mut to collect pred
         if !op.is_del() {
             self.ops.insert(cursor.pos, op.clone());
+            //self.ops.push(op.clone());
         }
         op
     }
@@ -637,8 +642,15 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn splice(&mut self, _path: &str, _range: Range<usize>, _replace: Vec<amp::ScalarValue>) {
-        unimplemented!()
+    pub fn splice(&mut self, obj: &ObjId, mut pos: usize, del: usize, vals: Vec<Value>) -> Result<(), AutomergeError> {
+      for _ in 0..del {
+        self.del(obj, pos.into())?;
+      }
+      for v in vals {
+        self.insert(obj, pos.into(), v)?;
+        pos += 1;
+      }
+      Ok(())
     }
 
     pub fn text(&self, _path: &str) -> String {
@@ -1264,7 +1276,7 @@ mod tests {
     fn insert_op() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin(None, None)?;
+        doc.begin()?;
         doc.set(&ROOT, "hello".into(), "world".into())?;
         assert!(doc.pending_ops() == 1);
         doc.commit()?;
@@ -1276,7 +1288,7 @@ mod tests {
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin(None, None)?;
+        doc.begin()?;
         let list_id: ObjId = doc
             .set(&ROOT, "items".into(), amp::ObjType::List.into())?
             .into();
@@ -1300,7 +1312,7 @@ mod tests {
     fn test_del() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin(None, None)?;
+        doc.begin()?;
         doc.set(&ROOT, "xxx".into(), "xxx".into())?;
         assert!(doc.values(&ROOT, "xxx".into())?.len() > 0);
         doc.del(&ROOT, "xxx".into())?;
@@ -1312,7 +1324,7 @@ mod tests {
     #[test]
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.begin(None, None)?;
+        doc.begin()?;
         let id = doc.set(
             &ROOT,
             "counter".into(),

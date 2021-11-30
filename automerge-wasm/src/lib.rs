@@ -10,6 +10,7 @@ use std::convert::TryInto;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use unicode_segmentation::UnicodeSegmentation;
 extern crate web_sys;
 
 #[allow(unused_macros)]
@@ -100,7 +101,7 @@ impl Automerge {
     pub fn begin(&mut self, message: JsValue, time: JsValue) -> Result<(), JsValue> {
         let message = message.as_string();
         let time = time.as_f64().map(|v| v as i64);
-        self.0.begin(message, time).map_err(to_js_err)
+        self.0.begin_with_opts(message, time).map_err(to_js_err)
     }
 
     pub fn pending_ops(&self) -> JsValue {
@@ -131,20 +132,34 @@ impl Automerge {
         obj: JsValue,
         start: JsValue,
         delete_count: JsValue,
-        values: Array,
+        text: JsValue,
     ) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
-        let start = to_usize(start, "start")?;
+        let mut start = to_usize(start, "start")?;
         let delete_count = to_usize(delete_count, "deleteCount")?;
         for i in 0..delete_count {
-            log!("DELETE");
             self.0.del(&obj, start.into()).map_err(to_js_err)?;
         }
-        for i in values.entries() {
-            log!("VAL {:?}", i);
-        }
-        unimplemented!()
-        //Ok(())
+        if let Some(t) = text.as_string() {
+            for c in t.graphemes(true) {
+              self.0.insert(&obj, start.into(), c.into()).map_err(to_js_err)?;
+              start += 1;
+            }
+        } else if let Ok(array) = text.dyn_into::<Array>() {
+            for i in array.iter() {
+              if let Some(t) = i.as_string() {
+                self.0.insert(&obj, start.into(), t.into()).map_err(to_js_err)?;
+                start += 1;
+              } else if let Ok(array) = i.dyn_into::<Array>() {
+                let value = array.get(1);
+                let datatype = array.get(2);
+                let value = self.import_value(value, datatype)?;
+                self.0.insert(&obj, start.into(), value).map_err(to_js_err)?;
+                start += 1;
+              }
+            }
+        } 
+        Ok(())
     }
 
     pub fn insert(

@@ -549,7 +549,7 @@ where
     }
 
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        self.index += n;
+        self.index += n + 1;
         self.inner.get(self.index - 1)
     }
 }
@@ -592,7 +592,6 @@ mod tests {
     #[test]
     fn insert_book() {
         let mut t = SequenceTree::new();
-        let actor = ActorId::random();
 
         for i in 0..100 {
             t.insert(i % 2, ());
@@ -602,7 +601,6 @@ mod tests {
     #[test]
     fn insert_book_vec() {
         let mut t = SequenceTree::new();
-        let actor = ActorId::random();
         let mut v = Vec::new();
 
         for i in 0..100 {

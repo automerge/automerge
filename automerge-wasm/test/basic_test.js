@@ -115,5 +115,23 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(root, "counter"),["counter",15])
       doc.commit()
     })
+
+    it('should be able to splice text', () => {
+      let doc = Automerge.init()
+      let root = Automerge.root()
+
+      doc.begin()
+      let text = doc.set(root, "text", Automerge.TEXT);
+      doc.splice(text, 0, 0, "hello ")
+      doc.splice(text, 6, 0, ["w","o","r","l","d"])
+      doc.splice(text, 11, 0, [["str","!"],["str","?"]])
+      assert.deepEqual(doc.value(text, 0),["str","h"])
+      assert.deepEqual(doc.value(text, 1),["str","e"])
+      assert.deepEqual(doc.value(text, 9),["str","l"])
+      assert.deepEqual(doc.value(text, 10),["str","d"])
+      assert.deepEqual(doc.value(text, 11),["str","!"])
+      assert.deepEqual(doc.value(text, 12),["str","?"])
+      doc.commit()
+    })
   })
 })

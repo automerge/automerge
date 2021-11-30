@@ -10,13 +10,11 @@ const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 
 // CORE FEATURES
 //
-// TODO - move the set/insert behavior our of the WASM
 // TODO - Cursors
-// TODO - Text & Table proxies
-// TODO - inc
+// TODO - Tables
 // TODO - on-pass load() & reconstruct change from opset
 // TODO - micro-patches (needed for fully hydrated object in js)
-// TODO - valueAt(heads)
+// TODO - valueAt(heads) / GC
 // 
 // AUTOMERGE UNSUPPORTED
 //

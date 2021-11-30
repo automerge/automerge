@@ -56,6 +56,26 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn map() -> Value {
+      Value::Object(amp::ObjType::Map)
+    }
+
+    pub fn list() -> Value {
+      Value::Object(amp::ObjType::List)
+    }
+
+    pub fn text() -> Value {
+      Value::Object(amp::ObjType::Text)
+    }
+
+    pub fn table() -> Value {
+      Value::Object(amp::ObjType::Table)
+    }
+
+    pub fn str(s: &str) -> Value {
+      Value::Scalar(amp::ScalarValue::Str(s.into()))
+    }
 }
 
 impl Exportable for ObjId {
@@ -183,6 +203,12 @@ impl From<ElemId> for Key {
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
         Value::Scalar(s.into())
+    }
+}
+
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::Scalar(amp::ScalarValue::Str(s.into()))
     }
 }
 
