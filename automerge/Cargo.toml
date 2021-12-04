@@ -18,6 +18,9 @@ smol_str = "^0.1.17"
 tracing = { version = "^0.1.25", features = ["log"] }
 automerge-protocol = { path = "../../automerge-rs/automerge-protocol" }
 nonzero_ext = "^0.2.0"
+fxhash = "^0.2"
+tinyvec = { version = "^1.3.0", features = ["alloc"] }
+
 
 [dependencies.web-sys]
 version = "^0.3.22"

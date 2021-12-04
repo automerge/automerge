@@ -99,6 +99,15 @@ describe('Automerge', () => {
       assert.deepEqual(doc.length(submap),4)
     })
 
+    it('should be able to make lists', () => {
+      let doc = Automerge.init()
+      doc.begin()
+      doc.set("_root", "foo","bar")
+      doc.del("_root", "foo")
+      doc.del("_root", "baz")
+      doc.commit()
+    })
+
     it('should be able to del', () => {
       let doc = Automerge.init()
       let root = "_root"

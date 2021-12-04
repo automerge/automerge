@@ -135,30 +135,38 @@ impl Automerge {
         text: JsValue,
     ) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
-        let mut start = to_usize(start, "start")?;
+        let start = to_usize(start, "start")?;
         let delete_count = to_usize(delete_count, "deleteCount")?;
+/*
         for i in 0..delete_count {
             self.0.del(&obj, start.into()).map_err(to_js_err)?;
         }
+*/
+
+        let mut vals = vec![];
         if let Some(t) = text.as_string() {
             for c in t.graphemes(true) {
-              self.0.insert(&obj, start.into(), c.into()).map_err(to_js_err)?;
-              start += 1;
+              //self.0.insert(&obj, start.into(), c.into()).map_err(to_js_err)?;
+              vals.push(c.into());
+              //start += 1;
             }
         } else if let Ok(array) = text.dyn_into::<Array>() {
             for i in array.iter() {
               if let Some(t) = i.as_string() {
-                self.0.insert(&obj, start.into(), t.into()).map_err(to_js_err)?;
-                start += 1;
+                vals.push(t.into());
+                //self.0.insert(&obj, start.into(), t.into()).map_err(to_js_err)?;
+                //start += 1;
               } else if let Ok(array) = i.dyn_into::<Array>() {
                 let value = array.get(1);
                 let datatype = array.get(2);
                 let value = self.import_value(value, datatype)?;
-                self.0.insert(&obj, start.into(), value).map_err(to_js_err)?;
-                start += 1;
+                vals.push(value);
+                //self.0.insert(&obj, start.into(), value).map_err(to_js_err)?;
+                //start += 1;
               }
             }
-        } 
+        }
+        self.0.splice(&obj, start, delete_count, vals).map_err(to_js_err)?;
         Ok(())
     }
 

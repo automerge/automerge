@@ -6,20 +6,224 @@ use std::{
     mem,
 };
 
-use crate::Op;
+use automerge_protocol as amp;
+use std::collections::{ HashMap, HashSet };
+use crate::{Op, ElemId, ObjId, IndexedCache, Key, OpId, ScalarValue };
+use crate::{ lamport_cmp, key_cmp };
+use fxhash::FxBuildHasher;
 
-pub(crate) type OpTree = OpTreeInternal<25>;
+pub(crate) type OpTree = OpTreeInternal<64>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal<const B: usize> {
     root_node: Option<OpTreeNode<B>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 struct OpTreeNode<const B: usize> {
     elements: Vec<Op>,
     children: Vec<OpTreeNode<B>>,
+    index: Index,
+    depth: usize,
     length: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub (crate) struct OpIdQuery<const B: usize> {
+  target: OpId,
+  index: usize,
+  finish: bool,
+  pub ops: Vec<Op>,
+  counters: HashMap<OpId, CounterData>
+}
+
+impl <const B: usize> OpIdQuery<B> {
+  pub fn new(target: OpId) -> Self {
+    OpIdQuery { target, index: 0, finish: false, ops: vec![], counters: HashMap::new() }
+  }
+
+  fn query_child(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+    if child.index.ops.contains(&self.target) {
+        QueryResult::Decend
+    } else {
+        self.index += child.len();
+        QueryResult::Next
+    }
+  }
+
+  fn done(&self) -> bool {
+    self.finish
+  }
+
+  fn query_element(&mut self, element: &Op) -> QueryResult {
+    if element.id == self.target {
+      self.finish = true;
+      QueryResult::Finish
+    } else {
+      self.index += 1;
+      QueryResult::Next
+    }
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub (crate) struct NthQuery<const B: usize> {
+  obj: ObjId,
+  target: usize,
+  index: usize,
+  seen: usize,
+  pub insert: usize,
+  pub ops: Vec<Op>,
+  last_seen: Option<ElemId>,
+  counters: HashMap<OpId, CounterData>
+}
+
+impl <const B: usize> NthQuery<B> {
+  pub fn new(obj: ObjId, target: usize) -> Self {
+    NthQuery { obj, target, index: 0, seen: 0, last_seen: None, ops: vec![], insert: 0, counters: HashMap::new() }
+  }
+
+  fn query_child(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+    let index = &child.index;
+    if let Some(mut num_vis) = index.lens.get(&self.obj).copied() {
+      // num vis is the number of keys in the index
+      // minus one if we're counting last_seen
+      //let mut num_vis = s.keys().count();
+      if let Some(true) = self.last_seen.map(|seen| index.visible.get(&self.obj).map(|sub| sub.contains_key(&seen)).unwrap_or(false)) {
+        num_vis -= 1;
+      }
+      if self.seen + num_vis >= self.target {
+        QueryResult::Decend
+      } else {
+        self.index += child.len();
+        self.seen += num_vis;
+        self.last_seen = child.get(child.len() - 1).and_then(|op| op.elemid());
+        QueryResult::Next
+      }
+    } else {
+      QueryResult::Next
+    }
+  }
+
+  fn done(&self) -> bool {
+    self.seen > self.target
+  }
+
+  //fn query_span(&mut self, index: &Index, span: &Span) -> QueryResult {
+  //}
+
+  fn query_element(&mut self, element: &Op) -> QueryResult {
+    self.index += 1;
+    if element.obj != self.obj {
+        return if self.done() { QueryResult::Finish } else { QueryResult::Next };
+    }
+    if element.insert {
+      if self.done() { return QueryResult::Finish };
+      self.insert = self.index - 1;
+      self.last_seen = None
+    }
+    let visible = is_visible(element, self.index - 1, &mut self.counters);
+    if visible && self.last_seen.is_none() {
+      self.seen += 1;
+      self.last_seen = element.elemid()
+    }
+    if self.seen == self.target  + 1 && visible {
+      let vop = visible_op(element,&mut self.counters);
+      self.ops.push(vop)
+    }
+    QueryResult::Next
+  }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum QueryResult {
+  Next,
+  Decend,
+  Finish
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Index {
+  visible: HashMap<ObjId,HashMap<ElemId,usize, FxBuildHasher>, FxBuildHasher>,
+  lens: HashMap<ObjId,usize, FxBuildHasher>,
+  ops: HashSet<OpId, FxBuildHasher>,
+}
+
+impl Index {
+  fn new() -> Self {
+    Index {
+      visible: Default::default(),
+      lens: Default::default(),
+      ops: Default::default(),
+    }
+  }
+
+  fn insert(&mut self, op: &Op) {
+    self.ops.insert(op.id);
+    if op.succ.is_empty() {
+      if let Some(elem) = op.elemid() {
+        //self.visible.entry(op.obj).or_default().entry(elem).and_modify(|n| *n += 1).or_insert(1);
+        let mut sub = self.visible.entry(op.obj).or_default();
+        match sub.get(&elem) {
+          None => {
+            sub.insert(elem,1);
+            self.lens.entry(op.obj).and_modify(|n| *n += 1).or_insert(1);
+          }
+          Some(n) => {
+            sub.insert(elem,n+1);
+          }
+        }
+      }
+    }
+  }
+
+  fn remove(&mut self, op: &Op) {
+    self.ops.remove(&op.id);
+    if op.succ.is_empty() {
+      let mut sub_empty = false;
+      if let Some(elem) = op.elemid() {
+        if let Some(c) = self.visible.get_mut(&op.obj) {
+          if let Some(d) = c.get(&elem).copied() {
+            if d == 1 {
+              c.remove(&elem);
+              sub_empty = c.is_empty();
+            } else {
+              c.insert(elem, d - 1);
+            }
+          }
+        }
+      }
+      if sub_empty {
+        self.visible.remove(&op.obj);
+        self.lens.remove(&op.obj);
+      }
+    }
+  }
+
+  fn merge(&mut self, other: &Index) {
+    //self.ops = self.ops.union(&other.ops).cloned().collect();
+    for id in &other.ops {
+      self.ops.insert(*id);
+    }
+    for (obj, sub) in other.visible.iter() {
+      let local_obj = self.visible.entry(*obj).or_default();
+      for (elem, n) in sub.iter() {
+        match local_obj.get(elem).cloned() {
+          None => {
+            local_obj.insert(*elem, 1);
+            self.lens.entry(*obj).and_modify(|o| *o += 1).or_insert(1);
+          },
+          Some(m) => { local_obj.insert(*elem, m + n); }
+        }
+      }
+    }
+  }
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const B: usize> OpTreeInternal<B> {
@@ -31,6 +235,59 @@ impl<const B: usize> OpTreeInternal<B> {
     /// Get the length of the sequence.
     pub fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
+    }
+
+    pub fn list_len(&self, obj: &ObjId) -> usize {
+        self.root_node.as_ref().map_or(0, |n| n.list_len(obj))
+    }
+
+    pub fn depth(&self) -> usize {
+      self.root_node.as_ref().map(|root| root.depth).unwrap_or(0)
+    }
+
+    pub fn audit(&mut self) {
+      self.root_node.as_mut().map(|root| root.audit());
+    }
+
+    pub fn query(&self, query: &mut NthQuery<B> ) -> bool {
+        self.root_node.as_ref().map(|root|  {
+          match query.query_child(&root) {
+            QueryResult::Decend => {
+              root.query(query);
+              query.done()
+            },
+            QueryResult::Finish => true,
+            QueryResult::Next => false,
+          }
+        }).unwrap_or(false)
+    }
+
+    pub fn seek_prop(&self, obj: &ObjId, key: &Key, actors: &IndexedCache<amp::ActorId>, props: &IndexedCache<String>) -> usize {
+      self.binary_search_by(|op|
+        match lamport_cmp(&actors, op.obj.0, obj.0) {
+          Ordering::Equal => key_cmp(&op.key, key, props),
+          n => n,
+        }
+      )
+    }
+    pub fn seek_obj(&self, obj: &ObjId, actors: &IndexedCache<amp::ActorId>) -> usize {
+      self.binary_search_by(|op| lamport_cmp(&actors, op.obj.0, obj.0))
+    }
+
+    pub fn binary_search_by<F>(&self, f: F) -> usize
+      where F: Fn(&Op) -> Ordering
+    {
+      let mut right = self.len();
+      let mut left = 0;
+      while left < right {
+        let seq = (left + right) / 2;
+        if f(&self.get(seq).unwrap()) == Ordering::Less {
+          left = seq + 1;
+        } else {
+          right = seq;
+        }
+      }
+      left
     }
 
     /// Check if the sequence is empty.
@@ -59,12 +316,13 @@ impl<const B: usize> OpTreeInternal<B> {
 
             if root.is_full() {
                 let original_len = root.len();
-                let new_root = OpTreeNode::new();
+                let new_root = OpTreeNode::new(root.depth + 1);
 
                 // move new_root to root position
                 let old_root = mem::replace(root, new_root);
 
                 root.length += old_root.len();
+                root.index = old_root.index.clone();
                 root.children.push(old_root);
                 root.split_child(0);
 
@@ -84,11 +342,9 @@ impl<const B: usize> OpTreeInternal<B> {
                 root.insert_into_non_full_node(index, element)
             }
         } else {
-            self.root_node = Some(OpTreeNode {
-                elements: vec![element],
-                children: Vec::new(),
-                length: 1,
-            })
+            let mut root = OpTreeNode::new(1);
+            root.insert_into_non_full_node(index, element);
+            self.root_node = Some(root)
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
     }
@@ -106,7 +362,24 @@ impl<const B: usize> OpTreeInternal<B> {
 
     /// Get the `element` at `index` in the sequence.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Op> {
+        // FIXME - no index update
         self.root_node.as_mut().and_then(|n| n.get_mut(index))
+    }
+
+//    pub fn binary_search_by<F>(&self, f: F) -> usize
+//      where F: Fn(&Op) -> Ordering
+    pub fn replace<F>(&mut self, index: usize, mut f: F) -> Option<Op>
+      where F: FnMut(&mut Op) -> ()
+    {
+      if self.len() > index {
+        let op = self.get(index).unwrap().clone();
+        let mut new_op = op.clone();
+        f(&mut new_op);
+        self.set(index, new_op);
+        Some(op)
+      } else {
+        None
+      }
     }
 
     /// Removes the element at `index` from the sequence.
@@ -147,16 +420,88 @@ impl<const B: usize> OpTreeInternal<B> {
 }
 
 impl<const B: usize> OpTreeNode<B> {
-    fn new() -> Self {
+    fn new(depth: usize) -> Self {
         Self {
             elements: Vec::new(),
             children: Vec::new(),
+            index: Default::default(),
+            depth,
             length: 0,
         }
     }
 
+    pub fn query(&self, query: &mut NthQuery<B>) -> bool {
+      if self.is_leaf() {
+        for e in &self.elements {
+          if query.query_element(&e) == QueryResult::Finish {
+            return true
+          }
+        }
+        false
+      } else {
+        for (child_index, child) in self.children.iter().enumerate() {
+          match query.query_child(&child) {
+            QueryResult::Decend => if child.query(query) { break },
+            QueryResult::Finish => { break },
+            QueryResult::Next => (),
+          }
+          if let Some(e) = self.elements.get(child_index) {
+            match query.query_element(&e) {
+              // decend - panic!()
+              QueryResult::Finish => break,
+              _ => (),
+            }
+          }
+        }
+        query.done()
+      }
+    }
+
     pub fn len(&self) -> usize {
         self.length
+    }
+
+    pub fn list_len(&self, obj: &ObjId) -> usize {
+        self.index.lens.get(obj).copied().unwrap_or(0)
+    }
+
+    fn audit(&mut self) {
+        let old = self.index.clone();
+        self.reindex();
+        if old != self.index {
+          let mut objs : Vec<_> = old.visible.keys().chain(self.index.visible.keys()).collect();
+          objs.sort();
+          objs.dedup();
+          for o in objs {
+            let a = old.visible.get(&o).cloned().unwrap_or_default();
+            let b = self.index.visible.get(&o).cloned().unwrap_or_default();
+            let mut keys : Vec<_> = a.keys().chain(b.keys()).collect();
+            keys.sort();
+            keys.dedup();
+            for k in keys {
+              let a = a.get(k);
+              let b = b.get(k);
+              if a != b {
+                  println!("key={:?} obj={:?} {:?} NE {:?}", k, o, a, b);
+              }
+            }
+          }
+          panic!("Not Eq");
+        }
+        for c in self.children.iter_mut() {
+          c.audit()
+        }
+    }
+
+    fn reindex(&mut self) {
+      let mut index = Index::new();
+      for c in &self.children {
+        index.merge(&c.index);
+      }
+      for e in &self.elements {
+        index.insert(e);
+      }
+      self.index = index
     }
 
     fn is_leaf(&self) -> bool {
@@ -183,6 +528,9 @@ impl<const B: usize> OpTreeNode<B> {
 
     fn insert_into_non_full_node(&mut self, index: usize, element: Op) {
         assert!(!self.is_full());
+
+        self.index.insert(&element);
+
         if self.is_leaf() {
             self.length += 1;
             self.elements.insert(index, element);
@@ -209,11 +557,12 @@ impl<const B: usize> OpTreeNode<B> {
     fn split_child(&mut self, full_child_index: usize) {
         let original_len_self = self.len();
 
+        let full_child = &mut self.children[full_child_index];
+
         // Create a new node which is going to store (B-1) keys
         // of the full child.
-        let mut successor_sibling = OpTreeNode::new();
+        let mut successor_sibling = OpTreeNode::new(full_child.depth);
 
-        let full_child = &mut self.children[full_child_index];
         let original_len = full_child.len();
         assert!(full_child.is_full());
 
@@ -239,6 +588,9 @@ impl<const B: usize> OpTreeNode<B> {
 
         let full_child_len = full_child.len();
 
+        full_child.reindex();
+        successor_sibling.reindex();
+
         self.children
             .insert(full_child_index + 1, successor_sibling);
 
@@ -256,7 +608,7 @@ impl<const B: usize> OpTreeNode<B> {
 
     fn remove_element_from_non_leaf(&mut self, index: usize, element_index: usize) -> Op {
         self.length -= 1;
-        if self.children[element_index].elements.len() >= B {
+        let op = if self.children[element_index].elements.len() >= B {
             let total_index = self.cumulative_index(element_index);
             // recursively delete index - 1 in predecessor_node
             let predecessor = self.children[element_index].remove(index - 1 - total_index);
@@ -275,7 +627,8 @@ impl<const B: usize> OpTreeNode<B> {
 
             let total_index = self.cumulative_index(element_index);
             self.children[element_index].remove(index - total_index)
-        }
+        };
+        op
     }
 
     fn cumulative_index(&self, child_index: usize) -> usize {
@@ -325,13 +678,16 @@ impl<const B: usize> OpTreeNode<B> {
                     .get(child_index - 1)
                     .map_or(false, |c| c.elements.len() >= B)
             {
+                // FIXME - index issues here
                 let last_element = self.children[child_index - 1].elements.pop().unwrap();
                 assert!(!self.children[child_index - 1].elements.is_empty());
                 self.children[child_index - 1].length -= 1;
+                self.children[child_index - 1].index.remove(&last_element);
 
                 let parent_element =
                     mem::replace(&mut self.elements[child_index - 1], last_element);
 
+                self.children[child_index].index.insert(&parent_element);
                 self.children[child_index]
                     .elements
                     .insert(0, parent_element);
@@ -339,8 +695,10 @@ impl<const B: usize> OpTreeNode<B> {
 
                 if let Some(last_child) = self.children[child_index - 1].children.pop() {
                     self.children[child_index - 1].length -= last_child.len();
+                    self.children[child_index - 1].reindex();
                     self.children[child_index].length += last_child.len();
                     self.children[child_index].children.insert(0, last_child);
+                    self.children[child_index].reindex();
                 }
             } else if self
                 .children
@@ -348,6 +706,7 @@ impl<const B: usize> OpTreeNode<B> {
                 .map_or(false, |c| c.elements.len() >= B)
             {
                 let first_element = self.children[child_index + 1].elements.remove(0);
+                self.children[child_index + 1].index.remove(&first_element);
                 self.children[child_index + 1].length -= 1;
 
                 assert!(!self.children[child_index + 1].elements.is_empty());
@@ -355,14 +714,17 @@ impl<const B: usize> OpTreeNode<B> {
                 let parent_element = mem::replace(&mut self.elements[child_index], first_element);
 
                 self.children[child_index].length += 1;
+                self.children[child_index].index.insert(&parent_element);
                 self.children[child_index].elements.push(parent_element);
 
                 if !self.children[child_index + 1].is_leaf() {
                     let first_child = self.children[child_index + 1].children.remove(0);
                     self.children[child_index + 1].length -= first_child.len();
+                    self.children[child_index + 1].reindex();
                     self.children[child_index].length += first_child.len();
 
                     self.children[child_index].children.push(first_child);
+                    self.children[child_index].reindex();
                 }
             }
         }
@@ -382,6 +744,7 @@ impl<const B: usize> OpTreeNode<B> {
         let original_len = self.len();
         if self.is_leaf() {
             let v = self.remove_from_leaf(index);
+            self.index.remove(&v);
             assert_eq!(original_len, self.len() + 1);
             debug_assert_eq!(self.check(), self.len());
             v
@@ -399,12 +762,14 @@ impl<const B: usize> OpTreeNode<B> {
                             index,
                             min(child_index, self.elements.len() - 1),
                         );
+                        self.index.remove(&v);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
                     }
                     Ordering::Greater => {
                         let v = self.remove_from_internal_child(index, child_index);
+                        self.index.remove(&v);
                         assert_eq!(original_len, self.len() + 1);
                         debug_assert_eq!(self.check(), self.len());
                         return v;
@@ -422,6 +787,8 @@ impl<const B: usize> OpTreeNode<B> {
     }
 
     fn merge(&mut self, middle: Op, successor_sibling: OpTreeNode<B>) {
+        self.index.insert(&middle);
+        self.index.merge(&successor_sibling.index);
         self.elements.push(middle);
         self.elements.extend(successor_sibling.elements);
         self.children.extend(successor_sibling.children);
@@ -432,6 +799,8 @@ impl<const B: usize> OpTreeNode<B> {
     pub fn set(&mut self, index: usize, element: Op) -> Op {
         if self.is_leaf() {
             let old_element = self.elements.get_mut(index).unwrap();
+            self.index.remove(&old_element);
+            self.index.insert(&element);
             mem::replace(old_element, element)
         } else {
             let mut cumulative_len = 0;
@@ -442,6 +811,8 @@ impl<const B: usize> OpTreeNode<B> {
                     }
                     Ordering::Equal => {
                         let old_element = self.elements.get_mut(child_index).unwrap();
+                        self.index.remove(&old_element);
+                        self.index.insert(&element);
                         return mem::replace(old_element, element);
                     }
                     Ordering::Greater => {
@@ -538,39 +909,108 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     }
 }
 
+
+#[derive(Debug, Clone, PartialEq)]
+struct CounterData {
+    pos: usize,
+    val: i64,
+    succ: HashSet<OpId>,
+    op: Op,
+}
+
+fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
+    let mut visible = false;
+    match op.action {
+        amp::OpType::Set(amp::ScalarValue::Counter(val)) => {
+            counters.insert(
+                op.id,
+                CounterData {
+                    pos,
+                    val,
+                    succ: op.succ.iter().cloned().collect(),
+                    op: op.clone(),
+                },
+            );
+            if op.succ.is_empty() {
+                visible = true;
+            }
+        }
+        amp::OpType::Inc(inc_val) => {
+            for id in &op.pred {
+                if let Some(mut entry) = counters.get_mut(id) {
+                    entry.succ.remove(&op.id);
+                    entry.val += inc_val;
+                    entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
+                    if entry.succ.is_empty() {
+                        visible = true;
+                    }
+                }
+            }
+        }
+        _ => {
+            if op.succ.is_empty() {
+                visible = true;
+            }
+        }
+    };
+    visible
+}
+fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
+    for pred in &op.pred {
+        // FIXME - delete a counter? - entry.succ.empty()?
+        if let Some(entry) = counters.get(pred) {
+            return entry.op.clone();
+        }
+    }
+    op.clone()
+}
+
 #[cfg(test)]
 mod tests {
-    use automerge_protocol::ActorId;
+    use automerge_protocol as amp;
+    use crate::{ Op, OpId };
 
     use super::*;
+
+    fn op(n:usize) -> Op {
+      let zero = OpId(0,0);
+      Op {
+        change: n,
+        id: zero,
+        action: amp::OpType::Set(0.into()),
+        obj: zero.into(),
+        key: zero.into(),
+        succ: vec![],
+        pred: vec![],
+        insert: false,
+      }
+    }
 
     #[test]
     fn push_back() {
         let mut t = OpTree::new();
-        let actor = ActorId::random();
 
-        t.push(actor.op_id_at(1));
-        t.push(actor.op_id_at(2));
-        t.push(actor.op_id_at(3));
-        t.push(actor.op_id_at(4));
-        t.push(actor.op_id_at(5));
-        t.push(actor.op_id_at(6));
-        t.push(actor.op_id_at(8));
-        t.push(actor.op_id_at(100));
+        t.push(op(1));
+        t.push(op(2));
+        t.push(op(3));
+        t.push(op(4));
+        t.push(op(5));
+        t.push(op(6));
+        t.push(op(8));
+        t.push(op(100));
     }
 
     #[test]
     fn insert() {
         let mut t = OpTree::new();
-        let actor = ActorId::random();
 
-        t.insert(0, actor.op_id_at(1));
-        t.insert(1, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(0, actor.op_id_at(1));
-        t.insert(3, actor.op_id_at(1));
-        t.insert(4, actor.op_id_at(1));
+        t.insert(0, op(1));
+        t.insert(1, op(1));
+        t.insert(0, op(1));
+        t.insert(0, op(1));
+        t.insert(0, op(1));
+        t.insert(3, op(1));
+        t.insert(4, op(1));
     }
 
     #[test]
@@ -578,7 +1018,7 @@ mod tests {
         let mut t = OpTree::new();
 
         for i in 0..100 {
-            t.insert(i % 2, ());
+            t.insert(i % 2, op(i));
         }
     }
 
@@ -588,12 +1028,45 @@ mod tests {
         let mut v = Vec::new();
 
         for i in 0..100 {
-            t.insert(i % 3, ());
-            v.insert(i % 3, ());
+            t.insert(i % 3, op(i));
+            v.insert(i % 3, op(i));
 
-            assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
+            assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
         }
     }
+
+/*
+    #[test]
+    fn test_depth() {
+        let mut t = OpTree::new();
+
+        assert_eq!(t.depth(),0);
+
+        for i in 0..5000 {
+            t.insert(0, op(i));
+        }
+        assert_eq!(t.depth(),3);
+
+        for _ in 0..1000 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),3);
+
+        for _ in 0..1000 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),3);
+
+        for _ in 0..1000 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),3);
+
+        for _ in 0..1000 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),2);
+
+        for _ in 0..950 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),2);
+
+        for _ in 0..30 { t.remove(t.len() / 2); }
+        assert_eq!(t.depth(),1);
+
+    }
+*/
 
     /*
         fn arb_indices() -> impl Strategy<Value = Vec<usize>> {

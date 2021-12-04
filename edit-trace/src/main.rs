@@ -1,10 +1,23 @@
+//mod sequence_tree;
+
 use std::fs;
 use json;
 use std::time::Instant;
 use automerge::{ Automerge, ROOT, Value, AutomergeError };
-
+use rand::prelude::*;
+//use sequence_tree::SequenceTree;
 
 fn main() -> Result<(), AutomergeError> {
+/*
+  let mut rng = rand::thread_rng();
+  let mut t = SequenceTree::new();
+  for i in 0..100000 {
+    let j : usize = rng.gen();
+    let j = j % (t.len() + 1);
+    t.insert(j ,i)
+  }
+  Ok(())
+*/
   let contents = fs::read_to_string("edits.json").expect("cannot read edits file");
   let edits = json::parse(&contents).expect("cant parse edits");
   let mut commands = vec![];

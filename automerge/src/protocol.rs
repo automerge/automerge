@@ -5,6 +5,7 @@ extern crate hex;
 extern crate uuid;
 extern crate web_sys;
 
+use tinyvec::TinyVec;
 use automerge_protocol as amp;
 use std::cmp::Eq;
 
@@ -244,7 +245,7 @@ impl From<Op> for (Value, OpId) {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
 pub enum Key {
     Map(usize),
     Seq(ElemId),
@@ -271,10 +272,10 @@ impl Key {
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash)]
 pub struct OpId(pub u64, pub usize);
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord)]
+#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash)]
 pub struct ObjId(pub OpId);
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord)]
+#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash)]
 pub struct ElemId(pub OpId);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +291,7 @@ pub(crate) struct Op {
 }
 
 impl Op {
+
     pub fn is_del(&self) -> bool {
         matches!(self.action, amp::OpType::Del(_))
     }
@@ -305,6 +307,18 @@ impl Op {
             self.key.elemid()
         }
     }
+
+    pub fn dump(&self) -> String {
+        match &self.action {
+          amp::OpType::Set(value) if self.insert => format!("i:{}", value),
+          amp::OpType::Set(value) => format!("s:{}", value),
+          amp::OpType::Make(obj) => format!("make{}", obj),
+          amp::OpType::Inc(val) => format!("inc:{}", val),
+          amp::OpType::Del(_) => format!("del"),
+          amp::OpType::MultiSet(_) => format!("multiset"),
+        }
+    }
+
 }
 
 #[derive(Debug, Clone)]
