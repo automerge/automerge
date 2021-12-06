@@ -1,6 +1,3 @@
-//#![allow(unused_variables)]
-//#![allow(dead_code)]
-
 extern crate hex;
 extern crate uuid;
 extern crate web_sys;
@@ -212,6 +209,24 @@ impl From<String> for Value {
     }
 }
 
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Scalar(amp::ScalarValue::Int(n))
+    }
+}
+
+impl From<i32> for Value {
+    fn from(n: i32) -> Self {
+        Value::Scalar(amp::ScalarValue::Int(n.into()))
+    }
+}
+
+impl From<u64> for Value {
+    fn from(n: u64) -> Self {
+        Value::Scalar(amp::ScalarValue::Uint(n))
+    }
+}
+
 impl From<amp::ObjType> for Value {
     fn from(o: amp::ObjType) -> Self {
         Value::Object(o)
@@ -256,7 +271,7 @@ pub enum Prop {
     Seq(usize),
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Patch {}
 
 impl Key {
@@ -268,13 +283,13 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash)]
+#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub struct OpId(pub u64, pub usize);
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub struct ObjId(pub OpId);
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub struct ElemId(pub OpId);
 
 #[derive(Debug, Clone, PartialEq)]

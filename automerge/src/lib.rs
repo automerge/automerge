@@ -2,19 +2,14 @@ extern crate hex;
 extern crate uuid;
 extern crate web_sys;
 
-#[cfg(target_familt = "wasm")]
 macro_rules! log {
      ( $( $t:tt )* ) => {
+         #[cfg(target_family = "wasm")]
          web_sys::console::log_1(&format!( $( $t )* ).into());
+         #[cfg(not(target_family = "wasm"))]
+         println!( $( $t )* );
      }
  }
-
-#[cfg(not(target_familt = "wasm"))]
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        println!( $( $t )* );
-    }
-}
 
 mod change;
 mod columnar;
@@ -62,8 +57,7 @@ pub struct Automerge {
     history_index: HashMap<ChangeHash, usize>,
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
-    //ops: Vec<Op>,
-    //ops: SequenceTree<Op>,
+    saved: Vec<ChangeHash>,
     ops: OpTree,
     actor: Option<usize>,
     max_op: u64,
@@ -81,6 +75,7 @@ impl Automerge {
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
+            saved: Default::default(),
             actor: None,
             max_op: 0,
             transaction: None,
@@ -124,6 +119,7 @@ impl Automerge {
             states: HashMap::new(),
             ops: Default::default(),
             deps: Default::default(),
+            saved: Default::default(),
             actor: None,
             max_op: 0,
             transaction: None,
@@ -188,11 +184,10 @@ impl Automerge {
     pub fn rollback(&mut self) {
         if let Some(tx) = self.transaction.take() {
             for op in &tx.operations {
+                // FIXME - use query to make this fast
                 for pred_id in &op.pred {
                     if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
-                        //if let Some(o) = self.ops.get_mut(p) {
                         self.ops.replace(p, |o| o.succ.retain(|i| i != pred_id));
-                        //}
                     }
                 }
                 if let Some(pos) = self.ops.iter().position(|o| o.id == op.id) {
@@ -295,8 +290,6 @@ impl Automerge {
             }
             *pos += 1;
         }
-        //let tmp = self.ops.seek_obj(obj, &self.actors);
-        //assert_eq!(*pos, tmp);
     }
 
     fn scan_to_prop_start(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
@@ -386,14 +379,6 @@ impl Automerge {
                     next.pred.push(op.id);
                 }
             });
-            /*
-                        if let Some(op) = self.ops.get_mut(vpos) {
-                            op.succ.push(next.id);
-                            if local {
-                                next.pred.push(op.id);
-                            }
-                        }
-            */
         }
     }
 
@@ -629,12 +614,10 @@ impl Automerge {
             .map(|e| (e.into(), size_hint))
     }
 
-    // idea!
     // set(obj, prop, value) - value can be scalar or objtype
-    // insert(obj, prop, value)
     // del(obj, prop)
-    // inc(obj, prop)
-    // what about AT?
+    // inc(obj, prop, value)
+    // insert(obj, index, value)
 
     pub fn set(&mut self, obj: &ObjId, prop: Prop, value: Value) -> Result<OpId, AutomergeError> {
         let (key, pos_hint) = self.import_prop(obj, prop, false)?;
@@ -677,7 +660,6 @@ impl Automerge {
         del: usize,
         vals: Vec<Value>,
     ) -> Result<(), AutomergeError> {
-        //println!("SPLICE {}/{}/{} , {} , {:?}", pos, self.ops.len(), self.ops.list_len(obj), del, vals);
         for _ in 0..del {
             self.del(obj, pos.into())?;
         }
@@ -821,15 +803,30 @@ impl Automerge {
             .collect()
     }
 
-    pub fn save(&self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        // TODO - would be nice if I could pass an iterator instead of a collection here
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
-        // FIXME
         let ops: Vec<_> = self.ops.iter().cloned().collect();
-        encode_document(&c, ops.as_slice(), &self.actors, &self.props.cache)
+        // TODO - can we make encode_document error free
+        let bytes = encode_document(&c, ops.as_slice(), &self.actors, &self.props.cache);
+        if bytes.is_ok() {
+            self.saved = self.get_heads().iter().copied().collect();
+        }
+        bytes
     }
 
-    pub fn save_incremental(&mut self) -> Vec<u8> {
-        unimplemented!()
+    pub fn save_incremental(&mut self) -> Option<Vec<u8>> {
+        let changes = self.get_changes(self.saved.as_slice());
+        let mut bytes = vec![];
+        for c in changes {
+            bytes.extend(c.raw_bytes());
+        }
+        if !bytes.is_empty() {
+            self.saved = self.get_heads().iter().copied().collect();
+            Some(bytes)
+        } else {
+            None
+        }
     }
 
     /// Filter the changes down to those that are not transitive dependencies of the heads.
@@ -1185,24 +1182,6 @@ impl Default for Automerge {
     }
 }
 
-impl Default for OpId {
-    fn default() -> Self {
-        OpId(0, 0)
-    }
-}
-
-impl Default for ObjId {
-    fn default() -> Self {
-        ObjId(Default::default())
-    }
-}
-
-impl Default for ElemId {
-    fn default() -> Self {
-        ElemId(Default::default())
-    }
-}
-
 pub(crate) fn key_cmp(left: &Key, right: &Key, props: &IndexedCache<String>) -> Ordering {
     match (left, right) {
         (Key::Map(a), Key::Map(b)) => props[*a].cmp(&props[*b]),
@@ -1360,6 +1339,51 @@ mod tests {
                 == Some((Value::Scalar(amp::ScalarValue::Counter(15)), id))
         );
         doc.commit()?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_save_incremental() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+
+        doc.begin()?;
+        doc.set(&ROOT, "foo".into(), 1.into())?;
+        doc.commit()?;
+
+        let save1 = doc.save().unwrap();
+
+        doc.begin()?;
+        doc.set(&ROOT, "bar".into(), 2.into())?;
+        doc.commit()?;
+
+        let save2 = doc.save_incremental().unwrap();
+
+        doc.begin()?;
+        doc.set(&ROOT, "baz".into(), 3.into())?;
+        doc.commit()?;
+
+        let save3 = doc.save_incremental().unwrap();
+
+        let mut save_a: Vec<u8> = vec![];
+        save_a.extend(&save1);
+        save_a.extend(&save2);
+        save_a.extend(&save3);
+
+        assert!(doc.save_incremental().is_none());
+
+        let save_b = doc.save().unwrap();
+
+        assert!(save_b.len() < save_a.len());
+
+        let mut doc_a = Automerge::load(&save_a)?;
+        let mut doc_b = Automerge::load(&save_b)?;
+
+        assert!(doc_a.values(&ROOT, "baz".into())? == doc_b.values(&ROOT, "baz".into())?);
+
+        assert!(doc_a.save().unwrap() == doc_b.save().unwrap());
+
+        doc_a.dump();
+
         Ok(())
     }
 }

@@ -264,11 +264,17 @@ impl Automerge {
         self.0.del(&obj, prop).map_err(to_js_err)
     }
 
-    pub fn save(&self) -> Result<Uint8Array, JsValue> {
+    pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
         self.0
             .save()
             .map(|v| js_sys::Uint8Array::from(v.as_slice()))
             .map_err(to_js_err)
+    }
+
+    pub fn save_incremental(&mut self) -> JsValue {
+        self.0
+            .save_incremental()
+            .map(|v| js_sys::Uint8Array::from(v.as_slice())).into()
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
@@ -411,6 +417,12 @@ impl Automerge {
                 } else if let Some(s) = value.as_string() {
                     // FIXME - we need to detect str vs int vs float vs bool here :/
                     Ok(am::ScalarValue::Str(s.into()).into())
+                } else if let Some(n) = value.as_f64() {
+                    if n.round() == n {
+                        Ok(am::ScalarValue::Int((n as i64).into()).into())
+                    } else {
+                        Ok(am::ScalarValue::F64(n.into()).into())
+                    }
                 } else if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
                 } else if let Ok(o) = &value.dyn_into::<Uint8Array>() {

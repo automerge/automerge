@@ -151,5 +151,38 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(text, 12),["str","?"])
       doc.commit()
     })
+
+    it('should be able save all or incrementally', () => {
+      let doc = Automerge.init()
+
+      doc.begin()
+      doc.set("_root", "foo", 1)
+      doc.commit()
+
+      let save1 = doc.save()
+
+      doc.begin()
+      doc.set("_root", "bar", 2)
+      doc.commit()
+
+      let save2 = doc.save_incremental()
+
+      doc.begin()
+      doc.set("_root", "baz", 3)
+      doc.commit()
+
+      let save3 = doc.save_incremental()
+
+      let saveA = doc.save();
+      let saveB = new Uint8Array([... save1, ...save2, ...save3]);
+
+      assert.notDeepEqual(saveA, saveB);
+
+      let docA = Automerge.load(saveA);
+      let docB = Automerge.load(saveB);
+
+      assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
+      assert.deepEqual(docA.save(), docB.save());
+    })
   })
 })
