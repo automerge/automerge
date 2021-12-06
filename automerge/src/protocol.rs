@@ -5,7 +5,6 @@ extern crate hex;
 extern crate uuid;
 extern crate web_sys;
 
-use tinyvec::TinyVec;
 use automerge_protocol as amp;
 use std::cmp::Eq;
 
@@ -291,7 +290,6 @@ pub(crate) struct Op {
 }
 
 impl Op {
-
     pub fn is_del(&self) -> bool {
         matches!(self.action, amp::OpType::Del(_))
     }
@@ -308,17 +306,17 @@ impl Op {
         }
     }
 
+    #[allow(dead_code)]
     pub fn dump(&self) -> String {
         match &self.action {
-          amp::OpType::Set(value) if self.insert => format!("i:{}", value),
-          amp::OpType::Set(value) => format!("s:{}", value),
-          amp::OpType::Make(obj) => format!("make{}", obj),
-          amp::OpType::Inc(val) => format!("inc:{}", val),
-          amp::OpType::Del(_) => format!("del"),
-          amp::OpType::MultiSet(_) => format!("multiset"),
+            amp::OpType::Set(value) if self.insert => format!("i:{}", value),
+            amp::OpType::Set(value) => format!("s:{}", value),
+            amp::OpType::Make(obj) => format!("make{}", obj),
+            amp::OpType::Inc(val) => format!("inc:{}", val),
+            amp::OpType::Del(_) => "del".to_string(),
+            amp::OpType::MultiSet(_) => "multiset".to_string(),
         }
     }
-
 }
 
 #[derive(Debug, Clone)]

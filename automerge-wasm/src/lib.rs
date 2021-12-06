@@ -8,9 +8,9 @@ use js_sys::{Array, Uint8Array};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
+use unicode_segmentation::UnicodeSegmentation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-use unicode_segmentation::UnicodeSegmentation;
 extern crate web_sys;
 
 #[allow(unused_macros)]
@@ -85,7 +85,6 @@ impl Automerge {
             Some(a) => automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec()),
             _ => automerge::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec()),
         };
-        //let actor = automerge::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
         let mut automerge = automerge::Automerge::new();
         automerge.set_actor(actor);
         Ok(Automerge(automerge))
@@ -137,36 +136,26 @@ impl Automerge {
         let obj = self.import(obj)?;
         let start = to_usize(start, "start")?;
         let delete_count = to_usize(delete_count, "deleteCount")?;
-/*
-        for i in 0..delete_count {
-            self.0.del(&obj, start.into()).map_err(to_js_err)?;
-        }
-*/
-
         let mut vals = vec![];
         if let Some(t) = text.as_string() {
             for c in t.graphemes(true) {
-              //self.0.insert(&obj, start.into(), c.into()).map_err(to_js_err)?;
-              vals.push(c.into());
-              //start += 1;
+                vals.push(c.into());
             }
         } else if let Ok(array) = text.dyn_into::<Array>() {
             for i in array.iter() {
-              if let Some(t) = i.as_string() {
-                vals.push(t.into());
-                //self.0.insert(&obj, start.into(), t.into()).map_err(to_js_err)?;
-                //start += 1;
-              } else if let Ok(array) = i.dyn_into::<Array>() {
-                let value = array.get(1);
-                let datatype = array.get(2);
-                let value = self.import_value(value, datatype)?;
-                vals.push(value);
-                //self.0.insert(&obj, start.into(), value).map_err(to_js_err)?;
-                //start += 1;
-              }
+                if let Some(t) = i.as_string() {
+                    vals.push(t.into());
+                } else if let Ok(array) = i.dyn_into::<Array>() {
+                    let value = array.get(1);
+                    let datatype = array.get(2);
+                    let value = self.import_value(value, datatype)?;
+                    vals.push(value);
+                }
             }
         }
-        self.0.splice(&obj, start, delete_count, vals).map_err(to_js_err)?;
+        self.0
+            .splice(&obj, start, delete_count, vals)
+            .map_err(to_js_err)?;
         Ok(())
     }
 
@@ -205,15 +194,13 @@ impl Automerge {
         Ok(self.export(opid))
     }
 
-    pub fn inc(
-        &mut self,
-        obj: JsValue,
-        prop: JsValue,
-        value: JsValue,
-    ) -> Result<(), JsValue> {
+    pub fn inc(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value : f64 = value.as_f64().ok_or("inc needs a numberic value").map_err(to_js_err)?;
+        let value: f64 = value
+            .as_f64()
+            .ok_or("inc needs a numberic value")
+            .map_err(to_js_err)?;
         self.0.inc(&obj, prop, value as i64).map_err(to_js_err)
     }
 
