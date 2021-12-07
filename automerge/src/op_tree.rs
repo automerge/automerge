@@ -61,7 +61,6 @@ impl Index {
         self.ops.insert(op.id);
         if op.succ.is_empty() {
             if let Some(elem) = op.elemid() {
-                //self.visible.entry(op.obj).or_default().entry(elem).and_modify(|n| *n += 1).or_insert(1);
                 let sub = self.visible.entry(op.obj).or_default();
                 match sub.get(&elem).copied() {
                     None => {
@@ -85,6 +84,7 @@ impl Index {
                     if let Some(d) = c.get(&elem).copied() {
                         if d == 1 {
                             c.remove(&elem);
+                            self.lens.entry(op.obj).and_modify(|n| *n -= 1);
                             sub_empty = c.is_empty();
                         } else {
                             c.insert(elem, d - 1);
@@ -100,7 +100,6 @@ impl Index {
     }
 
     fn merge(&mut self, other: &Index) {
-        //self.ops = self.ops.union(&other.ops).cloned().collect();
         for id in &other.ops {
             self.ops.insert(*id);
         }
@@ -249,6 +248,7 @@ impl<const B: usize> OpTreeInternal<B> {
                     (&mut root.children[0], index)
                 };
                 root.length += 1;
+                root.index.insert(&element);
                 child.insert_into_non_full_node(insertion_index, element)
             } else {
                 root.insert_into_non_full_node(index, element)
@@ -599,7 +599,6 @@ impl<const B: usize> OpTreeNode<B> {
                     .get(child_index - 1)
                     .map_or(false, |c| c.elements.len() >= B)
             {
-                // FIXME - index issues here
                 let last_element = self.children[child_index - 1].elements.pop().unwrap();
                 assert!(!self.children[child_index - 1].elements.is_empty());
                 self.children[child_index - 1].length -= 1;
@@ -737,7 +736,10 @@ impl<const B: usize> OpTreeNode<B> {
                         return mem::replace(old_element, element);
                     }
                     Ordering::Greater => {
-                        return child.set(index - cumulative_len, element);
+                        self.index.insert(&element);
+                        let old_element = child.set(index - cumulative_len, element);
+                        self.index.remove(&old_element);
+                        return old_element
                     }
                 }
             }

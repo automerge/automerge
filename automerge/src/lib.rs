@@ -530,32 +530,32 @@ impl Automerge {
         elem: &ElemId,
         local: bool,
         mut pos: usize,
-    ) -> Cursor {
+    ) -> usize {
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_elem_insert_op2(&op.obj, elem, &mut pos, &mut seen);
         self.scan_to_elem_update_pos(op, local, &mut pos);
-        Cursor { pos, seen }
+        pos
     }
 
-    fn seek_to_insert_elem(&self, op: &Op, elem: &ElemId, mut pos: usize) -> Cursor {
+    fn seek_to_insert_elem(&self, op: &Op, elem: &ElemId, mut pos: usize) -> usize {
         //let mut pos = 0;
         let mut seen = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_elem_insert_op1(&op.obj, elem, &mut pos, &mut seen);
         self.scan_to_lesser_insert(op, &mut pos, &mut seen);
-        Cursor { pos, seen }
+        pos
     }
 
-    fn seek_to_map_op(&mut self, op: &mut Op, local: bool) -> Cursor {
+    fn seek_to_map_op(&mut self, op: &mut Op, local: bool) -> usize {
         let mut pos = 0;
         self.scan_to_obj(&op.obj, &mut pos);
         self.scan_to_prop_start(&op.obj, &op.key, &mut pos);
         self.scan_to_prop_insertion_point(op, local, &mut pos);
-        Cursor { pos, seen: 0 }
+        pos
     }
 
-    fn seek_to_op(&mut self, op: &mut Op, local: bool, pos: usize) -> Cursor {
+    fn seek_to_op(&mut self, op: &mut Op, local: bool, pos: usize) -> usize {
         match (op.key, op.insert) {
             (Key::Map(_), _) => self.seek_to_map_op(op, local),
             (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem, pos),
@@ -564,12 +564,14 @@ impl Automerge {
     }
 
     fn insert_op(&mut self, mut op: Op, local: bool, pos_hint: usize) -> Op {
-        let cursor = self.seek_to_op(&mut op, local, pos_hint); //mut to collect pred
+        let pos = self.seek_to_op(&mut op, local, pos_hint); //mut to collect pred
         if !op.is_del() {
-            self.ops.insert(cursor.pos, op.clone());
+            self.ops.insert(pos, op.clone());
         }
         op
     }
+
+    // FIXME keys_at() -> Vec<String> {}
 
     pub fn keys(&self, obj: &ObjId) -> Vec<String> {
         let mut pos = 0;
@@ -589,14 +591,20 @@ impl Automerge {
         result
     }
 
+    // FIXME length_at(&self, heads: &[ChangeHash]) -> uszie {
+    //    /*
+    //    let mut pos = 0;
+    //    self.scan_to_obj(obj, &mut pos);
+    //    self.scan_visible(obj, &mut pos);
+    //    */
+    // }
+
     pub fn length(&self, obj: &ObjId) -> usize {
-        let mut pos = 0;
-        self.scan_to_obj(obj, &mut pos);
-        self.scan_visible(obj, &mut pos)
+        self.ops.list_len(&obj)
     }
 
     // TODO ? really export this ?
-    pub fn insert_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<(Key, usize)> {
+    fn insert_pos_for_index(&self, obj: &ObjId, index: usize) -> Option<(Key, usize)> {
         if index == 0 {
             // FIXME - binary search for HEAD
             Some((HEAD.into(), 0))
@@ -1168,12 +1176,6 @@ pub(crate) struct Transaction {
 enum Clock {
     Head,
     At(HashMap<usize, u64>),
-}
-
-#[derive(Debug, Clone)]
-struct Cursor {
-    pos: usize,
-    seen: usize,
 }
 
 impl Default for Automerge {

@@ -92,20 +92,37 @@ describe('Automerge', () => {
       doc.insert(submap, 2, "c");
       doc.insert(submap, 0, "z");
       doc.commit()
+
       assert.deepEqual(doc.value(submap, 0),["str","z"])
       assert.deepEqual(doc.value(submap, 1),["str","a"])
       assert.deepEqual(doc.value(submap, 2),["str","b"])
       assert.deepEqual(doc.value(submap, 3),["str","c"])
       assert.deepEqual(doc.length(submap),4)
+
+      doc.begin()
+      doc.set(submap, 2, "b v2");
+      doc.commit()
+
+      assert.deepEqual(doc.value(submap, 2),["str","b v2"])
+      assert.deepEqual(doc.length(submap),4)
     })
 
-    it('should be able to make lists', () => {
+    it('should be able delete non-existant props', () => {
       let doc = Automerge.init()
+
       doc.begin()
       doc.set("_root", "foo","bar")
+      doc.set("_root", "bip","bap")
+      doc.commit()
+
+      assert.deepEqual(doc.keys("_root"),["bip","foo"])
+
+      doc.begin()
       doc.del("_root", "foo")
       doc.del("_root", "baz")
       doc.commit()
+
+      assert.deepEqual(doc.keys("_root"),["bip"])
     })
 
     it('should be able to del', () => {
