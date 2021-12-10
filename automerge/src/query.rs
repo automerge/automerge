@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
 use crate::op_tree::{OpTreeNode, QueryResult, TreeQuery};
-use crate::{ElemId, ObjId, Op, OpId, ScalarValue};
+use crate::{lamport_cmp, ElemId, IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
 use automerge_protocol as amp;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
@@ -28,7 +29,7 @@ impl OpIdQuery {
 }
 
 impl<const B: usize> TreeQuery<B> for OpIdQuery {
-    fn query_child(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         if child.index.ops.contains(&self.target) {
             QueryResult::Decend
         } else {
@@ -53,7 +54,61 @@ impl<const B: usize> TreeQuery<B> for OpIdQuery {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NthQuery {
+pub(crate) struct PropQuery {
+    obj: ObjId,
+    key: Key,
+    pub ops: Vec<Op>,
+    pub ops_pos: Vec<usize>,
+}
+
+impl PropQuery {
+    pub fn new(obj: ObjId, key: Key) -> Self {
+        PropQuery {
+            obj,
+            key,
+            ops: vec![],
+            ops_pos: vec![],
+        }
+    }
+}
+
+fn prop_cmp(left: &Key, right: &Key, props: &IndexedCache<String>) -> Ordering {
+    match (left, right) {
+        (Key::Map(a), Key::Map(b)) => props[*a].cmp(&props[*b]),
+        _ => panic!("can only compare map keys"),
+    }
+}
+
+impl<const B: usize> TreeQuery<B> for PropQuery {
+    fn query_node_with_lookup(
+        &mut self,
+        child: &OpTreeNode<B>,
+        actors: &IndexedCache<amp::ActorId>,
+        props: &IndexedCache<String>,
+    ) -> QueryResult {
+        let start = binary_search_by(child, |op| {
+            lamport_cmp(actors, op.obj.0, self.obj.0)
+                .then_with(|| prop_cmp(&op.key, &self.key, props))
+        });
+        // TODO - would be nice if child had an iter_element()
+        let mut counters = Default::default();
+        for pos in start..child.len() {
+            let op = child.get(pos).unwrap();
+            if !(op.obj == self.obj && op.key == self.key) {
+                break;
+            }
+            if is_visible(op, pos, &mut counters) {
+                let (i, vop) = visible_op(op, pos, &counters);
+                self.ops.push(vop);
+                self.ops_pos.push(i);
+            }
+        }
+        QueryResult::Finish
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NthQuery<const B: usize> {
     obj: ObjId,
     target: usize,
     index: usize,
@@ -66,7 +121,7 @@ pub(crate) struct NthQuery {
     pub child_seeks: usize,
 }
 
-impl NthQuery {
+impl<const B: usize> NthQuery<B> {
     pub fn new(obj: ObjId, target: usize) -> Self {
         NthQuery {
             obj,
@@ -83,8 +138,8 @@ impl NthQuery {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for NthQuery {
-    fn query_child(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl<const B: usize> TreeQuery<B> for NthQuery<B> {
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         self.child_seeks += 1;
         let index = &child.index;
         if let Some(mut num_vis) = index.lens.get(&self.obj).copied() {
@@ -143,7 +198,7 @@ impl<const B: usize> TreeQuery<B> for NthQuery {
             self.last_seen = element.elemid()
         }
         if self.seen == self.target + 1 && visible {
-            let vop = visible_op(element, &self.counters);
+            let (_, vop) = visible_op(element, self.index - 1, &self.counters);
             self.ops.push(vop)
         }
         QueryResult::Next
@@ -205,11 +260,32 @@ pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, Count
     visible
 }
 
-pub(crate) fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
+pub(crate) fn visible_op(
+    op: &Op,
+    pos: usize,
+    counters: &HashMap<OpId, CounterData>,
+) -> (usize, Op) {
     for pred in &op.pred {
         if let Some(entry) = counters.get(pred) {
-            return entry.op.clone();
+            return (entry.pos, entry.op.clone());
         }
     }
-    op.clone()
+    (pos, op.clone())
+}
+
+fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
+where
+    F: Fn(&Op) -> Ordering,
+{
+    let mut right = node.len();
+    let mut left = 0;
+    while left < right {
+        let seq = (left + right) / 2;
+        if f(node.get(seq).unwrap()) == Ordering::Less {
+            left = seq + 1;
+        } else {
+            right = seq;
+        }
+    }
+    left
 }

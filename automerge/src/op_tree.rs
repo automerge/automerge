@@ -16,6 +16,8 @@ pub(crate) type OpTree = OpTreeInternal<64>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal<const B: usize> {
+    pub actors: IndexedCache<amp::ActorId>,
+    pub props: IndexedCache<String>,
     root_node: Option<OpTreeNode<B>>,
 }
 
@@ -29,9 +31,26 @@ pub(crate) struct OpTreeNode<const B: usize> {
 }
 
 pub(crate) trait TreeQuery<const B: usize> {
-    fn query_child(&mut self, child: &OpTreeNode<B>) -> QueryResult;
-    fn done(&self) -> bool;
-    fn query_element(&mut self, element: &Op) -> QueryResult;
+    fn query_node_with_lookup(
+        &mut self,
+        child: &OpTreeNode<B>,
+        actors: &IndexedCache<amp::ActorId>,
+        props: &IndexedCache<String>,
+    ) -> QueryResult {
+        self.query_node(child)
+    }
+
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+        panic!("invalid node query")
+    }
+
+    fn done(&self) -> bool {
+        return true;
+    }
+
+    fn query_element(&mut self, element: &Op) -> QueryResult {
+        panic!("invalid element query")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,7 +148,19 @@ impl Default for Index {
 impl<const B: usize> OpTreeInternal<B> {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
-        Self { root_node: None }
+        Self {
+            root_node: None,
+            actors: IndexedCache::new(),
+            props: IndexedCache::new(),
+        }
+    }
+
+    pub fn with_actor(actor: amp::ActorId) -> Self {
+        Self {
+            root_node: None,
+            actors: IndexedCache::from(vec![actor]),
+            props: IndexedCache::new(),
+        }
     }
 
     /// Get the length of the sequence.
@@ -151,21 +182,17 @@ impl<const B: usize> OpTreeInternal<B> {
         }
     }
 
-    pub fn query<Q>(&self, query: &mut Q) -> bool
+    pub fn search<Q>(&self, mut query: Q) -> Q
     where
         Q: TreeQuery<B>,
     {
-        self.root_node
-            .as_ref()
-            .map(|root| match query.query_child(root) {
-                QueryResult::Decend => {
-                    root.query(query);
-                    query.done()
-                }
-                QueryResult::Finish => true,
-                QueryResult::Next => false,
-            })
-            .unwrap_or(false)
+        self.root_node.as_ref().map(|root| {
+            match query.query_node_with_lookup(root, &self.actors, &self.props) {
+                QueryResult::Decend => root.search(&mut query, &self.actors, &self.props),
+                _ => true,
+            }
+        });
+        query
     }
 
     pub fn seek_prop(
@@ -175,13 +202,9 @@ impl<const B: usize> OpTreeInternal<B> {
         actors: &IndexedCache<amp::ActorId>,
         props: &IndexedCache<String>,
     ) -> usize {
-        self.binary_search_by(|op| match lamport_cmp(actors, op.obj.0, obj.0) {
-            Ordering::Equal => key_cmp(&op.key, key, props),
-            n => n,
+        self.binary_search_by(|op| {
+            lamport_cmp(actors, op.obj.0, obj.0).then_with(|| key_cmp(&op.key, key, props))
         })
-    }
-    pub fn seek_obj(&self, obj: &ObjId, actors: &IndexedCache<amp::ActorId>) -> usize {
-        self.binary_search_by(|op| lamport_cmp(actors, op.obj.0, obj.0))
     }
 
     pub fn binary_search_by<F>(&self, f: F) -> usize
@@ -343,7 +366,12 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    pub fn query<Q>(&self, query: &mut Q) -> bool
+    pub fn search<Q>(
+        &self,
+        query: &mut Q,
+        actors: &IndexedCache<amp::ActorId>,
+        props: &IndexedCache<String>,
+    ) -> bool
     where
         Q: TreeQuery<B>,
     {
@@ -356,22 +384,22 @@ impl<const B: usize> OpTreeNode<B> {
             false
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
-                match query.query_child(child) {
+                match query.query_node_with_lookup(child, actors, props) {
                     QueryResult::Decend => {
-                        if child.query(query) {
-                            break;
+                        if child.search(query, actors, props) {
+                            return true;
                         }
                     }
-                    QueryResult::Finish => break,
+                    QueryResult::Finish => return true,
                     QueryResult::Next => (),
                 }
                 if let Some(e) = self.elements.get(child_index) {
                     if query.query_element(e) == QueryResult::Finish {
-                        break;
+                        return true;
                     }
                 }
             }
-            query.done()
+            false
         }
     }
 
@@ -739,7 +767,7 @@ impl<const B: usize> OpTreeNode<B> {
                         self.index.insert(&element);
                         let old_element = child.set(index - cumulative_len, element);
                         self.index.remove(&old_element);
-                        return old_element
+                        return old_element;
                     }
                 }
             }
@@ -877,6 +905,7 @@ fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) ->
     };
     visible
 }
+
 fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
     for pred in &op.pred {
         // FIXME - delete a counter? - entry.succ.empty()?
