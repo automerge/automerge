@@ -19,6 +19,6 @@ for (let i = 0; i < edits.length; i++) {
 }
 doc.commit()
 
-//if (state.text.join('') !== finalText) {
-//  throw new RangeError('ERROR: final text did not match expectation')
-//}
+if (doc.text(text) !== finalText) {
+  throw new RangeError('ERROR: final text did not match expectation')
+}

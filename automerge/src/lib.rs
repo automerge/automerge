@@ -6,8 +6,8 @@ extern crate web_sys;
 //  #[cfg(not(target_family = "wasm"))]
 macro_rules! log {
      ( $( $t:tt )* ) => {
-//         web_sys::console::log_1(&format!( $( $t )* ).into());
-        println!( $( $t )* );
+         web_sys::console::log_1(&format!( $( $t )* ).into());
+//        println!( $( $t )* );
      }
  }
 
@@ -35,11 +35,11 @@ use nonzero_ext::nonzero;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
-use types::{ Op };
+use types::Op;
 pub use types::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, Value, HEAD,
-    ROOT,
+    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, Value, HEAD, ROOT,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub use amp::ChangeHash;
 pub use change::{decode_change, Change};
@@ -390,24 +390,25 @@ impl Automerge {
         pos
     }
 
-    fn seek_to_op(&mut self, op: &mut Op, local: bool, pos: usize) -> usize {
+    fn seek_to_op(&mut self, op: &mut Op, local: bool) -> usize {
         match (op.key, op.insert) {
             (Key::Map(_), _) => self.seek_to_map_op(op, local),
-            (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem, pos),
-            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local, pos),
+            (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem, 0),
+            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local, 0),
         }
     }
 
-    fn insert_op(&mut self, mut op: Op, local: bool, pos_hint: usize) -> Op {
-        let pos = self.seek_to_op(&mut op, local, pos_hint); //mut to collect pred
+    fn insert_op(&mut self, mut op: Op, local: bool) -> Op {
+        // TODO - write a fast query
+        let pos = self.seek_to_op(&mut op, local); //mut to collect pred
         if !op.is_del() {
             self.ops.insert(pos, op.clone());
         }
         op
     }
 
-    // TODO - faster
     pub fn keys(&self, obj: ObjId) -> Vec<String> {
+        // TODO - use index, add _at(clock)
         let mut pos = 0;
         let mut result = vec![];
         self.scan_to_obj(&obj, &mut pos);
@@ -426,6 +427,8 @@ impl Automerge {
     }
 
     pub fn length(&self, obj: ObjId) -> usize {
+        // TODO - use index
+        // add _at(clock)
         self.ops.list_len(&obj)
     }
 
@@ -491,9 +494,29 @@ impl Automerge {
         Ok(())
     }
 
+    pub fn splice_text(
+        &mut self,
+        obj: ObjId,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<(), AutomergeError> {
+        let mut vals = vec![];
+        for c in text.to_owned().graphemes(true) {
+            vals.push(c.into());
+        }
+        self.splice(obj, pos, del, vals)
+    }
+
     pub fn text(&self, obj: ObjId) -> Result<String, AutomergeError> {
-        let _query = self.ops.search(query::Object::new(obj));
-        unimplemented!()
+        let query = self.ops.search(query::ListVals::new(obj));
+        let mut buffer = String::new();
+        for q in &query.ops {
+            if let amp::OpType::Set(amp::ScalarValue::Str(s)) = &q.action {
+                buffer.push_str(s);
+            }
+        }
+        Ok(buffer)
     }
 
     // TODO - I need to return these OpId's here **only** to get
@@ -573,7 +596,7 @@ impl Automerge {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
-            self.insert_op(op, false, 0);
+            self.insert_op(op, false);
         }
     }
 
@@ -1288,8 +1311,18 @@ mod tests {
 
         assert!(doc_a.save().unwrap() == doc_b.save().unwrap());
 
-        doc_a.dump();
+        Ok(())
+    }
 
+    #[test]
+    fn test_save_text() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+        doc.begin()?;
+        let text = doc.set(ROOT, "text".into(), amp::ObjType::Text.into())?;
+        let text: ObjId = text.into();
+        doc.splice_text(text, 0, 0, "hello world")?;
+        doc.splice_text(text, 6, 0, "big bad ")?;
+        assert!(&doc.text(text)? == "hello big bad world");
         Ok(())
     }
 }

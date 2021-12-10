@@ -8,7 +8,6 @@ use js_sys::{Array, Uint8Array};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
-use unicode_segmentation::UnicodeSegmentation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 extern crate web_sys;
@@ -126,6 +125,11 @@ impl Automerge {
         Ok(result)
     }
 
+    pub fn text(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        self.0.text(obj).map_err(to_js_err).map(|t| t.into())
+    }
+
     pub fn splice(
         &mut self,
         obj: JsValue,
@@ -138,24 +142,26 @@ impl Automerge {
         let delete_count = to_usize(delete_count, "deleteCount")?;
         let mut vals = vec![];
         if let Some(t) = text.as_string() {
-            for c in t.graphemes(true) {
-                vals.push(c.into());
-            }
-        } else if let Ok(array) = text.dyn_into::<Array>() {
-            for i in array.iter() {
-                if let Some(t) = i.as_string() {
-                    vals.push(t.into());
-                } else if let Ok(array) = i.dyn_into::<Array>() {
-                    let value = array.get(1);
-                    let datatype = array.get(2);
-                    let value = self.import_value(value, datatype)?;
-                    vals.push(value);
+            self.0
+                .splice_text(obj, start, delete_count, &t)
+                .map_err(to_js_err)?;
+        } else {
+            if let Ok(array) = text.dyn_into::<Array>() {
+                for i in array.iter() {
+                    if let Some(t) = i.as_string() {
+                        vals.push(t.into());
+                    } else if let Ok(array) = i.dyn_into::<Array>() {
+                        let value = array.get(1);
+                        let datatype = array.get(2);
+                        let value = self.import_value(value, datatype)?;
+                        vals.push(value);
+                    }
                 }
             }
+            self.0
+                .splice(obj, start, delete_count, vals)
+                .map_err(to_js_err)?;
         }
-        self.0
-            .splice(obj, start, delete_count, vals)
-            .map_err(to_js_err)?;
         Ok(())
     }
 

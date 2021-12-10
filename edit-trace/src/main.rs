@@ -20,13 +20,12 @@ fn main() -> Result<(), AutomergeError> {
 
   let now = Instant::now();
   doc.begin()?;
-  let text = doc.set(&ROOT, "text".into(), Value::text()).unwrap();
+  let text = doc.set(ROOT, "text".into(), Value::text()).unwrap();
   for (i,(pos,del,vals)) in commands.into_iter().enumerate() {
     if i % 1000 == 0 {
         println!("Processed {} edits in {} ms",i,now.elapsed().as_millis());
     }
-    doc.splice(&text.into(), pos, del, vals)?;
-    //doc.splice(&text.into(), 0, del, vals)?;
+    doc.splice(text.into(), pos, del, vals)?;
   }
   doc.commit()?;
   Ok(())

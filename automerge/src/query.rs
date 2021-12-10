@@ -9,14 +9,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 mod insert;
+mod list_vals;
 mod nth;
-mod object;
 mod opid;
 mod prop;
 
 pub(crate) use insert::InsertNth;
+pub(crate) use list_vals::ListVals;
 pub(crate) use nth::Nth;
-pub(crate) use object::Object;
 #[allow(unused_imports)]
 pub(crate) use opid::OpIdQuery;
 pub(crate) use prop::Prop;

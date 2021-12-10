@@ -2,7 +2,7 @@
 const assert = require('assert')
 const util = require('util')
 const Automerge = require('..')
-const { MAP, LIST } = Automerge
+const { MAP, LIST, TEXT } = Automerge
 
 describe('Automerge', () => {
   describe('basics', () => {
@@ -208,6 +208,16 @@ describe('Automerge', () => {
 
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
+    })
+
+    it('should be able to splice text', () => {
+      let doc = Automerge.init()
+      doc.begin();
+      let text = doc.set("_root", "text", TEXT);
+      doc.splice(text, 0, 0, "hello world");
+      doc.splice(text, 6, 0, "big bad ");
+      doc.commit()
+      assert.strictEqual(doc.text(text), "hello big bad world")
     })
   })
 })
