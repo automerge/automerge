@@ -161,6 +161,12 @@ impl From<OpId> for ObjId {
     }
 }
 
+impl From<OpId> for ElemId {
+    fn from(o: OpId) -> Self {
+        ElemId(o)
+    }
+}
+
 impl From<String> for Prop {
     fn from(p: String) -> Self {
         Prop::Map(p)
@@ -259,6 +265,15 @@ impl From<Op> for (Value, OpId) {
     }
 }
 
+impl From<Value> for amp::OpType {
+    fn from(v: Value) -> Self {
+        match v {
+            Value::Object(o) => amp::OpType::Make(o),
+            Value::Scalar(s) => amp::OpType::Set(s),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
 pub enum Key {
     Map(usize),
@@ -307,10 +322,6 @@ pub(crate) struct Op {
 impl Op {
     pub fn is_del(&self) -> bool {
         matches!(self.action, amp::OpType::Del(_))
-    }
-
-    pub fn visible(&self) -> bool {
-        self.succ.is_empty()
     }
 
     pub fn elemid(&self) -> Option<ElemId> {

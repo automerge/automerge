@@ -6,18 +6,43 @@ use std::{
     mem,
 };
 
+use crate::query::{Index, QueryResult, TreeQuery};
 use crate::{key_cmp, lamport_cmp};
-use crate::{ElemId, IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
+use crate::{IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
 use automerge_protocol as amp;
-use fxhash::FxBuildHasher;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<64>;
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpTreeInternal<const B: usize> {
+pub(crate) struct OpSetMetadata {
     pub actors: IndexedCache<amp::ActorId>,
     pub props: IndexedCache<String>,
+}
+
+impl OpSetMetadata {
+    pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
+        match (left, right) {
+            (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
+            _ => panic!("can only compare map keys"),
+        }
+    }
+
+    pub fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
+        match (left, right) {
+            (OpId(0, _), OpId(0, _)) => Ordering::Equal,
+            (OpId(0, _), OpId(_, _)) => Ordering::Less,
+            (OpId(_, _), OpId(0, _)) => Ordering::Greater,
+            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order
+            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
+            (OpId(a, _), OpId(b, _)) => a.cmp(&b),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OpTreeInternal<const B: usize> {
+    pub m: OpSetMetadata,
     root_node: Option<OpTreeNode<B>>,
 }
 
@@ -30,136 +55,25 @@ pub(crate) struct OpTreeNode<const B: usize> {
     length: usize,
 }
 
-pub(crate) trait TreeQuery<const B: usize> {
-    fn query_node_with_lookup(
-        &mut self,
-        child: &OpTreeNode<B>,
-        actors: &IndexedCache<amp::ActorId>,
-        props: &IndexedCache<String>,
-    ) -> QueryResult {
-        self.query_node(child)
-    }
-
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        panic!("invalid node query")
-    }
-
-    fn done(&self) -> bool {
-        return true;
-    }
-
-    fn query_element(&mut self, element: &Op) -> QueryResult {
-        panic!("invalid element query")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum QueryResult {
-    Next,
-    Decend,
-    Finish,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Index {
-    pub visible: HashMap<ObjId, HashMap<ElemId, usize, FxBuildHasher>, FxBuildHasher>,
-    pub lens: HashMap<ObjId, usize, FxBuildHasher>,
-    pub ops: HashSet<OpId, FxBuildHasher>,
-}
-
-impl Index {
-    fn new() -> Self {
-        Index {
-            visible: Default::default(),
-            lens: Default::default(),
-            ops: Default::default(),
-        }
-    }
-
-    fn insert(&mut self, op: &Op) {
-        self.ops.insert(op.id);
-        if op.succ.is_empty() {
-            if let Some(elem) = op.elemid() {
-                let sub = self.visible.entry(op.obj).or_default();
-                match sub.get(&elem).copied() {
-                    None => {
-                        sub.insert(elem, 1);
-                        self.lens.entry(op.obj).and_modify(|n| *n += 1).or_insert(1);
-                    }
-                    Some(n) => {
-                        sub.insert(elem, n + 1);
-                    }
-                }
-            }
-        }
-    }
-
-    fn remove(&mut self, op: &Op) {
-        self.ops.remove(&op.id);
-        if op.succ.is_empty() {
-            let mut sub_empty = false;
-            if let Some(elem) = op.elemid() {
-                if let Some(c) = self.visible.get_mut(&op.obj) {
-                    if let Some(d) = c.get(&elem).copied() {
-                        if d == 1 {
-                            c.remove(&elem);
-                            self.lens.entry(op.obj).and_modify(|n| *n -= 1);
-                            sub_empty = c.is_empty();
-                        } else {
-                            c.insert(elem, d - 1);
-                        }
-                    }
-                }
-            }
-            if sub_empty {
-                self.visible.remove(&op.obj);
-                self.lens.remove(&op.obj);
-            }
-        }
-    }
-
-    fn merge(&mut self, other: &Index) {
-        for id in &other.ops {
-            self.ops.insert(*id);
-        }
-        for (obj, sub) in other.visible.iter() {
-            let local_obj = self.visible.entry(*obj).or_default();
-            for (elem, n) in sub.iter() {
-                match local_obj.get(elem).cloned() {
-                    None => {
-                        local_obj.insert(*elem, 1);
-                        self.lens.entry(*obj).and_modify(|o| *o += 1).or_insert(1);
-                    }
-                    Some(m) => {
-                        local_obj.insert(*elem, m + n);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl Default for Index {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<const B: usize> OpTreeInternal<B> {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
         Self {
             root_node: None,
-            actors: IndexedCache::new(),
-            props: IndexedCache::new(),
+            m: OpSetMetadata {
+                actors: IndexedCache::new(),
+                props: IndexedCache::new(),
+            },
         }
     }
 
     pub fn with_actor(actor: amp::ActorId) -> Self {
         Self {
             root_node: None,
-            actors: IndexedCache::from(vec![actor]),
-            props: IndexedCache::new(),
+            m: OpSetMetadata {
+                actors: IndexedCache::from(vec![actor]),
+                props: IndexedCache::new(),
+            },
         }
     }
 
@@ -186,24 +100,18 @@ impl<const B: usize> OpTreeInternal<B> {
     where
         Q: TreeQuery<B>,
     {
-        self.root_node.as_ref().map(|root| {
-            match query.query_node_with_lookup(root, &self.actors, &self.props) {
-                QueryResult::Decend => root.search(&mut query, &self.actors, &self.props),
+        self.root_node
+            .as_ref()
+            .map(|root| match query.query_node_with_metadata(root, &self.m) {
+                QueryResult::Decend => root.search(&mut query, &self.m),
                 _ => true,
-            }
-        });
+            });
         query
     }
 
-    pub fn seek_prop(
-        &self,
-        obj: &ObjId,
-        key: &Key,
-        actors: &IndexedCache<amp::ActorId>,
-        props: &IndexedCache<String>,
-    ) -> usize {
+    pub fn seek_prop(&self, obj: &ObjId, key: &Key, m: &OpSetMetadata) -> usize {
         self.binary_search_by(|op| {
-            lamport_cmp(actors, op.obj.0, obj.0).then_with(|| key_cmp(&op.key, key, props))
+            lamport_cmp(&m.actors, op.obj.0, obj.0).then_with(|| key_cmp(&op.key, key, &m.props))
         })
     }
 
@@ -295,6 +203,10 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
+    pub fn last(&self) -> Option<&Op> {
+        self.root_node.as_ref().map(|n| n.last())
+    }
+
     /// Get the `element` at `index` in the sequence.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Op> {
         // FIXME - no index update
@@ -366,12 +278,7 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    pub fn search<Q>(
-        &self,
-        query: &mut Q,
-        actors: &IndexedCache<amp::ActorId>,
-        props: &IndexedCache<String>,
-    ) -> bool
+    pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
         Q: TreeQuery<B>,
     {
@@ -384,9 +291,9 @@ impl<const B: usize> OpTreeNode<B> {
             false
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
-                match query.query_node_with_lookup(child, actors, props) {
+                match query.query_node_with_metadata(child, m) {
                     QueryResult::Decend => {
-                        if child.search(query, actors, props) {
+                        if child.search(query, m) {
                             return true;
                         }
                     }
@@ -773,6 +680,11 @@ impl<const B: usize> OpTreeNode<B> {
             }
             panic!("Invalid index to set: {} but len was {}", index, self.len())
         }
+    }
+
+    pub fn last(&self) -> &Op {
+        // node is never empty so this is safe
+        self.get(self.len() - 1).unwrap()
     }
 
     pub fn get(&self, index: usize) -> Option<&Op> {

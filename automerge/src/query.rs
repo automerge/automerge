@@ -1,209 +1,25 @@
 #![allow(dead_code)]
 
-use crate::op_tree::{OpTreeNode, QueryResult, TreeQuery};
-use crate::{lamport_cmp, ElemId, IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
+use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::{ElemId, ObjId, Op, OpId, ScalarValue};
 use automerge_protocol as amp;
+use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OpIdQuery {
-    target: OpId,
-    index: usize,
-    finish: bool,
-    pub ops: Vec<Op>,
-    counters: HashMap<OpId, CounterData>,
-}
+mod insert;
+mod nth;
+mod object;
+mod opid;
+mod prop;
 
-impl OpIdQuery {
-    pub fn new(target: OpId) -> Self {
-        OpIdQuery {
-            target,
-            index: 0,
-            finish: false,
-            ops: vec![],
-            counters: HashMap::new(),
-        }
-    }
-}
-
-impl<const B: usize> TreeQuery<B> for OpIdQuery {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        if child.index.ops.contains(&self.target) {
-            QueryResult::Decend
-        } else {
-            self.index += child.len();
-            QueryResult::Next
-        }
-    }
-
-    fn done(&self) -> bool {
-        self.finish
-    }
-
-    fn query_element(&mut self, element: &Op) -> QueryResult {
-        if element.id == self.target {
-            self.finish = true;
-            QueryResult::Finish
-        } else {
-            self.index += 1;
-            QueryResult::Next
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PropQuery {
-    obj: ObjId,
-    key: Key,
-    pub ops: Vec<Op>,
-    pub ops_pos: Vec<usize>,
-}
-
-impl PropQuery {
-    pub fn new(obj: ObjId, key: Key) -> Self {
-        PropQuery {
-            obj,
-            key,
-            ops: vec![],
-            ops_pos: vec![],
-        }
-    }
-}
-
-fn prop_cmp(left: &Key, right: &Key, props: &IndexedCache<String>) -> Ordering {
-    match (left, right) {
-        (Key::Map(a), Key::Map(b)) => props[*a].cmp(&props[*b]),
-        _ => panic!("can only compare map keys"),
-    }
-}
-
-impl<const B: usize> TreeQuery<B> for PropQuery {
-    fn query_node_with_lookup(
-        &mut self,
-        child: &OpTreeNode<B>,
-        actors: &IndexedCache<amp::ActorId>,
-        props: &IndexedCache<String>,
-    ) -> QueryResult {
-        let start = binary_search_by(child, |op| {
-            lamport_cmp(actors, op.obj.0, self.obj.0)
-                .then_with(|| prop_cmp(&op.key, &self.key, props))
-        });
-        // TODO - would be nice if child had an iter_element()
-        let mut counters = Default::default();
-        for pos in start..child.len() {
-            let op = child.get(pos).unwrap();
-            if !(op.obj == self.obj && op.key == self.key) {
-                break;
-            }
-            if is_visible(op, pos, &mut counters) {
-                let (i, vop) = visible_op(op, pos, &counters);
-                self.ops.push(vop);
-                self.ops_pos.push(i);
-            }
-        }
-        QueryResult::Finish
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NthQuery<const B: usize> {
-    obj: ObjId,
-    target: usize,
-    index: usize,
-    seen: usize,
-    pub insert: usize,
-    pub ops: Vec<Op>,
-    last_seen: Option<ElemId>,
-    counters: HashMap<OpId, CounterData>,
-    pub element_seeks: usize,
-    pub child_seeks: usize,
-}
-
-impl<const B: usize> NthQuery<B> {
-    pub fn new(obj: ObjId, target: usize) -> Self {
-        NthQuery {
-            obj,
-            target,
-            index: 0,
-            seen: 0,
-            last_seen: None,
-            ops: vec![],
-            insert: 0,
-            counters: HashMap::new(),
-            element_seeks: 0,
-            child_seeks: 0,
-        }
-    }
-}
-
-impl<const B: usize> TreeQuery<B> for NthQuery<B> {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        self.child_seeks += 1;
-        let index = &child.index;
-        if let Some(mut num_vis) = index.lens.get(&self.obj).copied() {
-            // num vis is the number of keys in the index
-            // minus one if we're counting last_seen
-            //let mut num_vis = s.keys().count();
-            if let Some(true) = self.last_seen.map(|seen| {
-                index
-                    .visible
-                    .get(&self.obj)
-                    .map(|sub| sub.contains_key(&seen))
-                    .unwrap_or(false)
-            }) {
-                num_vis -= 1;
-            }
-            if self.seen + num_vis >= self.target {
-                QueryResult::Decend
-            } else {
-                self.index += child.len();
-                self.seen += num_vis;
-                self.last_seen = child.get(child.len() - 1).and_then(|op| op.elemid());
-                QueryResult::Next
-            }
-        } else {
-            QueryResult::Next
-        }
-    }
-
-    fn done(&self) -> bool {
-        self.seen > self.target
-    }
-
-    //fn query_span(&mut self, index: &Index, span: &Span) -> QueryResult {
-    //}
-
-    fn query_element(&mut self, element: &Op) -> QueryResult {
-        self.element_seeks += 1;
-        self.index += 1;
-        if element.obj != self.obj {
-            return if self.seen > self.target {
-                QueryResult::Finish
-            } else {
-                QueryResult::Next
-            };
-        }
-        if element.insert {
-            if self.seen > self.target {
-                return QueryResult::Finish;
-            };
-            self.insert = self.index - 1;
-            self.last_seen = None
-        }
-        let visible = is_visible(element, self.index - 1, &mut self.counters);
-        if visible && self.last_seen.is_none() {
-            self.seen += 1;
-            self.last_seen = element.elemid()
-        }
-        if self.seen == self.target + 1 && visible {
-            let (_, vop) = visible_op(element, self.index - 1, &self.counters);
-            self.ops.push(vop)
-        }
-        QueryResult::Next
-    }
-}
+pub(crate) use insert::InsertNth;
+pub(crate) use nth::Nth;
+pub(crate) use object::Object;
+#[allow(unused_imports)]
+pub(crate) use opid::OpIdQuery;
+pub(crate) use prop::Prop;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {
@@ -211,6 +27,131 @@ pub(crate) struct CounterData {
     val: i64,
     succ: HashSet<OpId>,
     op: Op,
+}
+
+pub(crate) trait TreeQuery<const B: usize> {
+    #[inline(always)]
+    fn query_node_with_metadata(
+        &mut self,
+        child: &OpTreeNode<B>,
+        _m: &OpSetMetadata,
+    ) -> QueryResult {
+        self.query_node(child)
+    }
+
+    fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
+        panic!("invalid node query")
+    }
+
+    #[inline(always)]
+    fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
+        self.query_element(element)
+    }
+
+    fn query_element(&mut self, _element: &Op) -> QueryResult {
+        panic!("invalid element query")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum QueryResult {
+    Next,
+    Decend,
+    Finish,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Index {
+    pub visible: HashMap<ObjId, HashMap<ElemId, usize, FxBuildHasher>, FxBuildHasher>,
+    pub lens: HashMap<ObjId, usize, FxBuildHasher>,
+    pub ops: HashSet<OpId, FxBuildHasher>,
+}
+
+impl Index {
+    pub fn new() -> Self {
+        Index {
+            visible: Default::default(),
+            lens: Default::default(),
+            ops: Default::default(),
+        }
+    }
+
+    pub fn has(&self, obj: &ObjId, e: &Option<ElemId>) -> bool {
+        if let Some(seen) = e {
+            if let Some(sub) = self.visible.get(obj) {
+                return sub.contains_key(seen);
+            }
+        }
+        false
+    }
+
+    pub fn insert(&mut self, op: &Op) {
+        self.ops.insert(op.id);
+        if op.succ.is_empty() {
+            if let Some(elem) = op.elemid() {
+                let sub = self.visible.entry(op.obj).or_default();
+                match sub.get(&elem).copied() {
+                    None => {
+                        sub.insert(elem, 1);
+                        self.lens.entry(op.obj).and_modify(|n| *n += 1).or_insert(1);
+                    }
+                    Some(n) => {
+                        sub.insert(elem, n + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn remove(&mut self, op: &Op) {
+        self.ops.remove(&op.id);
+        if op.succ.is_empty() {
+            let mut sub_empty = false;
+            if let Some(elem) = op.elemid() {
+                if let Some(c) = self.visible.get_mut(&op.obj) {
+                    if let Some(d) = c.get(&elem).copied() {
+                        if d == 1 {
+                            c.remove(&elem);
+                            self.lens.entry(op.obj).and_modify(|n| *n -= 1);
+                            sub_empty = c.is_empty();
+                        } else {
+                            c.insert(elem, d - 1);
+                        }
+                    }
+                }
+            }
+            if sub_empty {
+                self.visible.remove(&op.obj);
+                self.lens.remove(&op.obj);
+            }
+        }
+    }
+
+    pub fn merge(&mut self, other: &Index) {
+        for id in &other.ops {
+            self.ops.insert(*id);
+        }
+        for (obj, sub) in other.visible.iter() {
+            let local_obj = self.visible.entry(*obj).or_default();
+            for (elem, n) in sub.iter() {
+                match local_obj.get(elem).cloned() {
+                    None => {
+                        local_obj.insert(*elem, 1);
+                        self.lens.entry(*obj).and_modify(|o| *o += 1).or_insert(1);
+                    }
+                    Some(m) => {
+                        local_obj.insert(*elem, m + n);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub(crate) fn visible_pos(op: &Op, pos: usize, counters: &HashMap<OpId, CounterData>) -> usize {
@@ -273,7 +214,7 @@ pub(crate) fn visible_op(
     (pos, op.clone())
 }
 
-fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
+pub(crate) fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
 where
     F: Fn(&Op) -> Ordering,
 {

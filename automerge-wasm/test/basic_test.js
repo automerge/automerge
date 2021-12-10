@@ -6,6 +6,14 @@ const { MAP, LIST } = Automerge
 
 describe('Automerge', () => {
   describe('basics', () => {
+/*
+    it.only('xxx', () => {
+      let data = require("fs").readFileSync("/tmp/tmp.dat")
+      console.log(data)
+      let doc1 = Automerge.load(data)
+     // doc1.dump();
+    })
+*/
     it('should init clone and free', () => {
       let doc1 = Automerge.init()
       let doc2 = doc1.clone()

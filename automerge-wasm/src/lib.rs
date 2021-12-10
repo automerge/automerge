@@ -119,7 +119,7 @@ impl Automerge {
         let obj = self.import(obj)?;
         let result = self
             .0
-            .keys(&obj)
+            .keys(obj)
             .iter()
             .map(|s| JsValue::from_str(s))
             .collect();
@@ -154,7 +154,7 @@ impl Automerge {
             }
         }
         self.0
-            .splice(&obj, start, delete_count, vals)
+            .splice(obj, start, delete_count, vals)
             .map_err(to_js_err)?;
         Ok(())
     }
@@ -175,7 +175,7 @@ impl Automerge {
         let value = self.import_value(value, datatype)?;
         let opid = self
             .0
-            .insert(&obj, index as usize, value)
+            .insert(obj, index as usize, value)
             .map_err(to_js_err)?;
         Ok(self.export(opid))
     }
@@ -190,7 +190,7 @@ impl Automerge {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, datatype)?;
-        let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
+        let opid = self.0.set(obj, prop, value).map_err(to_js_err)?;
         Ok(self.export(opid))
     }
 
@@ -201,7 +201,8 @@ impl Automerge {
             .as_f64()
             .ok_or("inc needs a numberic value")
             .map_err(to_js_err)?;
-        self.0.inc(&obj, prop, value as i64).map_err(to_js_err)
+        self.0.inc(obj, prop, value as i64).map_err(to_js_err)?;
+        Ok(())
     }
 
     pub fn value(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
@@ -209,7 +210,7 @@ impl Automerge {
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
-            let value = self.0.value(&obj, prop).map_err(to_js_err)?;
+            let value = self.0.value(obj, prop).map_err(to_js_err)?;
             match value {
                 Some((Value::Object(obj_type), obj_id)) => {
                     result.push(&obj_type.to_string().into());
@@ -230,7 +231,7 @@ impl Automerge {
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
-            let values = self.0.values(&obj, prop).map_err(to_js_err)?;
+            let values = self.0.values(obj, prop).map_err(to_js_err)?;
             for value in values {
                 match value {
                     (Value::Object(obj_type), obj_id) => {
@@ -254,14 +255,15 @@ impl Automerge {
 
     pub fn length(&mut self, obj: JsValue, arg: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        let len = self.0.length(&obj) as f64;
+        let len = self.0.length(obj) as f64;
         Ok(len.into())
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
-        self.0.del(&obj, prop).map_err(to_js_err)
+        self.0.del(obj, prop).map_err(to_js_err)?;
+        Ok(())
     }
 
     pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
@@ -274,7 +276,8 @@ impl Automerge {
     pub fn save_incremental(&mut self) -> JsValue {
         self.0
             .save_incremental()
-            .map(|v| js_sys::Uint8Array::from(v.as_slice())).into()
+            .map(|v| js_sys::Uint8Array::from(v.as_slice()))
+            .into()
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
@@ -418,10 +421,10 @@ impl Automerge {
                     // FIXME - we need to detect str vs int vs float vs bool here :/
                     Ok(am::ScalarValue::Str(s.into()).into())
                 } else if let Some(n) = value.as_f64() {
-                    if n.round() == n {
-                        Ok(am::ScalarValue::Int((n as i64).into()).into())
+                    if (n.round() - n).abs() < f64::EPSILON {
+                        Ok(am::ScalarValue::Int(n as i64).into())
                     } else {
-                        Ok(am::ScalarValue::F64(n.into()).into())
+                        Ok(am::ScalarValue::F64(n).into())
                     }
                 } else if let Some(o) = to_objtype(&value) {
                     Ok(o.into())

@@ -136,12 +136,19 @@ describe('Automerge', () => {
             assert.deepEqual(docB2, doc2);
         })
 
-        it('have many list methiods', () => {
+        it('have many list methods', () => {
             let doc1 = Automerge.from({ list: [1,2,3] })
             assert.deepEqual(doc1, { list: [1,2,3] });
             let doc2 = Automerge.change(doc1, (d) => {
               d.list.splice(1,1,9,10)
             })
+            console.log("len", doc2.list.length);
+            console.log("l[0]", doc2.list[0]);
+            console.log("l[1]", doc2.list[1]);
+            console.log("l[2]", doc2.list[2]);
+            console.log("l[3]", doc2.list[3]);
+            console.log("l[4]", doc2.list[4]);
+            Automerge.dump(doc2)
             assert.deepEqual(doc2, { list: [1,9,10,3] });
             let doc3 = Automerge.change(doc2, (d) => {
               d.list.push(11,12)

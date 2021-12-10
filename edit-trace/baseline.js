@@ -3,7 +3,13 @@ const { edits, finalText } = require('./editing-trace')
 
 const start = new Date()
 let chars = []
-for (let edit of edits) chars.splice(...edit)
+for (let i = 0; i < edits.length; i++) {
+  let edit = edits[i]
+  if (i % 1000 === 0) {
+    console.log(`Processed ${i} edits in ${new Date() - start} ms`)
+  }
+  chars.splice(...edit)
+}
 const time = new Date() - start
 
 if (chars.join('') !== finalText) {

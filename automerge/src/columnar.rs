@@ -11,7 +11,7 @@ use std::{
     str,
 };
 
-use crate::protocol::{ElemId, Key, ObjId, OpId};
+use crate::types::{ElemId, Key, ObjId, OpId};
 use crate::ROOT;
 
 use amp::SortedVec;
