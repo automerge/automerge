@@ -2,12 +2,26 @@ extern crate hex;
 extern crate uuid;
 extern crate web_sys;
 
-//  #[cfg(target_family = "wasm")]
-//  #[cfg(not(target_family = "wasm"))]
 macro_rules! log {
      ( $( $t:tt )* ) => {
+          use $crate::__log;
+          __log!( $( $t )* );
+     }
+ }
+
+#[cfg(target_family = "wasm")]
+#[macro_export]
+macro_rules! __log {
+     ( $( $t:tt )* ) => {
          web_sys::console::log_1(&format!( $( $t )* ).into());
-//        println!( $( $t )* );
+     }
+ }
+
+#[cfg(not(target_family = "wasm"))]
+#[macro_export]
+macro_rules! __log {
+     ( $( $t:tt )* ) => {
+         println!( $( $t )* );
      }
  }
 
@@ -230,8 +244,6 @@ impl Automerge {
             }
             *pos += 1;
         }
-        let tmp = self.ops.seek_prop(obj, key, &self.ops.m);
-        assert_eq!(*pos, tmp);
     }
 
     fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {

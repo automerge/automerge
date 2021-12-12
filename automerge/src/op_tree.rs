@@ -6,10 +6,9 @@ use std::{
     mem,
 };
 
-use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{key_cmp, lamport_cmp};
-use crate::{IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
 use automerge_protocol as amp;
+use crate::query::{Index, QueryResult, TreeQuery};
+use crate::{IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<64>;
@@ -107,12 +106,6 @@ impl<const B: usize> OpTreeInternal<B> {
                 _ => true,
             });
         query
-    }
-
-    pub fn seek_prop(&self, obj: &ObjId, key: &Key, m: &OpSetMetadata) -> usize {
-        self.binary_search_by(|op| {
-            lamport_cmp(&m.actors, op.obj.0, obj.0).then_with(|| key_cmp(&op.key, key, &m.props))
-        })
     }
 
     pub fn binary_search_by<F>(&self, f: F) -> usize

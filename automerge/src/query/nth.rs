@@ -89,9 +89,10 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
                 self.last_seen = element.elemid()
             }
             if self.seen == self.target + 1 && visible {
-                let (vpos, vop) = visible_op(element, self.pos, &self.counters);
-                self.ops.push(vop);
-                self.ops_pos.push(vpos);
+                for (vpos, vop) in visible_op(element, self.pos, &self.counters) {
+                  self.ops.push(vop);
+                  self.ops_pos.push(vpos);
+                }
             }
         }
         self.pos += 1;

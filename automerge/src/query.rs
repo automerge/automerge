@@ -13,6 +13,7 @@ mod list_vals;
 mod nth;
 mod opid;
 mod prop;
+mod seek_op;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use list_vals::ListVals;
@@ -20,6 +21,8 @@ pub(crate) use nth::Nth;
 #[allow(unused_imports)]
 pub(crate) use opid::OpIdQuery;
 pub(crate) use prop::Prop;
+#[allow(unused_imports)]
+pub(crate) use seek_op::SeekOp;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {
@@ -205,13 +208,18 @@ pub(crate) fn visible_op(
     op: &Op,
     pos: usize,
     counters: &HashMap<OpId, CounterData>,
-) -> (usize, Op) {
+) -> Vec<(usize, Op)> {
+    let mut result = vec![];
     for pred in &op.pred {
         if let Some(entry) = counters.get(pred) {
-            return (entry.pos, entry.op.clone());
+            result.push((entry.pos, entry.op.clone()));
         }
     }
-    (pos, op.clone())
+    if result.is_empty() {
+      vec![(pos, op.clone())]
+    } else {
+      result
+    }
 }
 
 pub(crate) fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
