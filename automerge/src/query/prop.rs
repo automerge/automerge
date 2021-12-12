@@ -45,8 +45,8 @@ impl<const B: usize> TreeQuery<B> for Prop {
             }
             if is_visible(op, pos, &mut counters) {
                 for (vpos, vop) in visible_op(op, pos, &counters) {
-                  self.ops.push(vop);
-                  self.ops_pos.push(vpos);
+                    self.ops.push(vop);
+                    self.ops_pos.push(vpos);
                 }
             }
             self.pos += 1;

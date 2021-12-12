@@ -96,22 +96,27 @@ impl Automerge {
 
     pub fn free(self) {}
 
-    pub fn begin(&mut self, message: JsValue, time: JsValue) -> Result<(), JsValue> {
-        let message = message.as_string();
-        let time = time.as_f64().map(|v| v as i64);
-        self.0.begin_with_opts(message, time).map_err(to_js_err)
-    }
+    /*
+        pub fn begin(&mut self, message: JsValue, time: JsValue) -> Result<(), JsValue> {
+            let message = message.as_string();
+            let time = time.as_f64().map(|v| v as i64);
+            self.0.begin_with_opts(message, time).map_err(to_js_err)
+        }
+    */
 
     pub fn pending_ops(&self) -> JsValue {
         (self.0.pending_ops() as u32).into()
     }
 
-    pub fn commit(&mut self) -> Result<(), JsValue> {
-        self.0.commit().map_err(to_js_err)
+    pub fn commit(&mut self, message: JsValue, time: JsValue) -> JsValue {
+        //self.0.commit().map_err(to_js_err)
+        let message = message.as_string();
+        let time = time.as_f64().map(|v| v as i64);
+        self.0.commit(message, time).into()
     }
 
-    pub fn rollback(&mut self) {
-        self.0.rollback();
+    pub fn rollback(&mut self) -> JsValue {
+        self.0.rollback().into()
     }
 
     pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {

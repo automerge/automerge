@@ -40,8 +40,8 @@ impl<const B: usize> TreeQuery<B> for ListVals {
             }
             if self.last_elem.is_none() && is_visible(op, pos, &mut counters) {
                 for (_, vop) in visible_op(op, pos, &counters) {
-                  self.last_elem = vop.elemid();
-                  self.ops.push(vop);
+                    self.last_elem = vop.elemid();
+                    self.ops.push(vop);
                 }
             }
         }

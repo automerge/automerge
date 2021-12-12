@@ -6,9 +6,9 @@ use std::{
     mem,
 };
 
-use automerge_protocol as amp;
 use crate::query::{Index, QueryResult, TreeQuery};
 use crate::{IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
+use automerge_protocol as amp;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<64>;

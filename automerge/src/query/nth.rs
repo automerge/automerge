@@ -90,8 +90,8 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
             }
             if self.seen == self.target + 1 && visible {
                 for (vpos, vop) in visible_op(element, self.pos, &self.counters) {
-                  self.ops.push(vop);
-                  self.ops_pos.push(vpos);
+                    self.ops.push(vop);
+                    self.ops_pos.push(vpos);
                 }
             }
         }

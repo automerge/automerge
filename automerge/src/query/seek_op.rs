@@ -35,23 +35,26 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
         child: &OpTreeNode<B>,
         m: &OpSetMetadata,
     ) -> QueryResult {
-        if self.found { return QueryResult::Decend }
+        if self.found {
+            return QueryResult::Decend;
+        }
         match self.op.key {
-          Key::Seq(e) => 
-            if child.index.ops.contains(&e.0) {
-                QueryResult::Decend
-            } else {
-                self.pos += child.len();
-                QueryResult::Next
+            Key::Seq(e) => {
+                if child.index.ops.contains(&e.0) {
+                    QueryResult::Decend
+                } else {
+                    self.pos += child.len();
+                    QueryResult::Next
+                }
             }
-          Key::Map(_) => {
-            self.pos = binary_search_by(child, |op|
-               m.lamport_cmp(op.obj.0, self.op.obj.0)
-                .then_with(|| m.key_cmp(&op.key, &self.op.key))
-                .then_with(|| m.lamport_cmp(op.id, self.op.id))
-            );
-            QueryResult::Finish
-          }
+            Key::Map(_) => {
+                self.pos = binary_search_by(child, |op| {
+                    m.lamport_cmp(op.obj.0, self.op.obj.0)
+                        .then_with(|| m.key_cmp(&op.key, &self.op.key))
+                        .then_with(|| m.lamport_cmp(op.id, self.op.id))
+                });
+                QueryResult::Finish
+            }
         }
     }
 
@@ -60,17 +63,16 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
             if self.found {
                 return QueryResult::Finish;
             }
-        } else {
-            if element.insert {
-                if !self.found {
-                    return QueryResult::Finish;
-                };
-                //self.last_seen = None;
-                //self.last_insert = element.elemid();
-            }
+        } else if element.insert && !self.found {
+            //if !self.found {
+            return QueryResult::Finish;
+            //};
+            //self.last_seen = None;
+            //self.last_insert = element.elemid();
+            //}
             //if self.last_seen.is_none() && self.is_visible(element) {
-                //self.seen += 1;
-                //self.last_seen = element.elemid()
+            //self.seen += 1;
+            //self.last_seen = element.elemid()
             //}
         }
         self.pos += 1;

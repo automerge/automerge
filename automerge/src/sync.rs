@@ -23,10 +23,15 @@ const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Automerge {
-    pub fn generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
-        let our_heads = self.get_heads();
+    pub fn generate_sync_message(&mut self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+        self.ensure_transaction_closed();
+        self._generate_sync_message(sync_state)
+    }
 
-        let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
+    fn _generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+        let our_heads = self._get_heads();
+
+        let our_need = self._get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
 
         let their_heads_set = if let Some(ref heads) = sync_state.their_heads {
             heads.iter().collect::<HashSet<_>>()
@@ -44,7 +49,7 @@ impl Automerge {
                 if !first_have
                     .last_sync
                     .iter()
-                    .all(|hash| self.get_change_by_hash(hash).is_some())
+                    .all(|hash| self._get_change_by_hash(hash).is_some())
                 {
                     let reset_msg = SyncMessage {
                         heads: our_heads,
@@ -105,6 +110,15 @@ impl Automerge {
         sync_state: &mut SyncState,
         message: SyncMessage,
     ) -> Result<Option<Patch>, AutomergeError> {
+        self.ensure_transaction_closed();
+        self._receive_sync_message(sync_state, message)
+    }
+
+    fn _receive_sync_message(
+        &mut self,
+        sync_state: &mut SyncState,
+        message: SyncMessage,
+    ) -> Result<Option<Patch>, AutomergeError> {
         let mut patch = None;
 
         let before_heads = self.get_heads();
@@ -159,7 +173,7 @@ impl Automerge {
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {
-        let new_changes = self.get_changes(&last_sync);
+        let new_changes = self._get_changes(&last_sync);
         let hashes = new_changes
             .into_iter()
             .map(|change| change.hash)
@@ -170,10 +184,10 @@ impl Automerge {
         }
     }
 
-    pub fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<&Change> {
+    fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<&Change> {
         if have.is_empty() {
             need.iter()
-                .filter_map(|hash| self.get_change_by_hash(hash))
+                .filter_map(|hash| self._get_change_by_hash(hash))
                 .collect()
         } else {
             let mut last_sync_hashes = HashSet::new();
@@ -188,7 +202,7 @@ impl Automerge {
             }
             let last_sync_hashes = last_sync_hashes.into_iter().collect::<Vec<_>>();
 
-            let changes = self.get_changes(&last_sync_hashes);
+            let changes = self._get_changes(&last_sync_hashes);
 
             let mut change_hashes = HashSet::with_capacity(changes.len());
             let mut dependents: HashMap<ChangeHash, Vec<ChangeHash>> = HashMap::new();
@@ -224,7 +238,7 @@ impl Automerge {
             for hash in need {
                 hashes_to_send.insert(*hash);
                 if !change_hashes.contains(hash) {
-                    let change = self.get_change_by_hash(hash);
+                    let change = self._get_change_by_hash(hash);
                     if let Some(change) = change {
                         changes_to_send.push(change);
                     }

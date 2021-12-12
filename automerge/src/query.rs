@@ -216,9 +216,9 @@ pub(crate) fn visible_op(
         }
     }
     if result.is_empty() {
-      vec![(pos, op.clone())]
+        vec![(pos, op.clone())]
     } else {
-      result
+        result
     }
 }
 

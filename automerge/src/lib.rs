@@ -92,6 +92,7 @@ impl Automerge {
     }
 
     pub fn set_actor(&mut self, actor: amp::ActorId) {
+        self.ensure_transaction_closed();
         self.actor = Some(self.ops.m.actors.cache(actor))
     }
 
@@ -134,62 +135,114 @@ impl Automerge {
     }
 
     pub fn pending_ops(&self) -> u64 {
-        match &self.transaction {
-            Some(t) => t.operations.len() as u64,
-            None => 0,
-        }
+        self.transaction
+            .as_ref()
+            .map(|t| t.operations.len() as u64)
+            .unwrap_or(0)
     }
 
-    pub fn begin(&mut self) -> Result<(), AutomergeError> {
-        self.begin_with_opts(None, None)
-    }
+    fn tx(&mut self) -> &mut Transaction {
+        if self.transaction.is_none() {
+            let actor = self.get_actor_index();
 
-    pub fn begin_with_opts(
-        &mut self,
-        message: Option<String>,
-        time: Option<i64>,
-    ) -> Result<(), AutomergeError> {
-        if self.transaction.is_some() {
-            return Err(AutomergeError::MismatchedBegin);
-        }
-
-        let actor = self.get_actor_index();
-
-        let seq = self.states.entry(actor).or_default().len() as u64 + 1;
-        let mut deps = self.get_heads();
-        if seq > 1 {
-            let last_hash = self.get_hash(actor, seq - 1)?;
-            if !deps.contains(&last_hash) {
-                deps.push(last_hash);
+            let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+            let mut deps = self.get_heads();
+            if seq > 1 {
+                let last_hash = self.get_hash(actor, seq - 1).unwrap();
+                if !deps.contains(&last_hash) {
+                    deps.push(last_hash);
+                }
             }
+
+            self.transaction = Some(Transaction {
+                actor,
+                seq,
+                start_op: self.max_op + 1,
+                time: 0,
+                message: None,
+                extra_bytes: Default::default(),
+                hash: None,
+                operations: vec![],
+                deps,
+            });
         }
 
-        self.transaction = Some(Transaction {
-            actor,
-            seq,
-            start_op: self.max_op + 1,
-            time: time.unwrap_or(0),
-            message,
-            extra_bytes: Default::default(),
-            hash: None,
-            operations: vec![],
-            deps,
-        });
-
-        Ok(())
+        self.transaction.as_mut().unwrap()
     }
 
-    pub fn commit(&mut self) -> Result<(), AutomergeError> {
+    /*
+        pub fn begin(&mut self) -> Result<(), AutomergeError> {
+            unimplemented!()
+            //self.begin_with_opts(None, None)
+        }
+    */
+    /*
+     */
+
+    /*
+        pub fn begin_with_opts(
+            &mut self,
+            message: Option<String>,
+            time: Option<i64>,
+        ) -> Result<(), AutomergeError> {
+            if self.transaction.is_some() {
+                return Err(AutomergeError::MismatchedBegin);
+            }
+
+            let actor = self.get_actor_index();
+
+            let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+            let mut deps = self.get_heads();
+            if seq > 1 {
+                let last_hash = self.get_hash(actor, seq - 1)?;
+                if !deps.contains(&last_hash) {
+                    deps.push(last_hash);
+                }
+            }
+
+            self.transaction = Some(Transaction {
+                actor,
+                seq,
+                start_op: self.max_op + 1,
+                time: time.unwrap_or(0),
+                message,
+                extra_bytes: Default::default(),
+                hash: None,
+                operations: vec![],
+                deps,
+            });
+
+            Ok(())
+        }
+    */
+
+    pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> usize {
+        let tx = self.tx();
+
+        if message.is_some() {
+            tx.message = message;
+        }
+
+        if let Some(t) = time {
+            tx.time = t;
+        }
+
+        let ops = tx.operations.len();
+
+        self.ensure_transaction_closed();
+
+        ops
+    }
+
+    pub fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             self.update_history(export_change(&tx, &self.ops.m.actors, &self.ops.m.props));
-            Ok(())
-        } else {
-            Err(AutomergeError::MismatchedCommit)
         }
     }
 
-    pub fn rollback(&mut self) {
+    pub fn rollback(&mut self) -> usize {
         if let Some(tx) = self.transaction.take() {
+            let num = tx.operations.len();
             for op in &tx.operations {
                 // FIXME - use query to make this fast
                 for pred_id in &op.pred {
@@ -201,15 +254,15 @@ impl Automerge {
                     self.ops.remove(pos);
                 }
             }
+            num
+        } else {
+            0
         }
     }
 
-    fn next_id(&self) -> Result<OpId, AutomergeError> {
-        if let Some(tx) = &self.transaction {
-            Ok(OpId(tx.start_op + tx.operations.len() as u64, tx.actor))
-        } else {
-            Err(AutomergeError::OpOutsideOfTransaction)
-        }
+    fn next_id(&mut self) -> OpId {
+        let tx = self.tx();
+        OpId(tx.start_op + tx.operations.len() as u64, tx.actor)
     }
 
     fn insert_local_op(&mut self, op: Op, pos: usize, succ_pos: &[usize]) {
@@ -223,9 +276,7 @@ impl Automerge {
             self.ops.insert(pos, op.clone());
         }
 
-        if let Some(tx) = self.transaction.as_mut() {
-            tx.operations.push(op);
-        }
+        self.tx().operations.push(op);
     }
 
     fn scan_to_obj(&self, obj: &ObjId, pos: &mut usize) {
@@ -459,7 +510,7 @@ impl Automerge {
         index: usize,
         value: Value,
     ) -> Result<OpId, AutomergeError> {
-        let id = self.next_id()?;
+        let id = self.next_id();
 
         let query = self.ops.search(query::InsertNth::new(obj, index));
 
@@ -591,6 +642,7 @@ impl Automerge {
     }
 
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
+        self.ensure_transaction_closed();
         for c in changes {
             if self.is_causally_ready(c) {
                 self.apply_change(c.clone());
@@ -605,6 +657,7 @@ impl Automerge {
     }
 
     pub fn apply_change(&mut self, change: Change) {
+        self.ensure_transaction_closed();
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
@@ -634,7 +687,7 @@ impl Automerge {
             return Err(AutomergeError::EmptyStringKey);
         }
 
-        let id = self.next_id()?;
+        let id = self.next_id();
         let prop = self.ops.m.props.cache(prop);
         let query = self.ops.search(query::Prop::new(obj, prop));
 
@@ -664,7 +717,7 @@ impl Automerge {
     ) -> Result<OpId, AutomergeError> {
         let query = self.ops.search(query::Nth::new(obj, index));
 
-        let id = self.next_id()?;
+        let id = self.next_id();
         let pred = query.ops.iter().map(|op| op.id).collect();
         let key = query.key()?;
 
@@ -739,6 +792,7 @@ impl Automerge {
     }
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
+        self.ensure_transaction_closed();
         // TODO - would be nice if I could pass an iterator instead of a collection here
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         let ops: Vec<_> = self.ops.iter().cloned().collect();
@@ -757,13 +811,14 @@ impl Automerge {
 
     // should this return an empty vec instead of None?
     pub fn save_incremental(&mut self) -> Option<Vec<u8>> {
-        let changes = self.get_changes(self.saved.as_slice());
+        self.ensure_transaction_closed();
+        let changes = self._get_changes(self.saved.as_slice());
         let mut bytes = vec![];
         for c in changes {
             bytes.extend(c.raw_bytes());
         }
         if !bytes.is_empty() {
-            self.saved = self.get_heads().iter().copied().collect();
+            self.saved = self._get_heads().iter().copied().collect();
             Some(bytes)
         } else {
             None
@@ -835,7 +890,12 @@ impl Automerge {
         }
     }
 
-    pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+        self.ensure_transaction_closed();
+        self._get_missing_deps(heads)
+    }
+
+    fn _get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
@@ -886,7 +946,7 @@ impl Automerge {
         }
 
         // if we get to the end and there is a head we haven't seen then fast path cant work
-        if self.get_heads().iter().all(|h| has_seen.contains(h)) {
+        if self._get_heads().iter().all(|h| has_seen.contains(h)) {
             Some(missing_changes)
         } else {
             None
@@ -915,7 +975,8 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_last_local_change(&self) -> Option<&Change> {
+    pub fn get_last_local_change(&mut self) -> Option<&Change> {
+        self.ensure_transaction_closed();
         if let Some(actor) = &self.actor {
             let actor = &self.ops.m.actors[*actor];
             return self.history.iter().rev().find(|c| c.actor_id() == actor);
@@ -923,7 +984,12 @@ impl Automerge {
         None
     }
 
-    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
+        self.ensure_transaction_closed();
+        self._get_changes(have_deps)
+    }
+
+    fn _get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         if let Some(changes) = self.get_changes_fast(have_deps) {
             changes
         } else {
@@ -937,7 +1003,7 @@ impl Automerge {
         }
         // FIXME - could be way faster
         let mut clock = HashMap::new();
-        for c in self.get_changes(heads) {
+        for c in self._get_changes(heads) {
             let actor = self.ops.m.actors.lookup(c.actor_id().clone()).unwrap();
             if let Some(val) = clock.get(&actor) {
                 if val < &c.seq {
@@ -950,23 +1016,33 @@ impl Automerge {
         Clock::At(clock)
     }
 
-    pub fn get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
+    pub fn get_change_by_hash(&mut self, hash: &amp::ChangeHash) -> Option<&Change> {
+        self.ensure_transaction_closed();
+        self._get_change_by_hash(hash)
+    }
+
+    fn _get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
     }
 
-    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
+    pub fn get_changes_added<'a>(&mut self, other: &'a Self) -> Vec<&'a Change> {
+        self.ensure_transaction_closed();
+        self._get_changes_added(other)
+    }
+
+    fn _get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
-        let mut stack: Vec<_> = other.get_heads();
+        let mut stack: Vec<_> = other._get_heads();
         let mut seen_hashes = HashSet::new();
         let mut added_change_hashes = Vec::new();
         while let Some(hash) = stack.pop() {
-            if !seen_hashes.contains(&hash) && self.get_change_by_hash(&hash).is_none() {
+            if !seen_hashes.contains(&hash) && self._get_change_by_hash(&hash).is_none() {
                 seen_hashes.insert(hash);
                 added_change_hashes.push(hash);
-                if let Some(change) = other.get_change_by_hash(&hash) {
+                if let Some(change) = other._get_change_by_hash(&hash) {
                     stack.extend(&change.deps);
                 }
             }
@@ -976,17 +1052,22 @@ impl Automerge {
         added_change_hashes.reverse();
         added_change_hashes
             .into_iter()
-            .filter_map(|h| other.get_change_by_hash(&h))
+            .filter_map(|h| other._get_change_by_hash(&h))
             .collect()
     }
 
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        self._get_heads()
+    }
+
+    fn _get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
         deps
     }
 
-    fn get_hash(&self, actor: usize, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
@@ -1211,10 +1292,8 @@ mod tests {
     fn insert_op() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin()?;
         doc.set(ROOT, "hello".into(), "world".into())?;
         assert!(doc.pending_ops() == 1);
-        doc.commit()?;
         doc.value(ROOT, "hello".into())?;
         Ok(())
     }
@@ -1223,7 +1302,6 @@ mod tests {
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin()?;
         let list_id: ObjId = doc
             .set(ROOT, "items".into(), amp::ObjType::List.into())?
             .into();
@@ -1238,7 +1316,6 @@ mod tests {
         assert!(doc.value(list_id, 2.into())?.unwrap().0 == "a".into());
         assert!(doc.value(list_id, 3.into())?.unwrap().0 == "c".into());
         assert!(doc.length(list_id) == 4);
-        doc.commit()?;
         doc.save()?;
         Ok(())
     }
@@ -1247,19 +1324,16 @@ mod tests {
     fn test_del() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        doc.begin()?;
         doc.set(ROOT, "xxx".into(), "xxx".into())?;
         assert!(doc.values(ROOT, "xxx".into())?.len() > 0);
         doc.del(ROOT, "xxx".into())?;
         assert!(doc.values(ROOT, "xxx".into())?.len() == 0);
-        doc.commit()?;
         Ok(())
     }
 
     #[test]
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.begin()?;
         let id = doc.set(
             ROOT,
             "counter".into(),
@@ -1279,7 +1353,6 @@ mod tests {
             doc.value(ROOT, "counter".into())?
                 == Some((Value::Scalar(amp::ScalarValue::Counter(15)), id))
         );
-        doc.commit()?;
         Ok(())
     }
 
@@ -1287,21 +1360,15 @@ mod tests {
     fn test_save_incremental() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
 
-        doc.begin()?;
         doc.set(ROOT, "foo".into(), 1.into())?;
-        doc.commit()?;
 
         let save1 = doc.save().unwrap();
 
-        doc.begin()?;
         doc.set(ROOT, "bar".into(), 2.into())?;
-        doc.commit()?;
 
         let save2 = doc.save_incremental().unwrap();
 
-        doc.begin()?;
         doc.set(ROOT, "baz".into(), 3.into())?;
-        doc.commit()?;
 
         let save3 = doc.save_incremental().unwrap();
 
@@ -1329,7 +1396,6 @@ mod tests {
     #[test]
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.begin()?;
         let text = doc.set(ROOT, "text".into(), amp::ObjType::Text.into())?;
         let text: ObjId = text.into();
         doc.splice_text(text, 0, 0, "hello world")?;

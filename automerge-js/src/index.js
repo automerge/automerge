@@ -47,7 +47,7 @@ function change(doc, options, callback) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
   const state = doc[STATE].clone()
-  state.begin(options.message, options.time)
+  //state.begin(options.message, options.time)
   try {
     doc[FROZEN] = true
     let root = rootProxy(state);
@@ -57,7 +57,7 @@ function change(doc, options, callback) {
       doc[FROZEN] = false
       return doc
     } else {
-      state.commit()
+      state.commit(options.message, options.time)
       return rootProxy(state, true);
     }
   } catch (e) {
@@ -87,8 +87,7 @@ function emptyChange(doc, options) {
   }
 
   const state = doc[STATE]
-  state.begin(options.message, options.time)
-  state.commit()
+  state.commit(options.message, options.time)
   return rootProxy(state, true);
 }
 
