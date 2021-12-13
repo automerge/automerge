@@ -41,6 +41,7 @@ mod internal;
 mod op_tree;
 mod query;
 mod types;
+mod value;
 
 use op_tree::OpTree;
 
@@ -53,8 +54,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
 use types::Op;
 pub use types::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, Value, HEAD, ROOT,
+    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, HEAD, ROOT,
 };
+pub use value::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub use amp::ChangeHash;
@@ -987,9 +989,7 @@ mod tests {
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        let list_id: ObjId = doc
-            .set(ROOT, "items".into(), amp::ObjType::List.into())?
-            .into();
+        let list_id: ObjId = doc.set(ROOT, "items".into(), Value::list())?.into();
         doc.set(ROOT, "zzz".into(), "zzzval".into())?;
         assert!(doc.value(ROOT, "items".into())?.unwrap().1 == list_id.0);
         doc.insert(list_id, 0, "a".into())?;
@@ -1019,25 +1019,12 @@ mod tests {
     #[test]
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        let id = doc.set(
-            ROOT,
-            "counter".into(),
-            Value::Scalar(amp::ScalarValue::Counter(10)),
-        )?;
-        assert!(
-            doc.value(ROOT, "counter".into())?
-                == Some((Value::Scalar(amp::ScalarValue::Counter(10)), id))
-        );
+        let id = doc.set(ROOT, "counter".into(), Value::counter(10))?;
+        assert!(doc.value(ROOT, "counter".into())? == Some((Value::counter(10), id)));
         doc.inc(ROOT, "counter".into(), 10)?;
-        assert!(
-            doc.value(ROOT, "counter".into())?
-                == Some((Value::Scalar(amp::ScalarValue::Counter(20)), id))
-        );
+        assert!(doc.value(ROOT, "counter".into())? == Some((Value::counter(20), id)));
         doc.inc(ROOT, "counter".into(), -5)?;
-        assert!(
-            doc.value(ROOT, "counter".into())?
-                == Some((Value::Scalar(amp::ScalarValue::Counter(15)), id))
-        );
+        assert!(doc.value(ROOT, "counter".into())?  == Some((Value::counter(15), id)));
         Ok(())
     }
 
@@ -1081,7 +1068,7 @@ mod tests {
     #[test]
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        let text = doc.set(ROOT, "text".into(), amp::ObjType::Text.into())?;
+        let text = doc.set(ROOT, "text".into(), Value::text())?;
         let text: ObjId = text.into();
         doc.splice_text(text, 0, 0, "hello world")?;
         doc.splice_text(text, 6, 0, "big bad ")?;
