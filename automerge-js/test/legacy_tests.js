@@ -746,6 +746,8 @@ describe('Automerge', () => {
         s1 = Automerge.change(s1, doc => doc.maze[0][0][0][0][0][0][0][1].unshift('found'))
         assert.deepStrictEqual(s1.maze, [[[[[[[['noodles', ['found', 'here']]]]]]]]])
         assert.deepStrictEqual(s1.maze[0][0][0][0][0][0][0][1][1], 'here')
+        s2 = Automerge.load(Automerge.save(s1))
+        assert.deepStrictEqual(s1,s2)
       })
 
       it('should not allow several references to the same list object', () => {
@@ -799,6 +801,8 @@ describe('Automerge', () => {
       assert.deepStrictEqual(s3, {foo: 'bar', hello: 'world'})
       assert.strictEqual(Automerge.getConflicts(s3, 'foo'), undefined)
       assert.strictEqual(Automerge.getConflicts(s3, 'hello'), undefined)
+      s4 = Automerge.load(Automerge.save(s3))
+      assert.deepEqual(s3,s4)
     })
 
     it('should add concurrent increments of the same property', () => {
@@ -811,6 +815,8 @@ describe('Automerge', () => {
       assert.strictEqual(s2.counter.value, 2)
       assert.strictEqual(s3.counter.value, 3)
       assert.strictEqual(Automerge.getConflicts(s3, 'counter'), undefined)
+      s4 = Automerge.load(Automerge.save(s3))
+      assert.deepEqual(s3,s4)
     })
 
     it('should add increments only to the values they precede', () => {
@@ -828,6 +834,8 @@ describe('Automerge', () => {
         [`1@${Automerge.getActorId(s1)}`]: new Automerge.Counter(1),
         [`1@${Automerge.getActorId(s2)}`]: new Automerge.Counter(103)
       })
+      s4 = Automerge.load(Automerge.save(s3))
+      assert.deepEqual(s3,s4)
     })
 
     it('should detect concurrent updates of the same field', () => {
@@ -974,6 +982,8 @@ describe('Automerge', () => {
       assert.deepStrictEqual(s1.birds, ['blackbird', 'starling', 'goldfinch'])
       assert.deepStrictEqual(s2.birds, ['blackbird', 'goldfinch'])
       assert.deepStrictEqual(s3.birds, ['blackbird', 'starling', 'goldfinch'])
+      s4 = Automerge.load(Automerge.save(s3))
+      assert.deepStrictEqual(s3, s4);
     })
 
     it('should handle insertion after a deleted list element', () => {

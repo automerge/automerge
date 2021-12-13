@@ -193,6 +193,10 @@ describe('Automerge', () => {
       assert.deepEqual(result, [
         [ 'counter', 15, '2@cccc' ], [ 'counter', 5, '2@bbbb' ]
       ])
+
+      let save1 = doc1.save()
+      let doc4 = Automerge.load(save1)
+      assert.deepEqual(doc4.save(), save1);
     })
 
     it('local inc increments all visible counters in a sequence', () => {
@@ -218,9 +222,9 @@ describe('Automerge', () => {
         [ 'counter', 15, '3@cccc' ], [ 'counter', 5, '3@bbbb' ]
       ])
 
-      let save3 = doc3.save()
-      let doc4 = Automerge.load(save3)
-      assert.deepEqual(doc4.save(), save3);
+      let save = doc1.save()
+      let doc4 = Automerge.load(save)
+      assert.deepEqual(doc4.save(), save);
     })
   })
 })

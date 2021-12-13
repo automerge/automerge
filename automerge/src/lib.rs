@@ -2,10 +2,13 @@ extern crate hex;
 extern crate uuid;
 extern crate web_sys;
 
+#[macro_export]
 macro_rules! log {
      ( $( $t:tt )* ) => {
-          use $crate::__log;
-          __log!( $( $t )* );
+          {
+            use $crate::__log;
+            __log!( $( $t )* );
+          }
      }
  }
 
@@ -46,7 +49,6 @@ use change::{encode_document, export_change};
 pub use error::AutomergeError;
 use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
 use types::Op;
@@ -170,52 +172,6 @@ impl Automerge {
         self.transaction.as_mut().unwrap()
     }
 
-    /*
-        pub fn begin(&mut self) -> Result<(), AutomergeError> {
-            unimplemented!()
-            //self.begin_with_opts(None, None)
-        }
-    */
-    /*
-     */
-
-    /*
-        pub fn begin_with_opts(
-            &mut self,
-            message: Option<String>,
-            time: Option<i64>,
-        ) -> Result<(), AutomergeError> {
-            if self.transaction.is_some() {
-                return Err(AutomergeError::MismatchedBegin);
-            }
-
-            let actor = self.get_actor_index();
-
-            let seq = self.states.entry(actor).or_default().len() as u64 + 1;
-            let mut deps = self.get_heads();
-            if seq > 1 {
-                let last_hash = self.get_hash(actor, seq - 1)?;
-                if !deps.contains(&last_hash) {
-                    deps.push(last_hash);
-                }
-            }
-
-            self.transaction = Some(Transaction {
-                actor,
-                seq,
-                start_op: self.max_op + 1,
-                time: time.unwrap_or(0),
-                message,
-                extra_bytes: Default::default(),
-                hash: None,
-                operations: vec![],
-                deps,
-            });
-
-            Ok(())
-        }
-    */
-
     pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> usize {
         let tx = self.tx();
 
@@ -279,219 +235,27 @@ impl Automerge {
         self.tx().operations.push(op);
     }
 
-    fn scan_to_obj(&self, obj: &ObjId, pos: &mut usize) {
-        for op in self.ops.iter().skip(*pos) {
-            if lamport_cmp(&self.ops.m.actors, obj.0, op.obj.0) != Ordering::Greater {
-                break;
-            }
-            *pos += 1;
-        }
-    }
+    fn insert_op(&mut self, op: Op) -> Op {
+        //let (pos,succ) = self.seek_to_op(&mut op); //mut to collect pred
+        let q = self.ops.search(query::SeekOp::new(&op));
 
-    fn scan_to_prop_start(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
-        for op in self.ops.iter().skip(*pos) {
-            if &op.obj != obj || key_cmp(key, &op.key, &self.ops.m.props) != Ordering::Greater {
-                break;
-            }
-            *pos += 1;
-        }
-    }
-
-    fn scan_to_visible(&self, obj: &ObjId, pos: &mut usize) {
-        let mut counters = Default::default();
-        for op in self.ops.iter().skip(*pos) {
-            if &op.obj != obj || is_visible(op, *pos, &mut counters) {
-                break;
-            }
-            *pos += 1
-        }
-    }
-
-    fn scan_to_next_prop(&self, obj: &ObjId, key: &Key, pos: &mut usize) {
-        for op in self.ops.iter().skip(*pos) {
-            if !(&op.obj == obj && &op.key == key) {
-                break;
-            }
-            *pos += 1
-        }
-    }
-
-    fn scan_to_prop_insertion_point(&mut self, next: &mut Op, local: bool, pos: &mut usize) {
-        let mut counters = Default::default();
-        let mut succ = vec![];
-        for op in self.ops.iter().skip(*pos) {
-            if !(op.obj == next.obj
-                && op.key == next.key
-                && lamport_cmp(&self.ops.m.actors, next.id, op.id) == Ordering::Greater)
-            {
-                break;
-            }
-            // FIXME if i increment pos x and it has a counter and a non counter do i take both or one pred
-            if local {
-                if is_visible(op, *pos, &mut counters) {
-                    succ.push((true, visible_pos(op, *pos, &counters)));
-                }
-            } else if next.pred.iter().any(|i| i == &op.id) {
-                succ.push((false, *pos));
-            }
-            *pos += 1
+        for i in q.succ {
+            self.ops.replace(i, |old_op| old_op.succ.push(op.id));
         }
 
-        for (local, vpos) in succ {
-            self.ops.replace(vpos, |op| {
-                op.succ.push(next.id);
-                if local {
-                    next.pred.push(op.id);
-                }
-            });
-        }
-    }
-
-    fn scan_to_elem_insert_op1(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize) {
-        if *elem == HEAD {
-            return;
-        }
-
-        for op in self.ops.iter().skip(*pos) {
-            if &op.obj != obj {
-                break;
-            }
-
-            *pos += 1;
-
-            if op.insert && op.id == elem.0 {
-                break;
-            }
-        }
-    }
-
-    fn scan_to_elem_insert_op2(&self, obj: &ObjId, elem: &ElemId, pos: &mut usize) {
-        for op in self.ops.iter().skip(*pos) {
-            if &op.obj != obj {
-                break;
-            }
-
-            if op.insert && op.id == elem.0 {
-                break;
-            }
-
-            *pos += 1;
-        }
-    }
-
-    fn scan_to_elem_update_pos(&mut self, next: &mut Op, local: bool, pos: &mut usize) {
-        let mut counters = Default::default();
-        let mut succ = vec![];
-        for op in self.ops.iter().skip(*pos) {
-            if !(op.obj == next.obj
-                && op.elemid() == next.elemid()
-                && lamport_cmp(&self.ops.m.actors, next.id, op.id) == Ordering::Greater)
-            {
-                break;
-            }
-            if local {
-                if op.elemid() == next.elemid() && is_visible(op, *pos, &mut counters) {
-                    succ.push((true, visible_pos(op, *pos, &counters)));
-                }
-            } else if op.elemid() == next.elemid() && next.pred.iter().any(|i| i == &op.id) {
-                succ.push((false, *pos));
-            }
-            *pos += 1
-        }
-
-        for (local, vpos) in succ {
-            if let Some(op) = self.ops.get(vpos) {
-                let mut op = op.clone();
-                op.succ.push(next.id);
-                if local {
-                    next.pred.push(op.id);
-                }
-                self.ops.set(vpos, op);
-            }
-        }
-    }
-
-    fn scan_to_lesser_insert(&self, next: &Op, pos: &mut usize) {
-        for op in self.ops.iter().skip(*pos) {
-            if op.obj != next.obj {
-                break;
-            }
-
-            if next.insert && lamport_cmp(&self.ops.m.actors, next.id, op.id) == Ordering::Greater {
-                break;
-            }
-
-            *pos += 1
-        }
-    }
-
-    fn seek_to_update_elem(
-        &mut self,
-        op: &mut Op,
-        elem: &ElemId,
-        local: bool,
-        mut pos: usize,
-    ) -> usize {
-        self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op2(&op.obj, elem, &mut pos);
-        self.scan_to_elem_update_pos(op, local, &mut pos);
-        pos
-    }
-
-    fn seek_to_insert_elem(&self, op: &Op, elem: &ElemId, mut pos: usize) -> usize {
-        self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_elem_insert_op1(&op.obj, elem, &mut pos);
-        self.scan_to_lesser_insert(op, &mut pos);
-        pos
-    }
-
-    fn seek_to_map_op(&mut self, op: &mut Op, local: bool) -> usize {
-        let mut pos = 0;
-        self.scan_to_obj(&op.obj, &mut pos);
-        self.scan_to_prop_start(&op.obj, &op.key, &mut pos);
-        self.scan_to_prop_insertion_point(op, local, &mut pos);
-        pos
-    }
-
-    fn seek_to_op(&mut self, op: &mut Op, local: bool) -> usize {
-        match (op.key, op.insert) {
-            (Key::Map(_), _) => self.seek_to_map_op(op, local),
-            (Key::Seq(elem), true) => self.seek_to_insert_elem(op, &elem, 0),
-            (Key::Seq(elem), false) => self.seek_to_update_elem(op, &elem, local, 0),
-        }
-    }
-
-    fn insert_op(&mut self, mut op: Op, local: bool) -> Op {
-        // TODO - write a fast query
-        let pos = self.seek_to_op(&mut op, local); //mut to collect pred
         if !op.is_del() {
-            self.ops.insert(pos, op.clone());
+            self.ops.insert(q.pos, op.clone());
         }
         op
     }
 
     pub fn keys(&self, obj: ObjId) -> Vec<String> {
-        // TODO - use index, add _at(clock)
-        let mut pos = 0;
-        let mut result = vec![];
-        self.scan_to_obj(&obj, &mut pos);
-        self.scan_to_visible(&obj, &mut pos);
-        while let Some(op) = self.ops.get(pos) {
-            // we reached the next object
-            if op.obj != obj {
-                break;
-            }
-            let key = &op.key;
-            result.push(self.export(*key));
-            self.scan_to_next_prop(&obj, key, &mut pos);
-            self.scan_to_visible(&obj, &mut pos);
-        }
-        result
+        let q = self.ops.search(query::Keys::new(obj));
+        q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
     pub fn length(&self, obj: ObjId) -> usize {
-        // TODO - use index
-        // add _at(clock)
+        // TODO self.ops.search(query::Length::new(obj)).len
         self.ops.list_len(&obj)
     }
 
@@ -644,12 +408,14 @@ impl Automerge {
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
         self.ensure_transaction_closed();
         for c in changes {
-            if self.is_causally_ready(c) {
-                self.apply_change(c.clone());
-            } else {
-                self.queue.push(c.clone());
-                while let Some(c) = self.pop_next_causally_ready_change() {
-                    self.apply_change(c);
+            if !self.history_index.contains_key(&c.hash) {
+                if self.is_causally_ready(c) {
+                    self.apply_change(c.clone());
+                } else {
+                    self.queue.push(c.clone());
+                    while let Some(c) = self.pop_next_causally_ready_change() {
+                        self.apply_change(c);
+                    }
                 }
             }
         }
@@ -661,7 +427,7 @@ impl Automerge {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
-            self.insert_op(op, false);
+            self.insert_op(op);
         }
     }
 
@@ -1201,87 +967,6 @@ impl Default for Automerge {
         Self::new()
     }
 }
-
-pub(crate) fn key_cmp(left: &Key, right: &Key, props: &IndexedCache<String>) -> Ordering {
-    match (left, right) {
-        (Key::Map(a), Key::Map(b)) => props[*a].cmp(&props[*b]),
-        _ => panic!("can only compare map keys"),
-    }
-}
-
-pub(crate) fn lamport_cmp(
-    actors: &IndexedCache<amp::ActorId>,
-    left: OpId,
-    right: OpId,
-) -> Ordering {
-    match (left, right) {
-        (OpId(0, _), OpId(0, _)) => Ordering::Equal,
-        (OpId(0, _), OpId(_, _)) => Ordering::Less,
-        (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-        // FIXME - this one seems backwards to me - why - is values() returning in the wrong order
-        (OpId(a, x), OpId(b, y)) if a == b => actors[y].cmp(&actors[x]),
-        (OpId(a, _), OpId(b, _)) => a.cmp(&b),
-    }
-}
-
-fn visible_pos(op: &Op, pos: usize, counters: &HashMap<OpId, CounterData>) -> usize {
-    for pred in &op.pred {
-        if let Some(entry) = counters.get(pred) {
-            return entry.pos;
-        }
-    }
-    pos
-}
-
-fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
-    let mut visible = false;
-    match op.action {
-        amp::OpType::Set(amp::ScalarValue::Counter(val)) => {
-            counters.insert(
-                op.id,
-                CounterData {
-                    pos,
-                    val,
-                    succ: op.succ.iter().cloned().collect(),
-                    op: op.clone(),
-                },
-            );
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-        amp::OpType::Inc(inc_val) => {
-            for id in &op.pred {
-                if let Some(mut entry) = counters.get_mut(id) {
-                    entry.succ.remove(&op.id);
-                    entry.val += inc_val;
-                    entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
-                    if entry.succ.is_empty() {
-                        visible = true;
-                    }
-                }
-            }
-        }
-        _ => {
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-    };
-    visible
-}
-
-/*
-fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
-    for pred in &op.pred {
-        // FIXME - delete a counter? - entry.succ.empty()?
-        if let Some(entry) = counters.get(pred) {
-            return entry.op.clone();
-        }
-    }
-    op.clone()
-}
-*/
 
 #[cfg(test)]
 mod tests {

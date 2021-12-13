@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 mod insert;
+mod keys;
 mod list_vals;
 mod nth;
 mod opid;
@@ -16,12 +17,12 @@ mod prop;
 mod seek_op;
 
 pub(crate) use insert::InsertNth;
+pub(crate) use keys::Keys;
 pub(crate) use list_vals::ListVals;
 pub(crate) use nth::Nth;
 #[allow(unused_imports)]
 pub(crate) use opid::OpIdQuery;
 pub(crate) use prop::Prop;
-#[allow(unused_imports)]
 pub(crate) use seek_op::SeekOp;
 
 #[derive(Debug, Clone, PartialEq)]

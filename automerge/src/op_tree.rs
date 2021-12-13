@@ -277,7 +277,7 @@ impl<const B: usize> OpTreeNode<B> {
     {
         if self.is_leaf() {
             for e in &self.elements {
-                if query.query_element(e) == QueryResult::Finish {
+                if query.query_element_with_metadata(e, m) == QueryResult::Finish {
                     return true;
                 }
             }
@@ -294,7 +294,7 @@ impl<const B: usize> OpTreeNode<B> {
                     QueryResult::Next => (),
                 }
                 if let Some(e) = self.elements.get(child_index) {
-                    if query.query_element(e) == QueryResult::Finish {
+                    if query.query_element_with_metadata(e, m) == QueryResult::Finish {
                         return true;
                     }
                 }

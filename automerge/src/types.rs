@@ -290,7 +290,7 @@ pub enum Prop {
 pub struct Patch {}
 
 impl Key {
-    fn elemid(&self) -> Option<ElemId> {
+    pub fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,
             Key::Seq(id) => Some(*id),
@@ -322,6 +322,10 @@ pub(crate) struct Op {
 impl Op {
     pub fn is_del(&self) -> bool {
         matches!(self.action, amp::OpType::Del(_))
+    }
+
+    pub fn overwrites(&self, other: &Op) -> bool {
+        self.pred.iter().any(|i| i == &other.id)
     }
 
     pub fn elemid(&self) -> Option<ElemId> {
