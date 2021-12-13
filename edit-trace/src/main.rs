@@ -26,5 +26,7 @@ fn main() -> Result<(), AutomergeError> {
         }
         doc.splice(text.into(), pos, del, vals)?;
     }
+    let _ = doc.save();
+    println!("Done in {} ms", now.elapsed().as_millis());
     Ok(())
 }

@@ -1,4 +1,10 @@
-// Apply the paper editing trace to an Automerge.Text object, one char at a time
+
+// make sure to 
+
+// # cd ../automerge-wasm
+// # yarn release
+// # yarn opt
+
 const { edits, finalText } = require('./editing-trace')
 const Automerge = require('../automerge-wasm')
 
@@ -14,6 +20,10 @@ for (let i = 0; i < edits.length; i++) {
   }
   doc.splice(text, ...edit)
 }
+
+let _ = doc.save()
+
+console.log(`Done in ${new Date() - start} ms`)
 
 if (doc.text(text) !== finalText) {
   throw new RangeError('ERROR: final text did not match expectation')

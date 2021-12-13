@@ -1,6 +1,8 @@
-// Apply the paper editing trace to an Automerge.Text object, one char at a time
+
+// this assumes automerge has been checked out along side this repo
+
 const { edits, finalText } = require('./editing-trace')
-const Automerge = require('../automerge-js')
+const Automerge = require('../../automerge')
 
 const start = new Date()
 let state = Automerge.from({text: new Automerge.Text()})
@@ -14,6 +16,10 @@ state = Automerge.change(state, doc => {
     if (edits[i].length > 2) doc.text.insertAt(edits[i][0], ...edits[i].slice(2))
   }
 })
+
+let _ = Automerge.save(state)
+console.log(`Done in ${new Date() - start} ms`)
+
 
 if (state.text.join('') !== finalText) {
   throw new RangeError('ERROR: final text did not match expectation')
