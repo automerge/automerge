@@ -430,7 +430,7 @@ fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
 }
 
 fn export_objid(id: &ObjId, actors: &IndexedCache<amp::ActorId>) -> amp::ObjectId {
-    if id == &ROOT {
+    if id.0 == ROOT {
         amp::ObjectId::Root
     } else {
         export_opid(&id.0, actors).into()

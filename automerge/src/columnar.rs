@@ -876,14 +876,14 @@ impl ObjEncoder {
     }
 
     fn append(&mut self, obj: &ObjId, actors: &[usize]) {
-        match obj {
-            &ROOT => {
+        match obj.0 {
+            ROOT => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
-            ObjId(OpId(ctr, actor)) => {
-                self.actor.append_value(actors[*actor]);
-                self.ctr.append_value(*ctr);
+            OpId(ctr, actor) => {
+                self.actor.append_value(actors[actor]);
+                self.ctr.append_value(ctr);
             }
         }
     }

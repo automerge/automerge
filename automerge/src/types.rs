@@ -6,7 +6,7 @@ use automerge_protocol as amp;
 use std::cmp::Eq;
 
 pub const HEAD: ElemId = ElemId(OpId(0, 0));
-pub const ROOT: ObjId = ObjId(OpId(0, 0));
+pub const ROOT: OpId = OpId(0, 0);
 
 const ROOT_STR: &str = "_root";
 const HEAD_STR: &str = "_head";
@@ -42,7 +42,7 @@ impl OpId {
 
 impl Exportable for ObjId {
     fn export(&self) -> Export {
-        if self == &ROOT {
+        if self.0 == ROOT {
             Export::Special(ROOT_STR.to_owned())
         } else {
             Export::Id(self.0)
@@ -52,7 +52,7 @@ impl Exportable for ObjId {
 
 impl Exportable for &ObjId {
     fn export(&self) -> Export {
-        if self == &&ROOT {
+        if self.0 == ROOT {
             Export::Special(ROOT_STR.to_owned())
         } else {
             Export::Id(self.0)
@@ -91,6 +91,19 @@ impl Importable for ObjId {
     }
     fn from(s: &str) -> Option<Self> {
         if s == ROOT_STR {
+            Some(ROOT.into())
+        } else {
+            None
+        }
+    }
+}
+
+impl Importable for OpId {
+    fn wrap(id: OpId) -> Self {
+        id
+    }
+    fn from(s: &str) -> Option<Self> {
+        if s == ROOT_STR {
             Some(ROOT)
         } else {
             None
@@ -108,15 +121,6 @@ impl Importable for ElemId {
         } else {
             None
         }
-    }
-}
-
-impl Importable for OpId {
-    fn wrap(id: OpId) -> Self {
-        id
-    }
-    fn from(_: &str) -> Option<Self> {
-        None
     }
 }
 

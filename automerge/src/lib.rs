@@ -52,9 +52,9 @@ use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
-use types::Op;
+use types::{ HEAD, Op, ObjId };
 pub use types::{
-    ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, HEAD, ROOT,
+    ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT,
 };
 use unicode_segmentation::UnicodeSegmentation;
 pub use value::Value;
@@ -270,16 +270,16 @@ impl Automerge {
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
-    pub fn length(&self, obj: ObjId) -> usize {
-        self.ops.search(query::Len::new(obj)).len
+    pub fn length(&self, obj: OpId) -> usize {
+        self.ops.search(query::Len::new(obj.into())).len
     }
 
-    pub fn length_at(&self, obj: ObjId, heads: &[ChangeHash]) -> usize {
+    pub fn length_at(&self, obj: OpId, heads: &[ChangeHash]) -> usize {
         if heads.is_empty() {
             return self.length(obj);
         }
         let clock = self.clock_at(heads);
-        self.ops.search(query::LenAt::new(obj, clock)).len
+        self.ops.search(query::LenAt::new(obj.into(), clock)).len
     }
 
     // set(obj, prop, value) - value can be scalar or objtype
@@ -287,16 +287,17 @@ impl Automerge {
     // inc(obj, prop, value)
     // insert(obj, index, value)
 
-    pub fn set(&mut self, obj: ObjId, prop: Prop, value: Value) -> Result<OpId, AutomergeError> {
-        self.local_op(obj, prop, value.into())
+    pub fn set(&mut self, obj: OpId, prop: Prop, value: Value) -> Result<OpId, AutomergeError> {
+        self.local_op(obj.into(), prop, value.into())
     }
 
     pub fn insert(
         &mut self,
-        obj: ObjId,
+        obj: OpId,
         index: usize,
         value: Value,
     ) -> Result<OpId, AutomergeError> {
+        let obj = obj.into();
         let id = self.next_id();
 
         let query = self.ops.search(query::InsertNth::new(obj, index));
@@ -319,17 +320,17 @@ impl Automerge {
         Ok(id)
     }
 
-    pub fn inc(&mut self, obj: ObjId, prop: Prop, value: i64) -> Result<OpId, AutomergeError> {
-        self.local_op(obj, prop, amp::OpType::Inc(value))
+    pub fn inc(&mut self, obj: OpId, prop: Prop, value: i64) -> Result<OpId, AutomergeError> {
+        self.local_op(obj.into(), prop, amp::OpType::Inc(value))
     }
 
-    pub fn del(&mut self, obj: ObjId, prop: Prop) -> Result<OpId, AutomergeError> {
-        self.local_op(obj, prop, amp::OpType::Del(nonzero!(1_u32)))
+    pub fn del(&mut self, obj: OpId, prop: Prop) -> Result<OpId, AutomergeError> {
+        self.local_op(obj.into(), prop, amp::OpType::Del(nonzero!(1_u32)))
     }
 
     pub fn splice(
         &mut self,
-        obj: ObjId,
+        obj: OpId,
         mut pos: usize,
         del: usize,
         vals: Vec<Value>,
@@ -346,7 +347,7 @@ impl Automerge {
 
     pub fn splice_text(
         &mut self,
-        obj: ObjId,
+        obj: OpId,
         pos: usize,
         del: usize,
         text: &str,
@@ -358,7 +359,8 @@ impl Automerge {
         self.splice(obj, pos, del, vals)
     }
 
-    pub fn text(&self, obj: ObjId) -> Result<String, AutomergeError> {
+    pub fn text(&self, obj: OpId) -> Result<String, AutomergeError> {
+        let obj = obj.into();
         let query = self.ops.search(query::ListVals::new(obj));
         let mut buffer = String::new();
         for q in &query.ops {
@@ -372,20 +374,21 @@ impl Automerge {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    pub fn value(&self, obj: ObjId, prop: Prop) -> Result<Option<(Value, OpId)>, AutomergeError> {
+    pub fn value(&self, obj: OpId, prop: Prop) -> Result<Option<(Value, OpId)>, AutomergeError> {
         Ok(self.values(obj, prop)?.first().cloned())
     }
 
     pub fn value_at(
         &self,
-        obj: ObjId,
+        obj: OpId,
         prop: Prop,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, OpId)>, AutomergeError> {
         Ok(self.values_at(obj, prop, heads)?.first().cloned())
     }
 
-    pub fn values(&self, obj: ObjId, prop: Prop) -> Result<Vec<(Value, OpId)>, AutomergeError> {
+    pub fn values(&self, obj: OpId, prop: Prop) -> Result<Vec<(Value, OpId)>, AutomergeError> {
+        let obj = obj.into();
         let result = match prop {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(p);
@@ -413,13 +416,14 @@ impl Automerge {
 
     pub fn values_at(
         &self,
-        obj: ObjId,
+        obj: OpId,
         prop: Prop,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, OpId)>, AutomergeError> {
         if heads.is_empty() {
             return self.values(obj, prop);
         }
+        let obj = obj.into();
         let clock = self.clock_at(heads);
         let result = match prop {
             Prop::Map(p) => {
@@ -1018,7 +1022,7 @@ impl Default for Automerge {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, AutomergeError, ObjId, Value, ROOT};
+    use crate::{Automerge, AutomergeError, Value, ROOT};
     use automerge_protocol as amp;
 
     #[test]
@@ -1035,9 +1039,9 @@ mod tests {
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(amp::ActorId::random());
-        let list_id: ObjId = doc.set(ROOT, "items".into(), Value::list())?.into();
+        let list_id = doc.set(ROOT, "items".into(), Value::list())?;
         doc.set(ROOT, "zzz".into(), "zzzval".into())?;
-        assert!(doc.value(ROOT, "items".into())?.unwrap().1 == list_id.0);
+        assert!(doc.value(ROOT, "items".into())?.unwrap().1 == list_id);
         doc.insert(list_id, 0, "a".into())?;
         doc.insert(list_id, 0, "b".into())?;
         doc.insert(list_id, 2, "c".into())?;
@@ -1115,7 +1119,6 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let text = doc.set(ROOT, "text".into(), Value::text())?;
-        let text: ObjId = text.into();
         doc.splice_text(text, 0, 0, "hello world")?;
         doc.splice_text(text, 6, 0, "big bad ")?;
         assert!(&doc.text(text)? == "hello big bad world");
