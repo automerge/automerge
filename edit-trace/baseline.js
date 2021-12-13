@@ -10,10 +10,14 @@ for (let i = 0; i < edits.length; i++) {
   }
   chars.splice(...edit)
 }
+
+let _save = JSON.stringify(chars)
+
 const time = new Date() - start
+
+console.log(`Done in ${time} ms`)
 
 if (chars.join('') !== finalText) {
   throw new RangeError('ERROR: final text did not match expectation')
 }
 
-console.log(`Applied ${edits.length} edits in ${time} ms`)

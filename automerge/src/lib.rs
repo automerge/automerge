@@ -257,8 +257,7 @@ impl Automerge {
     }
 
     pub fn length(&self, obj: ObjId) -> usize {
-        // TODO self.ops.search(query::Length::new(obj)).len
-        self.ops.list_len(&obj)
+        self.ops.search(query::Len::new(obj)).len
     }
 
     // set(obj, prop, value) - value can be scalar or objtype

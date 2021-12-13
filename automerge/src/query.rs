@@ -10,6 +10,7 @@ use std::fmt::Debug;
 
 mod insert;
 mod keys;
+mod len;
 mod list_vals;
 mod nth;
 mod opid;
@@ -18,6 +19,7 @@ mod seek_op;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
+pub(crate) use len::Len;
 pub(crate) use list_vals::ListVals;
 pub(crate) use nth::Nth;
 #[allow(unused_imports)]

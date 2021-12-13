@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{IndexedCache, Key, ObjId, Op, OpId, ScalarValue};
+use crate::{IndexedCache, Key, Op, OpId, ScalarValue};
 use automerge_protocol as amp;
 use std::collections::{HashMap, HashSet};
 
@@ -32,7 +32,7 @@ impl OpSetMetadata {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order
+            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order?
             (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
@@ -79,10 +79,6 @@ impl<const B: usize> OpTreeInternal<B> {
     /// Get the length of the sequence.
     pub fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
-    }
-
-    pub fn list_len(&self, obj: &ObjId) -> usize {
-        self.root_node.as_ref().map_or(0, |n| n.list_len(obj))
     }
 
     pub fn depth(&self) -> usize {
@@ -305,10 +301,6 @@ impl<const B: usize> OpTreeNode<B> {
 
     pub fn len(&self) -> usize {
         self.length
-    }
-
-    pub fn list_len(&self, obj: &ObjId) -> usize {
-        self.index.lens.get(obj).copied().unwrap_or(0)
     }
 
     fn audit(&mut self) {
