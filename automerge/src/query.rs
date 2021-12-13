@@ -10,21 +10,29 @@ use std::fmt::Debug;
 
 mod insert;
 mod keys;
+mod keys_at;
 mod len;
+mod len_at;
 mod list_vals;
 mod nth;
+mod nth_at;
 mod opid;
 mod prop;
+mod prop_at;
 mod seek_op;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
+pub(crate) use keys_at::KeysAt;
 pub(crate) use len::Len;
+pub(crate) use len_at::LenAt;
 pub(crate) use list_vals::ListVals;
 pub(crate) use nth::Nth;
+pub(crate) use nth_at::NthAt;
 #[allow(unused_imports)]
 pub(crate) use opid::OpIdQuery;
 pub(crate) use prop::Prop;
+pub(crate) use prop_at::PropAt;
 pub(crate) use seek_op::SeekOp;
 
 #[derive(Debug, Clone, PartialEq)]

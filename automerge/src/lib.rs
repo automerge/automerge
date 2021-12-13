@@ -56,8 +56,8 @@ use types::Op;
 pub use types::{
     ElemId, Export, Exportable, Importable, Key, ObjId, OpId, Patch, Peer, Prop, HEAD, ROOT,
 };
-pub use value::Value;
 use unicode_segmentation::UnicodeSegmentation;
+pub use value::Value;
 
 pub use amp::ChangeHash;
 pub use change::{decode_change, Change};
@@ -251,13 +251,35 @@ impl Automerge {
         op
     }
 
+    // KeysAt::()
+    // LenAt::()
+    // PropAt::()
+    // NthAt::()
+
     pub fn keys(&self, obj: ObjId) -> Vec<String> {
         let q = self.ops.search(query::Keys::new(obj));
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
+    pub fn keys_at(&self, obj: ObjId, heads: &[ChangeHash]) -> Vec<String> {
+        if heads.is_empty() {
+            return self.keys(obj);
+        }
+        let clock = self.clock_at(heads);
+        let q = self.ops.search(query::KeysAt::new(obj, clock));
+        q.keys.iter().map(|k| self.export(*k)).collect()
+    }
+
     pub fn length(&self, obj: ObjId) -> usize {
         self.ops.search(query::Len::new(obj)).len
+    }
+
+    pub fn length_at(&self, obj: ObjId, heads: &[ChangeHash]) -> usize {
+        if heads.is_empty() {
+            return self.length(obj);
+        }
+        let clock = self.clock_at(heads);
+        self.ops.search(query::LenAt::new(obj, clock)).len
     }
 
     // set(obj, prop, value) - value can be scalar or objtype
@@ -351,7 +373,7 @@ impl Automerge {
     // the legacy conflicts format of { [opid]: value }
     // Something better?
     pub fn value(&self, obj: ObjId, prop: Prop) -> Result<Option<(Value, OpId)>, AutomergeError> {
-        Ok(self.values_at(obj, prop, &[])?.first().cloned())
+        Ok(self.values(obj, prop)?.first().cloned())
     }
 
     pub fn value_at(
@@ -364,16 +386,6 @@ impl Automerge {
     }
 
     pub fn values(&self, obj: ObjId, prop: Prop) -> Result<Vec<(Value, OpId)>, AutomergeError> {
-        self.values_at(obj, prop, &[])
-    }
-
-    pub fn values_at(
-        &self,
-        obj: ObjId,
-        prop: Prop,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, OpId)>, AutomergeError> {
-        let _clock = self.clock_at(heads);
         let result = match prop {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(p);
@@ -391,6 +403,41 @@ impl Automerge {
             Prop::Seq(n) => self
                 .ops
                 .search(query::Nth::new(obj, n))
+                .ops
+                .into_iter()
+                .map(|o| o.into())
+                .collect(),
+        };
+        Ok(result)
+    }
+
+    pub fn values_at(
+        &self,
+        obj: ObjId,
+        prop: Prop,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value, OpId)>, AutomergeError> {
+        if heads.is_empty() {
+            return self.values(obj, prop);
+        }
+        let clock = self.clock_at(heads);
+        let result = match prop {
+            Prop::Map(p) => {
+                let prop = self.ops.m.props.lookup(p);
+                if let Some(p) = prop {
+                    self.ops
+                        .search(query::PropAt::new(obj, p, clock))
+                        .ops
+                        .into_iter()
+                        .map(|o| o.into())
+                        .collect()
+                } else {
+                    vec![]
+                }
+            }
+            Prop::Seq(n) => self
+                .ops
+                .search(query::NthAt::new(obj, n, clock))
                 .ops
                 .into_iter()
                 .map(|o| o.into())
@@ -957,7 +1004,7 @@ pub(crate) struct Transaction {
     pub operations: Vec<Op>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 enum Clock {
     Head,
     At(HashMap<usize, u64>),
@@ -1023,7 +1070,7 @@ mod tests {
         doc.inc(ROOT, "counter".into(), 10)?;
         assert!(doc.value(ROOT, "counter".into())? == Some((Value::counter(20), id)));
         doc.inc(ROOT, "counter".into(), -5)?;
-        assert!(doc.value(ROOT, "counter".into())?  == Some((Value::counter(15), id)));
+        assert!(doc.value(ROOT, "counter".into())? == Some((Value::counter(15), id)));
         Ok(())
     }
 

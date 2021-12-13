@@ -2,24 +2,26 @@
 
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::ObjId;
+use crate::{Clock, ObjId};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Len<const B: usize> {
+pub(crate) struct LenAt<const B: usize> {
     obj: ObjId,
+    clock: Clock,
     pub len: usize,
 }
 
-impl<const B: usize> Len<B> {
-    pub fn new(obj: ObjId) -> Self {
-        Len { obj, len: 0 }
+impl<const B: usize> LenAt<B> {
+    pub fn new(obj: ObjId, clock: Clock) -> Self {
+        LenAt { obj, clock, len: 0 }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Len<B> {
+impl<const B: usize> TreeQuery<B> for LenAt<B> {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         self.len = child.index.lens.get(&self.obj).copied().unwrap_or(0);
-        QueryResult::Finish
+        //QueryResult::Finish
+        unimplemented!();
     }
 }

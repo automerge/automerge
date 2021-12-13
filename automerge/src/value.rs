@@ -135,4 +135,3 @@ impl From<Value> for amp::OpType {
         }
     }
 }
-
