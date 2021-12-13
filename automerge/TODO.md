@@ -14,4 +14,5 @@ extra tests
 ergronomics
 
   set(obj, prop, val) vs mapset(obj, str, val) and seqset(obj, usize, val)
+  value() -> (id, value)
 

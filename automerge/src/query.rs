@@ -14,6 +14,7 @@ mod keys_at;
 mod len;
 mod len_at;
 mod list_vals;
+mod list_vals_at;
 mod nth;
 mod nth_at;
 mod opid;
@@ -27,6 +28,7 @@ pub(crate) use keys_at::KeysAt;
 pub(crate) use len::Len;
 pub(crate) use len_at::LenAt;
 pub(crate) use list_vals::ListVals;
+pub(crate) use list_vals_at::ListValsAt;
 pub(crate) use nth::Nth;
 pub(crate) use nth_at::NthAt;
 #[allow(unused_imports)]

@@ -371,6 +371,19 @@ impl Automerge {
         Ok(buffer)
     }
 
+    pub fn text_at(&self, obj: OpId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
+        let clock = self.clock_at(heads);
+        let obj = obj.into();
+        let query = self.ops.search(query::ListValsAt::new(obj, clock));
+        let mut buffer = String::new();
+        for q in &query.ops {
+            if let amp::OpType::Set(amp::ScalarValue::Str(s)) = &q.action {
+                buffer.push_str(s);
+            }
+        }
+        Ok(buffer)
+    }
+
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
