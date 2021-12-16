@@ -668,8 +668,13 @@ impl<const B: usize> OpTreeNode<B> {
     }
 
     pub fn last(&self) -> &Op {
-        // node is never empty so this is safe
-        self.get(self.len() - 1).unwrap()
+        if self.is_leaf() {
+            // node is never empty so this is safe
+            self.elements.last().unwrap()
+        } else {
+            // if not a leaf then there is always at least one child
+            self.children.last().unwrap().last()
+        }
     }
 
     pub fn get(&self, index: usize) -> Option<&Op> {
