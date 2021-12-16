@@ -96,20 +96,11 @@ impl Automerge {
 
     pub fn free(self) {}
 
-    /*
-        pub fn begin(&mut self, message: JsValue, time: JsValue) -> Result<(), JsValue> {
-            let message = message.as_string();
-            let time = time.as_f64().map(|v| v as i64);
-            self.0.begin_with_opts(message, time).map_err(to_js_err)
-        }
-    */
-
     pub fn pending_ops(&self) -> JsValue {
         (self.0.pending_ops() as u32).into()
     }
 
     pub fn commit(&mut self, message: JsValue, time: JsValue) -> JsValue {
-        //self.0.commit().map_err(to_js_err)
         let message = message.as_string();
         let time = time.as_f64().map(|v| v as i64);
         self.0.commit(message, time).into()
@@ -284,11 +275,19 @@ impl Automerge {
             .map_err(to_js_err)
     }
 
+    #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> JsValue {
         self.0
             .save_incremental()
             .map(|v| js_sys::Uint8Array::from(v.as_slice()))
             .into()
+    }
+
+    #[wasm_bindgen(js_name = loadIncremental)]
+    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<JsValue,JsValue> {
+        let data = data.to_vec();
+        let len = self.0.load_incremental(&data).map_err(to_js_err)?;
+        Ok(len.into())
     }
 
     #[wasm_bindgen(js_name = applyChanges)]

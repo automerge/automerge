@@ -146,11 +146,13 @@ describe('Automerge', () => {
 
       doc.set("_root", "bar", 2)
 
-      let save2 = doc.save_incremental()
+      let saveMidway = doc.clone().save();
 
-      doc.set("_root", "baz", 3)
+      let save2 = doc.saveIncremental();
 
-      let save3 = doc.save_incremental()
+      doc.set("_root", "baz", 3);
+
+      let save3 = doc.saveIncremental();
 
       let saveA = doc.save();
       let saveB = new Uint8Array([... save1, ...save2, ...save3]);
@@ -159,9 +161,12 @@ describe('Automerge', () => {
 
       let docA = Automerge.load(saveA);
       let docB = Automerge.load(saveB);
+      let docC = Automerge.load(saveMidway)
+      docC.loadIncremental(save3)
 
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
+      assert.deepEqual(docA.save(), docC.save());
     })
 
     it('should be able to splice text', () => {

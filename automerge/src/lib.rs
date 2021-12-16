@@ -470,6 +470,14 @@ impl Automerge {
         Ok(doc)
     }
 
+    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
+        let changes = Change::load_document(data)?;
+        let start = self.ops.len();
+        self.apply_changes(&changes)?;
+        let delta = self.ops.len() - start;
+        Ok(delta)
+    }
+
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
         self.ensure_transaction_closed();
         for c in changes {
@@ -998,14 +1006,6 @@ impl Automerge {
             );
         }
     }
-}
-
-#[derive(Debug, Clone)]
-struct CounterData {
-    pos: usize,
-    val: i64,
-    succ: HashSet<OpId>,
-    op: Op,
 }
 
 #[derive(Debug, Clone)]
