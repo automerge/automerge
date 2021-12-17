@@ -6,8 +6,6 @@ use std::{
     io::Write,
 };
 
-//use automerge_protocol::{ChangeHash, Patch};
-
 use crate::{
     decoding, decoding::Decoder, encoding, encoding::Encodable, Automerge, AutomergeError, Change,
     ChangeHash, Patch,

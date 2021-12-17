@@ -5,7 +5,7 @@ use std::{
     mem,
 };
 
-use automerge_protocol as amp;
+use crate::legacy as amp;
 use flate2::{bufread::DeflateEncoder, Compression};
 use smol_str::SmolStr;
 

@@ -28,6 +28,7 @@ macro_rules! __log {
      }
  }
 
+mod legacy;
 mod change;
 mod columnar;
 mod decoding;
@@ -45,23 +46,22 @@ mod value;
 
 use op_tree::OpTree;
 
-use automerge_protocol as amp;
 use change::{encode_document, export_change};
-pub use error::AutomergeError;
 use indexed_cache::IndexedCache;
 use nonzero_ext::nonzero;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
-pub use types::{ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
 use types::{ObjId, Op, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
-pub use value::Value;
+use legacy::OpType;
 
-pub use amp::ChangeHash;
+pub use legacy::Change as ExpandedChange;
+pub use error::AutomergeError;
+pub use types::{ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
+pub use value::Value;
 pub use change::{decode_change, Change};
 pub use sync::{SyncMessage, SyncState};
-
-pub use amp::{ActorId, ObjType, ScalarValue};
+pub use legacy::{ChangeHash, ActorId, ScalarValue, ObjType};
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -93,18 +93,18 @@ impl Automerge {
         }
     }
 
-    pub fn set_actor(&mut self, actor: amp::ActorId) {
+    pub fn set_actor(&mut self, actor: ActorId) {
         self.ensure_transaction_closed();
         self.actor = Some(self.ops.m.actors.cache(actor))
     }
 
-    fn random_actor(&mut self) -> amp::ActorId {
-        let actor = amp::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
+    fn random_actor(&mut self) -> ActorId {
+        let actor = ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
         self.actor = Some(self.ops.m.actors.cache(actor.clone()));
         actor
     }
 
-    pub fn get_actor(&mut self) -> amp::ActorId {
+    pub fn get_actor(&mut self) -> ActorId {
         if let Some(actor) = self.actor {
             self.ops.m.actors[actor].clone()
         } else {
@@ -121,7 +121,7 @@ impl Automerge {
         }
     }
 
-    pub fn new_with_actor_id(actor: amp::ActorId) -> Self {
+    pub fn new_with_actor_id(actor: ActorId) -> Self {
         Automerge {
             queue: vec![],
             history: vec![],
@@ -331,11 +331,11 @@ impl Automerge {
         prop: P,
         value: i64,
     ) -> Result<OpId, AutomergeError> {
-        self.local_op(obj.into(), prop.into(), amp::OpType::Inc(value))
+        self.local_op(obj.into(), prop.into(), OpType::Inc(value))
     }
 
     pub fn del<P: Into<Prop>>(&mut self, obj: OpId, prop: P) -> Result<OpId, AutomergeError> {
-        self.local_op(obj.into(), prop.into(), amp::OpType::Del(nonzero!(1_u32)))
+        self.local_op(obj.into(), prop.into(), OpType::Del(nonzero!(1_u32)))
     }
 
     pub fn splice(
@@ -374,7 +374,7 @@ impl Automerge {
         let query = self.ops.search(query::ListVals::new(obj));
         let mut buffer = String::new();
         for q in &query.ops {
-            if let amp::OpType::Set(amp::ScalarValue::Str(s)) = &q.action {
+            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
             }
         }
@@ -387,7 +387,7 @@ impl Automerge {
         let query = self.ops.search(query::ListValsAt::new(obj, clock));
         let mut buffer = String::new();
         for q in &query.ops {
-            if let amp::OpType::Set(amp::ScalarValue::Str(s)) = &q.action {
+            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
             }
         }
@@ -526,7 +526,7 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         prop: Prop,
-        action: amp::OpType,
+        action: OpType,
     ) -> Result<OpId, AutomergeError> {
         match prop {
             Prop::Map(s) => self.local_map_op(obj, s, action),
@@ -538,7 +538,7 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         prop: String,
-        action: amp::OpType,
+        action: OpType,
     ) -> Result<OpId, AutomergeError> {
         if prop.is_empty() {
             return Err(AutomergeError::EmptyStringKey);
@@ -570,7 +570,7 @@ impl Automerge {
         &mut self,
         obj: ObjId,
         index: usize,
-        action: amp::OpType,
+        action: OpType,
     ) -> Result<OpId, AutomergeError> {
         let query = self.ops.search(query::Nth::new(obj, index));
 
@@ -627,10 +627,10 @@ impl Automerge {
                     .map(|i| self.import(&i.to_string()).unwrap())
                     .collect();
                 let key = match &c.key.as_ref() {
-                    amp::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
-                    amp::Key::Seq(amp::ElementId::Head) => Key::Seq(HEAD),
+                    legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
+                    legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(HEAD),
                     // FIXME dont need to_string()
-                    amp::Key::Seq(amp::ElementId::Id(i)) => {
+                    legacy::Key::Seq(legacy::ElementId::Id(i)) => {
                         Key::Seq(self.import(&i.to_string()).unwrap())
                     }
                 };
@@ -685,8 +685,8 @@ impl Automerge {
     /// Thus a graph with these heads has not seen the remaining changes.
     pub(crate) fn filter_changes(
         &self,
-        heads: &[amp::ChangeHash],
-        changes: &mut HashSet<amp::ChangeHash>,
+        heads: &[ChangeHash],
+        changes: &mut HashSet<ChangeHash>,
     ) {
         // Reduce the working set to find to those which we may be able to find.
         // This filters out those hashes that are successors of or concurrent with all of the
@@ -745,12 +745,12 @@ impl Automerge {
         }
     }
 
-    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
         self._get_missing_deps(heads)
     }
 
-    fn _get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<amp::ChangeHash> {
+    fn _get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
 
@@ -871,12 +871,12 @@ impl Automerge {
         Clock::At(clock)
     }
 
-    pub fn get_change_by_hash(&mut self, hash: &amp::ChangeHash) -> Option<&Change> {
+    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<&Change> {
         self.ensure_transaction_closed();
         self._get_change_by_hash(hash)
     }
 
-    fn _get_change_by_hash(&self, hash: &amp::ChangeHash) -> Option<&Change> {
+    fn _get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
@@ -922,7 +922,7 @@ impl Automerge {
         deps
     }
 
-    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<amp::ChangeHash, AutomergeError> {
+    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
@@ -966,7 +966,7 @@ impl Automerge {
             let counter = s[0..n]
                 .parse()
                 .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
-            let actor = amp::ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
+            let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
                 .m
@@ -1003,11 +1003,11 @@ impl Automerge {
                 Key::Seq(n) => self.export(n),
             };
             let value: String = match &i.action {
-                amp::OpType::Set(value) => format!("{}", value),
-                amp::OpType::Make(obj) => format!("make{}", obj),
-                amp::OpType::Inc(obj) => format!("inc{}", obj),
-                amp::OpType::Del(_) => format!("del{}", 0),
-                amp::OpType::MultiSet(_) => format!("multiset{}", 0),
+                OpType::Set(value) => format!("{}", value),
+                OpType::Make(obj) => format!("make{}", obj),
+                OpType::Inc(obj) => format!("inc{}", obj),
+                OpType::Del(_) => format!("del{}", 0),
+                OpType::MultiSet(_) => format!("multiset{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
             let succ: Vec<_> = i.succ.iter().map(|id| self.export(*id)).collect();
@@ -1052,12 +1052,12 @@ impl Default for Automerge {
 #[cfg(test)]
 mod tests {
     use crate::{Automerge, AutomergeError, Value, ROOT};
-    use automerge_protocol as amp;
+    use crate::legacy as amp;
 
     #[test]
     fn insert_op() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.set_actor(amp::ActorId::random());
+        doc.set_actor(ActorId::random());
         doc.set(ROOT, "hello", "world")?;
         assert!(doc.pending_ops() == 1);
         doc.value(ROOT, "hello")?;
@@ -1067,7 +1067,7 @@ mod tests {
     #[test]
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.set_actor(amp::ActorId::random());
+        doc.set_actor(ActorId::random());
         let list_id = doc.set(ROOT, "items", Value::list())?;
         doc.set(ROOT, "zzz", "zzzval")?;
         assert!(doc.value(ROOT, "items")?.unwrap().1 == list_id);
@@ -1087,7 +1087,7 @@ mod tests {
     #[test]
     fn test_del() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        doc.set_actor(amp::ActorId::random());
+        doc.set_actor(ActorId::random());
         doc.set(ROOT, "xxx", "xxx")?;
         assert!(!doc.values(ROOT, "xxx")?.is_empty());
         doc.del(ROOT, "xxx")?;

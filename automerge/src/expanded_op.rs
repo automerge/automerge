@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use amp::{ActorId, ElementId, Key, OpId, SortedVec};
-use automerge_protocol as amp;
+use crate::legacy as amp;
 
 use crate::internal::InternalOpType;
 

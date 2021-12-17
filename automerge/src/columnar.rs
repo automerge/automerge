@@ -14,8 +14,8 @@ use std::{
 use crate::types::{ElemId, Key, ObjId, OpId};
 use crate::ROOT;
 
+use crate::legacy as amp;
 use amp::SortedVec;
-use automerge_protocol as amp;
 use flate2::bufread::DeflateDecoder;
 use smol_str::SmolStr;
 use tracing::instrument;

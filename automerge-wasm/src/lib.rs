@@ -3,7 +3,6 @@
 #![allow(unused_variables)]
 use automerge as am;
 use automerge::{Prop, Value};
-use automerge_protocol as amp;
 use js_sys::{Array, Uint8Array};
 use std::convert::TryFrom;
 use std::convert::TryInto;
@@ -277,10 +276,8 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> JsValue {
-        self.0
-            .save_incremental()
-            .map(|v| js_sys::Uint8Array::from(v.as_slice()))
-            .into()
+        let bytes = self.0.save_incremental();
+        js_sys::Uint8Array::from(bytes.as_slice()).into()
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
@@ -518,7 +515,7 @@ pub fn load(data: Uint8Array, actor: JsValue) -> Result<Automerge, JsValue> {
 
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
-    let change: amp::Change = change.into_serde().map_err(to_js_err)?;
+    let change: am::ExpandedChange = change.into_serde().map_err(to_js_err)?;
     let change: am::Change = change.into();
     Ok(js_sys::Uint8Array::from(change.raw_bytes()))
 }
@@ -526,7 +523,7 @@ pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
 #[wasm_bindgen(js_name = decodeChange)]
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     let change = am::Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
-    let change: amp::Change = change.decode();
+    let change: am::ExpandedChange = change.decode();
     JsValue::from_serde(&change).map_err(to_js_err)
 }
 

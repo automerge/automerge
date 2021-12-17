@@ -9,7 +9,7 @@ use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
 use crate::internal::InternalOpType;
 use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
-use automerge_protocol as amp;
+use crate::legacy as amp;
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},

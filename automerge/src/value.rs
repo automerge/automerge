@@ -1,9 +1,4 @@
-extern crate hex;
-extern crate uuid;
-extern crate web_sys;
-
-use automerge_protocol as amp;
-
+use crate::legacy as amp;
 use crate::types::{Op, OpId};
 
 #[derive(Debug, Clone, PartialEq)]

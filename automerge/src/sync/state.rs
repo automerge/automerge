@@ -1,9 +1,7 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use automerge_protocol::ChangeHash;
-
 use super::{decode_hashes, encode_hashes};
-use crate::{decoding, decoding::Decoder, encoding, BloomFilter};
+use crate::{ChangeHash, decoding, decoding::Decoder, encoding, BloomFilter};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 

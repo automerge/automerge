@@ -1,7 +1,7 @@
 use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
-use automerge_protocol as amp;
+use crate::legacy as amp;
 use smol_str::SmolStr;
 
 /// The error type for decoding operations.

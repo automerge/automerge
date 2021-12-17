@@ -16,13 +16,12 @@ flate2 = "^1.0.20"
 uuid = { version = "^0.8.2", features=["v4", "wasm-bindgen", "serde"] }
 smol_str = "^0.1.17"
 tracing = { version = "^0.1.25", features = ["log"] }
-automerge-protocol = { git = "https://github.com/automerge/automerge-rs.git", branch = "main" }
 nonzero_ext = "^0.2.0"
 fxhash = "^0.2"
 tinyvec = { version = "^1.3.0", features = ["alloc"] }
 unicode-segmentation = "1.7.1"
-
-
+serde = { version = "^1.0", features=["derive"] }
+strum = { version = "0.21.0", features=["derive"]}
 
 [dependencies.web-sys]
 version = "^0.3.22"
@@ -31,4 +30,5 @@ features = ["console"]
 [dev-dependencies]
 pretty_assertions = "^0.7.2"
 proptest = { version = "0.10.1", default-features = false, features = ["std"] }
+serde_json = { version = "^1.0.61", features=["float_roundtrip"], default-features=true }
 

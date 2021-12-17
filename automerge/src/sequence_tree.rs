@@ -4,8 +4,6 @@ use std::{
     mem,
 };
 
-//use automerge_protocol::OpId;
-
 pub type SequenceTree<T> = SequenceTreeInternal<T, 25>;
 
 #[derive(Clone, Debug)]
@@ -556,7 +554,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use automerge_protocol::ActorId;
+    use crate::ActorId;
 
     use super::*;
 
