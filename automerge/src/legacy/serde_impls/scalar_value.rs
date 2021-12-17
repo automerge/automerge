@@ -1,7 +1,7 @@
 use serde::{de, Deserialize, Deserializer};
 use smol_str::SmolStr;
 
-use crate::legacy::ScalarValue;
+use crate::ScalarValue;
 
 impl<'de> Deserialize<'de> for ScalarValue {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

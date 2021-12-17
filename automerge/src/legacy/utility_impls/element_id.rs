@@ -4,7 +4,8 @@ use std::{
     str::FromStr,
 };
 
-use crate::legacy::{error::InvalidElementId, ElementId, OpId};
+use crate::error::InvalidElementId;
+use crate::legacy::{ElementId, OpId};
 
 impl PartialOrd for ElementId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {

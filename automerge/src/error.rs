@@ -1,6 +1,3 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
 use crate::decoding;
 use crate::value::DataType;
 use crate::ScalarValue;
@@ -23,13 +20,13 @@ pub enum AutomergeError {
 }
 
 impl From<std::io::Error> for AutomergeError {
-    fn from(e: std::io::Error) -> Self {
+    fn from(_: std::io::Error) -> Self {
         AutomergeError::Encoding
     }
 }
 
 impl From<decoding::Error> for AutomergeError {
-    fn from(e: decoding::Error) -> Self {
+    fn from(_: decoding::Error) -> Self {
         AutomergeError::Decoding
     }
 }
@@ -46,3 +43,19 @@ pub struct InvalidScalarValue {
     pub unexpected: String,
     pub expected: String,
 }
+
+#[derive(Error, Debug, PartialEq)]
+#[error("Invalid change hash slice: {0:?}")]
+pub struct InvalidChangeHashSlice(pub Vec<u8>);
+
+#[derive(Error, Debug, PartialEq)]
+#[error("Invalid object ID: {0}")]
+pub struct InvalidObjectId(pub String);
+
+#[derive(Error, Debug)]
+#[error("Invalid element ID: {0}")]
+pub struct InvalidElementId(pub String);
+
+#[derive(Error, Debug)]
+#[error("Invalid OpID: {0}")]
+pub struct InvalidOpId(pub String);

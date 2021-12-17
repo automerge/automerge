@@ -82,7 +82,7 @@ impl Encodable for &[u8] {
     }
 }
 
-pub struct OperationIterator<'a> {
+pub(crate) struct OperationIterator<'a> {
     pub(crate) action: RleDecoder<'a, Action>,
     pub(crate) objs: ObjIterator<'a>,
     pub(crate) keys: KeyIterator<'a>,

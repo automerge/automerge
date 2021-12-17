@@ -5,14 +5,11 @@ use serde::{
 
 mod actor_id;
 mod change_hash;
-mod cursor_diff;
-mod diff;
 mod element_id;
 mod object_id;
 mod op;
 mod op_type;
 mod opid;
-mod root_diff;
 mod scalar_value;
 
 // Helper method for use in custom deserialize impls

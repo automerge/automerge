@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
+use crate::error;
 use crate::legacy as amp;
 use crate::ActorId;
 use smol_str::SmolStr;
@@ -21,7 +22,7 @@ pub enum Error {
     )]
     WrongType { expected_one_of: Vec<u8>, found: u8 },
     #[error("Bad change format: {0}")]
-    BadChangeFormat(#[source] amp::error::InvalidChangeHashSlice),
+    BadChangeFormat(#[source] error::InvalidChangeHashSlice),
     #[error("Not enough bytes")]
     NotEnoughBytes,
     #[error("Found the wrong magic bytes in the document")]
@@ -59,12 +60,12 @@ pub enum InvalidChangeError {
     #[error("Change contained an invalid object id: {}", source.0)]
     InvalidObjectId {
         #[from]
-        source: amp::error::InvalidObjectId,
+        source: error::InvalidObjectId,
     },
     #[error("Change contained an invalid hash: {:?}", source.0)]
     InvalidChangeHash {
         #[from]
-        source: amp::error::InvalidChangeHashSlice,
+        source: error::InvalidChangeHashSlice,
     },
 }
 

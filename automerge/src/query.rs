@@ -1,8 +1,5 @@
-#![allow(dead_code)]
-
-use crate::legacy as amp;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::{ElemId, ObjId, Op, OpId, ScalarValue};
+use crate::{ElemId, ObjId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -170,19 +167,10 @@ impl Default for Index {
     }
 }
 
-pub(crate) fn visible_pos(op: &Op, pos: usize, counters: &HashMap<OpId, CounterData>) -> usize {
-    for pred in &op.pred {
-        if let Some(entry) = counters.get(pred) {
-            return entry.pos;
-        }
-    }
-    pos
-}
-
 pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
     let mut visible = false;
     match op.action {
-        amp::OpType::Set(amp::ScalarValue::Counter(val)) => {
+        OpType::Set(ScalarValue::Counter(val)) => {
             counters.insert(
                 op.id,
                 CounterData {
@@ -196,12 +184,12 @@ pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, Count
                 visible = true;
             }
         }
-        amp::OpType::Inc(inc_val) => {
+        OpType::Inc(inc_val) => {
             for id in &op.pred {
                 if let Some(mut entry) = counters.get_mut(id) {
                     entry.succ.remove(&op.id);
                     entry.val += inc_val;
-                    entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
+                    entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
                     if entry.succ.is_empty() {
                         visible = true;
                     }

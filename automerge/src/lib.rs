@@ -56,11 +56,10 @@ use unicode_segmentation::UnicodeSegmentation;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
-pub use legacy::ChangeHash;
 pub use sync::{SyncMessage, SyncState};
 pub use types::{
-    ActorId, ElemId, Export, Exportable, Importable, Key, ObjType, OpId, OpType, Patch, Peer, Prop,
-    ROOT,
+    ActorId, ChangeHash, ElemId, Export, Exportable, Importable, Key, ObjType, OpId, OpType, Patch,
+    Peer, Prop, ROOT,
 };
 pub use value::{ScalarValue, Value};
 

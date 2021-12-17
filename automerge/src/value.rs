@@ -1,9 +1,7 @@
-use crate::legacy as amp;
-use crate::{error, ObjType, Op, OpId};
+use crate::{error, ObjType, Op, OpId, OpType};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::convert::TryFrom;
-use strum::EnumDiscriminants;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -109,8 +107,8 @@ impl From<ScalarValue> for Value {
 impl From<&Op> for (Value, OpId) {
     fn from(op: &Op) -> Self {
         match &op.action {
-            amp::OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            amp::OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
+            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
@@ -119,18 +117,18 @@ impl From<&Op> for (Value, OpId) {
 impl From<Op> for (Value, OpId) {
     fn from(op: Op) -> Self {
         match &op.action {
-            amp::OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            amp::OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
+            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
 }
 
-impl From<Value> for amp::OpType {
+impl From<Value> for OpType {
     fn from(v: Value) -> Self {
         match v {
-            Value::Object(o) => amp::OpType::Make(o),
-            Value::Scalar(s) => amp::OpType::Set(s),
+            Value::Object(o) => OpType::Make(o),
+            Value::Scalar(s) => OpType::Set(s),
         }
     }
 }
@@ -160,8 +158,7 @@ impl DataType {
     }
 }
 
-#[derive(Serialize, PartialEq, Debug, Clone, EnumDiscriminants)]
-#[strum_discriminants(name(ScalarValueKind))]
+#[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),

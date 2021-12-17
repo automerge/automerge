@@ -5,7 +5,8 @@ use std::{
     str::FromStr,
 };
 
-use crate::legacy::{error::InvalidOpId, ActorId, OpId};
+use crate::error::InvalidOpId;
+use crate::legacy::{ActorId, OpId};
 
 impl Ord for OpId {
     fn cmp(&self, other: &Self) -> Ordering {

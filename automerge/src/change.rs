@@ -364,7 +364,7 @@ impl Change {
         }
     }
 
-    pub fn iter_ops(&self) -> OperationIterator {
+    pub(crate) fn iter_ops(&self) -> OperationIterator {
         OperationIterator::new(self.bytes.uncompressed(), self.actors.as_slice(), &self.ops)
     }
 

@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::legacy::ActorId;
+use crate::ActorId;
 
 impl<'de> Deserialize<'de> for ActorId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

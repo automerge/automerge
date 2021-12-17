@@ -4,6 +4,7 @@ use crate::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::convert::TryFrom;
+use std::convert::TryInto;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::str::FromStr;
@@ -358,7 +359,7 @@ pub struct ElemId(pub OpId);
 pub(crate) struct Op {
     pub change: usize,
     pub id: OpId,
-    pub action: amp::OpType,
+    pub action: OpType,
     pub obj: ObjId,
     pub key: Key,
     pub succ: Vec<OpId>,
@@ -368,7 +369,7 @@ pub(crate) struct Op {
 
 impl Op {
     pub fn is_del(&self) -> bool {
-        matches!(self.action, amp::OpType::Del(_))
+        matches!(self.action, OpType::Del(_))
     }
 
     pub fn overwrites(&self, other: &Op) -> bool {
@@ -386,8 +387,8 @@ impl Op {
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         match &self.action {
-            amp::OpType::Set(value) if self.insert => format!("i:{}", value),
-            amp::OpType::Set(value) => format!("s:{}", value),
+            OpType::Set(value) if self.insert => format!("i:{}", value),
+            OpType::Set(value) => format!("s:{}", value),
             amp::OpType::Make(obj) => format!("make{}", obj),
             amp::OpType::Inc(val) => format!("inc:{}", val),
             amp::OpType::Del(_) => "del".to_string(),
@@ -397,3 +398,51 @@ impl Op {
 
 #[derive(Debug, Clone)]
 pub struct Peer {}
+
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
+pub struct ChangeHash(pub [u8; 32]);
+
+impl fmt::Debug for ChangeHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ChangeHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ParseChangeHashError {
+    #[error(transparent)]
+    HexDecode(#[from] hex::FromHexError),
+    #[error("incorrect length, change hash should be 32 bytes, got {actual}")]
+    IncorrectLength { actual: usize },
+}
+
+impl FromStr for ChangeHash {
+    type Err = ParseChangeHashError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = hex::decode(s)?;
+        if bytes.len() == 32 {
+            Ok(ChangeHash(bytes.try_into().unwrap()))
+        } else {
+            Err(ParseChangeHashError::IncorrectLength {
+                actual: bytes.len(),
+            })
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for ChangeHash {
+    type Error = error::InvalidChangeHashSlice;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        if bytes.len() != 32 {
+            Err(error::InvalidChangeHashSlice(Vec::from(bytes)))
+        } else {
+            let mut array = [0; 32];
+            array.copy_from_slice(bytes);
+            Ok(ChangeHash(array))
+        }
+    }
+}

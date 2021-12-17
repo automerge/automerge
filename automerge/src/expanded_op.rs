@@ -9,7 +9,7 @@ use crate::internal::InternalOpType;
 /// collections of `amp::Op` into `ExpandedOp`s and remove optypes which perform multiple
 /// operations (`amp::OpType::MultiSet` and `amp::OpType::Del`)
 #[derive(Debug, PartialEq)]
-pub struct ExpandedOp<'a> {
+pub(crate) struct ExpandedOp<'a> {
     pub(crate) action: InternalOpType,
     pub obj: Cow<'a, amp::ObjectId>,
     pub key: Cow<'a, amp::Key>,

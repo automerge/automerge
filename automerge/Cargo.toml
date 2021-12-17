@@ -21,7 +21,6 @@ fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
 unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
-strum = { version = "^0.23.0", features=["derive"]}
 
 [dependencies.web-sys]
 version = "^0.3.55"

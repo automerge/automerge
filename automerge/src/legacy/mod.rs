@@ -1,10 +1,9 @@
-pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{collections::HashMap, convert::TryInto, fmt, iter::FromIterator, str::FromStr};
+use std::iter::FromIterator;
 
-pub(crate) use crate::value::{DataType, ScalarValueKind};
-pub(crate) use crate::{ActorId, ObjType, OpType, ScalarValue};
+pub(crate) use crate::value::DataType;
+pub(crate) use crate::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -12,14 +11,14 @@ use smol_str::SmolStr;
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(rename_all = "camelCase")]
-pub enum MapType {
+pub(crate) enum MapType {
     Map,
     Table,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase")]
-pub enum SequenceType {
+pub(crate) enum SequenceType {
     List,
     Text,
 }
@@ -234,182 +233,6 @@ impl Op {
     }
 }
 
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
-pub struct ChangeHash(pub [u8; 32]);
-
-impl fmt::Debug for ChangeHash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ChangeHash")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum ParseChangeHashError {
-    #[error(transparent)]
-    HexDecode(#[from] hex::FromHexError),
-    #[error("incorrect length, change hash should be 32 bytes, got {actual}")]
-    IncorrectLength { actual: usize },
-}
-
-impl FromStr for ChangeHash {
-    type Err = ParseChangeHashError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let bytes = hex::decode(s)?;
-        if bytes.len() == 32 {
-            Ok(ChangeHash(bytes.try_into().unwrap()))
-        } else {
-            Err(ParseChangeHashError::IncorrectLength {
-                actual: bytes.len(),
-            })
-        }
-    }
-}
-
-// The Diff Structure Maps on to the Patch Diffs the Frontend is expecting
-// Diff {
-//  object_id: 123,
-//  obj_type: map,
-//  props: {
-//      "key1": {
-//          "10@abc123":
-//              DiffLink::Diff(Diff {
-//                  object_id: 444,
-//                  obj_type: list,
-//                  edits: [ DiffEdit { ... } ],
-//                  props: { ... },
-//              })
-//          }
-//      "key2": {
-//          "11@abc123":
-//              DiffLink::Value(DiffValue {
-//                  value: 10,
-//                  datatype: "counter"
-//              }
-//          }
-//      }
-// }
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Diff {
-    Map(MapDiff),
-    Table(TableDiff),
-    List(ListDiff),
-    Text(TextDiff),
-    Value(ScalarValue),
-}
-
-#[derive(Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct MapDiff {
-    pub object_id: ObjectId,
-    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
-}
-
-#[derive(Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TableDiff {
-    pub object_id: ObjectId,
-    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
-}
-
-#[derive(Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ListDiff {
-    pub object_id: ObjectId,
-    pub edits: Vec<DiffEdit>,
-}
-
-#[derive(Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TextDiff {
-    pub object_id: ObjectId,
-    pub edits: Vec<DiffEdit>,
-}
-
-#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ObjDiff {
-    pub object_id: ObjectId,
-    #[serde(rename = "type")]
-    pub obj_type: ObjType,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct CursorDiff {
-    pub object_id: ObjectId,
-    pub elem_id: OpId,
-    pub index: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-#[serde(rename_all = "camelCase", tag = "action")]
-pub enum DiffEdit {
-    /// Describes the insertion of a single element into a list or text object.
-    /// The element can be a nested object.
-    #[serde(rename = "insert", rename_all = "camelCase")]
-    SingleElementInsert {
-        /// the list index at which to insert the new element
-        index: u64,
-        /// the unique element ID of the new list element
-        elem_id: ElementId,
-        /// ID of the operation that assigned this value
-        op_id: OpId,
-        value: Diff,
-    },
-    /// Describes the insertion of a consecutive sequence of primitive values into
-    /// a list or text object. In the case of text, the values are strings (each
-    /// character as a separate string value). Each inserted value is given a
-    /// consecutive element ID: starting with `elemId` for the first value, the
-    /// subsequent values are given elemIds with the same actor ID and incrementing
-    /// counters. To insert non-primitive values, use SingleInsertEdit.
-
-    /// We need to use a separate struct here to implement custom
-    /// serialization and deserialization logic (due to the presence
-    /// of the datatype field)
-    #[serde(rename = "multi-insert")]
-
-    /// Describes the update of the value or nested object at a particular index
-    /// of a list or text object. In the case where there are multiple conflicted
-    /// values at the same list index, multiple UpdateEdits with the same index
-    /// (but different opIds) appear in the edits array of ListDiff.
-    #[serde(rename_all = "camelCase")]
-    Update {
-        /// the list index to update
-        index: u64,
-        /// ID of the operation that assigned this value
-        op_id: OpId,
-        value: Diff,
-    },
-    #[serde(rename_all = "camelCase")]
-    Remove { index: u64, count: u64 },
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct Patch {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub actor: Option<ActorId>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub seq: Option<u64>,
-    pub clock: HashMap<ActorId, u64>,
-    pub deps: Vec<ChangeHash>,
-    pub max_op: u64,
-    pub pending_changes: usize,
-    //    pub can_undo: bool,
-    //    pub can_redo: bool,
-    //    pub version: u64,
-    pub diffs: RootDiff,
-}
-
-/// A custom MapDiff that implicitly has the object_id Root and is a map object.
-#[derive(Debug, PartialEq, Clone, Default)]
-pub struct RootDiff {
-    pub props: HashMap<SmolStr, HashMap<OpId, Diff>>,
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Change {
     #[serde(rename = "ops")]
@@ -441,16 +264,3 @@ impl PartialEq for Change {
             && self.extra_bytes == other.extra_bytes
     }
 }
-
-/*
-impl Change {
-    pub fn op_id_of(&self, index: u64) -> Option<OpId> {
-        if let Ok(index_usize) = usize::try_from(index) {
-            if index_usize < self.operations.len() {
-                return Some(self.actor_id.op_id_at(self.start_op + index));
-            }
-        }
-        None
-    }
-}
-*/

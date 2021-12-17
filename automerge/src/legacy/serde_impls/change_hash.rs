@@ -2,7 +2,7 @@ use std::convert::TryInto;
 
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::legacy::ChangeHash;
+use crate::ChangeHash;
 
 impl Serialize for ChangeHash {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

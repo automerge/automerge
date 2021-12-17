@@ -5,7 +5,8 @@ use std::{
     str::FromStr,
 };
 
-use crate::legacy::{error::InvalidObjectId, ObjectId, OpId};
+use crate::error::InvalidObjectId;
+use crate::legacy::{ObjectId, OpId};
 
 impl PartialOrd for ObjectId {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
