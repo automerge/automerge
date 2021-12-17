@@ -11,7 +11,7 @@ use crate::query::{Index, QueryResult, TreeQuery};
 use crate::{IndexedCache, Key, Op, OpId, ScalarValue};
 use std::collections::{HashMap, HashSet};
 
-pub(crate) type OpTree = OpTreeInternal<64>;
+pub(crate) type OpTree = OpTreeInternal<16>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpSetMetadata {
