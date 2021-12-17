@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::ROOT;
-use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, ScalarValue};
+use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, OpType, ScalarValue};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -23,8 +23,6 @@ use tracing::instrument;
 use crate::{
     decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
-    expanded_op::ExpandedOp,
-    internal::InternalOpType,
     IndexedCache, Op,
 };
 
@@ -129,7 +127,7 @@ impl<'a> OperationIterator<'a> {
 }
 
 impl<'a> Iterator for OperationIterator<'a> {
-    type Item = ExpandedOp<'a>;
+    type Item = amp::Op;
 
     fn next(&mut self) -> Option<Self::Item> {
         let action = self.action.next()??;
@@ -139,19 +137,19 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => InternalOpType::Set(value),
-            Action::MakeList => InternalOpType::Make(ObjType::List),
-            Action::MakeText => InternalOpType::Make(ObjType::Text),
-            Action::MakeMap => InternalOpType::Make(ObjType::Map),
-            Action::MakeTable => InternalOpType::Make(ObjType::Table),
-            Action::Del => InternalOpType::Del,
-            Action::Inc => InternalOpType::Inc(value.to_i64()?),
+            Action::Set => OpType::Set(value),
+            Action::MakeList => OpType::Make(ObjType::List),
+            Action::MakeText => OpType::Make(ObjType::Text),
+            Action::MakeMap => OpType::Make(ObjType::Map),
+            Action::MakeTable => OpType::Make(ObjType::Table),
+            Action::Del => OpType::Del,
+            Action::Inc => OpType::Inc(value.to_i64()?),
         };
-        Some(ExpandedOp {
+        Some(amp::Op {
             action,
-            obj: Cow::Owned(obj),
-            key: Cow::Owned(key),
-            pred: Cow::Owned(pred),
+            obj,
+            key,
+            pred,
             insert,
         })
     }
@@ -180,13 +178,13 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let succ = self.succ.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => InternalOpType::Set(value),
-            Action::MakeList => InternalOpType::Make(ObjType::List),
-            Action::MakeText => InternalOpType::Make(ObjType::Text),
-            Action::MakeMap => InternalOpType::Make(ObjType::Map),
-            Action::MakeTable => InternalOpType::Make(ObjType::Table),
-            Action::Del => InternalOpType::Del,
-            Action::Inc => InternalOpType::Inc(value.to_i64()?),
+            Action::Set => OpType::Set(value),
+            Action::MakeList => OpType::Make(ObjType::List),
+            Action::MakeText => OpType::Make(ObjType::Text),
+            Action::MakeMap => OpType::Make(ObjType::Map),
+            Action::MakeTable => OpType::Make(ObjType::Table),
+            Action::Del => OpType::Del,
+            Action::Inc => OpType::Inc(value.to_i64()?),
         };
         Some(DocOp {
             actor,
@@ -513,7 +511,7 @@ pub(crate) struct DocChange {
 pub(crate) struct DocOp {
     pub actor: usize,
     pub ctr: u64,
-    pub action: InternalOpType,
+    pub action: OpType,
     pub obj: amp::ObjectId,
     pub key: amp::Key,
     pub succ: Vec<(u64, usize)>,
@@ -1072,8 +1070,7 @@ impl DocOpEncoder {
                     self.val.append_value(&ScalarValue::Int(*val), actors);
                     Action::Inc
                 }
-                amp::OpType::Del(n) => {
-                    // FIXME throw error
+                amp::OpType::Del => {
                     self.val.append_null();
                     Action::Del
                 }
@@ -1135,12 +1132,12 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops<'a, 'b, I>(
+    pub fn encode_ops<'a, I>(
         ops: I,
         actors: &'a mut Vec<ActorId>,
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
-        I: IntoIterator<Item = ExpandedOp<'b>>,
+        I: IntoIterator<Item = &'a amp::Op>,
     {
         let mut e = Self::new();
         e.encode(ops, actors);
@@ -1158,35 +1155,35 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<ActorId>)
+    fn encode<'a, 'b, I>(&'a mut self, ops: I, actors: &'b mut Vec<ActorId>)
     where
-        I: IntoIterator<Item = ExpandedOp<'c>>,
+        I: IntoIterator<Item = &'b amp::Op>,
     {
         for op in ops {
             self.append(op, actors);
         }
     }
 
-    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &mut Vec<ActorId>) {
+    fn append(&mut self, op: &amp::Op, actors: &mut Vec<ActorId>) {
         self.obj.append(&op.obj, actors);
-        self.key.append(op.key.into_owned(), actors);
+        self.key.append(op.key.clone(), actors);
         self.insert.append(op.insert);
 
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
-            InternalOpType::Set(value) => {
+            OpType::Set(value) => {
                 self.val.append_value2(value, actors);
                 Action::Set
             }
-            InternalOpType::Inc(val) => {
+            OpType::Inc(val) => {
                 self.val.append_value2(&ScalarValue::Int(*val), actors);
                 Action::Inc
             }
-            InternalOpType::Del => {
+            OpType::Del => {
                 self.val.append_null();
                 Action::Del
             }
-            InternalOpType::Make(kind) => {
+            OpType::Make(kind) => {
                 self.val.append_null();
                 match kind {
                     ObjType::Map => Action::MakeMap,
@@ -1353,139 +1350,5 @@ const DOCUMENT_COLUMNS = {
   depsIndex: 4 << 3 | COLUMN_TYPE.INT_DELTA,
   extraLen:  5 << 3 | COLUMN_TYPE.VALUE_LEN,
   extraRaw:  5 << 3 | COLUMN_TYPE.VALUE_RAW
-}
-*/
-
-/*
-#[cfg(test)]
-mod tests {
-    use amp::{ActorId, Key, ScalarValue};
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn test_rle_encoder_for_strings_from_key() {
-        // this seems like a strange case but checks that we write nulls into the encoder as usize and read them out the same.
-        // if we don't then the 64 nulls gets interpreted as -64 and causes the rle decoder to never read the next values.
-        let ops = vec![
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some("a".to_owned()),
-        ];
-        let mut encoder = RleEncoder::new();
-        for op in &ops {
-            if let Some(v) = op {
-                encoder.append_value(v.clone());
-            } else {
-                encoder.append_null();
-            }
-        }
-        let encoded = encoder.finish(0).data;
-
-        assert_eq!(encoded, vec![0, 64, 127, 1, 97]);
-
-        let decoder: RleDecoder<String> = RleDecoder::from(Cow::from(&encoded[..]));
-
-        let decoded = decoder.take(ops.len()).collect::<Vec<_>>();
-        assert_eq!(decoded, ops);
-    }
-
-    #[test]
-    fn pred_sorted() {
-        let actor = ActorId::random();
-        let actor2 = ActorId::random();
-
-        let mut actors = vec![actor.clone(), actor2.clone()];
-        actors.sort();
-
-        let col_op = ExpandedOp {
-            action: InternalOpType::Set(ScalarValue::Null),
-            obj: Cow::Owned(amp::ObjectId::Root),
-            key: Cow::Owned(Key::Map("r".into())),
-            pred: Cow::Owned(vec![actor.op_id_at(1), actor2.op_id_at(1)].into()),
-            insert: false,
-        };
-
-        let mut column_encoder = ColumnEncoder::new();
-        column_encoder.encode(vec![col_op], &mut actors);
-        let (bytes, _) = column_encoder.finish();
-
-        let col_op2 = ExpandedOp {
-            action: InternalOpType::Set(ScalarValue::Null),
-            obj: Cow::Owned(amp::ObjectId::Root),
-            key: Cow::Owned(Key::Map("r".into())),
-            pred: Cow::Owned(vec![actor2.op_id_at(1), actor.op_id_at(1)].into()),
-            insert: false,
-        };
-
-        let mut column_encoder = ColumnEncoder::new();
-        column_encoder.encode(vec![col_op2], &mut actors);
-        let (bytes2, _) = column_encoder.finish();
-
-        assert_eq!(bytes, bytes2);
-    }
 }
 */

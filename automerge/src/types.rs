@@ -6,7 +6,6 @@ use std::cmp::Eq;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt;
-use std::num::NonZeroU32;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
@@ -156,7 +155,7 @@ impl fmt::Display for ObjType {
 pub enum OpType {
     Make(ObjType),
     /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
-    Del(NonZeroU32),
+    Del,
     Inc(i64),
     Set(ScalarValue),
 }
@@ -369,7 +368,7 @@ pub(crate) struct Op {
 
 impl Op {
     pub fn is_del(&self) -> bool {
-        matches!(self.action, OpType::Del(_))
+        matches!(self.action, OpType::Del)
     }
 
     pub fn overwrites(&self, other: &Op) -> bool {
@@ -389,9 +388,9 @@ impl Op {
         match &self.action {
             OpType::Set(value) if self.insert => format!("i:{}", value),
             OpType::Set(value) => format!("s:{}", value),
-            amp::OpType::Make(obj) => format!("make{}", obj),
-            amp::OpType::Inc(val) => format!("inc:{}", val),
-            amp::OpType::Del(_) => "del".to_string(),
+            OpType::Make(obj) => format!("make{}", obj),
+            OpType::Inc(val) => format!("inc:{}", val),
+            OpType::Del => "del".to_string(),
         }
     }
 }

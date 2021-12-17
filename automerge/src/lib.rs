@@ -37,8 +37,6 @@ mod legacy;
 mod sync;
 
 mod error;
-mod expanded_op;
-mod internal;
 mod op_tree;
 mod query;
 mod types;
@@ -46,7 +44,6 @@ mod value;
 
 use change::{encode_document, export_change};
 use indexed_cache::IndexedCache;
-use nonzero_ext::nonzero;
 use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
@@ -335,7 +332,7 @@ impl Automerge {
     }
 
     pub fn del<P: Into<Prop>>(&mut self, obj: OpId, prop: P) -> Result<OpId, AutomergeError> {
-        self.local_op(obj.into(), prop.into(), OpType::Del(nonzero!(1_u32)))
+        self.local_op(obj.into(), prop.into(), OpType::Del)
     }
 
     pub fn splice(
@@ -621,7 +618,7 @@ impl Automerge {
                     .iter()
                     .map(|i| self.import(&i.to_string()).unwrap())
                     .collect();
-                let key = match &c.key.as_ref() {
+                let key = match &c.key {
                     legacy::Key::Map(n) => Key::Map(self.ops.m.props.cache(n.to_string())),
                     legacy::Key::Seq(legacy::ElementId::Head) => Key::Seq(HEAD),
                     // FIXME dont need to_string()
@@ -632,7 +629,7 @@ impl Automerge {
                 Op {
                     change: change_id,
                     id,
-                    action: c.action.into(),
+                    action: c.action,
                     obj,
                     key,
                     succ: Default::default(),
@@ -997,7 +994,7 @@ impl Automerge {
                 OpType::Set(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make{}", obj),
                 OpType::Inc(obj) => format!("inc{}", obj),
-                OpType::Del(_) => format!("del{}", 0),
+                OpType::Del => format!("del{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
             let succ: Vec<_> = i.succ.iter().map(|id| self.export(*id)).collect();

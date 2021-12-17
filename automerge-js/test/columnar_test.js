@@ -17,7 +17,7 @@ describe('change encoding', () => {
     const change1 = {actor: 'aaaa', seq: 1, startOp: 1, time: 9, message: null, deps: [], ops: [
       {action: 'makeText', obj: '_root', key: 'text', pred: []},
       {action: 'set', obj: '1@aaaa', elemId: '_head', insert: true, value: 'h', pred: []},
-      {action: 'del', obj: '1@aaaa', elemId: '2@aaaa', multiOp: 1, pred: ['2@aaaa']},
+      {action: 'del', obj: '1@aaaa', elemId: '2@aaaa', pred: ['2@aaaa']},
       {action: 'set', obj: '1@aaaa', elemId: '_head', insert: true, value: 'H', pred: []},
       {action: 'set', obj: '1@aaaa', elemId: '4@aaaa', insert: true, value: 'i', pred: []}
     ]}

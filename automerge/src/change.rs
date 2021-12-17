@@ -5,11 +5,10 @@ use crate::columnar::{
 use crate::decoding;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
-use crate::expanded_op::ExpandedOpIterator;
-use crate::internal::InternalOpType;
 use crate::legacy as amp;
 use crate::{
-    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT,
+    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, OpType, Transaction, HEAD,
+    ROOT,
 };
 use core::ops::Range;
 use flate2::{
@@ -212,10 +211,8 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
-    let expanded_ops = ExpandedOpIterator::new(&change.operations, change.start_op);
-
     // encode ops into a side buffer - collect all other actors
-    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
+    let (ops_buf, mut ops) = ColumnEncoder::encode_ops(&change.operations, &mut actors);
 
     // encode all other actors
     actors[1..].encode(&mut bytes).unwrap();
@@ -353,10 +350,10 @@ impl Change {
             operations: self
                 .iter_ops()
                 .map(|op| amp::Op {
-                    action: op.action.into(),
-                    obj: op.obj.clone().into_owned(),
-                    key: op.key.into_owned(),
-                    pred: op.pred.into_owned(),
+                    action: op.action.clone(),
+                    obj: op.obj.clone(),
+                    key: op.key.clone(),
+                    pred: op.pred.clone(),
                     insert: op.insert,
                 })
                 .collect(),
@@ -380,16 +377,6 @@ impl Change {
         self.bytes.raw()
     }
 }
-
-/*
-impl TryFrom<&[u8]> for Change {
-    type Error = decoding::Error;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Change::from_bytes(bytes.to_vec())
-    }
-}
-*/
 
 fn read_leb128(bytes: &mut &[u8]) -> Result<(usize, usize), decoding::Error> {
     let mut buf = &bytes[..];
@@ -851,7 +838,7 @@ fn group_doc_change_and_doc_ops(
                 let del = DocOp {
                     actor: succ.1,
                     ctr: succ.0,
-                    action: InternalOpType::Del,
+                    action: OpType::Del,
                     obj: op.obj.clone(),
                     key,
                     succ: Vec::new(),
@@ -908,7 +895,7 @@ fn doc_changes_to_uncompressed_changes<'a>(
             .ops
             .into_iter()
             .map(|op| amp::Op {
-                action: (&op.action).into(),
+                action: op.action.clone(),
                 insert: op.insert,
                 key: op.key,
                 obj: op.obj,

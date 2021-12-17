@@ -1,5 +1,3 @@
-use std::num::NonZeroU32;
-
 use serde::{
     de::{Error, MapAccess, Unexpected, Visitor},
     ser::SerializeStruct,
@@ -51,8 +49,7 @@ impl Serialize for Op {
         match &self.action {
             OpType::Inc(n) => op.serialize_field("value", &n)?,
             OpType::Set(value) => op.serialize_field("value", &value)?,
-            OpType::Del(multi_op) => op.serialize_field("multiOp", &multi_op)?,
-            OpType::Make(..) => {}
+            _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
         op.end()
@@ -148,7 +145,6 @@ impl<'de> Deserialize<'de> for Op {
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
                 let mut ref_id: Option<OpId> = None;
-                let mut multi_op: Option<u32> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
                         "action" => read_field("action", &mut action, &mut map)?,
@@ -172,7 +168,6 @@ impl<'de> Deserialize<'de> for Op {
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
                         "ref" => read_field("ref", &mut ref_id, &mut map)?,
-                        "multiOp" => read_field("multiOp", &mut multi_op, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
                 }
@@ -186,11 +181,7 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeTable => OpType::Make(ObjType::Table),
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
-                    RawOpType::Del => OpType::Del(
-                        multi_op
-                            .map(|i| NonZeroU32::new(i).unwrap())
-                            .unwrap_or_else(|| NonZeroU32::new(1).unwrap()),
-                    ),
+                    RawOpType::Del => OpType::Del,
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             let raw_value = value
