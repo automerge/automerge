@@ -1,11 +1,166 @@
 use crate::legacy as amp;
 use std::cmp::Eq;
+use std::fmt;
+use tinyvec::{ArrayVec, TinyVec};
+use std::num::NonZeroU32;
+use std::convert::TryFrom;
+use crate::error;
+use std::str::FromStr;
+use serde::{ Deserialize, Serialize };
+use crate::ScalarValue;
 
 pub const HEAD: ElemId = ElemId(OpId(0, 0));
 pub const ROOT: OpId = OpId(0, 0);
 
 const ROOT_STR: &str = "_root";
 const HEAD_STR: &str = "_head";
+
+/// An actor id is a sequence of bytes. By default we use a uuid which can be nicely stack
+/// allocated.
+///
+/// In the event that users want to use their own type of identifier that is longer than a uuid
+/// then they will likely end up pushing it onto the heap which is still fine.
+///
+// Note that change encoding relies on the Ord implementation for the ActorId being implemented in
+// terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
+// changing the ActorId implementation in ways which might affect the Ord implementation
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
+#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
+pub struct ActorId(TinyVec<[u8; 16]>);
+
+impl fmt::Debug for ActorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("ActorID")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
+impl ActorId {
+    pub fn random() -> ActorId {
+        ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
+    }
+
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(&self.0)
+    }
+
+    pub fn op_id_at(&self, seq: u64) -> amp::OpId {
+        amp::OpId(seq, self.clone())
+    }
+}
+
+impl TryFrom<&str> for ActorId {
+    type Error = error::InvalidActorId;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        hex::decode(s)
+            .map(ActorId::from)
+            .map_err(|_| error::InvalidActorId(s.into()))
+    }
+}
+
+impl From<uuid::Uuid> for ActorId {
+    fn from(u: uuid::Uuid) -> Self {
+        ActorId(TinyVec::from(*u.as_bytes()))
+    }
+}
+
+impl From<&[u8]> for ActorId {
+    fn from(b: &[u8]) -> Self {
+        ActorId(TinyVec::from(b))
+    }
+}
+
+impl From<&Vec<u8>> for ActorId {
+    fn from(b: &Vec<u8>) -> Self {
+        ActorId::from(b.as_slice())
+    }
+}
+
+impl From<Vec<u8>> for ActorId {
+    fn from(b: Vec<u8>) -> Self {
+        let inner = if let Ok(arr) = ArrayVec::try_from(b.as_slice()) {
+            TinyVec::Inline(arr)
+        } else {
+            TinyVec::Heap(b)
+        };
+        ActorId(inner)
+    }
+}
+
+impl FromStr for ActorId {
+    type Err = error::InvalidActorId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ActorId::try_from(s)
+    }
+}
+
+impl fmt::Display for ActorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_hex_string())
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
+#[serde(rename_all = "camelCase", untagged)]
+pub enum ObjType {
+    Map,
+    Table,
+    List,
+    Text,
+}
+
+impl ObjType {
+    pub fn is_sequence(&self) -> bool {
+        matches!(self, Self::List | Self::Text)
+    }
+}
+
+impl From<amp::MapType> for ObjType {
+    fn from(other: amp::MapType) -> Self {
+        match other {
+            amp::MapType::Map => Self::Map,
+            amp::MapType::Table => Self::Table,
+        }
+    }
+}
+
+impl From<amp::SequenceType> for ObjType {
+    fn from(other: amp::SequenceType) -> Self {
+        match other {
+            amp::SequenceType::List => Self::List,
+            amp::SequenceType::Text => Self::Text,
+        }
+    }
+}
+
+impl fmt::Display for ObjType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjType::Map => write!(f, "map"),
+            ObjType::Table => write!(f, "table"),
+            ObjType::List => write!(f, "list"),
+            ObjType::Text => write!(f, "text"),
+        }
+    }
+}
+
+
+#[derive(PartialEq, Debug, Clone)]
+pub enum OpType {
+    Make(ObjType),
+    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
+    Del(NonZeroU32),
+    Inc(i64),
+    Set(ScalarValue),
+    MultiSet(amp::ScalarValues),
+}
 
 #[derive(Debug)]
 pub enum Export {

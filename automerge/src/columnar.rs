@@ -11,7 +11,7 @@ use std::{
     str,
 };
 
-use crate::types::{ElemId, Key, ObjId, OpId};
+use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, ScalarValue };
 use crate::ROOT;
 
 use crate::legacy as amp;
@@ -34,7 +34,7 @@ impl Encodable for Action {
     }
 }
 
-impl Encodable for [amp::ActorId] {
+impl Encodable for [ActorId] {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         let mut len = self.len().encode(buf)?;
         for i in self {
@@ -44,7 +44,7 @@ impl Encodable for [amp::ActorId] {
     }
 }
 
-fn map_actor(actor: &amp::ActorId, actors: &mut Vec<amp::ActorId>) -> usize {
+fn map_actor(actor: &ActorId, actors: &mut Vec<ActorId>) -> usize {
     if let Some(pos) = actors.iter().position(|a| a == actor) {
         pos
     } else {
@@ -53,11 +53,11 @@ fn map_actor(actor: &amp::ActorId, actors: &mut Vec<amp::ActorId>) -> usize {
     }
 }
 
-impl Encodable for amp::ActorId {
+impl Encodable for ActorId {
     fn encode_with_actors<R: Write>(
         &self,
         buf: &mut R,
-        actors: &mut Vec<amp::ActorId>,
+        actors: &mut Vec<ActorId>,
     ) -> io::Result<usize> {
         map_actor(self, actors).encode(buf)
     }
@@ -94,7 +94,7 @@ pub struct OperationIterator<'a> {
 impl<'a> OperationIterator<'a> {
     pub(crate) fn new(
         bytes: &'a [u8],
-        actors: &'a [amp::ActorId],
+        actors: &'a [ActorId],
         ops: &'a HashMap<u32, Range<usize>>,
     ) -> OperationIterator<'a> {
         OperationIterator {
@@ -140,10 +140,10 @@ impl<'a> Iterator for OperationIterator<'a> {
         let value = self.value.next()?;
         let action = match action {
             Action::Set => InternalOpType::Set(value),
-            Action::MakeList => InternalOpType::Make(amp::ObjType::List),
-            Action::MakeText => InternalOpType::Make(amp::ObjType::Text),
-            Action::MakeMap => InternalOpType::Make(amp::ObjType::Map),
-            Action::MakeTable => InternalOpType::Make(amp::ObjType::Table),
+            Action::MakeList => InternalOpType::Make(ObjType::List),
+            Action::MakeText => InternalOpType::Make(ObjType::Text),
+            Action::MakeMap => InternalOpType::Make(ObjType::Map),
+            Action::MakeTable => InternalOpType::Make(ObjType::Table),
             Action::Del => InternalOpType::Del,
             Action::Inc => InternalOpType::Inc(value.to_i64()?),
         };
@@ -181,10 +181,10 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let value = self.value.next()?;
         let action = match action {
             Action::Set => InternalOpType::Set(value),
-            Action::MakeList => InternalOpType::Make(amp::ObjType::List),
-            Action::MakeText => InternalOpType::Make(amp::ObjType::Text),
-            Action::MakeMap => InternalOpType::Make(amp::ObjType::Map),
-            Action::MakeTable => InternalOpType::Make(amp::ObjType::Table),
+            Action::MakeList => InternalOpType::Make(ObjType::List),
+            Action::MakeText => InternalOpType::Make(ObjType::Text),
+            Action::MakeMap => InternalOpType::Make(ObjType::Map),
+            Action::MakeTable => InternalOpType::Make(ObjType::Table),
             Action::Del => InternalOpType::Del,
             Action::Inc => InternalOpType::Inc(value.to_i64()?),
         };
@@ -204,7 +204,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
 impl<'a> DocOpIterator<'a> {
     pub(crate) fn new(
         bytes: &'a [u8],
-        actors: &'a [amp::ActorId],
+        actors: &'a [ActorId],
         ops: &'a HashMap<u32, Range<usize>>,
     ) -> DocOpIterator<'a> {
         DocOpIterator {
@@ -287,7 +287,7 @@ impl<'a> Iterator for ChangeIterator<'a> {
 
 pub struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
-    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actors: &'a [ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: RleDecoder<'a, u64>,
 }
@@ -312,7 +312,7 @@ pub struct ExtraIterator<'a> {
 }
 
 pub struct PredIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actors: &'a [ActorId],
     pub(crate) pred_num: RleDecoder<'a, usize>,
     pub(crate) pred_actor: RleDecoder<'a, usize>,
     pub(crate) pred_ctr: DeltaDecoder<'a>,
@@ -325,14 +325,14 @@ pub struct SuccIterator<'a> {
 }
 
 pub struct KeyIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actors: &'a [ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
     pub(crate) str: RleDecoder<'a, SmolStr>,
 }
 
 pub struct ValueIterator<'a> {
-    pub(crate) actors: &'a [amp::ActorId],
+    pub(crate) actors: &'a [ActorId],
     pub(crate) val_len: RleDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,
     pub(crate) actor: RleDecoder<'a, usize>,
@@ -394,22 +394,22 @@ impl<'a> Iterator for SuccIterator<'a> {
 }
 
 impl<'a> Iterator for ValueIterator<'a> {
-    type Item = amp::ScalarValue;
-    fn next(&mut self) -> Option<amp::ScalarValue> {
+    type Item = ScalarValue;
+    fn next(&mut self) -> Option<ScalarValue> {
         let val_type = self.val_len.next()??;
         let actor = self.actor.next()?;
         let ctr = self.ctr.next()?;
         match val_type {
-            VALUE_TYPE_NULL => Some(amp::ScalarValue::Null),
-            VALUE_TYPE_FALSE => Some(amp::ScalarValue::Boolean(false)),
-            VALUE_TYPE_TRUE => Some(amp::ScalarValue::Boolean(true)),
+            VALUE_TYPE_NULL => Some(ScalarValue::Null),
+            VALUE_TYPE_FALSE => Some(ScalarValue::Boolean(false)),
+            VALUE_TYPE_TRUE => Some(ScalarValue::Boolean(true)),
             v if v % 16 == VALUE_TYPE_COUNTER => {
                 let len = v >> 4;
                 let val = self.val_raw.read().ok()?;
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::ScalarValue::Counter(val))
+                Some(ScalarValue::Counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
                 let len = v >> 4;
@@ -417,7 +417,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::ScalarValue::Timestamp(val))
+                Some(ScalarValue::Timestamp(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_UINT => {
                 let len = v >> 4;
@@ -425,7 +425,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::ScalarValue::Uint(val))
+                Some(ScalarValue::Uint(val))
             }
             v if v % 16 == VALUE_TYPE_LEB128_INT => {
                 let len = v >> 4;
@@ -433,18 +433,18 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(amp::ScalarValue::Int(val))
+                Some(ScalarValue::Int(val))
             }
             v if v % 16 == VALUE_TYPE_UTF8 => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
                 let s = str::from_utf8(data).ok()?;
-                Some(amp::ScalarValue::Str(SmolStr::new(s)))
+                Some(ScalarValue::Str(SmolStr::new(s)))
             }
             v if v % 16 == VALUE_TYPE_BYTES => {
                 let len = v >> 4;
                 let data = self.val_raw.read_bytes(len).ok()?;
-                Some(amp::ScalarValue::Bytes(data.to_vec()))
+                Some(ScalarValue::Bytes(data.to_vec()))
             }
             v if v % 16 >= VALUE_TYPE_MIN_UNKNOWN && v % 16 <= VALUE_TYPE_MAX_UNKNOWN => {
                 let len = v >> 4;
@@ -457,7 +457,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len == 8 {
                     // confirm only 8 bytes read
                     let num = self.val_raw.read().ok()?;
-                    Some(amp::ScalarValue::F64(num))
+                    Some(ScalarValue::F64(num))
                 } else {
                     // bad size of float
                     None
@@ -466,7 +466,7 @@ impl<'a> Iterator for ValueIterator<'a> {
             v if v % 16 == VALUE_TYPE_CURSOR => {
                 if let (Some(actor), Some(ctr)) = (actor, ctr) {
                     let actor_id = self.actors.get(actor)?;
-                    Some(amp::ScalarValue::Cursor(amp::OpId(ctr, actor_id.clone())))
+                    Some(ScalarValue::Cursor(amp::OpId(ctr, actor_id.clone())))
                 } else {
                     None
                 }
@@ -568,50 +568,50 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &amp::ScalarValue, actors: &[usize]) {
+    fn append_value(&mut self, val: &ScalarValue, actors: &[usize]) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
-        if !matches!(val, amp::ScalarValue::Cursor(_)) {
+        if !matches!(val, ScalarValue::Cursor(_)) {
             self.ref_actor.append_null();
             self.ref_counter.append_null();
         }
         match val {
-            amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
-            amp::ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
-            amp::ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            amp::ScalarValue::Bytes(bytes) => {
+            ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
+            ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
+            ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            ScalarValue::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES);
             }
-            amp::ScalarValue::Str(s) => {
+            ScalarValue::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            amp::ScalarValue::Counter(count) => {
+            ScalarValue::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
-            amp::ScalarValue::Timestamp(time) => {
+            ScalarValue::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP);
             }
-            amp::ScalarValue::Int(n) => {
+            ScalarValue::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT);
             }
-            amp::ScalarValue::Uint(n) => {
+            ScalarValue::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT);
             }
-            amp::ScalarValue::F64(n) => {
+            ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
             }
-            amp::ScalarValue::Cursor(opid) => {
+            ScalarValue::Cursor(opid) => {
                 unimplemented!()
                 /*
                 // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
@@ -624,50 +624,50 @@ impl ValEncoder {
         }
     }
 
-    fn append_value2(&mut self, val: &amp::ScalarValue, actors: &mut Vec<amp::ActorId>) {
+    fn append_value2(&mut self, val: &ScalarValue, actors: &mut Vec<ActorId>) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
-        if !matches!(val, amp::ScalarValue::Cursor(_)) {
+        if !matches!(val, ScalarValue::Cursor(_)) {
             self.ref_actor.append_null();
             self.ref_counter.append_null();
         }
         match val {
-            amp::ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
-            amp::ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
-            amp::ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
-            amp::ScalarValue::Bytes(bytes) => {
+            ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
+            ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
+            ScalarValue::Boolean(false) => self.len.append_value(VALUE_TYPE_FALSE),
+            ScalarValue::Bytes(bytes) => {
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_BYTES);
             }
-            amp::ScalarValue::Str(s) => {
+            ScalarValue::Str(s) => {
                 let bytes = s.as_bytes();
                 let len = bytes.len();
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            amp::ScalarValue::Counter(count) => {
+            ScalarValue::Counter(count) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
-            amp::ScalarValue::Timestamp(time) => {
+            ScalarValue::Timestamp(time) => {
                 let len = time.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_TIMESTAMP);
             }
-            amp::ScalarValue::Int(n) => {
+            ScalarValue::Int(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_INT);
             }
-            amp::ScalarValue::Uint(n) => {
+            ScalarValue::Uint(n) => {
                 let len = n.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_LEB128_UINT);
             }
-            amp::ScalarValue::F64(n) => {
+            ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
             }
-            amp::ScalarValue::Cursor(opid) => {
+            ScalarValue::Cursor(opid) => {
                 // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
                 self.len.append_value(VALUE_TYPE_CURSOR);
                 let actor_index = map_actor(&opid.1, actors);
@@ -757,7 +757,7 @@ impl KeyEncoderOld {
         }
     }
 
-    fn append(&mut self, key: amp::Key, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, key: amp::Key, actors: &mut Vec<ActorId>) {
         match key {
             amp::Key::Map(s) => {
                 self.actor.append_null();
@@ -843,7 +843,7 @@ impl PredEncoder {
         }
     }
 
-    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<ActorId>) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
@@ -911,7 +911,7 @@ impl ObjEncoderOld {
         }
     }
 
-    fn append(&mut self, obj: &amp::ObjectId, actors: &mut Vec<amp::ActorId>) {
+    fn append(&mut self, obj: &amp::ObjectId, actors: &mut Vec<ActorId>) {
         match obj {
             amp::ObjectId::Root => {
                 self.actor.append_null();
@@ -948,7 +948,7 @@ impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
     pub fn encode_changes<'a, 'b, I>(
         changes: I,
-        actors: &'a IndexedCache<amp::ActorId>,
+        actors: &'a IndexedCache<ActorId>,
     ) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::Change>,
@@ -972,7 +972,7 @@ impl ChangeEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<amp::ActorId>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<ActorId>)
     where
         I: IntoIterator<Item = &'c amp::Change>,
     {
@@ -1098,7 +1098,7 @@ impl DocOpEncoder {
                     Action::Set
                 }
                 amp::OpType::Inc(val) => {
-                    self.val.append_value(&amp::ScalarValue::Int(*val), actors);
+                    self.val.append_value(&ScalarValue::Int(*val), actors);
                     Action::Inc
                 }
                 amp::OpType::Del(n) => {
@@ -1109,10 +1109,10 @@ impl DocOpEncoder {
                 amp::OpType::Make(kind) => {
                     self.val.append_null();
                     match kind {
-                        amp::ObjType::Map => Action::MakeMap,
-                        amp::ObjType::Table => Action::MakeTable,
-                        amp::ObjType::List => Action::MakeList,
-                        amp::ObjType::Text => Action::MakeText,
+                        ObjType::Map => Action::MakeMap,
+                        ObjType::Table => Action::MakeTable,
+                        ObjType::List => Action::MakeList,
+                        ObjType::Text => Action::MakeText,
                     }
                 }
                 amp::OpType::MultiSet(_) => unimplemented!(),
@@ -1167,7 +1167,7 @@ pub(crate) struct ColumnEncoder {
 impl ColumnEncoder {
     pub fn encode_ops<'a, 'b, I>(
         ops: I,
-        actors: &'a mut Vec<amp::ActorId>,
+        actors: &'a mut Vec<ActorId>,
     ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = ExpandedOp<'b>>,
@@ -1188,7 +1188,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<amp::ActorId>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, ops: I, actors: &'b mut Vec<ActorId>)
     where
         I: IntoIterator<Item = ExpandedOp<'c>>,
     {
@@ -1197,7 +1197,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &mut Vec<amp::ActorId>) {
+    fn append<'a>(&mut self, op: ExpandedOp<'a>, actors: &mut Vec<ActorId>) {
         self.obj.append(&op.obj, actors);
         self.key.append(op.key.into_owned(), actors);
         self.insert.append(op.insert);
@@ -1209,7 +1209,7 @@ impl ColumnEncoder {
                 Action::Set
             }
             InternalOpType::Inc(val) => {
-                self.val.append_value2(&amp::ScalarValue::Int(*val), actors);
+                self.val.append_value2(&ScalarValue::Int(*val), actors);
                 Action::Inc
             }
             InternalOpType::Del => {
@@ -1219,10 +1219,10 @@ impl ColumnEncoder {
             InternalOpType::Make(kind) => {
                 self.val.append_null();
                 match kind {
-                    amp::ObjType::Map => Action::MakeMap,
-                    amp::ObjType::Table => Action::MakeTable,
-                    amp::ObjType::List => Action::MakeList,
-                    amp::ObjType::Text => Action::MakeText,
+                    ObjType::Map => Action::MakeMap,
+                    ObjType::Table => Action::MakeTable,
+                    ObjType::List => Action::MakeList,
+                    ObjType::Text => Action::MakeText,
                 }
             }
         };

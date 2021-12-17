@@ -9,7 +9,7 @@ use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
 use crate::internal::InternalOpType;
 use crate::legacy as amp;
-use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
+use crate::{ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -50,7 +50,7 @@ fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
 pub(crate) fn encode_document(
     changes: &[amp::Change],
     doc_ops: &[Op],
-    actors_index: &IndexedCache<amp::ActorId>,
+    actors_index: &IndexedCache<ActorId>,
     props: &[String],
 ) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
@@ -181,7 +181,7 @@ fn encode(change: &amp::Change) -> Change {
 struct ChunkIntermediate {
     bytes: Vec<u8>,
     body: Range<usize>,
-    actors: Vec<amp::ActorId>,
+    actors: Vec<ActorId>,
     message: Range<usize>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
@@ -299,14 +299,14 @@ pub struct Change {
     pub start_op: u64,
     pub time: i64,
     message: Range<usize>,
-    actors: Vec<amp::ActorId>,
+    actors: Vec<ActorId>,
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
 }
 
 impl Change {
-    pub fn actor_id(&self) -> &amp::ActorId {
+    pub fn actor_id(&self) -> &ActorId {
         &self.actors[0]
     }
 
@@ -429,7 +429,7 @@ fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
     }
 }
 
-fn export_objid(id: &ObjId, actors: &IndexedCache<amp::ActorId>) -> amp::ObjectId {
+fn export_objid(id: &ObjId, actors: &IndexedCache<ActorId>) -> amp::ObjectId {
     if id.0 == ROOT {
         amp::ObjectId::Root
     } else {
@@ -437,7 +437,7 @@ fn export_objid(id: &ObjId, actors: &IndexedCache<amp::ActorId>) -> amp::ObjectI
     }
 }
 
-fn export_elemid(id: &ElemId, actors: &IndexedCache<amp::ActorId>) -> amp::ElementId {
+fn export_elemid(id: &ElemId, actors: &IndexedCache<ActorId>) -> amp::ElementId {
     if id == &HEAD {
         amp::ElementId::Head
     } else {
@@ -445,13 +445,13 @@ fn export_elemid(id: &ElemId, actors: &IndexedCache<amp::ActorId>) -> amp::Eleme
     }
 }
 
-fn export_opid(id: &OpId, actors: &IndexedCache<amp::ActorId>) -> amp::OpId {
+fn export_opid(id: &OpId, actors: &IndexedCache<ActorId>) -> amp::OpId {
     amp::OpId(id.0, actors.get(id.1).clone())
 }
 
 fn export_op(
     op: &Op,
-    actors: &IndexedCache<amp::ActorId>,
+    actors: &IndexedCache<ActorId>,
     props: &IndexedCache<String>,
 ) -> amp::Op {
     let action = op.action.clone();
@@ -472,7 +472,7 @@ fn export_op(
 
 pub(crate) fn export_change(
     change: &Transaction,
-    actors: &IndexedCache<amp::ActorId>,
+    actors: &IndexedCache<ActorId>,
     props: &IndexedCache<String>,
 ) -> Change {
     amp::Change {
@@ -516,7 +516,7 @@ pub fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
     let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
 
     let actor =
-        amp::ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
+        ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
     let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
     let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
     let time = read_slice(bytes.uncompressed(), &mut cursor)?;
@@ -584,15 +584,15 @@ fn decode_hashes(
 fn decode_actors(
     bytes: &[u8],
     cursor: &mut Range<usize>,
-    first: Option<amp::ActorId>,
-) -> Result<Vec<amp::ActorId>, decoding::Error> {
+    first: Option<ActorId>,
+) -> Result<Vec<ActorId>, decoding::Error> {
     let num_actors: usize = read_slice(bytes, cursor)?;
     let mut actors = Vec::with_capacity(num_actors + 1);
     if let Some(actor) = first {
         actors.push(actor);
     }
     for _ in 0..num_actors {
-        actors.push(amp::ActorId::from(
+        actors.push(ActorId::from(
             bytes
                 .get(slice_bytes(bytes, cursor)?)
                 .ok_or(decoding::Error::NotEnoughBytes)?,
@@ -815,7 +815,7 @@ fn compress_doc_changes(
 fn group_doc_change_and_doc_ops(
     changes: &mut [DocChange],
     mut ops: Vec<DocOp>,
-    actors: &[amp::ActorId],
+    actors: &[ActorId],
 ) -> Result<(), decoding::Error> {
     let mut changes_by_actor: HashMap<usize, Vec<usize>> = HashMap::new();
 
@@ -898,7 +898,7 @@ fn group_doc_change_and_doc_ops(
 
 fn doc_changes_to_uncompressed_changes<'a>(
     changes: impl Iterator<Item = DocChange> + 'a,
-    actors: &'a [amp::ActorId],
+    actors: &'a [ActorId],
 ) -> impl Iterator<Item = amp::Change> + 'a {
     changes.map(move |change| amp::Change {
         // we've already confirmed that all change.actor's are valid
@@ -927,7 +927,7 @@ fn doc_changes_to_uncompressed_changes<'a>(
 
 fn pred_into(
     pred: impl Iterator<Item = (u64, usize)>,
-    actors: &[amp::ActorId],
+    actors: &[ActorId],
 ) -> amp::SortedVec<amp::OpId> {
     pred.map(|(ctr, actor)| amp::OpId(ctr, actors[actor].clone()))
         .collect()

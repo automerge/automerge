@@ -31,3 +31,8 @@ impl From<decoding::Error> for AutomergeError {
         AutomergeError::Decoding
     }
 }
+
+#[derive(Error, Debug)]
+#[error("Invalid actor ID: {0}")]
+pub struct InvalidActorId(pub String);
+

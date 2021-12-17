@@ -8,14 +8,14 @@ use std::{
 
 use crate::legacy as amp;
 use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{IndexedCache, Key, Op, OpId, ScalarValue};
+use crate::{ActorId, IndexedCache, Key, Op, OpId, ScalarValue};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<16>;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpSetMetadata {
-    pub actors: IndexedCache<amp::ActorId>,
+    pub actors: IndexedCache<ActorId>,
     pub props: IndexedCache<String>,
 }
 
@@ -66,7 +66,7 @@ impl<const B: usize> OpTreeInternal<B> {
         }
     }
 
-    pub fn with_actor(actor: amp::ActorId) -> Self {
+    pub fn with_actor(actor: ActorId) -> Self {
         Self {
             root_node: None,
             m: OpSetMetadata {

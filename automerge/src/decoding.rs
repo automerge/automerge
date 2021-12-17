@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
+use crate::{ActorId};
 use crate::legacy as amp;
 use smol_str::SmolStr;
 
@@ -399,7 +400,7 @@ impl Decodable for Option<String> {
     }
 }
 
-impl Decodable for amp::ActorId {
+impl Decodable for ActorId {
     fn decode<R>(bytes: &mut R) -> Option<Self>
     where
         R: Read,

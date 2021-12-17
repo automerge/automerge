@@ -581,7 +581,7 @@ mod tests {
                     "obj": "_root",
                     "key": "somekey",
                     "pred": [],
-                    "values": ["one",{"two": 2}],
+                    "values": ["one",{"two": 2 as i64}],
                 }),
                 expected: Err(Error::invalid_type(
                     Unexpected::Map,

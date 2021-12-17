@@ -6,10 +6,11 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
     iter::FromIterator,
-    num::NonZeroU32,
     slice::Iter,
     str::FromStr,
 };
+
+pub (crate) use crate::{ ActorId, ObjType, OpType };
 
 use error::InvalidScalarValues;
 use serde::{
@@ -18,90 +19,6 @@ use serde::{
 };
 use smol_str::SmolStr;
 use strum::EnumDiscriminants;
-use tinyvec::TinyVec;
-
-/// An actor id is a sequence of bytes. By default we use a uuid which can be nicely stack
-/// allocated.
-///
-/// In the event that users want to use their own type of identifier that is longer than a uuid
-/// then they will likely end up pushing it onto the heap which is still fine.
-///
-// Note that change encoding relies on the Ord implementation for the ActorId being implemented in
-// terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
-// changing the ActorId implementation in ways which might affect the Ord implementation
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
-#[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ActorId(TinyVec<[u8; 16]>);
-
-impl fmt::Debug for ActorId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("ActorID")
-            .field(&hex::encode(&self.0))
-            .finish()
-    }
-}
-
-impl ActorId {
-    pub fn random() -> ActorId {
-        ActorId(TinyVec::from(*uuid::Uuid::new_v4().as_bytes()))
-    }
-
-    pub fn to_bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    pub fn to_hex_string(&self) -> String {
-        hex::encode(&self.0)
-    }
-
-    pub fn op_id_at(&self, seq: u64) -> OpId {
-        OpId(seq, self.clone())
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
-#[serde(rename_all = "camelCase", untagged)]
-pub enum ObjType {
-    Map,
-    Table,
-    List,
-    Text,
-}
-
-impl ObjType {
-    pub fn is_sequence(&self) -> bool {
-        matches!(self, Self::List | Self::Text)
-    }
-}
-
-impl From<MapType> for ObjType {
-    fn from(other: MapType) -> Self {
-        match other {
-            MapType::Map => Self::Map,
-            MapType::Table => Self::Table,
-        }
-    }
-}
-
-impl From<SequenceType> for ObjType {
-    fn from(other: SequenceType) -> Self {
-        match other {
-            SequenceType::List => Self::List,
-            SequenceType::Text => Self::Text,
-        }
-    }
-}
-
-impl fmt::Display for ObjType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ObjType::Map => write!(f, "map"),
-            ObjType::Table => write!(f, "table"),
-            ObjType::List => write!(f, "list"),
-            ObjType::Text => write!(f, "text"),
-        }
-    }
-}
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -504,16 +421,6 @@ impl ScalarValue {
     }
 }
 
-#[derive(PartialEq, Debug, Clone)]
-pub enum OpType {
-    Make(ObjType),
-    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
-    Del(NonZeroU32),
-    Inc(i64),
-    Set(ScalarValue),
-    MultiSet(ScalarValues),
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct SortedVec<T>(Vec<T>);
@@ -835,6 +742,7 @@ impl PartialEq for Change {
     }
 }
 
+/*
 impl Change {
     pub fn op_id_of(&self, index: u64) -> Option<OpId> {
         if let Ok(index_usize) = usize::try_from(index) {
@@ -845,3 +753,4 @@ impl Change {
         None
     }
 }
+*/

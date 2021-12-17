@@ -79,12 +79,11 @@ impl<'a> From<&'a str> for JsErr {
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: JsValue) -> Result<Automerge, JsValue> {
-        let actor = match actor.as_string() {
-            Some(a) => automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec()),
-            _ => automerge::ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec()),
-        };
         let mut automerge = automerge::Automerge::new();
-        automerge.set_actor(actor);
+        if let Some(a) = actor.as_string() {
+            let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
+            automerge.set_actor(actor);
+        }
         Ok(Automerge(automerge))
     }
 

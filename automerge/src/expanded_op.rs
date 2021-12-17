@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use crate::legacy as amp;
-use amp::{ActorId, ElementId, Key, OpId, SortedVec};
+use crate::ActorId;
+use amp::{ElementId, Key, OpId, SortedVec};
 
 use crate::internal::InternalOpType;
 

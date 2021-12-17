@@ -46,7 +46,6 @@ mod value;
 
 use change::{encode_document, export_change};
 use indexed_cache::IndexedCache;
-use legacy::OpType;
 use nonzero_ext::nonzero;
 use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -57,9 +56,9 @@ use unicode_segmentation::UnicodeSegmentation;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
-pub use legacy::{ActorId, ChangeHash, ObjType, ScalarValue};
+pub use legacy::{ChangeHash, ScalarValue};
 pub use sync::{SyncMessage, SyncState};
-pub use types::{ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
+pub use types::{ActorId, OpType, ObjType, ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
 pub use value::Value;
 
 #[derive(Debug, Clone)]

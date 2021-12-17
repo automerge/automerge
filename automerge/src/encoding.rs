@@ -5,10 +5,10 @@ use std::{
     mem,
 };
 
-use crate::legacy as amp;
 use flate2::{bufread::DeflateEncoder, Compression};
 use smol_str::SmolStr;
 
+use crate::{ ActorId };
 use crate::columnar::COLUMN_TYPE_DEFLATE;
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
@@ -240,7 +240,7 @@ where
 }
 
 pub(crate) trait Encodable {
-    fn encode_with_actors_to_vec(&self, actors: &mut Vec<amp::ActorId>) -> io::Result<Vec<u8>> {
+    fn encode_with_actors_to_vec(&self, actors: &mut Vec<ActorId>) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
         self.encode_with_actors(&mut buf, actors)?;
         Ok(buf)
@@ -249,7 +249,7 @@ pub(crate) trait Encodable {
     fn encode_with_actors<R: Write>(
         &self,
         buf: &mut R,
-        _actors: &mut Vec<amp::ActorId>,
+        _actors: &mut Vec<ActorId>,
     ) -> io::Result<usize> {
         self.encode(buf)
     }
