@@ -1,6 +1,6 @@
 use std::{borrow::Cow, convert::TryFrom};
 
-use crate::{ChangeHash, decoding, decoding::Decoder, encoding, encoding::Encodable};
+use crate::{decoding, decoding::Decoder, encoding, encoding::Encodable, ChangeHash};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular

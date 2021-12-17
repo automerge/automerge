@@ -8,8 +8,8 @@ use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
 use crate::internal::InternalOpType;
-use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use crate::legacy as amp;
+use crate::{AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},

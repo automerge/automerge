@@ -6,9 +6,9 @@ use std::{
     mem,
 };
 
+use crate::legacy as amp;
 use crate::query::{Index, QueryResult, TreeQuery};
 use crate::{IndexedCache, Key, Op, OpId, ScalarValue};
-use crate::legacy as amp;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<64>;
@@ -820,8 +820,8 @@ fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Op, OpId};
     use crate::legacy as amp;
+    use crate::{Op, OpId};
 
     use super::*;
 

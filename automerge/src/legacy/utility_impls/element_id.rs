@@ -60,7 +60,7 @@ impl std::fmt::Display for ElementId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ElementId::Head => write!(f, "_head"),
-            ElementId::Id(id) => write!(f, "{}", id.to_string()),
+            ElementId::Id(id) => write!(f, "{}", id),
         }
     }
 }

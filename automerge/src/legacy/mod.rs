@@ -25,7 +25,7 @@ use tinyvec::TinyVec;
 ///
 /// In the event that users want to use their own type of identifier that is longer than a uuid
 /// then they will likely end up pushing it onto the heap which is still fine.
-/// 
+///
 // Note that change encoding relies on the Ord implementation for the ActorId being implemented in
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
 // changing the ActorId implementation in ways which might affect the Ord implementation

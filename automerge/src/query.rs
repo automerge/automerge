@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use crate::legacy as amp;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::{ElemId, ObjId, Op, OpId, ScalarValue};
-use crate::legacy as amp;
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

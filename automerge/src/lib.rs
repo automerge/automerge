@@ -28,12 +28,12 @@ macro_rules! __log {
      }
  }
 
-mod legacy;
 mod change;
 mod columnar;
 mod decoding;
 mod encoding;
 mod indexed_cache;
+mod legacy;
 mod sync;
 
 mod error;
@@ -44,24 +44,23 @@ mod query;
 mod types;
 mod value;
 
-use op_tree::OpTree;
-
 use change::{encode_document, export_change};
 use indexed_cache::IndexedCache;
+use legacy::OpType;
 use nonzero_ext::nonzero;
+use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use sync::BloomFilter;
 use types::{ObjId, Op, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
-use legacy::OpType;
 
-pub use legacy::Change as ExpandedChange;
+pub use change::{decode_change, Change};
 pub use error::AutomergeError;
+pub use legacy::Change as ExpandedChange;
+pub use legacy::{ActorId, ChangeHash, ObjType, ScalarValue};
+pub use sync::{SyncMessage, SyncState};
 pub use types::{ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
 pub use value::Value;
-pub use change::{decode_change, Change};
-pub use sync::{SyncMessage, SyncState};
-pub use legacy::{ChangeHash, ActorId, ScalarValue, ObjType};
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -522,12 +521,7 @@ impl Automerge {
         }
     }
 
-    fn local_op(
-        &mut self,
-        obj: ObjId,
-        prop: Prop,
-        action: OpType,
-    ) -> Result<OpId, AutomergeError> {
+    fn local_op(&mut self, obj: ObjId, prop: Prop, action: OpType) -> Result<OpId, AutomergeError> {
         match prop {
             Prop::Map(s) => self.local_map_op(obj, s, action),
             Prop::Seq(n) => self.local_list_op(obj, n, action),
@@ -683,11 +677,7 @@ impl Automerge {
     /// Filter the changes down to those that are not transitive dependencies of the heads.
     ///
     /// Thus a graph with these heads has not seen the remaining changes.
-    pub(crate) fn filter_changes(
-        &self,
-        heads: &[ChangeHash],
-        changes: &mut HashSet<ChangeHash>,
-    ) {
+    pub(crate) fn filter_changes(&self, heads: &[ChangeHash], changes: &mut HashSet<ChangeHash>) {
         // Reduce the working set to find to those which we may be able to find.
         // This filters out those hashes that are successors of or concurrent with all of the
         // heads.
@@ -1051,8 +1041,8 @@ impl Default for Automerge {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Automerge, AutomergeError, Value, ROOT};
     use crate::legacy as amp;
+    use crate::{Automerge, AutomergeError, Value, ROOT};
 
     #[test]
     fn insert_op() -> Result<(), AutomergeError> {

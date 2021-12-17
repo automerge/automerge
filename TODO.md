@@ -1,12 +1,10 @@
 
 ### next steps:
-  1. move amp into experiement codebase
-  2. more tests
-  3. C API
+  1. more tests
+  2. C API
 
 ### ergronomics:
-  1. set("key".into()) vs setmap("key".into()) set<List>()
-  2. value() -> () or something that into's a value
+  1. value() -> () or something that into's a value
 
 ### automerge:
   1. one pass load (legacy)

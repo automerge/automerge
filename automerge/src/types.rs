@@ -1,7 +1,3 @@
-extern crate hex;
-extern crate uuid;
-extern crate web_sys;
-
 use crate::legacy as amp;
 use std::cmp::Eq;
 

@@ -1,7 +1,3 @@
-extern crate hex;
-extern crate uuid;
-extern crate web_sys;
-
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::hash::Hash;
