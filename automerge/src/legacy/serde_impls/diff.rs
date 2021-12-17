@@ -307,7 +307,7 @@ mod tests {
 
     use maplit::hashmap;
 
-    use crate::{CursorDiff, Diff, ListDiff, MapDiff, ObjectId, OpId};
+    use crate::legacy::{CursorDiff, Diff, ListDiff, MapDiff, ObjectId, OpId};
 
     #[test]
     fn map_diff_serialization_round_trip() {
@@ -404,7 +404,7 @@ mod tests {
             "datatype": "cursor",
             "refObjectId": "1@4a093244de2b4fd0a4203724e15dfc16",
             "elemId": "2@4a093244de2b4fd0a4203724e15dfc16",
-            "index": 0,
+            "index": 0 as i64,
         });
         let diff = Diff::Cursor(CursorDiff {
             object_id: "1@4a093244de2b4fd0a4203724e15dfc16".try_into().unwrap(),

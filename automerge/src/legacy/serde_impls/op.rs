@@ -272,6 +272,7 @@ mod tests {
     use std::{convert::TryInto, str::FromStr};
 
     use super::*;
+    use crate::legacy as amp;
 
     #[test]
     fn test_deserialize_action() {
@@ -289,7 +290,7 @@ mod tests {
                     "obj": "_root",
                     "key": "somekey",
                     "datatype": "uint",
-                    "value": 123,
+                    "value": 123 as i64,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -306,7 +307,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": -123,
+                    "value": -123 as i64,
                     "datatype": "int",
                     "pred": []
                 }),
@@ -324,7 +325,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": -123,
+                    "value": -123 as i64,
                     "datatype": "float64",
                     "pred": []
                 }),
@@ -359,7 +360,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 1.23,
+                    "value": 1.23 as f64,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -404,7 +405,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 123,
+                    "value": 123 as i64,
                     "datatype": "counter",
                     "pred": []
                 }),
@@ -452,7 +453,7 @@ mod tests {
                     "action": "inc",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 12,
+                    "value": 12 as i64,
                     "datatype": "counter",
                     "pred": []
                 }),
@@ -470,7 +471,7 @@ mod tests {
                     "action": "inc",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 12,
+                    "value": 12 as i64,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -623,30 +624,30 @@ mod tests {
             "action": "inc",
             "obj": "_root",
             "key": "somekey",
-            "value": 1,
+            "value": 1 as f64,
             "pred": []
         }))
         .unwrap();
-        assert_eq!(root.obj, crate::ObjectId::Root);
+        assert_eq!(root.obj, amp::ObjectId::Root);
 
         let opid: Op = serde_json::from_value(serde_json::json!({
             "action": "inc",
             "obj": "1@7ef48769b04d47e9a88e98a134d62716",
             "key": "somekey",
-            "value": 1,
+            "value": 1 as f64,
             "pred": []
         }))
         .unwrap();
         assert_eq!(
             opid.obj,
-            crate::ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()
+            amp::ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()
         );
 
         let invalid: Result<Op, serde_json::Error> = serde_json::from_value(serde_json::json!({
             "action": "inc",
             "obj": "notanobject",
             "key": "somekey",
-            "value": 1,
+            "value": 1 as f64,
             "pred": []
         }));
         match invalid {

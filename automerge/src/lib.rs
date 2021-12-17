@@ -1041,8 +1041,7 @@ impl Default for Automerge {
 
 #[cfg(test)]
 mod tests {
-    use crate::legacy as amp;
-    use crate::{Automerge, AutomergeError, Value, ROOT};
+    use crate::{ActorId, Automerge, AutomergeError, Value, ROOT};
 
     #[test]
     fn insert_op() -> Result<(), AutomergeError> {
