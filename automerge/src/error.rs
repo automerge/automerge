@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 
 use crate::decoding;
+use crate::value::DataType;
+use crate::ScalarValue;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -36,3 +38,11 @@ impl From<decoding::Error> for AutomergeError {
 #[error("Invalid actor ID: {0}")]
 pub struct InvalidActorId(pub String);
 
+#[derive(Error, Debug, PartialEq)]
+#[error("Invalid scalar value, expected {expected} but received {unexpected}")]
+pub struct InvalidScalarValue {
+    pub raw_value: ScalarValue,
+    pub datatype: DataType,
+    pub unexpected: String,
+    pub expected: String,
+}

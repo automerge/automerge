@@ -1,5 +1,9 @@
 use crate::legacy as amp;
-use crate::{ObjType, Op, OpId, ScalarValue};
+use crate::{error, ObjType, Op, OpId};
+use serde::{Deserialize, Serialize};
+use smol_str::SmolStr;
+use std::convert::TryFrom;
+use strum::EnumDiscriminants;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -127,6 +131,181 @@ impl From<Value> for amp::OpType {
         match v {
             Value::Object(o) => amp::OpType::Make(o),
             Value::Scalar(s) => amp::OpType::Set(s),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
+pub enum DataType {
+    #[serde(rename = "counter")]
+    Counter,
+    #[serde(rename = "timestamp")]
+    Timestamp,
+    #[serde(rename = "bytes")]
+    Bytes,
+    #[serde(rename = "uint")]
+    Uint,
+    #[serde(rename = "int")]
+    Int,
+    #[serde(rename = "float64")]
+    F64,
+    #[serde(rename = "undefined")]
+    Undefined,
+}
+
+impl DataType {
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    pub fn is_undefined(d: &DataType) -> bool {
+        matches!(d, DataType::Undefined)
+    }
+}
+
+#[derive(Serialize, PartialEq, Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(name(ScalarValueKind))]
+#[serde(untagged)]
+pub enum ScalarValue {
+    Bytes(Vec<u8>),
+    Str(SmolStr),
+    Int(i64),
+    Uint(u64),
+    F64(f64),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Null,
+}
+
+impl ScalarValue {
+    pub fn as_datatype(
+        &self,
+        datatype: DataType,
+    ) -> Result<ScalarValue, error::InvalidScalarValue> {
+        match (datatype, self) {
+            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i)),
+            (DataType::Counter, ScalarValue::Uint(u)) => match i64::try_from(*u) {
+                Ok(i) => Ok(ScalarValue::Counter(i)),
+                Err(_) => Err(error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an integer".to_string(),
+                    unexpected: "an integer larger than i64::max_value".to_string(),
+                    datatype,
+                }),
+            },
+            (DataType::Bytes, ScalarValue::Bytes(bytes)) => Ok(ScalarValue::Bytes(bytes.clone())),
+            (DataType::Bytes, v) => Err(error::InvalidScalarValue {
+                raw_value: self.clone(),
+                expected: "a vector of bytes".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Counter, v) => Err(error::InvalidScalarValue {
+                raw_value: self.clone(),
+                expected: "an integer".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Timestamp, ScalarValue::Int(i)) => Ok(ScalarValue::Timestamp(*i)),
+            (DataType::Timestamp, ScalarValue::Uint(u)) => match i64::try_from(*u) {
+                Ok(i) => Ok(ScalarValue::Timestamp(i)),
+                Err(_) => Err(error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an integer".to_string(),
+                    unexpected: "an integer larger than i64::max_value".to_string(),
+                    datatype,
+                }),
+            },
+            (DataType::Timestamp, v) => Err(error::InvalidScalarValue {
+                raw_value: self.clone(),
+                expected: "an integer".to_string(),
+                unexpected: v.to_string(),
+                datatype,
+            }),
+            (DataType::Int, v) => Ok(ScalarValue::Int(v.to_i64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an int".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::Uint, v) => Ok(ScalarValue::Uint(v.to_u64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "a uint".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
+                error::InvalidScalarValue {
+                    raw_value: self.clone(),
+                    expected: "an f64".to_string(),
+                    unexpected: v.to_string(),
+                    datatype,
+                },
+            )?)),
+            (DataType::Undefined, _) => Ok(self.clone()),
+        }
+    }
+
+    /// Returns an Option containing a `DataType` if
+    /// `self` represents a numerical scalar value
+    /// This is necessary b/c numerical values are not self-describing
+    /// (unlike strings / bytes / etc. )
+    pub fn as_numerical_datatype(&self) -> Option<DataType> {
+        match self {
+            ScalarValue::Counter(..) => Some(DataType::Counter),
+            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            ScalarValue::Int(..) => Some(DataType::Int),
+            ScalarValue::Uint(..) => Some(DataType::Uint),
+            ScalarValue::F64(..) => Some(DataType::F64),
+            _ => None,
+        }
+    }
+
+    // TODO: Should this method be combined with as_numerical_datatype??
+    pub fn datatype(&self) -> Option<DataType> {
+        match self {
+            ScalarValue::Counter(..) => Some(DataType::Counter),
+            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
+            ScalarValue::Int(..) => Some(DataType::Int),
+            ScalarValue::Uint(..) => Some(DataType::Uint),
+            ScalarValue::F64(..) => Some(DataType::F64),
+            _ => None,
+        }
+    }
+
+    /// If this value can be coerced to an i64, return the i64 value
+    pub fn to_i64(&self) -> Option<i64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n),
+            ScalarValue::Uint(n) => Some(*n as i64),
+            ScalarValue::F64(n) => Some(*n as i64),
+            ScalarValue::Counter(n) => Some(*n),
+            ScalarValue::Timestamp(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn to_u64(&self) -> Option<u64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as u64),
+            ScalarValue::Uint(n) => Some(*n),
+            ScalarValue::F64(n) => Some(*n as u64),
+            ScalarValue::Counter(n) => Some(*n as u64),
+            ScalarValue::Timestamp(n) => Some(*n as u64),
+            _ => None,
+        }
+    }
+
+    pub fn to_f64(&self) -> Option<f64> {
+        match self {
+            ScalarValue::Int(n) => Some(*n as f64),
+            ScalarValue::Uint(n) => Some(*n as f64),
+            ScalarValue::F64(n) => Some(*n),
+            ScalarValue::Counter(n) => Some(*n as f64),
+            ScalarValue::Timestamp(n) => Some(*n as f64),
+            _ => None,
         }
     }
 }

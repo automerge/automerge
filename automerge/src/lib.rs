@@ -56,10 +56,13 @@ use unicode_segmentation::UnicodeSegmentation;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
-pub use legacy::{ChangeHash, ScalarValue};
+pub use legacy::ChangeHash;
 pub use sync::{SyncMessage, SyncState};
-pub use types::{ActorId, OpType, ObjType, ElemId, Export, Exportable, Importable, Key, OpId, Patch, Peer, Prop, ROOT};
-pub use value::Value;
+pub use types::{
+    ActorId, ElemId, Export, Exportable, Importable, Key, ObjType, OpId, OpType, Patch, Peer, Prop,
+    ROOT,
+};
+pub use value::{ScalarValue, Value};
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -996,7 +999,6 @@ impl Automerge {
                 OpType::Make(obj) => format!("make{}", obj),
                 OpType::Inc(obj) => format!("inc{}", obj),
                 OpType::Del(_) => format!("del{}", 0),
-                OpType::MultiSet(_) => format!("multiset{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.export(*id)).collect();
             let succ: Vec<_> = i.succ.iter().map(|id| self.export(*id)).collect();

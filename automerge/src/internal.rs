@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::legacy as amp;
+use crate::{ObjType, OpType, ScalarValue};
 use nonzero_ext::nonzero;
 use smol_str::SmolStr;
 
@@ -37,7 +37,7 @@ pub(crate) struct InternalOp {
 }
 
 impl InternalOp {
-    pub fn obj_type(&self) -> Option<amp::ObjType> {
+    pub fn obj_type(&self) -> Option<ObjType> {
         match self.action {
             InternalOpType::Make(objtype) => Some(objtype),
             _ => None,
@@ -51,10 +51,10 @@ impl InternalOp {
 
 #[derive(PartialEq, Debug, Clone)]
 pub(crate) enum InternalOpType {
-    Make(amp::ObjType),
+    Make(ObjType),
     Del,
     Inc(i64),
-    Set(amp::ScalarValue),
+    Set(ScalarValue),
 }
 
 impl Key {
@@ -91,24 +91,24 @@ impl From<OpId> for Key {
     }
 }
 
-impl From<&InternalOpType> for amp::OpType {
-    fn from(i: &InternalOpType) -> amp::OpType {
+impl From<&InternalOpType> for OpType {
+    fn from(i: &InternalOpType) -> OpType {
         match i {
-            InternalOpType::Del => amp::OpType::Del(nonzero!(1_u32)),
-            InternalOpType::Make(ot) => amp::OpType::Make(*ot),
-            InternalOpType::Set(v) => amp::OpType::Set(v.clone()),
-            InternalOpType::Inc(i) => amp::OpType::Inc(*i),
+            InternalOpType::Del => OpType::Del(nonzero!(1_u32)),
+            InternalOpType::Make(ot) => OpType::Make(*ot),
+            InternalOpType::Set(v) => OpType::Set(v.clone()),
+            InternalOpType::Inc(i) => OpType::Inc(*i),
         }
     }
 }
 
-impl From<InternalOpType> for amp::OpType {
-    fn from(i: InternalOpType) -> amp::OpType {
+impl From<InternalOpType> for OpType {
+    fn from(i: InternalOpType) -> OpType {
         match i {
-            InternalOpType::Del => amp::OpType::Del(nonzero!(1_u32)),
-            InternalOpType::Make(ot) => amp::OpType::Make(ot),
-            InternalOpType::Set(v) => amp::OpType::Set(v),
-            InternalOpType::Inc(i) => amp::OpType::Inc(i),
+            InternalOpType::Del => OpType::Del(nonzero!(1_u32)),
+            InternalOpType::Make(ot) => OpType::Make(ot),
+            InternalOpType::Set(v) => OpType::Set(v),
+            InternalOpType::Inc(i) => OpType::Inc(i),
         }
     }
 }

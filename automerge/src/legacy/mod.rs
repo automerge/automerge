@@ -1,24 +1,13 @@
 pub mod error;
 mod serde_impls;
 mod utility_impls;
-use std::{
-    collections::HashMap,
-    convert::{TryFrom, TryInto},
-    fmt,
-    iter::FromIterator,
-    slice::Iter,
-    str::FromStr,
-};
+use std::{collections::HashMap, convert::TryInto, fmt, iter::FromIterator, str::FromStr};
 
-pub (crate) use crate::{ ActorId, ObjType, OpType };
+pub(crate) use crate::value::{DataType, ScalarValueKind};
+pub(crate) use crate::{ActorId, ObjType, OpType, ScalarValue};
 
-use error::InvalidScalarValues;
-use serde::{
-    de::{Error, MapAccess, Unexpected},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
-use strum::EnumDiscriminants;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -139,284 +128,6 @@ impl Key {
         match self {
             Key::Map(_) => None,
             Key::Seq(eid) => eid.increment_by(by).map(Key::Seq),
-        }
-    }
-}
-
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
-pub enum DataType {
-    #[serde(rename = "counter")]
-    Counter,
-    #[serde(rename = "timestamp")]
-    Timestamp,
-    #[serde(rename = "bytes")]
-    Bytes,
-    #[serde(rename = "cursor")]
-    Cursor,
-    #[serde(rename = "uint")]
-    Uint,
-    #[serde(rename = "int")]
-    Int,
-    #[serde(rename = "float64")]
-    F64,
-    #[serde(rename = "undefined")]
-    Undefined,
-}
-
-impl DataType {
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn is_undefined(d: &DataType) -> bool {
-        matches!(d, DataType::Undefined)
-    }
-}
-
-/// We don't implement Serialize/Deserialize b/c
-/// this struct will always be serialized as 2 fields
-/// that are *part of* a larger struct. (It will never
-/// be serialized as its own struct/map)
-#[derive(PartialEq, Clone, Debug)]
-pub struct ScalarValues {
-    // For implementing Serialization in DiffEdit
-    pub(crate) vec: Vec<ScalarValue>,
-    // Can't use `std::mem::Discriminant` b/c we
-    // need to be able to `match` on the kind for `as_numerical_datatype`...
-    pub(crate) kind: ScalarValueKind,
-}
-
-impl ScalarValues {
-    pub fn new(kind: ScalarValueKind) -> Self {
-        Self {
-            vec: Vec::new(),
-            kind,
-        }
-    }
-
-    pub fn from_values_and_datatype<'de, V: MapAccess<'de>>(
-        mut old_values: Vec<ScalarValue>,
-        datatype: Option<DataType>,
-    ) -> Result<Self, V::Error> {
-        // ensure the values can be cast to the correct datatype
-        if let Some(datatype) = datatype {
-            old_values = old_values
-                .iter()
-                .map(|v| {
-                    v.as_datatype(datatype).map_err(|e| {
-                        Error::invalid_value(
-                            Unexpected::Other(e.unexpected.as_str()),
-                            &e.expected.as_str(),
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-        }
-        old_values.try_into().map_err(|e| match e {
-            InvalidScalarValues::Empty => Error::invalid_length(0, &"more than 0"),
-            InvalidScalarValues::UnexpectedKind(exp, unexp) => {
-                let unexp = format!("{:?}", unexp);
-                let exp = format!("{:?}", exp);
-                Error::invalid_value(Unexpected::Other(&unexp), &exp.as_str())
-            }
-        })
-    }
-
-    /// Try to append a `ScalarValue` to a `ScalarValues`. If we can't
-    // returh the `ScalarValueKind` of the value we tried to add (for error reporting)
-    pub fn append(&mut self, v: ScalarValue) -> Option<ScalarValueKind> {
-        let new_kind = ScalarValueKind::from(&v);
-        if self.kind == new_kind {
-            self.vec.push(v);
-            None
-        } else {
-            Some(new_kind)
-        }
-    }
-
-    pub fn get(&self, idx: usize) -> Option<&ScalarValue> {
-        self.vec.get(idx)
-    }
-
-    pub fn len(&self) -> usize {
-        self.vec.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.vec.is_empty()
-    }
-
-    pub fn iter(&self) -> Iter<ScalarValue> {
-        self.vec.iter()
-    }
-
-    /// Returns an Option containing a `DataType` if
-    /// `self` represents a numerical scalar value
-    /// This is necessary b/c numerical values are not self-describing
-    /// (unlike strings / bytes / etc. )
-    pub fn as_numerical_datatype(&self) -> Option<DataType> {
-        match self.kind {
-            ScalarValueKind::Counter => Some(DataType::Counter),
-            ScalarValueKind::Timestamp => Some(DataType::Timestamp),
-            ScalarValueKind::Int => Some(DataType::Int),
-            ScalarValueKind::Uint => Some(DataType::Uint),
-            ScalarValueKind::F64 => Some(DataType::F64),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Serialize, PartialEq, Debug, Clone, EnumDiscriminants)]
-#[strum_discriminants(name(ScalarValueKind))]
-#[serde(untagged)]
-pub enum ScalarValue {
-    Bytes(Vec<u8>),
-    Str(SmolStr),
-    Int(i64),
-    Uint(u64),
-    F64(f64),
-    Counter(i64),
-    Timestamp(i64),
-    Cursor(OpId),
-    Boolean(bool),
-    Null,
-}
-
-impl ScalarValue {
-    pub fn as_datatype(
-        &self,
-        datatype: DataType,
-    ) -> Result<ScalarValue, error::InvalidScalarValue> {
-        match (datatype, self) {
-            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i)),
-            (DataType::Counter, ScalarValue::Uint(u)) => match i64::try_from(*u) {
-                Ok(i) => Ok(ScalarValue::Counter(i)),
-                Err(_) => Err(error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "an integer".to_string(),
-                    unexpected: "an integer larger than i64::max_value".to_string(),
-                    datatype,
-                }),
-            },
-            (DataType::Bytes, ScalarValue::Bytes(bytes)) => Ok(ScalarValue::Bytes(bytes.clone())),
-            (DataType::Bytes, v) => Err(error::InvalidScalarValue {
-                raw_value: self.clone(),
-                expected: "a vector of bytes".to_string(),
-                unexpected: v.to_string(),
-                datatype,
-            }),
-            (DataType::Counter, v) => Err(error::InvalidScalarValue {
-                raw_value: self.clone(),
-                expected: "an integer".to_string(),
-                unexpected: v.to_string(),
-                datatype,
-            }),
-            (DataType::Timestamp, ScalarValue::Int(i)) => Ok(ScalarValue::Timestamp(*i)),
-            (DataType::Timestamp, ScalarValue::Uint(u)) => match i64::try_from(*u) {
-                Ok(i) => Ok(ScalarValue::Timestamp(i)),
-                Err(_) => Err(error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "an integer".to_string(),
-                    unexpected: "an integer larger than i64::max_value".to_string(),
-                    datatype,
-                }),
-            },
-            (DataType::Timestamp, v) => Err(error::InvalidScalarValue {
-                raw_value: self.clone(),
-                expected: "an integer".to_string(),
-                unexpected: v.to_string(),
-                datatype,
-            }),
-            (DataType::Cursor, v) => Err(error::InvalidScalarValue {
-                raw_value: self.clone(),
-                expected: "a cursor".to_string(),
-                unexpected: v.to_string(),
-                datatype,
-            }),
-            (DataType::Int, v) => Ok(ScalarValue::Int(v.to_i64().ok_or(
-                error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "an int".to_string(),
-                    unexpected: v.to_string(),
-                    datatype,
-                },
-            )?)),
-            (DataType::Uint, v) => Ok(ScalarValue::Uint(v.to_u64().ok_or(
-                error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "a uint".to_string(),
-                    unexpected: v.to_string(),
-                    datatype,
-                },
-            )?)),
-            (DataType::F64, v) => Ok(ScalarValue::F64(v.to_f64().ok_or(
-                error::InvalidScalarValue {
-                    raw_value: self.clone(),
-                    expected: "an f64".to_string(),
-                    unexpected: v.to_string(),
-                    datatype,
-                },
-            )?)),
-            (DataType::Undefined, _) => Ok(self.clone()),
-        }
-    }
-
-    /// Returns an Option containing a `DataType` if
-    /// `self` represents a numerical scalar value
-    /// This is necessary b/c numerical values are not self-describing
-    /// (unlike strings / bytes / etc. )
-    pub fn as_numerical_datatype(&self) -> Option<DataType> {
-        match self {
-            ScalarValue::Counter(..) => Some(DataType::Counter),
-            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
-            ScalarValue::Int(..) => Some(DataType::Int),
-            ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F64(..) => Some(DataType::F64),
-            _ => None,
-        }
-    }
-
-    // TODO: Should this method be combined with as_numerical_datatype??
-    pub fn datatype(&self) -> Option<DataType> {
-        match self {
-            ScalarValue::Counter(..) => Some(DataType::Counter),
-            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
-            ScalarValue::Int(..) => Some(DataType::Int),
-            ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F64(..) => Some(DataType::F64),
-            ScalarValue::Cursor(..) => Some(DataType::Cursor),
-            _ => None,
-        }
-    }
-
-    /// If this value can be coerced to an i64, return the i64 value
-    pub fn to_i64(&self) -> Option<i64> {
-        match self {
-            ScalarValue::Int(n) => Some(*n),
-            ScalarValue::Uint(n) => Some(*n as i64),
-            ScalarValue::F64(n) => Some(*n as i64),
-            ScalarValue::Counter(n) => Some(*n),
-            ScalarValue::Timestamp(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    pub fn to_u64(&self) -> Option<u64> {
-        match self {
-            ScalarValue::Int(n) => Some(*n as u64),
-            ScalarValue::Uint(n) => Some(*n),
-            ScalarValue::F64(n) => Some(*n as u64),
-            ScalarValue::Counter(n) => Some(*n as u64),
-            ScalarValue::Timestamp(n) => Some(*n as u64),
-            _ => None,
-        }
-    }
-
-    pub fn to_f64(&self) -> Option<f64> {
-        match self {
-            ScalarValue::Int(n) => Some(*n as f64),
-            ScalarValue::Uint(n) => Some(*n as f64),
-            ScalarValue::F64(n) => Some(*n),
-            ScalarValue::Counter(n) => Some(*n as f64),
-            ScalarValue::Timestamp(n) => Some(*n as f64),
-            _ => None,
         }
     }
 }
@@ -588,7 +299,6 @@ pub enum Diff {
     List(ListDiff),
     Text(TextDiff),
     Value(ScalarValue),
-    Cursor(CursorDiff),
 }
 
 #[derive(Deserialize, Debug, PartialEq, Clone)]
@@ -660,7 +370,6 @@ pub enum DiffEdit {
     /// serialization and deserialization logic (due to the presence
     /// of the datatype field)
     #[serde(rename = "multi-insert")]
-    MultiElementInsert(MultiElementInsert),
 
     /// Describes the update of the value or nested object at a particular index
     /// of a list or text object. In the case where there are multiple conflicted
@@ -676,15 +385,6 @@ pub enum DiffEdit {
     },
     #[serde(rename_all = "camelCase")]
     Remove { index: u64, count: u64 },
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct MultiElementInsert {
-    /// the list index at which to insert the first value
-    pub index: u64,
-    /// the unique ID of the first inserted element
-    pub elem_id: ElementId,
-    pub values: ScalarValues,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]

@@ -18,7 +18,6 @@ impl Serialize for OpType {
             OpType::Del(..) => RawOpType::Del,
             OpType::Inc(_) => RawOpType::Inc,
             OpType::Set(_) => RawOpType::Set,
-            OpType::MultiSet(..) => RawOpType::Set,
         };
         raw_type.serialize(serializer)
     }

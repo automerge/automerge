@@ -1,8 +1,7 @@
 use std::borrow::Cow;
 
 use crate::legacy as amp;
-use crate::ActorId;
-use amp::{ElementId, Key, OpId, SortedVec};
+use amp::SortedVec;
 
 use crate::internal::InternalOpType;
 
@@ -21,7 +20,6 @@ pub struct ExpandedOp<'a> {
 /// An iterator which expands `amp::OpType::MultiSet` and `amp::OpType::Del` operations into
 /// multiple `amp::InternalOpType`s
 pub(super) struct ExpandedOpIterator<'a> {
-    actor: ActorId,
     offset: usize,
     ops: &'a [amp::Op],
     expand_count: Option<usize>,
@@ -76,41 +74,6 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
                         });
                     }
                 }
-                amp::OpType::MultiSet(values) => {
-                    assert!(op.pred.is_empty(), "multi-insert pred must be empty");
-                    let expanded_offset = match self.expand_count {
-                        None => {
-                            self.expand_count = Some(0);
-                            0
-                        }
-                        Some(o) => o,
-                    };
-
-                    let key = if expanded_offset == 0 {
-                        Cow::Borrowed(&op.key)
-                    } else {
-                        Cow::Owned(Key::Seq(ElementId::Id(OpId(
-                            self.op_num - 1,
-                            self.actor.clone(),
-                        ))))
-                    };
-
-                    if expanded_offset == values.len() - 1 {
-                        self.offset += 1;
-                        self.expand_count = None;
-                    } else {
-                        self.expand_count = Some(expanded_offset + 1);
-                    }
-
-                    let v = values.get(expanded_offset).unwrap();
-                    return Some(ExpandedOp {
-                        action: InternalOpType::Set(v.clone()),
-                        insert: op.insert,
-                        pred: Cow::Borrowed(&op.pred),
-                        key,
-                        obj: Cow::Borrowed(&op.obj),
-                    });
-                }
             };
             self.offset += 1;
             Some(ExpandedOp {
@@ -129,187 +92,12 @@ impl<'a> Iterator for ExpandedOpIterator<'a> {
 }
 
 impl<'a> ExpandedOpIterator<'a> {
-    pub(super) fn new(ops: &'a [amp::Op], start_op: u64, actor: ActorId) -> ExpandedOpIterator<'a> {
+    pub(super) fn new(ops: &'a [amp::Op], start_op: u64) -> ExpandedOpIterator<'a> {
         ExpandedOpIterator {
             ops,
             offset: 0,
             expand_count: None,
             op_num: start_op - 1,
-            actor,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{convert::TryInto, num::NonZeroU32, str::FromStr};
-
-    use amp::{ObjectId, Op, OpType, ScalarValue, SortedVec};
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    #[test]
-    fn expand_multi_set() {
-        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
-        let ops = [Op {
-            action: OpType::MultiSet(
-                vec![
-                    ScalarValue::Uint(1),
-                    ScalarValue::Uint(2),
-                    ScalarValue::Uint(3),
-                ]
-                .try_into()
-                .unwrap(),
-            ),
-            obj: ObjectId::Id(OpId(1, actor.clone())),
-            key: Key::Seq(ElementId::Head),
-            pred: SortedVec::new(),
-            insert: true,
-        }];
-        let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
-        assert_eq!(
-            expanded_ops,
-            vec![
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(1)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Head)),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(2)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(3)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor)))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn expand_multi_set_double() {
-        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
-        let ops = [
-            Op {
-                action: OpType::MultiSet(
-                    vec![
-                        ScalarValue::Uint(1),
-                        ScalarValue::Uint(2),
-                        ScalarValue::Uint(3),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                ),
-                obj: ObjectId::Id(OpId(1, actor.clone())),
-                key: Key::Seq(ElementId::Head),
-                pred: SortedVec::new(),
-                insert: true,
-            },
-            Op {
-                action: OpType::MultiSet(
-                    vec![
-                        ScalarValue::Str("hi".into()),
-                        ScalarValue::Str("world".into()),
-                    ]
-                    .try_into()
-                    .unwrap(),
-                ),
-                obj: ObjectId::Id(OpId(1, actor.clone())),
-                key: Key::Seq(ElementId::Id(OpId(4, actor.clone()))),
-                pred: SortedVec::new(),
-                insert: true,
-            },
-        ];
-        let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
-        assert_eq!(
-            expanded_ops,
-            vec![
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(1)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Head)),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(2)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Uint(3)),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("hi".into())),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(4, actor.clone())))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Set(ScalarValue::Str("world".into())),
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(5, actor)))),
-                    pred: Cow::Owned(SortedVec::new()),
-                    insert: true
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn expand_multi_del() {
-        let actor = ActorId::from_str("7f12a4d3567c4257af34f216aa16fe48").unwrap();
-        let pred = OpId(1, actor.clone());
-        let ops = [Op {
-            action: OpType::Del(NonZeroU32::new(3).unwrap()),
-            obj: ObjectId::Id(OpId(1, actor.clone())),
-            key: Key::Seq(ElementId::Id(OpId(1, actor.clone()))),
-            pred: vec![pred].into(),
-            insert: true,
-        }];
-        let expanded_ops = ExpandedOpIterator::new(&ops, 2, actor.clone()).collect::<Vec<_>>();
-        assert_eq!(
-            expanded_ops,
-            vec![
-                ExpandedOp {
-                    action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(1, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(1, actor.clone())].into()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(2, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(2, actor.clone())].into()),
-                    insert: true
-                },
-                ExpandedOp {
-                    action: InternalOpType::Del,
-                    obj: Cow::Owned(ObjectId::Id(OpId(1, actor.clone()))),
-                    key: Cow::Owned(Key::Seq(ElementId::Id(OpId(3, actor.clone())))),
-                    pred: Cow::Owned(vec![OpId(3, actor)].into()),
-                    insert: true
-                },
-            ]
-        );
     }
 }

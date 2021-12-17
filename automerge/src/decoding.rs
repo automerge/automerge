@@ -1,8 +1,8 @@
 use core::fmt::Debug;
 use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
 
-use crate::{ActorId};
 use crate::legacy as amp;
+use crate::ActorId;
 use smol_str::SmolStr;
 
 /// The error type for decoding operations.

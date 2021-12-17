@@ -32,6 +32,7 @@ serde-wasm-bindgen = "0.1.3"
 serde_bytes = "0.11.5"
 automerge-protocol = { path = "../../automerge-rs/automerge-protocol" }
 unicode-segmentation = "1.7.1"
+hex = "^0.4.3"
 
 [dependencies.wasm-bindgen]
 version = "^0.2"
@@ -54,6 +55,5 @@ features = ["console"]
 
 [dev-dependencies]
 futures = "^0.1"
-hex = "^0.4.3"
 wasm-bindgen-futures = "^0.3"
 wasm-bindgen-test = "^0.3"

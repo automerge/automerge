@@ -52,7 +52,6 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
             ScalarValue::Null => write!(f, "null"),
-            ScalarValue::Cursor(elemid) => write!(f, "Cursor: {}", elemid),
         }
     }
 }

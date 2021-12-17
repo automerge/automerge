@@ -1,5 +1,3 @@
-//#![feature(set_stdio)]
-
 #![allow(unused_variables)]
 use automerge as am;
 use automerge::{Prop, Value};
@@ -33,7 +31,6 @@ fn datatype(s: &am::ScalarValue) -> String {
         am::ScalarValue::Timestamp(_) => "timestamp".into(),
         am::ScalarValue::Boolean(_) => "boolean".into(),
         am::ScalarValue::Null => "null".into(),
-        am::ScalarValue::Cursor(_) => "cursor".into(),
     }
 }
 
@@ -52,7 +49,6 @@ impl From<ScalarValue> for JsValue {
             am::ScalarValue::Timestamp(v) => (*v as f64).into(),
             am::ScalarValue::Boolean(v) => (*v).into(),
             am::ScalarValue::Null => JsValue::null(),
-            am::ScalarValue::Cursor(_) => unimplemented!(),
         }
     }
 }
@@ -82,7 +78,7 @@ impl Automerge {
         let mut automerge = automerge::Automerge::new();
         if let Some(a) = actor.as_string() {
             let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
-            automerge.set_actor(actor);
+            automerge.set_actor(a);
         }
         Ok(Automerge(automerge))
     }

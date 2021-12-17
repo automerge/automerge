@@ -1,4 +1,3 @@
-#![allow(unused_variables)]
 use crate::columnar::{
     ChangeEncoder, ChangeIterator, ColumnEncoder, DepsIterator, DocChange, DocOp, DocOpEncoder,
     DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
@@ -9,7 +8,9 @@ use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::expanded_op::ExpandedOpIterator;
 use crate::internal::InternalOpType;
 use crate::legacy as amp;
-use crate::{ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT};
+use crate::{
+    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, Transaction, HEAD, ROOT,
+};
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -211,8 +212,7 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     change.message.encode(&mut bytes).unwrap();
     let message = message..bytes.len();
 
-    let expanded_ops =
-        ExpandedOpIterator::new(&change.operations, change.start_op, change.actor_id.clone());
+    let expanded_ops = ExpandedOpIterator::new(&change.operations, change.start_op);
 
     // encode ops into a side buffer - collect all other actors
     let (ops_buf, mut ops) = ColumnEncoder::encode_ops(expanded_ops, &mut actors);
@@ -449,11 +449,7 @@ fn export_opid(id: &OpId, actors: &IndexedCache<ActorId>) -> amp::OpId {
     amp::OpId(id.0, actors.get(id.1).clone())
 }
 
-fn export_op(
-    op: &Op,
-    actors: &IndexedCache<ActorId>,
-    props: &IndexedCache<String>,
-) -> amp::Op {
+fn export_op(op: &Op, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> amp::Op {
     let action = op.action.clone();
     let key = match &op.key {
         Key::Map(n) => amp::Key::Map(props.get(*n).clone().into()),

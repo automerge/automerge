@@ -1,4 +1,5 @@
-use crate::legacy::{Diff, ScalarValue};
+use crate::legacy::Diff;
+use crate::ScalarValue;
 
 impl From<&ScalarValue> for Diff {
     fn from(v: &ScalarValue) -> Self {

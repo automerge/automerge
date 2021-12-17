@@ -8,8 +8,8 @@ use std::{
 use flate2::{bufread::DeflateEncoder, Compression};
 use smol_str::SmolStr;
 
-use crate::{ ActorId };
 use crate::columnar::COLUMN_TYPE_DEFLATE;
+use crate::ActorId;
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
 

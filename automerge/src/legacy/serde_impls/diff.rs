@@ -10,8 +10,8 @@ use smol_str::SmolStr;
 
 use super::read_field;
 use crate::legacy::{
-    CursorDiff, DataType, Diff, DiffEdit, ListDiff, MapDiff, MapType, ObjType, ObjectId, OpId,
-    ScalarValue, SequenceType, TableDiff, TextDiff,
+    DataType, Diff, DiffEdit, ListDiff, MapDiff, MapType, ObjType, ObjectId, OpId, ScalarValue,
+    SequenceType, TableDiff, TextDiff,
 };
 
 impl Serialize for Diff {
@@ -91,7 +91,6 @@ impl Serialize for Diff {
                     op.end()
                 }
             },
-            Diff::Cursor(diff) => diff.serialize(serializer),
         }
     }
 }
@@ -192,24 +191,9 @@ impl<'de> Deserialize<'de> for Diff {
                 }
                 if value.is_some() || datatype.is_some() {
                     let datatype = datatype.unwrap_or(DataType::Undefined);
-                    match datatype {
-                        DataType::Cursor => {
-                            let ref_object_id =
-                                ref_object_id.ok_or_else(|| Error::missing_field("refObjectId"))?;
-                            let elem_id = elem_id.ok_or_else(|| Error::missing_field("elemId"))?;
-                            let index = index.ok_or_else(|| Error::missing_field("index"))?;
-                            Ok(Diff::Cursor(CursorDiff {
-                                object_id: ref_object_id,
-                                elem_id,
-                                index,
-                            }))
-                        }
-                        _ => {
-                            let value = value.ok_or_else(|| Error::missing_field("value"))?;
-                            let value_with_datatype = maybe_add_datatype_to_value(value, datatype);
-                            Ok(Diff::Value(value_with_datatype))
-                        }
-                    }
+                    let value = value.ok_or_else(|| Error::missing_field("value"))?;
+                    let value_with_datatype = maybe_add_datatype_to_value(value, datatype);
+                    Ok(Diff::Value(value_with_datatype))
                 } else {
                     let object_id = object_id.ok_or_else(|| Error::missing_field("objectId"))?;
                     let diff_type = diff_type.ok_or_else(|| Error::missing_field("type"))?;
@@ -303,11 +287,11 @@ fn maybe_add_datatype_to_value(value: ScalarValue, datatype: DataType) -> Scalar
 
 #[cfg(test)]
 mod tests {
-    use std::{convert::TryInto, str::FromStr};
+    use std::str::FromStr;
 
     use maplit::hashmap;
 
-    use crate::legacy::{CursorDiff, Diff, ListDiff, MapDiff, ObjectId, OpId};
+    use crate::legacy::{Diff, ListDiff, MapDiff, ObjectId, OpId};
 
     #[test]
     fn map_diff_serialization_round_trip() {
@@ -394,23 +378,6 @@ mod tests {
                            //]
         });
 
-        assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());
-        assert_eq!(serde_json::from_value::<Diff>(json).unwrap(), diff);
-    }
-
-    #[test]
-    fn cursor_diff_serialization_round_trip() {
-        let json = serde_json::json!({
-            "datatype": "cursor",
-            "refObjectId": "1@4a093244de2b4fd0a4203724e15dfc16",
-            "elemId": "2@4a093244de2b4fd0a4203724e15dfc16",
-            "index": 0 as i64,
-        });
-        let diff = Diff::Cursor(CursorDiff {
-            object_id: "1@4a093244de2b4fd0a4203724e15dfc16".try_into().unwrap(),
-            elem_id: "2@4a093244de2b4fd0a4203724e15dfc16".try_into().unwrap(),
-            index: 0,
-        });
         assert_eq!(json, serde_json::to_value(diff.clone()).unwrap());
         assert_eq!(serde_json::from_value::<Diff>(json).unwrap(), diff);
     }

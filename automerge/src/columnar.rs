@@ -11,8 +11,8 @@ use std::{
     str,
 };
 
-use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, ScalarValue };
 use crate::ROOT;
+use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, ScalarValue};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -463,14 +463,6 @@ impl<'a> Iterator for ValueIterator<'a> {
                     None
                 }
             }
-            v if v % 16 == VALUE_TYPE_CURSOR => {
-                if let (Some(actor), Some(ctr)) = (actor, ctr) {
-                    let actor_id = self.actors.get(actor)?;
-                    Some(ScalarValue::Cursor(amp::OpId(ctr, actor_id.clone())))
-                } else {
-                    None
-                }
-            }
             _ => {
                 // unknown command
                 None
@@ -572,10 +564,8 @@ impl ValEncoder {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
-        if !matches!(val, ScalarValue::Cursor(_)) {
-            self.ref_actor.append_null();
-            self.ref_counter.append_null();
-        }
+        self.ref_actor.append_null();
+        self.ref_counter.append_null();
         match val {
             ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
             ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
@@ -610,16 +600,6 @@ impl ValEncoder {
             ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
-            }
-            ScalarValue::Cursor(opid) => {
-                unimplemented!()
-                /*
-                // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
-                self.len.append_value(VALUE_TYPE_CURSOR);
-                let actor_index = actors[opid.1];
-                self.ref_actor.append_value(actor_index);
-                self.ref_counter.append_value(opid.0);
-                */
             }
         }
     }
@@ -628,10 +608,8 @@ impl ValEncoder {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
-        if !matches!(val, ScalarValue::Cursor(_)) {
-            self.ref_actor.append_null();
-            self.ref_counter.append_null();
-        }
+        self.ref_actor.append_null();
+        self.ref_counter.append_null();
         match val {
             ScalarValue::Null => self.len.append_value(VALUE_TYPE_NULL),
             ScalarValue::Boolean(true) => self.len.append_value(VALUE_TYPE_TRUE),
@@ -666,13 +644,6 @@ impl ValEncoder {
             ScalarValue::F64(n) => {
                 let len = (*n).encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_IEEE754);
-            }
-            ScalarValue::Cursor(opid) => {
-                // the cursor opid are encoded in DocOpEncoder::encode and ColumnEncoder::encode
-                self.len.append_value(VALUE_TYPE_CURSOR);
-                let actor_index = map_actor(&opid.1, actors);
-                self.ref_actor.append_value(actor_index);
-                self.ref_counter.append_value(opid.0);
             }
         }
     }
@@ -1115,7 +1086,6 @@ impl DocOpEncoder {
                         ObjType::Text => Action::MakeText,
                     }
                 }
-                amp::OpType::MultiSet(_) => unimplemented!(),
             };
             self.action.append_value(action);
         }

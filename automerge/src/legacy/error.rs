@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::legacy::{DataType, ScalarValue, ScalarValueKind};
+use crate::legacy::{DataType, ScalarValue};
 
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]
@@ -29,12 +29,4 @@ pub struct InvalidScalarValue {
     pub datatype: DataType,
     pub unexpected: String,
     pub expected: String,
-}
-
-#[derive(Error, Debug, PartialEq)]
-pub enum InvalidScalarValues {
-    #[error("No scalar values")]
-    Empty,
-    #[error("Expected kind: `{0}` but got kind: `{1}`")]
-    UnexpectedKind(ScalarValueKind, ScalarValueKind),
 }

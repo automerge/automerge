@@ -8,7 +8,6 @@ mod change_hash;
 mod cursor_diff;
 mod diff;
 mod element_id;
-mod multi_element_insert;
 mod object_id;
 mod op;
 mod op_type;

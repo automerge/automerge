@@ -1,13 +1,13 @@
-use crate::legacy as amp;
-use std::cmp::Eq;
-use std::fmt;
-use tinyvec::{ArrayVec, TinyVec};
-use std::num::NonZeroU32;
-use std::convert::TryFrom;
 use crate::error;
-use std::str::FromStr;
-use serde::{ Deserialize, Serialize };
+use crate::legacy as amp;
 use crate::ScalarValue;
+use serde::{Deserialize, Serialize};
+use std::cmp::Eq;
+use std::convert::TryFrom;
+use std::fmt;
+use std::num::NonZeroU32;
+use std::str::FromStr;
+use tinyvec::{ArrayVec, TinyVec};
 
 pub const HEAD: ElemId = ElemId(OpId(0, 0));
 pub const ROOT: OpId = OpId(0, 0);
@@ -151,7 +151,6 @@ impl fmt::Display for ObjType {
     }
 }
 
-
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
     Make(ObjType),
@@ -159,7 +158,6 @@ pub enum OpType {
     Del(NonZeroU32),
     Inc(i64),
     Set(ScalarValue),
-    MultiSet(amp::ScalarValues),
 }
 
 #[derive(Debug)]
@@ -393,7 +391,6 @@ impl Op {
             amp::OpType::Make(obj) => format!("make{}", obj),
             amp::OpType::Inc(val) => format!("inc:{}", val),
             amp::OpType::Del(_) => "del".to_string(),
-            amp::OpType::MultiSet(_) => "multiset".to_string(),
         }
     }
 }
