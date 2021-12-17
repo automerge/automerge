@@ -35,6 +35,7 @@
               [
                 (rust.override {
                   extensions = [ "rust-src" ];
+                  targets = [ "wasm32-unknown-unknown" ];
                 })
                 cargo-edit
                 cargo-watch
