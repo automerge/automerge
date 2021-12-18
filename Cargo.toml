@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "automerge",
+    "automerge-wasm",
+    "edit-trace",
+]
+
+[profile.release]
+debug = true
+lto = true
+opt-level = 3
