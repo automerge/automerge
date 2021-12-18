@@ -1,6 +1,34 @@
-# Automerge Experiment
+# Automerge - NEXT
 
-### Setup
+This is pretty much a ground up rewrite of automerge-rs. The objective of this
+rewrite is to radically simplify the API. The end goal being to produce a library
+which is easy to work with both in Rust and from FFI.
+
+## How?
+
+The current iteration of automerge-rs is complicated to work with because it
+adopts the frontend/backend split architecture of the JS implementation. This
+architecture was necessary due to basic operations on the automerge opset being
+too slow to perform on the UI thread. Recently @orionz has been able to improve
+the performance to the point where the split is no longer necessary. This means
+we can adopt a much simpler mutable API.
+
+The architecture is now built around the `OpTree`. This is a data structure
+which supports efficiently inserting new operations and realising values of
+existing operations. Most interactions with the `OpTree` are in the form of
+implementations of `TreeQuery` - a trait which can be used to traverse the
+optree and producing state of some kind. User facing operations are exposed on
+an `Automerge` object, under the covers these operations typically instantiate
+some `TreeQuery` and run it over the `OpTree`.
+
+## Status
+
+We have working code which passes all of the tests in the JS test suite. We're
+now working on writing a bunch more tests and cleaning up the API.
+
+## Development
+
+### Running the JS tests
 
 You will need to have [node](https://nodejs.org/en/), [yarn](https://yarnpkg.com/getting-started/install), [rust](https://rustup.rs/) and [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/) installed.
 
