@@ -227,31 +227,44 @@ function equals() {
 function uuid() {
 }
 
-function encodeSyncMessage() {
+function encodeSyncMessage(msg) {
+  return AutomergeWASM.encodeSyncMessage(msg)
 }
 
-function decodeSyncMessage() {
+function decodeSyncMessage(msg) {
+  return AutomergeWASM.decodeSyncMessage(msg)
 }
 
-function encodeSyncState() {
+function encodeSyncState(state) {
+  return AutomergeWASM.encodeSyncState(state)
 }
 
 function decodeSyncState() {
+  return AutomergeWASM.decodeSyncState(state)
 }
 
-function generateSyncMessage() {
+function generateSyncMessage(doc, syncState) {
+  const state = doc[STATE]
+  return [ syncState, state.generateSyncMessage(syncState) ]
 }
 
-function receiveSyncMessage() {
+function receiveSyncMessage(doc, syncState, message) {
+  if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
+    throw new RangeError("must be the document root");
+  }
+  if (doc[FROZEN] === true) {
+    throw new RangeError("Attempting to use an outdated Automerge document")
+  }
+  if (doc[READ_ONLY] === false) {
+    throw new RangeError("Calls to Automerge.change cannot be nested")
+  }
+  const state = doc[STATE].clone()
+  state.receiveSyncMessage(syncState, message)
+  return [rootProxy(state, true), syncState, null];
 }
 
 function initSyncState() {
-}
-
-function encodeDocument() {
-}
-
-function decodeDocument() {
+  return AutomergeWASM.initSyncState(change)
 }
 
 function encodeChange(change) {
@@ -286,6 +299,11 @@ function getMissingDeps(doc, heads) {
   return state.getMissingDeps(heads)
 }
 
+function getHeads(doc) {
+  const state = doc[STATE]
+  return state.getHeads()
+}
+
 function dump(doc) {
   const state = doc[STATE]
   state.dump()
@@ -295,7 +313,7 @@ module.exports = {
     init, from, change, emptyChange, clone, free,
     load, save, merge, getChanges, getAllChanges, applyChanges,
     getLastLocalChange, getObjectId, getActorId, getConflicts,
-    encodeChange, decodeChange, equals, getHistory, uuid,
+    encodeChange, decodeChange, equals, getHistory, getHeads, uuid,
     generateSyncMessage, receiveSyncMessage, initSyncState,
     decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState,
     getMissingDeps,

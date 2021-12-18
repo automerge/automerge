@@ -2,6 +2,9 @@ extern crate web_sys;
 use automerge as am;
 use automerge::{Change, ChangeHash, Prop, Value};
 use js_sys::{Array, Object, Reflect, Uint8Array};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
@@ -55,6 +58,43 @@ impl From<ScalarValue> for JsValue {
 #[wasm_bindgen]
 #[derive(Debug)]
 pub struct Automerge(automerge::Automerge);
+
+#[wasm_bindgen]
+#[derive(Debug)]
+pub struct SyncState(am::SyncState);
+
+#[wasm_bindgen]
+impl SyncState {
+    #[wasm_bindgen(getter, js_name = sharedHeads)]
+    pub fn shared_heads(&self) -> JsValue {
+        rust_to_js(&self.0.shared_heads).unwrap()
+    }
+
+    #[wasm_bindgen(getter, js_name = lastSentHeads)]
+    pub fn last_sent_heads(&self) -> JsValue {
+        rust_to_js(self.0.last_sent_heads.as_ref()).unwrap()
+    }
+
+    #[wasm_bindgen(setter, js_name = lastSentHeads)]
+    pub fn set_last_sent_heads(&mut self, heads: JsValue) {
+        let heads: Option<Vec<ChangeHash>> = js_to_rust(&heads).unwrap();
+        self.0.last_sent_heads = heads
+    }
+
+    #[wasm_bindgen(setter, js_name = sentHashes)]
+    pub fn set_sent_hashes(&mut self, hashes: JsValue) {
+        let hashes_map: HashMap<ChangeHash, bool> = js_to_rust(&hashes).unwrap();
+        let hashes_set: HashSet<ChangeHash> = hashes_map.keys().cloned().collect();
+        self.0.sent_hashes = hashes_set
+    }
+
+    fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
+        let data = data.to_vec();
+        let s = am::SyncState::decode(&data);
+        let s = s.map_err(to_js_err)?;
+        Ok(SyncState(s))
+    }
+}
 
 #[derive(Debug)]
 pub struct JsErr(String);
@@ -349,6 +389,29 @@ impl Automerge {
         Ok(deps)
     }
 
+    #[wasm_bindgen(js_name = receiveSyncMessage)]
+    pub fn receive_sync_message(
+        &mut self,
+        state: &mut SyncState,
+        message: Uint8Array,
+    ) -> Result<(), JsValue> {
+        let message = message.to_vec();
+        let message = am::SyncMessage::decode(message.as_slice()).map_err(to_js_err)?;
+        self.0
+            .receive_sync_message(&mut state.0, message)
+            .map_err(to_js_err)?;
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = generateSyncMessage)]
+    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
+        if let Some(message) = self.0.generate_sync_message(&mut state.0) {
+            Ok(Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into())
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
     fn export<E: automerge::Exportable>(&self, val: E) -> JsValue {
         self.0.export(val).into()
     }
@@ -513,16 +576,9 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     JsValue::from_serde(&change).map_err(to_js_err)
 }
 
-#[wasm_bindgen(js_name = decodeDocument)]
-pub fn decode_document(data: Uint8Array) -> Result<Array, JsValue> {
-    let data = data.to_vec();
-    let mut automerge = am::Automerge::load(&data).map_err(to_js_err)?;
-    let changes = automerge.get_changes(&[]);
-    let changes: Array = changes
-        .iter()
-        .map(|c| Uint8Array::from(c.raw_bytes()))
-        .collect();
-    Ok(changes)
+#[wasm_bindgen(js_name = initSyncState)]
+pub fn init_sync_state() -> SyncState {
+    SyncState(Default::default())
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
@@ -561,21 +617,15 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(state: JsValue) -> Result<Uint8Array, JsValue> {
-    let shared_heads = get(&state, "sharedHeads")?.try_into()?;
-    let sync_state = automerge::SyncState { shared_heads, ..Default::default() };
+pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
     Ok(Uint8Array::from(
-        sync_state.encode().map_err(to_js_err)?.as_slice(),
+        state.0.encode().map_err(to_js_err)?.as_slice(),
     ))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(state: Uint8Array) -> Result<JsValue, JsValue> {
-    let state = am::SyncState::decode(&state.to_vec()).map_err(to_js_err)?;
-    let shared_heads: Array = VH(&state.shared_heads).into();
-    let obj = Object::new().into();
-    set(&obj, "sharedHeads", shared_heads)?;
-    Ok(obj)
+pub fn decode_sync_state(state: Uint8Array) -> Result<SyncState, JsValue> {
+    SyncState::decode(state)
 }
 
 #[wasm_bindgen(js_name = MAP)]
@@ -713,4 +763,12 @@ impl<'a> TryFrom<VSH<'a>> for Array {
         let have = have?;
         Ok(have)
     }
+}
+
+fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
+    JsValue::from_serde(&value).map_err(to_js_err)
+}
+
+fn js_to_rust<T: DeserializeOwned>(value: &JsValue) -> Result<T, JsValue> {
+    value.into_serde().map_err(to_js_err)
 }

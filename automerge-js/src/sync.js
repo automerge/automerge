@@ -16,7 +16,8 @@
  * last sync to disk), and we fall back to sending the entire document in this case.
  */
 
-const Backend = require('./backend')
+//const Backend = require('./backend')
+const Backend = {} //require('./backend')
 const { hexStringToBytes, bytesToHexString, Encoder, Decoder } = require('./encoding')
 const { decodeChangeMeta } = require('./columnar')
 const { copyObject } = require('../src/common')
