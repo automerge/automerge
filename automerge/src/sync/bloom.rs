@@ -17,6 +17,8 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
+    // FIXME - we can avoid a result here - why do we need to consume the bloom filter?  requires
+    // me to clone in places I shouldn't need to
     pub fn into_bytes(self) -> Result<Vec<u8>, encoding::Error> {
         if self.num_entries == 0 {
             Ok(Vec::new())

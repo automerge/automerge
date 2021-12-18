@@ -46,14 +46,13 @@ use change::{encode_document, export_change};
 use indexed_cache::IndexedCache;
 use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
-use sync::BloomFilter;
 use types::{ObjId, Op, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
-pub use sync::{SyncMessage, SyncState};
+pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{
     ActorId, ChangeHash, ElemId, Export, Exportable, Importable, Key, ObjType, OpId, OpType, Patch,
     Peer, Prop, ROOT,

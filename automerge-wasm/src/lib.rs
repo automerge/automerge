@@ -1,13 +1,12 @@
-#![allow(unused_variables)]
+extern crate web_sys;
 use automerge as am;
-use automerge::{Prop, Value};
-use js_sys::{Array, Uint8Array};
+use automerge::{Change, ChangeHash, Prop, Value};
+use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-extern crate web_sys;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -40,7 +39,7 @@ pub struct ScalarValue(am::ScalarValue);
 impl From<ScalarValue> for JsValue {
     fn from(val: ScalarValue) -> Self {
         match &val.0 {
-            am::ScalarValue::Bytes(v) => js_sys::Uint8Array::from(v.as_slice()).into(),
+            am::ScalarValue::Bytes(v) => Uint8Array::from(v.as_slice()).into(),
             am::ScalarValue::Str(v) => v.to_string().into(),
             am::ScalarValue::Int(v) => (*v as f64).into(),
             am::ScalarValue::Uint(v) => (*v as f64).into(),
@@ -249,7 +248,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn length(&mut self, obj: JsValue, arg: JsValue) -> Result<JsValue, JsValue> {
+    pub fn length(&mut self, obj: JsValue, _heads: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let len = self.0.length(obj) as f64;
         Ok(len.into())
@@ -265,44 +264,37 @@ impl Automerge {
     pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
         self.0
             .save()
-            .map(|v| js_sys::Uint8Array::from(v.as_slice()))
+            .map(|v| Uint8Array::from(v.as_slice()))
             .map_err(to_js_err)
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
     pub fn save_incremental(&mut self) -> JsValue {
         let bytes = self.0.save_incremental();
-        js_sys::Uint8Array::from(bytes.as_slice()).into()
+        Uint8Array::from(bytes.as_slice()).into()
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
-    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<JsValue,JsValue> {
+    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<JsValue, JsValue> {
         let data = data.to_vec();
         let len = self.0.load_incremental(&data).map_err(to_js_err)?;
         Ok(len.into())
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: Array) -> Result<(), JsValue> {
-        let deps: Result<Vec<js_sys::Uint8Array>, _> =
-            changes.iter().map(|j| j.dyn_into()).collect();
-        let deps = deps?;
-        let deps: Result<Vec<am::Change>, _> =
-            deps.iter().map(|a| am::decode_change(a.to_vec())).collect();
-        let deps = deps.map_err(to_js_err)?;
-        self.0.apply_changes(deps.as_ref()).map_err(to_js_err)?;
+    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+        let changes: Vec<_> = JS(changes).try_into()?;
+        self.0.apply_changes(&changes).map_err(to_js_err)?;
         Ok(())
     }
 
     #[wasm_bindgen(js_name = getChanges)]
-    pub fn get_changes(&mut self, have_deps: Array) -> Result<Array, JsValue> {
-        let deps: Result<Vec<am::ChangeHash>, _> =
-            have_deps.iter().map(|j| j.into_serde()).collect();
-        let deps = deps.map_err(to_js_err)?;
+    pub fn get_changes(&mut self, have_deps: JsValue) -> Result<Array, JsValue> {
+        let deps: Vec<_> = JS(have_deps).try_into()?;
         let changes = self.0.get_changes(&deps);
         let changes: Array = changes
             .iter()
-            .map(|c| js_sys::Uint8Array::from(c.raw_bytes()))
+            .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
         Ok(changes)
     }
@@ -312,7 +304,7 @@ impl Automerge {
         let changes = self.0.get_changes_added(&other.0);
         let changes: Array = changes
             .iter()
-            .map(|c| js_sys::Uint8Array::from(c.raw_bytes()))
+            .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
         Ok(changes)
     }
@@ -336,7 +328,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = getLastLocalChange)]
     pub fn get_last_local_change(&mut self) -> Result<JsValue, JsValue> {
         if let Some(change) = self.0.get_last_local_change() {
-            Ok(js_sys::Uint8Array::from(change.raw_bytes()).into())
+            Ok(Uint8Array::from(change.raw_bytes()).into())
         } else {
             Ok(JsValue::null())
         }
@@ -347,9 +339,8 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getMissingDeps)]
-    pub fn get_missing_deps(&mut self, heads: Array) -> Result<Array, JsValue> {
-        let heads: Result<Vec<am::ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();
-        let heads = heads.map_err(to_js_err)?;
+    pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, JsValue> {
+        let heads: Vec<_> = JS(heads).try_into()?;
         let deps = self.0.get_missing_deps(&heads);
         let deps: Array = deps
             .iter()
@@ -511,45 +502,80 @@ pub fn load(data: Uint8Array, actor: JsValue) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = encodeChange)]
 pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
     let change: am::ExpandedChange = change.into_serde().map_err(to_js_err)?;
-    let change: am::Change = change.into();
-    Ok(js_sys::Uint8Array::from(change.raw_bytes()))
+    let change: Change = change.into();
+    Ok(Uint8Array::from(change.raw_bytes()))
 }
 
 #[wasm_bindgen(js_name = decodeChange)]
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
-    let change = am::Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
+    let change = Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
     let change: am::ExpandedChange = change.decode();
     JsValue::from_serde(&change).map_err(to_js_err)
 }
 
-#[wasm_bindgen(js_name = encodeDocument)]
-pub fn encode_document(document: JsValue) -> Result<Uint8Array, JsValue> {
-    unimplemented!()
-}
-
 #[wasm_bindgen(js_name = decodeDocument)]
-pub fn decode_document(document: Uint8Array) -> Result<JsValue, JsValue> {
-    unimplemented!()
+pub fn decode_document(data: Uint8Array) -> Result<Array, JsValue> {
+    let data = data.to_vec();
+    let mut automerge = am::Automerge::load(&data).map_err(to_js_err)?;
+    let changes = automerge.get_changes(&[]);
+    let changes: Array = changes
+        .iter()
+        .map(|c| Uint8Array::from(c.raw_bytes()))
+        .collect();
+    Ok(changes)
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
 pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
-    unimplemented!()
+    let heads = get(&message, "heads")?.try_into()?;
+    let need = get(&message, "need")?.try_into()?;
+    let changes = get(&message, "changes")?.try_into()?;
+    let have = get(&message, "have")?.try_into()?;
+    Ok(Uint8Array::from(
+        am::SyncMessage {
+            heads,
+            need,
+            have,
+            changes,
+        }
+        .encode()
+        .unwrap()
+        .as_slice(),
+    ))
 }
 
 #[wasm_bindgen(js_name = decodeSyncMessage)]
-pub fn decode_sync_message(document: Uint8Array) -> Result<JsValue, JsValue> {
-    unimplemented!()
+pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
+    let data = msg.to_vec();
+    let msg = am::SyncMessage::decode(&data).map_err(to_js_err)?;
+    let heads: Array = VH(&msg.heads).into();
+    let need: Array = VH(&msg.need).into();
+    let changes: Array = VC(&msg.changes).into();
+    let have: Array = VSH(&msg.have).try_into()?;
+    let obj = Object::new().into();
+    set(&obj, "heads", heads)?;
+    set(&obj, "need", need)?;
+    set(&obj, "have", have)?;
+    set(&obj, "changes", changes)?;
+    Ok(obj)
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(document: JsValue) -> Result<Uint8Array, JsValue> {
-    unimplemented!()
+pub fn encode_sync_state(state: JsValue) -> Result<Uint8Array, JsValue> {
+    let shared_heads = get(&state, "sharedHeads")?.try_into()?;
+    let sync_state = automerge::SyncState { shared_heads, ..Default::default() };
+    Ok(Uint8Array::from(
+        sync_state.encode().map_err(to_js_err)?.as_slice(),
+    ))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(document: Uint8Array) -> Result<JsValue, JsValue> {
-    unimplemented!()
+pub fn decode_sync_state(state: Uint8Array) -> Result<JsValue, JsValue> {
+    let state = am::SyncState::decode(&state.to_vec()).map_err(to_js_err)?;
+    let shared_heads: Array = VH(&state.shared_heads).into();
+    let obj = Object::new().into();
+    set(&obj, "sharedHeads", shared_heads)?;
+    Ok(obj)
 }
 
 #[wasm_bindgen(js_name = MAP)]
@@ -566,4 +592,125 @@ pub struct Table {}
 
 fn to_js_err<T: Display>(err: T) -> JsValue {
     js_sys::Error::new(&std::format!("{}", err)).into()
+}
+
+fn get(obj: &JsValue, prop: &str) -> Result<JS, JsValue> {
+    Ok(JS(Reflect::get(obj, &prop.into())?))
+}
+
+fn set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsValue> {
+    Reflect::set(obj, &prop.into(), &val.into())
+}
+
+struct JS(JsValue);
+
+impl TryFrom<JS> for Vec<ChangeHash> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value.0.dyn_into::<Array>()?;
+        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value = value.map_err(to_js_err)?;
+        Ok(value)
+    }
+}
+
+impl TryFrom<JS> for Vec<Change> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value.0.dyn_into::<Array>()?;
+        let changes: Result<Vec<Uint8Array>, _> = value.iter().map(|j| j.dyn_into()).collect();
+        let changes = changes?;
+        let changes: Result<Vec<Change>, _> = changes
+            .iter()
+            .map(|a| am::decode_change(a.to_vec()))
+            .collect();
+        let changes = changes.map_err(to_js_err)?;
+        Ok(changes)
+    }
+}
+
+impl TryFrom<JS> for Vec<am::SyncHave> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value.0.dyn_into::<Array>()?;
+        let have: Result<Vec<am::SyncHave>, JsValue> = value
+            .iter()
+            .map(|s| {
+                let last_sync = get(&s, "lastSync")?.try_into()?;
+                let bloom = get(&s, "bloom")?.try_into()?;
+                Ok(am::SyncHave { last_sync, bloom })
+            })
+            .collect();
+        let have = have?;
+        Ok(have)
+    }
+}
+
+impl TryFrom<JS> for am::BloomFilter {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value: Uint8Array = value.0.dyn_into()?;
+        let value = value.to_vec();
+        let value = value.as_slice().try_into().map_err(to_js_err)?;
+        Ok(value)
+    }
+}
+
+struct VH<'a>(&'a [ChangeHash]);
+
+impl<'a> From<VH<'a>> for Array {
+    fn from(value: VH<'a>) -> Self {
+        let heads: Array = value
+            .0
+            .iter()
+            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .collect();
+        heads
+    }
+}
+
+struct VC<'a>(&'a [Change]);
+
+impl<'a> From<VC<'a>> for Array {
+    fn from(value: VC<'a>) -> Self {
+        let changes: Array = value
+            .0
+            .iter()
+            .map(|c| Uint8Array::from(c.raw_bytes()))
+            .collect();
+        changes
+    }
+}
+
+#[allow(clippy::upper_case_acronyms)]
+struct VSH<'a>(&'a [am::SyncHave]);
+
+impl<'a> TryFrom<VSH<'a>> for Array {
+    type Error = JsValue;
+
+    fn try_from(value: VSH<'a>) -> Result<Self, Self::Error> {
+        let have: Result<Array, JsValue> = value
+            .0
+            .iter()
+            .map(|have| {
+                let last_sync: Array = have
+                    .last_sync
+                    .iter()
+                    .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+                    .collect();
+                // FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
+                let bloom = Uint8Array::from(have.bloom.clone().into_bytes().unwrap().as_slice());
+                let obj: JsValue = Object::new().into();
+                Reflect::set(&obj, &"lastSync".into(), &last_sync.into())?;
+                Reflect::set(&obj, &"bloom".into(), &bloom.into())?;
+                Ok(obj)
+            })
+            .collect();
+        let have = have?;
+        Ok(have)
+    }
 }

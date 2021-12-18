@@ -7,18 +7,20 @@
   1. value() -> () or something that into's a value
 
 ### automerge:
-  1. one pass load (legacy)
-  2. valueAt()
-  3. micro-patches / bare bones observation API
+  1. single pass (fast) load
+  2. valueAt() / gc old documents
+  3. micro-patches / bare bones observation API / fully hydrated documents
 
-### automerge-wasm:
-  1. encode/decode peer & syncMessage
-
-### automerge-js:
-  1. fully hydrated document
-  2. gc old documents
+### sync
+  1. decodeSyncMessage
+  2. encodeSyncMessage
+  3. decodeSyncState
+  4. encodeSyncState
+  5. initSyncState
 
 ### maybe:
+  1. tables
+
+### no:
   1. cursors
-  2. tables
 
