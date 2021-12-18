@@ -281,12 +281,25 @@ impl Automerge {
     // inc(obj, prop, value)
     // insert(obj, index, value)
 
+    /// Set the value of property `P` to value `V` in object `obj`. 
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if 
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
     pub fn set<P: Into<Prop>, V: Into<Value>>(
         &mut self,
         obj: OpId,
         prop: P,
         value: V,
-    ) -> Result<OpId, AutomergeError> {
+    ) -> Result<Option<OpId>, AutomergeError> {
         let value = value.into();
         self.local_op(obj.into(), prop.into(), value.into())
     }
@@ -327,11 +340,18 @@ impl Automerge {
         prop: P,
         value: i64,
     ) -> Result<OpId, AutomergeError> {
-        self.local_op(obj.into(), prop.into(), OpType::Inc(value))
+        match self.local_op(obj.into(), prop.into(), OpType::Inc(value))? {
+            Some(opid) => Ok(opid),
+            None => { panic!("increment should always create a new op") }
+        }
     }
 
     pub fn del<P: Into<Prop>>(&mut self, obj: OpId, prop: P) -> Result<OpId, AutomergeError> {
-        self.local_op(obj.into(), prop.into(), OpType::Del)
+        // TODO: Should we also no-op multiple delete operations?
+        match self.local_op(obj.into(), prop.into(), OpType::Del)? {
+            Some(opid) => Ok(opid),
+            None => { panic!("increment should always create a new op") }
+        }
     }
 
     pub fn splice(
@@ -518,7 +538,7 @@ impl Automerge {
         }
     }
 
-    fn local_op(&mut self, obj: ObjId, prop: Prop, action: OpType) -> Result<OpId, AutomergeError> {
+    fn local_op(&mut self, obj: ObjId, prop: Prop, action: OpType) -> Result<Option<OpId>, AutomergeError> {
         match prop {
             Prop::Map(s) => self.local_map_op(obj, s, action),
             Prop::Seq(n) => self.local_list_op(obj, n, action),
@@ -530,7 +550,7 @@ impl Automerge {
         obj: ObjId,
         prop: String,
         action: OpType,
-    ) -> Result<OpId, AutomergeError> {
+    ) -> Result<Option<OpId>, AutomergeError> {
         if prop.is_empty() {
             return Err(AutomergeError::EmptyStringKey);
         }
@@ -539,7 +559,17 @@ impl Automerge {
         let prop = self.ops.m.props.cache(prop);
         let query = self.ops.search(query::Prop::new(obj, prop));
 
+        match (&query.ops[..], &action) {
+            // If there are no conflicts for this value and the old operation and the new operation are
+            // both setting the same value then we do nothing.
+            (&[Op{action: OpType::Set(ref old_v), ..}], OpType::Set(new_v)) if old_v == new_v => {
+                return Ok(None);
+            }
+            _ => {}
+        }
+
         let pred = query.ops.iter().map(|op| op.id).collect();
+
 
         let op = Op {
             change: self.history.len(),
@@ -552,9 +582,10 @@ impl Automerge {
             insert: false,
         };
 
+
         self.insert_local_op(op, query.pos, &query.ops_pos);
 
-        Ok(id)
+        Ok(Some(id))
     }
 
     fn local_list_op(
@@ -562,12 +593,22 @@ impl Automerge {
         obj: ObjId,
         index: usize,
         action: OpType,
-    ) -> Result<OpId, AutomergeError> {
+    ) -> Result<Option<OpId>, AutomergeError> {
         let query = self.ops.search(query::Nth::new(obj, index));
 
         let id = self.next_id();
         let pred = query.ops.iter().map(|op| op.id).collect();
         let key = query.key()?;
+
+        match (&query.ops[..], &action) {
+            // If there are no conflicts for this value and the old operation and the new operation are
+            // both setting the same value then we do nothing.
+            (&[Op{action: OpType::Set(ref old_v), ..}], OpType::Set(new_v)) if old_v == new_v => {
+                return Ok(None);
+            }
+            _ => {}
+        }
+
 
         let op = Op {
             change: self.history.len(),
@@ -582,7 +623,7 @@ impl Automerge {
 
         self.insert_local_op(op, query.pos, &query.ops_pos);
 
-        Ok(id)
+        Ok(Some(id))
     }
 
     fn is_causally_ready(&self, change: &Change) -> bool {
@@ -1053,7 +1094,7 @@ mod tests {
     fn test_list() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
-        let list_id = doc.set(ROOT, "items", Value::list())?;
+        let list_id = doc.set(ROOT, "items", Value::list())?.unwrap();
         doc.set(ROOT, "zzz", "zzzval")?;
         assert!(doc.value(ROOT, "items")?.unwrap().1 == list_id);
         doc.insert(list_id, 0, "a")?;
@@ -1083,7 +1124,7 @@ mod tests {
     #[test]
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        let id = doc.set(ROOT, "counter", Value::counter(10))?;
+        let id = doc.set(ROOT, "counter", Value::counter(10))?.unwrap();
         assert!(doc.value(ROOT, "counter")? == Some((Value::counter(10), id)));
         doc.inc(ROOT, "counter", 10)?;
         assert!(doc.value(ROOT, "counter")? == Some((Value::counter(20), id)));
@@ -1132,7 +1173,7 @@ mod tests {
     #[test]
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
-        let text = doc.set(ROOT, "text", Value::text())?;
+        let text = doc.set(ROOT, "text", Value::text())?.unwrap();
         doc.splice_text(text, 0, 0, "hello world")?;
         doc.splice_text(text, 6, 0, "big bad ")?;
         assert!(&doc.text(text)? == "hello big bad world");
