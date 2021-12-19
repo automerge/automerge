@@ -41,3 +41,7 @@ And finally to test the js library. This is where most of the tests reside.
   ## testing
   $ yarn test
 ```
+
+## Benchmarking
+
+The `edit-trace` folder has the main code for running the edit trace benchmarking.
