@@ -206,6 +206,13 @@ impl<const B: usize> OpTreeInternal<B> {
     pub fn set(&mut self, index: usize, element: Op) -> Op {
         self.root_node.as_mut().unwrap().set(index, element)
     }
+
+    #[cfg(feature = "optree-visualisation")]
+    /// Generates a graphvis representation of the optree
+    pub fn visualise<W: std::io::Write>(&self, write: &mut W) -> std::io::Result<()> {
+        let graph = visualisation::GraphVisualisation::construct(self);
+        dot::render(&graph, write)
+    }
 }
 
 impl<const B: usize> OpTreeNode<B> {
@@ -913,4 +920,191 @@ mod tests {
 
         }
     */
+}
+
+#[cfg(feature = "optree-visualisation")]
+mod visualisation {
+    use std::{borrow::Cow, collections::HashMap};
+
+    use dot;
+    use rand::Rng;
+
+    #[derive(Copy, Clone, PartialEq, Hash, Eq)]
+    pub struct NodeId(u64);
+
+    impl Default for NodeId {
+        fn default() -> Self {
+            let mut rng = rand::thread_rng();
+            let u = rng.gen();
+            NodeId(u)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct Node<'a, const B: usize> {
+        id: NodeId,
+        children: Vec<NodeId>,
+        node: &'a super::OpTreeNode<B>,
+        metadata: &'a super::OpSetMetadata,
+    }
+
+    #[derive(Clone)]
+    pub struct Edge {
+        parent_id: NodeId,
+        child_id: NodeId,
+    }
+
+    pub struct GraphVisualisation<'a, const B: usize> {
+        nodes: HashMap<NodeId, Node<'a, B>>,
+    }
+
+    impl<'a, const B: usize> GraphVisualisation<'a, B> {
+        pub(super) fn construct(tree: &'a super::OpTreeInternal<B>) -> GraphVisualisation<'a, B> {
+            let mut nodes = HashMap::new();
+            if let Some(root) = &tree.root_node {
+                Self::construct_nodes(&root, &mut nodes, &tree.m);
+            }
+            GraphVisualisation { nodes }
+        }
+
+        fn construct_nodes(
+            node: &'a super::OpTreeNode<B>,
+            nodes: &mut HashMap<NodeId, Node<'a, B>>,
+            m: &'a super::OpSetMetadata,
+        ) -> NodeId {
+            let node_id = NodeId::default();
+            let mut child_ids = Vec::new();
+            for child in &node.children {
+                let child_id = Self::construct_nodes(child, nodes, m);
+                child_ids.push(child_id);
+            }
+            nodes.insert(
+                node_id,
+                Node {
+                    id: node_id,
+                    children: child_ids,
+                    node,
+                    metadata: m,
+                },
+            );
+            node_id
+        }
+    }
+
+    impl<'a, const B: usize> dot::GraphWalk<'a, &'a Node<'a, B>, Edge> for GraphVisualisation<'a, B> {
+        fn nodes(&'a self) -> dot::Nodes<'a, &'a Node<'a, B>> {
+            Cow::Owned(self.nodes.values().collect::<Vec<_>>())
+        }
+
+        fn edges(&'a self) -> dot::Edges<'a, Edge> {
+            let mut edges = Vec::new();
+            for node in self.nodes.values() {
+                for child in &node.children {
+                    edges.push(Edge {
+                        parent_id: node.id,
+                        child_id: *child,
+                    });
+                }
+            }
+            Cow::Owned(edges)
+        }
+
+        fn source(&'a self, edge: &Edge) -> &'a Node<'a, B> {
+            self.nodes.get(&edge.parent_id).unwrap()
+        }
+
+        fn target(&'a self, edge: &Edge) -> &'a Node<'a, B> {
+            self.nodes.get(&edge.child_id).unwrap()
+        }
+    }
+
+    impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisualisation<'a, B> {
+        fn graph_id(&'a self) -> dot::Id<'a> {
+            dot::Id::new("optree").unwrap()
+        }
+
+        fn node_id(&'a self, n: &&Node<'a, B>) -> dot::Id<'a> {
+            dot::Id::new(format!("node_{}", n.id.0.to_string())).unwrap()
+        }
+
+        fn node_shape(&'a self, _node: &&'a Node<'a, B>) -> Option<dot::LabelText<'a>> {
+            Some(dot::LabelText::label("none"))
+        }
+
+        fn node_label(&'a self, n: &&Node<'a, B>) -> dot::LabelText<'a> {
+            dot::LabelText::HtmlStr(OpTable::from(*n).to_html().into())
+        }
+    }
+
+    struct OpTable {
+        rows: Vec<OpTableRow>,
+    }
+
+    impl<'a, const B: usize> From<&'a Node<'a, B>> for OpTable {
+        fn from(node: &'a Node<'a, B>) -> Self {
+            let rows = node
+                .node
+                .elements
+                .iter()
+                .map(|e| OpTableRow::create(e, node.metadata))
+                .collect();
+            OpTable { rows }
+        }
+    }
+
+    impl OpTable {
+        fn to_html(&self) -> String {
+            let rows = self
+                .rows
+                .iter()
+                .map(|r| r.to_html())
+                .collect::<Vec<_>>()
+                .join("");
+            format!(
+                "<table cellspacing=\"0\">\
+                <tr><td>op</td><td>obj</td><td>prop</td><td>action</td></tr>\
+                <hr/>\
+                {}\
+                </table>",
+                rows
+            )
+        }
+    }
+
+    struct OpTableRow {
+        obj_id: String,
+        op_id: String,
+        prop: String,
+        op_description: String,
+    }
+
+    impl OpTableRow {
+        fn to_html(&self) -> String {
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                self.op_id, self.obj_id, self.prop, self.op_description
+            )
+        }
+    }
+
+    impl OpTableRow {
+        fn create(op: &super::Op, metadata: &super::OpSetMetadata) -> Self {
+            let op_description = match &op.action {
+                crate::OpType::Del => "del".to_string(),
+                crate::OpType::Set(v) => format!("set {}", v),
+                crate::OpType::Make(obj) => format!("make {}", obj),
+                crate::OpType::Inc(v) => format!("inc {}", v),
+            };
+            let prop = match op.key {
+                crate::Key::Map(k) => metadata.props[k].clone(),
+                crate::Key::Seq(e) => format!("{}@{}", e.0.counter(), e.0.actor()),
+            };
+            OpTableRow {
+                op_description,
+                obj_id: format!("{}@{}", op.obj.0.counter(), op.obj.0.actor()),
+                op_id: format!("{}@{}", op.id.counter(), op.id.actor()),
+                prop,
+            }
+        }
+    }
 }

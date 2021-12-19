@@ -5,6 +5,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+optree-visualisation = ["dot"]
+
 [dependencies]
 hex = "^0.4.3"
 leb128 = "^0.2.5"
@@ -21,6 +24,7 @@ fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
 unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
+dot = { version = "0.1.4", optional = true }
 
 [dependencies.web-sys]
 version = "^0.3.55"
