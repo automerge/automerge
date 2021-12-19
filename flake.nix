@@ -46,6 +46,7 @@
                 wasm-pack
                 pkgconfig
                 openssl
+                gnuplot
 
                 nodejs
                 yarn
