@@ -1014,6 +1014,13 @@ impl Automerge {
             );
         }
     }
+
+    #[cfg(feature = "optree-visualisation")]
+    pub fn visualise_optree(&self) -> String {
+        let mut out = Vec::new();
+        self.ops.visualise(&mut out).unwrap();
+        String::from_utf8_lossy(&out[..]).to_string()
+    }
 }
 
 #[derive(Debug, Clone)]
