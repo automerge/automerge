@@ -59,16 +59,8 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
         }
         match self.op.key {
             Key::Seq(e) if e == HEAD => {
-                self.pos = binary_search_by(child, |op| {
-                    m.lamport_cmp(op.obj.0, self.op.obj.0)
-                    //.then_with(|| m.key_cmp(&op.key, &self.op.key))
-                    //.then_with(|| m.lamport_cmp(op.id, self.op.id))
-                });
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
-                    if op.obj != self.op.obj {
-                        break;
-                    }
                     if self.op.overwrites(op) {
                         self.succ.push(self.pos);
                     }
@@ -88,16 +80,9 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 }
             }
             Key::Map(_) => {
-                self.pos = binary_search_by(child, |op| {
-                    m.lamport_cmp(op.obj.0, self.op.obj.0)
-                        .then_with(|| m.key_cmp(&op.key, &self.op.key))
-                    //.then_with(|| m.lamport_cmp(op.id, self.op.id))
-                });
+                self.pos = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
-                    if op.obj != self.op.obj {
-                        break;
-                    }
                     if op.key != self.op.key {
                         break;
                     }

@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::{ElemId, ObjId, Op, OpId, OpType, ScalarValue};
+use crate::{ElemId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,6 @@ mod list_vals;
 mod list_vals_at;
 mod nth;
 mod nth_at;
-mod opid;
 mod prop;
 mod prop_at;
 mod seek_op;
@@ -28,8 +27,6 @@ pub(crate) use list_vals::ListVals;
 pub(crate) use list_vals_at::ListValsAt;
 pub(crate) use nth::Nth;
 pub(crate) use nth_at::NthAt;
-#[allow(unused_imports)]
-pub(crate) use opid::OpIdQuery;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
 pub(crate) use seek_op::SeekOp;
@@ -75,41 +72,39 @@ pub(crate) enum QueryResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
-    pub visible: HashMap<ObjId, HashMap<ElemId, usize, FxBuildHasher>, FxBuildHasher>,
-    pub lens: HashMap<ObjId, usize, FxBuildHasher>,
+    pub len: usize,
+    pub visible: HashMap<ElemId, usize, FxBuildHasher>,
     pub ops: HashSet<OpId, FxBuildHasher>,
 }
 
 impl Index {
     pub fn new() -> Self {
         Index {
+            len: 0,
             visible: Default::default(),
-            lens: Default::default(),
             ops: Default::default(),
         }
     }
 
-    pub fn has(&self, obj: &ObjId, e: &Option<ElemId>) -> bool {
+    pub fn has(&self, e: &Option<ElemId>) -> bool {
         if let Some(seen) = e {
-            if let Some(sub) = self.visible.get(obj) {
-                return sub.contains_key(seen);
-            }
+            self.visible.contains_key(seen)
+        } else {
+            false
         }
-        false
     }
 
     pub fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.succ.is_empty() {
             if let Some(elem) = op.elemid() {
-                let sub = self.visible.entry(op.obj).or_default();
-                match sub.get(&elem).copied() {
-                    None => {
-                        sub.insert(elem, 1);
-                        self.lens.entry(op.obj).and_modify(|n| *n += 1).or_insert(1);
-                    }
+                match self.visible.get(&elem).copied() {
                     Some(n) => {
-                        sub.insert(elem, n + 1);
+                        self.visible.insert(elem, n + 1);
+                    }
+                    None => {
+                        self.len += 1;
+                        self.visible.insert(elem, 1);
                     }
                 }
             }
@@ -119,23 +114,17 @@ impl Index {
     pub fn remove(&mut self, op: &Op) {
         self.ops.remove(&op.id);
         if op.succ.is_empty() {
-            let mut sub_empty = false;
             if let Some(elem) = op.elemid() {
-                if let Some(c) = self.visible.get_mut(&op.obj) {
-                    if let Some(d) = c.get(&elem).copied() {
-                        if d == 1 {
-                            c.remove(&elem);
-                            self.lens.entry(op.obj).and_modify(|n| *n -= 1);
-                            sub_empty = c.is_empty();
-                        } else {
-                            c.insert(elem, d - 1);
-                        }
+                match self.visible.get(&elem).copied() {
+                    Some(n) if n == 1 => {
+                        self.len -= 1;
+                        self.visible.remove(&elem);
                     }
+                    Some(n) => {
+                        self.visible.insert(elem, n - 1);
+                    }
+                    None => panic!("remove overun in index"),
                 }
-            }
-            if sub_empty {
-                self.visible.remove(&op.obj);
-                self.lens.remove(&op.obj);
             }
         }
     }
@@ -144,17 +133,14 @@ impl Index {
         for id in &other.ops {
             self.ops.insert(*id);
         }
-        for (obj, sub) in other.visible.iter() {
-            let local_obj = self.visible.entry(*obj).or_default();
-            for (elem, n) in sub.iter() {
-                match local_obj.get(elem).cloned() {
-                    None => {
-                        local_obj.insert(*elem, 1);
-                        self.lens.entry(*obj).and_modify(|o| *o += 1).or_insert(1);
-                    }
-                    Some(m) => {
-                        local_obj.insert(*elem, m + n);
-                    }
+        for (elem, n) in other.visible.iter() {
+            match self.visible.get(elem).cloned() {
+                None => {
+                    self.visible.insert(*elem, 1);
+                    self.len += 1;
+                }
+                Some(m) => {
+                    self.visible.insert(*elem, m + n);
                 }
             }
         }

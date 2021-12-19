@@ -7,41 +7,15 @@ use std::{
 };
 
 use crate::legacy as amp;
+pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{ActorId, IndexedCache, Key, Op, OpId, ScalarValue};
+use crate::{Op, OpId, ScalarValue};
 use std::collections::{HashMap, HashSet};
 
 pub(crate) type OpTree = OpTreeInternal<16>;
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpSetMetadata {
-    pub actors: IndexedCache<ActorId>,
-    pub props: IndexedCache<String>,
-}
-
-impl OpSetMetadata {
-    pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
-        match (left, right) {
-            (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
-            _ => panic!("can only compare map keys"),
-        }
-    }
-
-    pub fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        match (left, right) {
-            (OpId(0, _), OpId(0, _)) => Ordering::Equal,
-            (OpId(0, _), OpId(_, _)) => Ordering::Less,
-            (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order?
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
-            (OpId(a, _), OpId(b, _)) => a.cmp(&b),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal<const B: usize> {
-    pub m: OpSetMetadata,
     root_node: Option<OpTreeNode<B>>,
 }
 
@@ -57,23 +31,7 @@ pub(crate) struct OpTreeNode<const B: usize> {
 impl<const B: usize> OpTreeInternal<B> {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
-        Self {
-            root_node: None,
-            m: OpSetMetadata {
-                actors: IndexedCache::new(),
-                props: IndexedCache::new(),
-            },
-        }
-    }
-
-    pub fn with_actor(actor: ActorId) -> Self {
-        Self {
-            root_node: None,
-            m: OpSetMetadata {
-                actors: IndexedCache::from(vec![actor]),
-                props: IndexedCache::new(),
-            },
-        }
+        Self { root_node: None }
     }
 
     /// Get the length of the sequence.
@@ -85,20 +43,14 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map(|root| root.depth).unwrap_or(0)
     }
 
-    pub fn audit(&mut self) {
-        if let Some(root) = self.root_node.as_mut() {
-            root.audit()
-        }
-    }
-
-    pub fn search<Q>(&self, mut query: Q) -> Q
+    pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<B>,
     {
         self.root_node
             .as_ref()
-            .map(|root| match query.query_node_with_metadata(root, &self.m) {
-                QueryResult::Decend => root.search(&mut query, &self.m),
+            .map(|root| match query.query_node_with_metadata(root, m) {
+                QueryResult::Decend => root.search(&mut query, m),
                 _ => true,
             });
         query
@@ -301,38 +253,6 @@ impl<const B: usize> OpTreeNode<B> {
 
     pub fn len(&self) -> usize {
         self.length
-    }
-
-    fn audit(&mut self) {
-        let old = self.index.clone();
-        self.reindex();
-        if old != self.index {
-            let mut objs: Vec<_> = old
-                .visible
-                .keys()
-                .chain(self.index.visible.keys())
-                .collect();
-            objs.sort();
-            objs.dedup();
-            for o in objs {
-                let a = old.visible.get(o).cloned().unwrap_or_default();
-                let b = self.index.visible.get(o).cloned().unwrap_or_default();
-                let mut keys: Vec<_> = a.keys().chain(b.keys()).collect();
-                keys.sort();
-                keys.dedup();
-                for k in keys {
-                    let a = a.get(k);
-                    let b = b.get(k);
-                    if a != b {
-                        println!("key={:?} obj={:?} {:?} NE {:?}", k, o, a, b);
-                    }
-                }
-            }
-            panic!("Not Eq");
-        }
-        for c in self.children.iter_mut() {
-            c.audit()
-        }
     }
 
     fn reindex(&mut self) {

@@ -1,14 +1,13 @@
 #![allow(dead_code)]
 
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::query::{binary_search_by, is_visible, CounterData, QueryResult, TreeQuery};
-use crate::{AutomergeError, ElemId, Key, ObjId, Op, OpId, HEAD};
+use crate::op_tree::OpTreeNode;
+use crate::query::{is_visible, CounterData, QueryResult, TreeQuery};
+use crate::{AutomergeError, ElemId, Key, Op, OpId, HEAD};
 use std::collections::HashMap;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertNth<const B: usize> {
-    obj: ObjId,
     target: usize,
     seen: usize,
     pub pos: usize,
@@ -18,9 +17,8 @@ pub(crate) struct InsertNth<const B: usize> {
 }
 
 impl<const B: usize> InsertNth<B> {
-    pub fn new(obj: ObjId, target: usize) -> Self {
+    pub fn new(target: usize) -> Self {
         InsertNth {
-            obj,
             target,
             seen: 0,
             pos: 0,
@@ -46,24 +44,15 @@ impl<const B: usize> InsertNth<B> {
 }
 
 impl<const B: usize> TreeQuery<B> for InsertNth<B> {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
-        if self.target == 0 {
-            // search to the start of the obj
-            // all inserts are lesser b/c this is local
-            self.pos = binary_search_by(child, |op| m.lamport_cmp(op.obj.0, self.obj.0));
-            QueryResult::Finish
-        } else {
-            self.query_node(child)
-        }
-    }
-
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        if let Some(mut num_vis) = child.index.lens.get(&self.obj).copied() {
-            if child.index.has(&self.obj, &self.last_seen) {
+        if self.target == 0 {
+            // insert at the start of the obj all inserts are lesser b/c this is local
+            self.pos = 0;
+            return QueryResult::Finish;
+        }
+        let mut num_vis = child.index.len;
+        if num_vis > 0 {
+            if child.index.has(&self.last_seen) {
                 num_vis -= 1;
             }
             if self.seen + num_vis >= self.target {
@@ -81,22 +70,16 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
     }
 
     fn query_element(&mut self, element: &Op) -> QueryResult {
-        if element.obj != self.obj {
+        if element.insert {
             if self.seen >= self.target {
                 return QueryResult::Finish;
-            }
-        } else {
-            if element.insert {
-                if self.seen >= self.target {
-                    return QueryResult::Finish;
-                };
-                self.last_seen = None;
-                self.last_insert = element.elemid();
-            }
-            if self.last_seen.is_none() && self.is_visible(element) {
-                self.seen += 1;
-                self.last_seen = element.elemid()
-            }
+            };
+            self.last_seen = None;
+            self.last_insert = element.elemid();
+        }
+        if self.last_seen.is_none() && self.is_visible(element) {
+            self.seen += 1;
+            self.last_seen = element.elemid()
         }
         self.pos += 1;
         QueryResult::Next

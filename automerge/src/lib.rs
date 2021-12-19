@@ -37,6 +37,7 @@ mod legacy;
 mod sync;
 
 mod error;
+mod op_set;
 mod op_tree;
 mod query;
 mod types;
@@ -44,6 +45,7 @@ mod value;
 
 use change::{encode_document, export_change};
 use indexed_cache::IndexedCache;
+use op_set::OpSet;
 use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use types::{ObjId, Op, HEAD};
@@ -67,7 +69,7 @@ pub struct Automerge {
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
     saved: Vec<ChangeHash>,
-    ops: OpTree,
+    ops: OpSet,
     actor: Option<usize>,
     max_op: u64,
     transaction: Option<Transaction>,
@@ -123,7 +125,7 @@ impl Automerge {
             history: vec![],
             history_index: HashMap::new(),
             states: HashMap::new(),
-            ops: OpTree::with_actor(actor),
+            ops: OpSet::with_actor(actor),
             deps: Default::default(),
             saved: Default::default(),
             actor: None,
@@ -196,14 +198,15 @@ impl Automerge {
         if let Some(tx) = self.transaction.take() {
             let num = tx.operations.len();
             for op in &tx.operations {
-                // FIXME - use query to make this fast
                 for pred_id in &op.pred {
+                    // FIXME - use query to make this fast
                     if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
-                        self.ops.replace(p, |o| o.succ.retain(|i| i != pred_id));
+                        self.ops
+                            .replace(op.obj, p, |o| o.succ.retain(|i| i != pred_id));
                     }
                 }
                 if let Some(pos) = self.ops.iter().position(|o| o.id == op.id) {
-                    self.ops.remove(pos);
+                    self.ops.remove(op.obj, pos);
                 }
             }
             num
@@ -219,7 +222,7 @@ impl Automerge {
 
     fn insert_local_op(&mut self, op: Op, pos: usize, succ_pos: &[usize]) {
         for succ in succ_pos {
-            self.ops.replace(*succ, |old_op| {
+            self.ops.replace(op.obj, *succ, |old_op| {
                 old_op.succ.push(op.id);
             });
         }
@@ -232,11 +235,11 @@ impl Automerge {
     }
 
     fn insert_op(&mut self, op: Op) -> Op {
-        //let (pos,succ) = self.seek_to_op(&mut op); //mut to collect pred
-        let q = self.ops.search(query::SeekOp::new(&op));
+        let q = self.ops.search(op.obj, query::SeekOp::new(&op));
 
         for i in q.succ {
-            self.ops.replace(i, |old_op| old_op.succ.push(op.id));
+            self.ops
+                .replace(op.obj, i, |old_op| old_op.succ.push(op.id));
         }
 
         if !op.is_del() {
@@ -251,7 +254,7 @@ impl Automerge {
     // NthAt::()
 
     pub fn keys(&self, obj: ObjId) -> Vec<String> {
-        let q = self.ops.search(query::Keys::new(obj));
+        let q = self.ops.search(obj, query::Keys::new(obj));
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
@@ -260,12 +263,12 @@ impl Automerge {
             return self.keys(obj);
         }
         let clock = self.clock_at(heads);
-        let q = self.ops.search(query::KeysAt::new(obj, clock));
+        let q = self.ops.search(obj, query::KeysAt::new(obj, clock));
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
     pub fn length(&self, obj: OpId) -> usize {
-        self.ops.search(query::Len::new(obj.into())).len
+        self.ops.search(obj.into(), query::Len::new(obj.into())).len
     }
 
     pub fn length_at(&self, obj: OpId, heads: &[ChangeHash]) -> usize {
@@ -273,7 +276,9 @@ impl Automerge {
             return self.length(obj);
         }
         let clock = self.clock_at(heads);
-        self.ops.search(query::LenAt::new(obj.into(), clock)).len
+        self.ops
+            .search(obj.into(), query::LenAt::new(obj.into(), clock))
+            .len
     }
 
     // set(obj, prop, value) - value can be scalar or objtype
@@ -300,7 +305,7 @@ impl Automerge {
         let obj = obj.into();
         let id = self.next_id();
 
-        let query = self.ops.search(query::InsertNth::new(obj, index));
+        let query = self.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
         let value = value.into();
@@ -316,7 +321,8 @@ impl Automerge {
             insert: true,
         };
 
-        self.insert_local_op(op, query.pos, &[]);
+        self.ops.insert(query.pos, op.clone());
+        self.tx().operations.push(op);
 
         Ok(id)
     }
@@ -367,7 +373,7 @@ impl Automerge {
 
     pub fn text(&self, obj: OpId) -> Result<String, AutomergeError> {
         let obj = obj.into();
-        let query = self.ops.search(query::ListVals::new(obj));
+        let query = self.ops.search(obj, query::ListVals::new(obj));
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -380,7 +386,7 @@ impl Automerge {
     pub fn text_at(&self, obj: OpId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
         let clock = self.clock_at(heads);
         let obj = obj.into();
-        let query = self.ops.search(query::ListValsAt::new(obj, clock));
+        let query = self.ops.search(obj, query::ListValsAt::new(obj, clock));
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -421,7 +427,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(query::Prop::new(obj, p))
+                        .search(obj, query::Prop::new(obj, p))
                         .ops
                         .into_iter()
                         .map(|o| o.into())
@@ -432,7 +438,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(query::Nth::new(obj, n))
+                .search(obj, query::Nth::new(n))
                 .ops
                 .into_iter()
                 .map(|o| o.into())
@@ -457,7 +463,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(query::PropAt::new(obj, p, clock))
+                        .search(obj, query::PropAt::new(obj, p, clock))
                         .ops
                         .into_iter()
                         .map(|o| o.into())
@@ -468,7 +474,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(query::NthAt::new(obj, n, clock))
+                .search(obj, query::NthAt::new(obj, n, clock))
                 .ops
                 .into_iter()
                 .map(|o| o.into())
@@ -537,7 +543,7 @@ impl Automerge {
 
         let id = self.next_id();
         let prop = self.ops.m.props.cache(prop);
-        let query = self.ops.search(query::Prop::new(obj, prop));
+        let query = self.ops.search(obj, query::Prop::new(obj, prop));
 
         let pred = query.ops.iter().map(|op| op.id).collect();
 
@@ -563,7 +569,7 @@ impl Automerge {
         index: usize,
         action: OpType,
     ) -> Result<OpId, AutomergeError> {
-        let query = self.ops.search(query::Nth::new(obj, index));
+        let query = self.ops.search(obj, query::Nth::new(index));
 
         let id = self.next_id();
         let pred = query.ops.iter().map(|op| op.id).collect();

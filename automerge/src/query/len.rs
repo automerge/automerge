@@ -19,7 +19,7 @@ impl<const B: usize> Len<B> {
 
 impl<const B: usize> TreeQuery<B> for Len<B> {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        self.len = child.index.lens.get(&self.obj).copied().unwrap_or(0);
+        self.len = child.index.len;
         QueryResult::Finish
     }
 }
