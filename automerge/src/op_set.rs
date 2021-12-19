@@ -116,6 +116,14 @@ impl<const B: usize> OpSetInternal<B> {
             .insert(index, element);
         self.length += 1;
     }
+
+    #[cfg(feature = "optree-visualisation")]
+    pub fn visualise(&self) -> String {
+        let mut out = Vec::new();
+        let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
+        dot::render(&graph, &mut out).unwrap();
+        String::from_utf8_lossy(&out[..]).to_string()
+    }
 }
 
 impl<const B: usize> Default for OpSetInternal<B> {
