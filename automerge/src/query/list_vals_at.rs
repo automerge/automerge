@@ -1,53 +1,40 @@
-#![allow(dead_code)]
-
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
-use crate::{Clock, ElemId, ObjId, Op};
+use crate::query::{QueryResult, TreeQuery, VisWindow};
+use crate::{Clock, ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListValsAt {
-    obj: ObjId,
     clock: Clock,
     last_elem: Option<ElemId>,
     pub ops: Vec<Op>,
+    window: VisWindow,
+    pos: usize,
 }
 
 impl ListValsAt {
-    pub fn new(obj: ObjId, clock: Clock) -> Self {
+    pub fn new(clock: Clock) -> Self {
         ListValsAt {
-            obj,
             clock,
             last_elem: None,
             ops: vec![],
+            window: Default::default(),
+            pos: 0,
         }
     }
 }
 
 impl<const B: usize> TreeQuery<B> for ListValsAt {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
-        let start = binary_search_by(child, |op| m.lamport_cmp(op.obj.0, self.obj.0));
-        let mut counters = Default::default();
-        for pos in start..child.len() {
-            let op = child.get(pos).unwrap();
-            if op.obj != self.obj {
-                break;
-            }
-            if op.insert {
-                self.last_elem = None;
-            }
-            if self.last_elem.is_none() && is_visible(op, pos, &mut counters) {
-                for (_, vop) in visible_op(op, pos, &counters) {
-                    self.last_elem = vop.elemid();
-                    self.ops.push(vop);
-                }
+    fn query_element(&mut self, op: &Op) -> QueryResult {
+        if op.insert {
+            self.last_elem = None;
+        }
+        if self.last_elem.is_none() && self.window.visible_at(op, self.pos, &self.clock) {
+            for (_, vop) in self.window.seen_op(op, self.pos) {
+                self.last_elem = vop.elemid();
+                self.ops.push(vop);
             }
         }
-        //QueryResult::Finish
-        unimplemented!()
+        self.pos += 1;
+        QueryResult::Next
     }
 }

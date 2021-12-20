@@ -291,6 +291,12 @@ impl From<String> for Prop {
     }
 }
 
+impl From<&String> for Prop {
+    fn from(p: &String) -> Self {
+        Prop::Map(p.clone())
+    }
+}
+
 impl From<&str> for Prop {
     fn from(p: &str) -> Self {
         Prop::Map(p.to_owned())

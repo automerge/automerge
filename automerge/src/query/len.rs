@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
 use crate::ObjId;

@@ -1,17 +1,15 @@
-#![allow(dead_code)]
-
 use std::{
     cmp::{min, Ordering},
     fmt::Debug,
     mem,
 };
 
-use crate::legacy as amp;
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{Op, OpId, ScalarValue};
-use std::collections::{HashMap, HashSet};
+use crate::{Op, OpId};
+use std::collections::{HashSet};
 
+#[allow(dead_code)]
 pub(crate) type OpTree = OpTreeInternal<16>;
 
 #[derive(Clone, Debug)]
@@ -24,7 +22,6 @@ pub(crate) struct OpTreeNode<const B: usize> {
     pub(crate) elements: Vec<Op>,
     pub(crate) children: Vec<OpTreeNode<B>>,
     pub index: Index,
-    depth: usize,
     length: usize,
 }
 
@@ -39,10 +36,6 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn depth(&self) -> usize {
-        self.root_node.as_ref().map(|root| root.depth).unwrap_or(0)
-    }
-
     pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
     where
         Q: TreeQuery<B>,
@@ -54,23 +47,6 @@ impl<const B: usize> OpTreeInternal<B> {
                 _ => true,
             });
         query
-    }
-
-    pub fn binary_search_by<F>(&self, f: F) -> usize
-    where
-        F: Fn(&Op) -> Ordering,
-    {
-        let mut right = self.len();
-        let mut left = 0;
-        while left < right {
-            let seq = (left + right) / 2;
-            if f(self.get(seq).unwrap()) == Ordering::Less {
-                left = seq + 1;
-            } else {
-                right = seq;
-            }
-        }
-        left
     }
 
     /// Check if the sequence is empty.
@@ -99,7 +75,7 @@ impl<const B: usize> OpTreeInternal<B> {
 
             if root.is_full() {
                 let original_len = root.len();
-                let new_root = OpTreeNode::new(root.depth + 1);
+                let new_root = OpTreeNode::new();
 
                 // move new_root to root position
                 let old_root = mem::replace(root, new_root);
@@ -126,17 +102,11 @@ impl<const B: usize> OpTreeInternal<B> {
                 root.insert_into_non_full_node(index, element)
             }
         } else {
-            let mut root = OpTreeNode::new(1);
+            let mut root = OpTreeNode::new();
             root.insert_into_non_full_node(index, element);
             self.root_node = Some(root)
         }
         assert_eq!(self.len(), old_len + 1, "{:#?}", self);
-    }
-
-    /// Push the `element` onto the back of the sequence.
-    pub fn push(&mut self, element: Op) {
-        let l = self.len();
-        self.insert(l, element)
     }
 
     /// Get the `element` at `index` in the sequence.
@@ -144,18 +114,7 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().and_then(|n| n.get(index))
     }
 
-    pub fn last(&self) -> Option<&Op> {
-        self.root_node.as_ref().map(|n| n.last())
-    }
-
-    /// Get the `element` at `index` in the sequence.
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Op> {
-        // FIXME - no index update
-        self.root_node.as_mut().and_then(|n| n.get_mut(index))
-    }
-
-    //    pub fn binary_search_by<F>(&self, f: F) -> usize
-    //      where F: Fn(&Op) -> Ordering
+    // this replaces get_mut() because it allows the indexes to update correctly
     pub fn replace<F>(&mut self, index: usize, mut f: F) -> Option<Op>
     where
         F: FnMut(&mut Op),
@@ -209,12 +168,11 @@ impl<const B: usize> OpTreeInternal<B> {
 }
 
 impl<const B: usize> OpTreeNode<B> {
-    fn new(depth: usize) -> Self {
+    fn new() -> Self {
         Self {
             elements: Vec::new(),
             children: Vec::new(),
             index: Default::default(),
-            depth,
             length: 0,
         }
     }
@@ -323,7 +281,7 @@ impl<const B: usize> OpTreeNode<B> {
 
         // Create a new node which is going to store (B-1) keys
         // of the full child.
-        let mut successor_sibling = OpTreeNode::new(full_child.depth);
+        let mut successor_sibling = OpTreeNode::new();
 
         let original_len = full_child.len();
         assert!(full_child.is_full());
@@ -613,26 +571,6 @@ impl<const B: usize> OpTreeNode<B> {
         }
         None
     }
-
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Op> {
-        if self.is_leaf() {
-            return self.elements.get_mut(index);
-        } else {
-            let mut cumulative_len = 0;
-            for (child_index, child) in self.children.iter_mut().enumerate() {
-                match (cumulative_len + child.len()).cmp(&index) {
-                    Ordering::Less => {
-                        cumulative_len += child.len() + 1;
-                    }
-                    Ordering::Equal => return self.elements.get_mut(child_index),
-                    Ordering::Greater => {
-                        return child.get_mut(index - cumulative_len);
-                    }
-                }
-            }
-        }
-        None
-    }
 }
 
 impl<const B: usize> Default for OpTreeInternal<B> {
@@ -687,54 +625,6 @@ struct CounterData {
     op: Op,
 }
 
-fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
-    let mut visible = false;
-    match op.action {
-        amp::OpType::Set(amp::ScalarValue::Counter(val)) => {
-            counters.insert(
-                op.id,
-                CounterData {
-                    pos,
-                    val,
-                    succ: op.succ.iter().cloned().collect(),
-                    op: op.clone(),
-                },
-            );
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-        amp::OpType::Inc(inc_val) => {
-            for id in &op.pred {
-                if let Some(mut entry) = counters.get_mut(id) {
-                    entry.succ.remove(&op.id);
-                    entry.val += inc_val;
-                    entry.op.action = amp::OpType::Set(ScalarValue::Counter(entry.val));
-                    if entry.succ.is_empty() {
-                        visible = true;
-                    }
-                }
-            }
-        }
-        _ => {
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-    };
-    visible
-}
-
-fn visible_op(op: &Op, counters: &HashMap<OpId, CounterData>) -> Op {
-    for pred in &op.pred {
-        // FIXME - delete a counter? - entry.succ.empty()?
-        if let Some(entry) = counters.get(pred) {
-            return entry.op.clone();
-        }
-    }
-    op.clone()
-}
-
 #[cfg(test)]
 mod tests {
     use crate::legacy as amp;
@@ -754,20 +644,6 @@ mod tests {
             pred: vec![],
             insert: false,
         }
-    }
-
-    #[test]
-    fn push_back() {
-        let mut t = OpTree::new();
-
-        t.push(op(1));
-        t.push(op(2));
-        t.push(op(3));
-        t.push(op(4));
-        t.push(op(5));
-        t.push(op(6));
-        t.push(op(8));
-        t.push(op(100));
     }
 
     #[test]
@@ -804,113 +680,4 @@ mod tests {
             assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
         }
     }
-
-    /*
-        #[test]
-        fn test_depth() {
-            let mut t = OpTree::new();
-
-            assert_eq!(t.depth(),0);
-
-            for i in 0..5000 {
-                t.insert(0, op(i));
-            }
-            assert_eq!(t.depth(),3);
-
-            for _ in 0..1000 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),3);
-
-            for _ in 0..1000 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),3);
-
-            for _ in 0..1000 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),3);
-
-            for _ in 0..1000 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),2);
-
-            for _ in 0..950 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),2);
-
-            for _ in 0..30 { t.remove(t.len() / 2); }
-            assert_eq!(t.depth(),1);
-
-        }
-    */
-
-    /*
-        fn arb_indices() -> impl Strategy<Value = Vec<usize>> {
-            proptest::collection::vec(any::<usize>(), 0..1000).prop_map(|v| {
-                let mut len = 0;
-                v.into_iter()
-                    .map(|i| {
-                        len += 1;
-                        i % len
-                    })
-                    .collect::<Vec<_>>()
-            })
-        }
-    */
-
-    //    use proptest::prelude::*;
-
-    /*
-        proptest! {
-
-            #[test]
-            fn proptest_insert(indices in arb_indices()) {
-                let mut t = OpTreeInternal::<usize, 3>::new();
-                let actor = ActorId::random();
-                let mut v = Vec::new();
-
-                for i in indices{
-                    if i <= v.len() {
-                        t.insert(i % 3, i);
-                        v.insert(i % 3, i);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
-                }
-            }
-
-        }
-    */
-
-    /*
-        proptest! {
-
-            #[test]
-            fn proptest_remove(inserts in arb_indices(), removes in arb_indices()) {
-                let mut t = OpTreeInternal::<usize, 3>::new();
-                let actor = ActorId::random();
-                let mut v = Vec::new();
-
-                for i in inserts {
-                    if i <= v.len() {
-                        t.insert(i , i);
-                        v.insert(i , i);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
-                }
-
-                for i in removes {
-                    if i < v.len() {
-                        let tr = t.remove(i);
-                        let vr = v.remove(i);
-                        assert_eq!(tr, vr);
-                    } else {
-                        return Err(proptest::test_runner::TestCaseError::reject("index out of bounds"))
-                    }
-
-                    assert_eq!(v, t.iter().copied().collect::<Vec<_>>())
-                }
-            }
-
-        }
-    */
 }

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
 use crate::{Key, ObjId, Op};

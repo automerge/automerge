@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::op_tree::OpTreeNode;
 use crate::query::{is_visible, visible_op, CounterData, QueryResult, TreeQuery};
 use crate::{AutomergeError, ElemId, Key, Op, OpId};
@@ -30,10 +28,6 @@ impl<const B: usize> Nth<B> {
             last_elem: None,
             counters: HashMap::new(),
         }
-    }
-
-    pub fn done(&self) -> bool {
-        self.seen > self.target
     }
 
     pub fn key(&self) -> Result<Key, AutomergeError> {

@@ -29,6 +29,7 @@ macro_rules! __log {
  }
 
 mod change;
+mod clock;
 mod columnar;
 mod decoding;
 mod encoding;
@@ -46,9 +47,9 @@ mod types;
 mod value;
 
 use change::{encode_document, export_change};
+use clock::Clock;
 use indexed_cache::IndexedCache;
 use op_set::OpSet;
-use op_tree::OpTree;
 use std::collections::{HashMap, HashSet, VecDeque};
 use types::{ObjId, Op, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
@@ -178,7 +179,7 @@ impl Automerge {
         self.transaction.as_mut().unwrap()
     }
 
-    pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> usize {
+    pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
         let tx = self.tx();
 
         if message.is_some() {
@@ -189,11 +190,11 @@ impl Automerge {
             tx.time = t;
         }
 
-        let ops = tx.operations.len();
+        tx.operations.len();
 
         self.ensure_transaction_closed();
 
-        ops
+        self.get_heads()
     }
 
     pub fn ensure_transaction_closed(&mut self) {
@@ -261,17 +262,14 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
-    pub fn keys(&self, obj: ObjId) -> Vec<String> {
-        let q = self.ops.search(obj, query::Keys::new(obj));
+    pub fn keys(&self, obj: OpId) -> Vec<String> {
+        let q = self.ops.search(obj.into(), query::Keys::new());
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
-    pub fn keys_at(&self, obj: ObjId, heads: &[ChangeHash]) -> Vec<String> {
-        if heads.is_empty() {
-            return self.keys(obj);
-        }
+    pub fn keys_at(&self, obj: OpId, heads: &[ChangeHash]) -> Vec<String> {
         let clock = self.clock_at(heads);
-        let q = self.ops.search(obj, query::KeysAt::new(obj, clock));
+        let q = self.ops.search(obj.into(), query::KeysAt::new(clock));
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
@@ -280,13 +278,8 @@ impl Automerge {
     }
 
     pub fn length_at(&self, obj: OpId, heads: &[ChangeHash]) -> usize {
-        if heads.is_empty() {
-            return self.length(obj);
-        }
         let clock = self.clock_at(heads);
-        self.ops
-            .search(obj.into(), query::LenAt::new(obj.into(), clock))
-            .len
+        self.ops.search(obj.into(), query::LenAt::new(clock)).len
     }
 
     // set(obj, prop, value) - value can be scalar or objtype
@@ -294,7 +287,7 @@ impl Automerge {
     // inc(obj, prop, value)
     // insert(obj, index, value)
 
-    /// Set the value of property `P` to value `V` in object `obj`. 
+    /// Set the value of property `P` to value `V` in object `obj`.
     ///
     /// # Returns
     ///
@@ -303,7 +296,7 @@ impl Automerge {
     ///
     /// # Errors
     ///
-    /// This will return an error if 
+    /// This will return an error if
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
@@ -356,7 +349,9 @@ impl Automerge {
     ) -> Result<OpId, AutomergeError> {
         match self.local_op(obj.into(), prop.into(), OpType::Inc(value))? {
             Some(opid) => Ok(opid),
-            None => { panic!("increment should always create a new op") }
+            None => {
+                panic!("increment should always create a new op")
+            }
         }
     }
 
@@ -417,7 +412,7 @@ impl Automerge {
     pub fn text_at(&self, obj: OpId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
         let clock = self.clock_at(heads);
         let obj = obj.into();
-        let query = self.ops.search(obj, query::ListValsAt::new(obj, clock));
+        let query = self.ops.search(obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -438,10 +433,10 @@ impl Automerge {
         Ok(self.values(obj, prop.into())?.first().cloned())
     }
 
-    pub fn value_at(
+    pub fn value_at<P: Into<Prop>>(
         &self,
         obj: OpId,
-        prop: Prop,
+        prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, OpId)>, AutomergeError> {
         Ok(self.values_at(obj, prop, heads)?.first().cloned())
@@ -478,15 +473,13 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn values_at(
+    pub fn values_at<P: Into<Prop>>(
         &self,
         obj: OpId,
-        prop: Prop,
+        prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, OpId)>, AutomergeError> {
-        if heads.is_empty() {
-            return self.values(obj, prop);
-        }
+        let prop = prop.into();
         let obj = obj.into();
         let clock = self.clock_at(heads);
         let result = match prop {
@@ -494,7 +487,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(obj, query::PropAt::new(obj, p, clock))
+                        .search(obj, query::PropAt::new(p, clock))
                         .ops
                         .into_iter()
                         .map(|o| o.into())
@@ -505,7 +498,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(obj, query::NthAt::new(obj, n, clock))
+                .search(obj, query::NthAt::new(n, clock))
                 .ops
                 .into_iter()
                 .map(|o| o.into())
@@ -555,7 +548,12 @@ impl Automerge {
         }
     }
 
-    fn local_op(&mut self, obj: ObjId, prop: Prop, action: OpType) -> Result<Option<OpId>, AutomergeError> {
+    fn local_op(
+        &mut self,
+        obj: ObjId,
+        prop: Prop,
+        action: OpType,
+    ) -> Result<Option<OpId>, AutomergeError> {
         match prop {
             Prop::Map(s) => self.local_map_op(obj, s, action),
             Prop::Seq(n) => self.local_list_op(obj, n, action),
@@ -579,7 +577,13 @@ impl Automerge {
         match (&query.ops[..], &action) {
             // If there are no conflicts for this value and the old operation and the new operation are
             // both setting the same value then we do nothing.
-            (&[Op{action: OpType::Set(ref old_v), ..}], OpType::Set(new_v)) if old_v == new_v => {
+            (
+                &[Op {
+                    action: OpType::Set(ref old_v),
+                    ..
+                }],
+                OpType::Set(new_v),
+            ) if old_v == new_v => {
                 return Ok(None);
             }
             _ => {}
@@ -618,7 +622,13 @@ impl Automerge {
         match (&query.ops[..], &action) {
             // If there are no conflicts for this value and the old operation and the new operation are
             // both setting the same value then we do nothing.
-            (&[Op{action: OpType::Set(ref old_v), ..}], OpType::Set(new_v)) if old_v == new_v => {
+            (
+                &[Op {
+                    action: OpType::Set(ref old_v),
+                    ..
+                }],
+                OpType::Set(new_v),
+            ) if old_v == new_v => {
                 return Ok(None);
             }
             _ => {}
@@ -907,22 +917,23 @@ impl Automerge {
     }
 
     fn clock_at(&self, heads: &[ChangeHash]) -> Clock {
-        if heads.is_empty() {
-            return Clock::Head;
-        }
-        // FIXME - could be way faster
-        let mut clock = HashMap::new();
-        for c in self._get_changes(heads) {
-            let actor = self.ops.m.actors.lookup(c.actor_id().clone()).unwrap();
-            if let Some(val) = clock.get(&actor) {
-                if val < &c.seq {
-                    clock.insert(actor, c.seq);
+        let mut clock = Clock::new();
+        let mut seen = HashSet::new();
+        let mut to_see = heads.to_vec();
+        // FIXME - faster
+        while let Some(hash) = to_see.pop() {
+            if let Some(c) = self._get_change_by_hash(&hash) {
+                for h in &c.deps {
+                    if !seen.contains(h) {
+                        to_see.push(*h);
+                    }
                 }
-            } else {
-                clock.insert(actor, c.seq);
+                let actor = self.ops.m.actors.lookup(c.actor_id().clone()).unwrap();
+                clock.include(actor, c.max_op());
+                seen.insert(hash);
             }
         }
-        Clock::At(clock)
+        clock
     }
 
     pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<&Change> {
@@ -1095,12 +1106,6 @@ pub(crate) struct Transaction {
     pub operations: Vec<Op>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-enum Clock {
-    Head,
-    At(HashMap<usize, u64>),
-}
-
 impl Default for Automerge {
     fn default() -> Self {
         Self::new()
@@ -1109,7 +1114,8 @@ impl Default for Automerge {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ActorId, Automerge, AutomergeError, Value, ROOT};
+    use super::*;
+    use std::convert::TryInto;
 
     #[test]
     fn insert_op() -> Result<(), AutomergeError> {
@@ -1205,9 +1211,118 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let text = doc.set(ROOT, "text", Value::text())?.unwrap();
+        let heads1 = doc.commit(None, None);
         doc.splice_text(text, 0, 0, "hello world")?;
+        let heads2 = doc.commit(None, None);
         doc.splice_text(text, 6, 0, "big bad ")?;
+        let heads3 = doc.commit(None, None);
+
         assert!(&doc.text(text)? == "hello big bad world");
+        assert!(&doc.text_at(text, &heads1)? == "");
+        assert!(&doc.text_at(text, &heads2)? == "hello world");
+        assert!(&doc.text_at(text, &heads3)? == "hello big bad world");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_props_vals_at() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+        doc.set_actor("aaaa".try_into().unwrap());
+        doc.set(ROOT, "prop1", "val1")?;
+        doc.commit(None, None);
+        let heads1 = doc.get_heads();
+        doc.set(ROOT, "prop1", "val2")?;
+        doc.commit(None, None);
+        let heads2 = doc.get_heads();
+        doc.set(ROOT, "prop2", "val3")?;
+        doc.commit(None, None);
+        let heads3 = doc.get_heads();
+        doc.del(ROOT, "prop1")?;
+        doc.commit(None, None);
+        let heads4 = doc.get_heads();
+        doc.set(ROOT, "prop3", "val4")?;
+        doc.commit(None, None);
+        let heads5 = doc.get_heads();
+        assert!(doc.keys_at(ROOT, &heads1) == vec!["prop1".to_owned()]);
+        assert!(doc.value_at(ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
+        assert!(doc.value_at(ROOT, "prop2", &heads1)? == None);
+        assert!(doc.value_at(ROOT, "prop3", &heads1)? == None);
+
+        assert!(doc.keys_at(ROOT, &heads2) == vec!["prop1".to_owned()]);
+        assert!(doc.value_at(ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
+        assert!(doc.value_at(ROOT, "prop2", &heads2)? == None);
+        assert!(doc.value_at(ROOT, "prop3", &heads2)? == None);
+
+        assert!(doc.keys_at(ROOT, &heads3) == vec!["prop1".to_owned(), "prop2".to_owned()]);
+        assert!(doc.value_at(ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
+        assert!(doc.value_at(ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.value_at(ROOT, "prop3", &heads3)? == None);
+
+        assert!(doc.keys_at(ROOT, &heads4) == vec!["prop2".to_owned()]);
+        assert!(doc.value_at(ROOT, "prop1", &heads4)? == None);
+        assert!(doc.value_at(ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.value_at(ROOT, "prop3", &heads4)? == None);
+
+        assert!(doc.keys_at(ROOT, &heads5) == vec!["prop2".to_owned(), "prop3".to_owned()]);
+        assert!(doc.value_at(ROOT, "prop1", &heads5)? == None);
+        assert!(doc.value_at(ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
+        assert!(doc.value_at(ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
+
+        assert!(doc.keys_at(ROOT, &[]).is_empty());
+        assert!(doc.value_at(ROOT, "prop1", &[])? == None);
+        assert!(doc.value_at(ROOT, "prop2", &[])? == None);
+        assert!(doc.value_at(ROOT, "prop3", &[])? == None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_len_at() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+        doc.set_actor("aaaa".try_into().unwrap());
+
+        let list = doc.set(ROOT, "list", Value::list())?.unwrap();
+        let heads1 = doc.commit(None, None);
+
+        doc.insert(list, 0, Value::int(10))?;
+        let heads2 = doc.commit(None, None);
+
+        doc.set(list, 0, Value::int(20))?;
+        doc.insert(list, 0, Value::int(30))?;
+        let heads3 = doc.commit(None, None);
+
+        doc.set(list, 1, Value::int(40))?;
+        doc.insert(list, 1, Value::int(50))?;
+        let heads4 = doc.commit(None, None);
+
+        doc.del(list, 2)?;
+        let heads5 = doc.commit(None, None);
+
+        doc.del(list, 0)?;
+        let heads6 = doc.commit(None, None);
+
+        assert!(doc.length_at(list, &heads1) == 0);
+        assert!(doc.value_at(list, 0, &heads1)?.is_none());
+
+        assert!(doc.length_at(list, &heads2) == 1);
+        assert!(doc.value_at(list, 0, &heads2)?.unwrap().0 == Value::int(10));
+
+        assert!(doc.length_at(list, &heads3) == 2);
+        assert!(doc.value_at(list, 0, &heads3)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(list, 1, &heads3)?.unwrap().0 == Value::int(20));
+
+        assert!(doc.length_at(list, &heads4) == 3);
+        assert!(doc.value_at(list, 0, &heads4)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(list, 1, &heads4)?.unwrap().0 == Value::int(50));
+        assert!(doc.value_at(list, 2, &heads4)?.unwrap().0 == Value::int(40));
+
+        assert!(doc.length_at(list, &heads5) == 2);
+        assert!(doc.value_at(list, 0, &heads5)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(list, 1, &heads5)?.unwrap().0 == Value::int(50));
+
+        assert!(doc.length_at(list, &heads6) == 1);
+        assert!(doc.value_at(list, 0, &heads6)?.unwrap().0 == Value::int(50));
+
         Ok(())
     }
 }

@@ -1,13 +1,10 @@
-#![allow(dead_code)]
-
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
-use crate::{Clock, Key, ObjId, Op};
+use crate::query::{binary_search_by, QueryResult, TreeQuery, VisWindow};
+use crate::{Clock, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PropAt {
-    obj: ObjId,
     clock: Clock,
     key: Key,
     pub ops: Vec<Op>,
@@ -16,9 +13,8 @@ pub(crate) struct PropAt {
 }
 
 impl PropAt {
-    pub fn new(obj: ObjId, prop: usize, clock: Clock) -> Self {
+    pub fn new(prop: usize, clock: Clock) -> Self {
         PropAt {
-            obj,
             clock,
             key: Key::Map(prop),
             ops: vec![],
@@ -34,26 +30,22 @@ impl<const B: usize> TreeQuery<B> for PropAt {
         child: &OpTreeNode<B>,
         m: &OpSetMetadata,
     ) -> QueryResult {
-        let start = binary_search_by(child, |op| {
-            m.lamport_cmp(op.obj.0, self.obj.0)
-                .then_with(|| m.key_cmp(&op.key, &self.key))
-        });
-        let mut counters = Default::default();
+        let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
+        let mut window: VisWindow = Default::default();
         self.pos = start;
         for pos in start..child.len() {
             let op = child.get(pos).unwrap();
-            if !(op.obj == self.obj && op.key == self.key) {
+            if op.key != self.key {
                 break;
             }
-            if is_visible(op, pos, &mut counters) {
-                for (vpos, vop) in visible_op(op, pos, &counters) {
+            if window.visible_at(op, pos, &self.clock) {
+                for (vpos, vop) in window.seen_op(op, pos) {
                     self.ops.push(vop);
                     self.ops_pos.push(vpos);
                 }
             }
             self.pos += 1;
         }
-        //QueryResult::Finish
-        unimplemented!();
+        QueryResult::Finish
     }
 }
