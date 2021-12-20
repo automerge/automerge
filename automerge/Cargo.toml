@@ -31,4 +31,5 @@ pretty_assertions = "^0.7.2"
 proptest = { version = "0.10.1", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features=true }
 maplit = { version = "^1.0" }
+test-case = "1.2.1"
 
