@@ -234,8 +234,7 @@ pub fn translate_obj_id(
     id: automerge::OpId,
 ) -> automerge::OpId {
     let exported = from.export(id);
-    let imported = to.import(&exported).unwrap();
-    imported
+    to.import(&exported).unwrap()
 }
 
 pub fn mk_counter(value: i64) -> automerge::ScalarValue {
@@ -317,7 +316,7 @@ pub fn realize_obj(
     match objtype {
         automerge::ObjType::Map | automerge::ObjType::Table => {
             let mut result = HashMap::new();
-            for key in doc.keys(obj_id.into()) {
+            for key in doc.keys(obj_id) {
                 result.insert(key.clone(), realize_values(doc, obj_id, key));
             }
             RealizedObject::Map(result)
@@ -474,7 +473,7 @@ impl<'a> Hash for Translate<'a> {
 
 pub trait OpIdExt {
     fn native(self) -> ExportableOpId<'static>;
-    fn translate<'a>(self, doc: &'a automerge::Automerge) -> ExportableOpId<'a>;
+    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_>;
 }
 
 impl OpIdExt for automerge::OpId {
@@ -484,7 +483,7 @@ impl OpIdExt for automerge::OpId {
     }
 
     /// Translate this OpID from `doc` when exporting
-    fn translate<'a>(self, doc: &'a automerge::Automerge) -> ExportableOpId<'a> {
+    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_> {
         ExportableOpId::Translate(Translate {
             from: doc,
             opid: self,
