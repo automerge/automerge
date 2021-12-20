@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+# Force clippy to consider all local sources
+# https://github.com/rust-lang/rust-clippy/issues/4612
+find . -name "*.rs" -not -path "./target/*" -exec touch "{}" +
+cargo clippy --all-features --all-targets -- -D warnings

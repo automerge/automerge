@@ -1220,7 +1220,7 @@ mod tests {
         let heads3 = doc.commit(None, None);
 
         assert!(&doc.text(text)? == "hello big bad world");
-        assert!(&doc.text_at(text, &heads1)? == "");
+        assert!(&doc.text_at(text, &heads1)?.is_empty());
         assert!(&doc.text_at(text, &heads2)? == "hello world");
         assert!(&doc.text_at(text, &heads3)? == "hello big bad world");
 

@@ -124,7 +124,7 @@ fn list_deletion() {
 fn merge_concurrent_map_prop_updates() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let foo = doc1.set(automerge::ROOT, "foo", "bar").unwrap().unwrap();
+    let op1 = doc1.set(automerge::ROOT, "foo", "bar").unwrap().unwrap();
     let hello = doc2
         .set(automerge::ROOT, "hello", "world")
         .unwrap()
@@ -137,7 +137,7 @@ fn merge_concurrent_map_prop_updates() {
     assert_doc!(
         &doc1,
         map! {
-            "foo" => { foo => "bar" },
+            "foo" => { op1 => "bar" },
             "hello" => { hello.translate(&doc2) => "world" },
         }
     );
@@ -145,7 +145,7 @@ fn merge_concurrent_map_prop_updates() {
     assert_doc!(
         &doc2,
         map! {
-            "foo" => { foo.translate(&doc1) => "bar" },
+            "foo" => { op1.translate(&doc1) => "bar" },
             "hello" => { hello => "world" },
         }
     );

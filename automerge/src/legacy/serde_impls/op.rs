@@ -256,7 +256,7 @@ mod tests {
                     "obj": "_root",
                     "key": "somekey",
                     "datatype": "uint",
-                    "value": 123 as i64,
+                    "value": 123,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -273,7 +273,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": -123 as i64,
+                    "value": -123,
                     "datatype": "int",
                     "pred": []
                 }),
@@ -291,7 +291,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": -123 as i64,
+                    "value": -123,
                     "datatype": "float64",
                     "pred": []
                 }),
@@ -326,7 +326,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 1.23 as f64,
+                    "value": 1.23,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -371,7 +371,7 @@ mod tests {
                     "action": "set",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 123 as i64,
+                    "value": 123,
                     "datatype": "counter",
                     "pred": []
                 }),
@@ -419,7 +419,7 @@ mod tests {
                     "action": "inc",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 12 as i64,
+                    "value": 12,
                     "datatype": "counter",
                     "pred": []
                 }),
@@ -437,7 +437,7 @@ mod tests {
                     "action": "inc",
                     "obj": "_root",
                     "key": "somekey",
-                    "value": 12 as i64,
+                    "value": 12,
                     "pred": []
                 }),
                 expected: Ok(Op {
@@ -511,7 +511,7 @@ mod tests {
             "action": "inc",
             "obj": "_root",
             "key": "somekey",
-            "value": 1 as f64,
+            "value": 1,
             "pred": []
         }))
         .unwrap();
@@ -521,7 +521,7 @@ mod tests {
             "action": "inc",
             "obj": "1@7ef48769b04d47e9a88e98a134d62716",
             "key": "somekey",
-            "value": 1 as f64,
+            "value": 1,
             "pred": []
         }))
         .unwrap();
@@ -534,7 +534,7 @@ mod tests {
             "action": "inc",
             "obj": "notanobject",
             "key": "somekey",
-            "value": 1 as f64,
+            "value": 1,
             "pred": []
         }));
         match invalid {
