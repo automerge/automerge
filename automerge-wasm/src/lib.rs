@@ -133,30 +133,43 @@ impl Automerge {
         (self.0.pending_ops() as u32).into()
     }
 
-    pub fn commit(&mut self, message: JsValue, time: JsValue) -> JsValue {
+    pub fn commit(&mut self, message: JsValue, time: JsValue) -> Array {
         let message = message.as_string();
         let time = time.as_f64().map(|v| v as i64);
-        self.0.commit(message, time).into()
+        let heads = self.0.commit(message, time);
+        let heads: Array = heads
+            .iter()
+            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
+            .collect();
+        heads
     }
 
     pub fn rollback(&mut self) -> JsValue {
         self.0.rollback().into()
     }
 
-    pub fn keys(&mut self, obj: JsValue) -> Result<Array, JsValue> {
+    pub fn keys(&mut self, obj: JsValue, heads: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
-        let result = self
-            .0
-            .keys(obj)
-            .iter()
-            .map(|s| JsValue::from_str(s))
-            .collect();
+        let result = if let Some(heads) = get_heads(heads) {
+            self.0.keys_at(obj, &heads)
+        } else {
+            self.0.keys(obj)
+        }
+        .iter()
+        .map(|s| JsValue::from_str(s))
+        .collect();
         Ok(result)
     }
 
-    pub fn text(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+    pub fn text(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        self.0.text(obj).map_err(to_js_err).map(|t| t.into())
+        if let Some(heads) = get_heads(heads) {
+            self.0.text_at(obj, &heads)
+        } else {
+            self.0.text(obj)
+        }
+        .map_err(to_js_err)
+        .map(|t| t.into())
     }
 
     pub fn splice(
@@ -243,12 +256,18 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn value(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
+    pub fn value(&mut self, obj: JsValue, arg: JsValue, heads: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(arg);
+        let heads = get_heads(heads);
         if let Ok(prop) = prop {
-            let value = self.0.value(obj, prop).map_err(to_js_err)?;
+            let value = if let Some(h) = heads {
+                self.0.value_at(obj, prop, &h)
+            } else {
+                self.0.value(obj, prop)
+            }
+            .map_err(to_js_err)?;
             match value {
                 Some((Value::Object(obj_type), obj_id)) => {
                     result.push(&obj_type.to_string().into());
@@ -264,12 +283,17 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn values(&mut self, obj: JsValue, arg: JsValue) -> Result<Array, JsValue> {
+    pub fn values(&mut self, obj: JsValue, arg: JsValue, heads: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
-            let values = self.0.values(obj, prop).map_err(to_js_err)?;
+            let values = if let Some(heads) = get_heads(heads) {
+                self.0.values_at(obj, prop, &heads)
+            } else {
+                self.0.values(obj, prop)
+            }
+            .map_err(to_js_err)?;
             for value in values {
                 match value {
                     (Value::Object(obj_type), obj_id) => {
@@ -291,10 +315,13 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn length(&mut self, obj: JsValue, _heads: JsValue) -> Result<JsValue, JsValue> {
+    pub fn length(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        let len = self.0.length(obj) as f64;
-        Ok(len.into())
+        if let Some(heads) = get_heads(heads) {
+            Ok((self.0.length_at(obj, &heads) as f64).into())
+        } else {
+            Ok((self.0.length(obj) as f64).into())
+        }
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
@@ -668,6 +695,15 @@ impl TryFrom<JS> for Vec<ChangeHash> {
     }
 }
 
+impl From<JS> for Option<Vec<ChangeHash>> {
+    fn from(value: JS) -> Self {
+        let value = value.0.dyn_into::<Array>().ok()?;
+        let value: Result<Vec<ChangeHash>, _> = value.iter().map(|j| j.into_serde()).collect();
+        let value = value.ok()?;
+        Some(value)
+    }
+}
+
 impl TryFrom<JS> for Vec<Change> {
     type Error = JsValue;
 
@@ -774,4 +810,8 @@ fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
 
 fn js_to_rust<T: DeserializeOwned>(value: &JsValue) -> Result<T, JsValue> {
     value.into_serde().map_err(to_js_err)
+}
+
+fn get_heads(heads: JsValue) -> Option<Vec<ChangeHash>> {
+    JS(heads).into()
 }

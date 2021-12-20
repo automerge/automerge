@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::{ElemId, Op, OpId, OpType, ScalarValue};
+use crate::{Clock, ElemId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -50,7 +50,7 @@ pub(crate) trait TreeQuery<const B: usize> {
     }
 
     fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
-        panic!("invalid node query")
+        QueryResult::Decend
     }
 
     #[inline(always)]
@@ -182,6 +182,108 @@ impl Index {
 impl Default for Index {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct VisWindow {
+    counters: HashMap<OpId, CounterData>,
+}
+
+impl VisWindow {
+    fn visible(&mut self, op: &Op, pos: usize) -> bool {
+        let mut visible = false;
+        match op.action {
+            OpType::Set(ScalarValue::Counter(val)) => {
+                self.counters.insert(
+                    op.id,
+                    CounterData {
+                        pos,
+                        val,
+                        succ: op.succ.iter().cloned().collect(),
+                        op: op.clone(),
+                    },
+                );
+                if op.succ.is_empty() {
+                    visible = true;
+                }
+            }
+            OpType::Inc(inc_val) => {
+                for id in &op.pred {
+                    if let Some(mut entry) = self.counters.get_mut(id) {
+                        entry.succ.remove(&op.id);
+                        entry.val += inc_val;
+                        entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
+                        if entry.succ.is_empty() {
+                            visible = true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                if op.succ.is_empty() {
+                    visible = true;
+                }
+            }
+        };
+        visible
+    }
+
+    fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
+        if !clock.covers(&op.id) {
+            return false;
+        }
+
+        let mut visible = false;
+        match op.action {
+            OpType::Set(ScalarValue::Counter(val)) => {
+                self.counters.insert(
+                    op.id,
+                    CounterData {
+                        pos,
+                        val,
+                        succ: op.succ.iter().cloned().collect(),
+                        op: op.clone(),
+                    },
+                );
+                if !op.succ.iter().any(|i| clock.covers(i)) {
+                    visible = true;
+                }
+            }
+            OpType::Inc(inc_val) => {
+                for id in &op.pred {
+                    // pred is always before op.id so we can see them
+                    if let Some(mut entry) = self.counters.get_mut(id) {
+                        entry.succ.remove(&op.id);
+                        entry.val += inc_val;
+                        entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
+                        if !entry.succ.iter().any(|i| clock.covers(i)) {
+                            visible = true;
+                        }
+                    }
+                }
+            }
+            _ => {
+                if !op.succ.iter().any(|i| clock.covers(i)) {
+                    visible = true;
+                }
+            }
+        };
+        visible
+    }
+
+    pub fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
+        let mut result = vec![];
+        for pred in &op.pred {
+            if let Some(entry) = self.counters.get(pred) {
+                result.push((entry.pos, entry.op.clone()));
+            }
+        }
+        if result.is_empty() {
+            vec![(pos, op.clone())]
+        } else {
+            result
+        }
     }
 }
 

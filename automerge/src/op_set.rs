@@ -1,14 +1,9 @@
-#![allow(unused_variables)]
-#![allow(dead_code)]
-#![allow(unused_mut)]
-#![allow(unused_imports)]
-
 use crate::op_tree::OpTreeInternal;
-use crate::query::{binary_search_by, Index, QueryResult, TreeQuery};
-use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId, OpTree, ScalarValue};
+use crate::query::{TreeQuery};
+use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId };
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 
 pub(crate) type OpSet = OpSetInternal<16>;
 
@@ -53,7 +48,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn search<Q>(&self, obj: ObjId, mut query: Q) -> Q
+    pub fn search<Q>(&self, obj: ObjId, query: Q) -> Q
     where
         Q: TreeQuery<B>,
     {
@@ -64,15 +59,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn get(&self, obj: ObjId, index: usize) -> Option<&Op> {
-        if let Some(tree) = self.trees.get(&obj) {
-            tree.get(index)
-        } else {
-            None
-        }
-    }
-
-    pub fn replace<F>(&mut self, obj: ObjId, index: usize, mut f: F) -> Option<Op>
+    pub fn replace<F>(&mut self, obj: ObjId, index: usize, f: F) -> Option<Op>
     where
         F: FnMut(&mut Op),
     {

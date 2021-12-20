@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::op_tree::OpTreeNode;
 use crate::query::{is_visible, CounterData, QueryResult, TreeQuery};
 use crate::{AutomergeError, ElemId, Key, Op, OpId, HEAD};

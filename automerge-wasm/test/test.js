@@ -99,13 +99,17 @@ describe('Automerge', () => {
 
       doc.set("_root", "foo","bar")
       doc.set("_root", "bip","bap")
+      let heads1 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip","foo"])
 
       doc.del("_root", "foo")
       doc.del("_root", "baz")
+      let heads2 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip"])
+      assert.deepEqual(doc.keys("_root", heads1),["bip", "foo"])
+      assert.deepEqual(doc.keys("_root", heads2),["bip"])
     })
 
     it('should be able to del', () => {
@@ -182,8 +186,15 @@ describe('Automerge', () => {
       let doc = Automerge.init()
       let text = doc.set("_root", "text", TEXT);
       doc.splice(text, 0, 0, "hello world");
+      let heads1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
+      let heads2 = doc.commit();
       assert.strictEqual(doc.text(text), "hello big bad world")
+      assert.strictEqual(doc.length(text), 19)
+      assert.strictEqual(doc.text(text, heads1), "hello world")
+      assert.strictEqual(doc.length(text, heads1), 11)
+      assert.strictEqual(doc.text(text, heads2), "hello big bad world")
+      assert.strictEqual(doc.length(text, heads2), 19)
     })
 
     it('local inc increments all visible counters in a map', () => {
@@ -241,24 +252,5 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.save(), save);
     })
 
-    it.skip('encode decode sync message', () => {
-      let message1 = en("B\x01�t�~�FF^�G��`�Ԃ��\x11\b\x18�\x1B�'Ϫ�<�\r \x00\x01\x00\x11\x0B\n\x07Ge.�\x17H�N��\x13x\x06m\x00")
-      let message2 = new Uint8Array([
-         66,   1, 229, 116, 203, 126, 137,  70,  70,  94, 155,
-         71, 240, 193,  96, 132, 212, 130, 195, 208,  17,   8,
-         24, 213,  27, 195,  39, 207, 170, 174,  60, 232,  13,
-         32,   0,   1,   0,  17,  11,  10,   7,  71, 101,  46,
-        239,  23,  72, 193,  78, 184, 232,  19, 120,   6, 109,
-          0])
-        let b = btoa(message2)
-        let a = atob(b)
-        console.log(message2);
-        console.log(b);
-        console.log(new Uint8Array(a.split(",")));
-//      assert.deepEqual(message2, en(de(message2)))
-//      console.log(message2)
-        let x = Automerge.decodeSyncMessage(message2)
-        console.log(x);
-    })
   })
 })
