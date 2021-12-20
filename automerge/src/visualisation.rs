@@ -1,7 +1,6 @@
 use fxhash::FxHasher;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
-use dot;
 use rand::Rng;
 
 #[derive(Copy, Clone, PartialEq, Hash, Eq)]
@@ -26,7 +25,7 @@ pub(crate) struct Node<'a, const B: usize> {
 #[derive(Clone)]
 pub(crate) enum NodeType<'a, const B: usize> {
     ObjRoot(crate::ObjId),
-    ObjTreeNode(&'a crate::op_tree::OpTreeNode<B>)
+    ObjTreeNode(&'a crate::op_tree::OpTreeNode<B>),
 }
 
 #[derive(Clone)]
@@ -37,11 +36,16 @@ pub(crate) struct Edge {
 
 pub(crate) struct GraphVisualisation<'a, const B: usize> {
     nodes: HashMap<NodeId, Node<'a, B>>,
+    actor_shorthands: HashMap<usize, String>,
 }
 
 impl<'a, const B: usize> GraphVisualisation<'a, B> {
     pub(super) fn construct(
-        trees: &'a HashMap<crate::types::ObjId, crate::op_tree::OpTreeInternal<B>, BuildHasherDefault<FxHasher>>,
+        trees: &'a HashMap<
+            crate::types::ObjId,
+            crate::op_tree::OpTreeInternal<B>,
+            BuildHasherDefault<FxHasher>,
+        >,
         metadata: &'a crate::op_set::OpSetMetadata,
     ) -> GraphVisualisation<'a, B> {
         let mut nodes = HashMap::new();
@@ -49,15 +53,25 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
             if let Some(root_node) = &tree.root_node {
                 let tree_id = Self::construct_nodes(&root_node, &mut nodes, metadata);
                 let obj_tree_id = NodeId::default();
-                nodes.insert(obj_tree_id, Node{
-                    id: obj_tree_id,
-                    children: vec![tree_id],
-                    node_type: NodeType::ObjRoot(obj_id.clone()),
-                    metadata,
-                });
+                nodes.insert(
+                    obj_tree_id,
+                    Node {
+                        id: obj_tree_id,
+                        children: vec![tree_id],
+                        node_type: NodeType::ObjRoot(*obj_id),
+                        metadata,
+                    },
+                );
             }
         }
-        GraphVisualisation { nodes }
+        let mut actor_shorthands = HashMap::new();
+        for actor in 0..metadata.actors.len() {
+            actor_shorthands.insert(actor, format!("actor{}", actor));
+        }
+        GraphVisualisation {
+            actor_shorthands,
+            nodes,
+        }
     }
 
     fn construct_nodes(
@@ -130,11 +144,13 @@ impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisua
 
     fn node_label(&'a self, n: &&Node<'a, B>) -> dot::LabelText<'a> {
         match n.node_type {
-            NodeType::ObjTreeNode(tree_node) => {
-                dot::LabelText::HtmlStr(OpTable::create(tree_node, n.metadata).to_html().into())
-            },
+            NodeType::ObjTreeNode(tree_node) => dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, n.metadata, &self.actor_shorthands)
+                    .to_html()
+                    .into(),
+            ),
             NodeType::ObjRoot(objid) => {
-                dot::LabelText::label(format!("{}@{}", objid.0.counter(), n.metadata.actors[objid.0.actor()]))
+                dot::LabelText::label(print_opid(&objid.0, &self.actor_shorthands))
             }
         }
     }
@@ -145,12 +161,15 @@ struct OpTable {
 }
 
 impl OpTable {
-
-    fn create<'a, const B: usize>(node: &'a crate::op_tree::OpTreeNode<B>, metadata: &crate::op_set::OpSetMetadata) -> Self {
+    fn create<'a, const B: usize>(
+        node: &'a crate::op_tree::OpTreeNode<B>,
+        metadata: &crate::op_set::OpSetMetadata,
+        actor_shorthands: &HashMap<usize, String>,
+    ) -> Self {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(e, metadata))
+            .map(|e| OpTableRow::create(e, metadata, actor_shorthands))
             .collect();
         OpTable { rows }
     }
@@ -164,7 +183,13 @@ impl OpTable {
             .join("");
         format!(
             "<table cellspacing=\"0\">\
-            <tr><td>op</td><td>obj</td><td>prop</td><td>action</td></tr>\
+            <tr>\
+                <td>op</td>\
+                <td>obj</td>\
+                <td>prop</td>\
+                <td>action</td>\
+                <td>succ</td>\
+            </tr>\
             <hr/>\
             {}\
             </table>",
@@ -178,19 +203,32 @@ struct OpTableRow {
     op_id: String,
     prop: String,
     op_description: String,
+    succ: String,
 }
 
 impl OpTableRow {
     fn to_html(&self) -> String {
-        format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            self.op_id, self.obj_id, self.prop, self.op_description
-        )
+        let rows = [
+            &self.op_id,
+            &self.obj_id,
+            &self.prop,
+            &self.op_description,
+            &self.succ,
+        ];
+        let row = rows
+            .iter()
+            .map(|r| format!("<td>{}</td>", &r))
+            .collect::<String>();
+        format!("<tr>{}</tr>", row)
     }
 }
 
 impl OpTableRow {
-    fn create(op: &super::Op, metadata: &crate::op_set::OpSetMetadata) -> Self {
+    fn create(
+        op: &super::Op,
+        metadata: &crate::op_set::OpSetMetadata,
+        actor_shorthands: &HashMap<usize, String>,
+    ) -> Self {
         let op_description = match &op.action {
             crate::OpType::Del => "del".to_string(),
             crate::OpType::Set(v) => format!("set {}", v),
@@ -199,14 +237,23 @@ impl OpTableRow {
         };
         let prop = match op.key {
             crate::Key::Map(k) => metadata.props[k].clone(),
-            crate::Key::Seq(e) => format!("{}@{}", e.0.counter(), e.0.actor()),
+            crate::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
+        let succ = op
+            .succ
+            .iter()
+            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
+            .collect();
         OpTableRow {
             op_description,
-            obj_id: format!("{}@{}", op.obj.0.counter(), op.obj.0.actor()),
-            op_id: format!("{}@{}", op.id.counter(), op.id.actor()),
+            obj_id: print_opid(&op.obj.0, actor_shorthands),
+            op_id: print_opid(&op.id, actor_shorthands),
             prop,
+            succ,
         }
     }
 }
 
+fn print_opid(opid: &crate::OpId, actor_shorthands: &HashMap<usize, String>) -> String {
+    format!("{}@{}", opid.counter(), actor_shorthands[&opid.actor()])
+}

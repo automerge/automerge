@@ -92,6 +92,12 @@ impl From<u64> for Value {
     }
 }
 
+impl From<bool> for Value {
+    fn from(v: bool) -> Self {
+        Value::Scalar(ScalarValue::Boolean(v))
+    }
+}
+
 impl From<ObjType> for Value {
     fn from(o: ObjType) -> Self {
         Value::Object(o)
