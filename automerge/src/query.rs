@@ -94,6 +94,38 @@ impl Index {
         }
     }
 
+    pub fn replace(&mut self, old: &Op, new: &Op) {
+        if old.id != new.id {
+            self.ops.remove(&old.id);
+            self.ops.insert(new.id);
+        }
+
+        assert!(new.key == old.key);
+
+        match (new.succ.is_empty(), old.succ.is_empty(), new.elemid()) {
+            (false, true, Some(elem)) => match self.visible.get(&elem).copied() {
+                Some(n) if n == 1 => {
+                    self.len -= 1;
+                    self.visible.remove(&elem);
+                }
+                Some(n) => {
+                    self.visible.insert(elem, n - 1);
+                }
+                None => panic!("remove overun in index"),
+            },
+            (true, false, Some(elem)) => match self.visible.get(&elem).copied() {
+                Some(n) => {
+                    self.visible.insert(elem, n + 1);
+                }
+                None => {
+                    self.len += 1;
+                    self.visible.insert(elem, 1);
+                }
+            },
+            _ => {}
+        }
+    }
+
     pub fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
         if op.succ.is_empty() {

@@ -559,8 +559,7 @@ impl<const B: usize> OpTreeNode<B> {
     pub fn set(&mut self, index: usize, element: Op) -> Op {
         if self.is_leaf() {
             let old_element = self.elements.get_mut(index).unwrap();
-            self.index.remove(old_element);
-            self.index.insert(&element);
+            self.index.replace(old_element, &element);
             mem::replace(old_element, element)
         } else {
             let mut cumulative_len = 0;
@@ -571,14 +570,12 @@ impl<const B: usize> OpTreeNode<B> {
                     }
                     Ordering::Equal => {
                         let old_element = self.elements.get_mut(child_index).unwrap();
-                        self.index.remove(old_element);
-                        self.index.insert(&element);
+                        self.index.replace(old_element, &element);
                         return mem::replace(old_element, element);
                     }
                     Ordering::Greater => {
-                        self.index.insert(&element);
-                        let old_element = child.set(index - cumulative_len, element);
-                        self.index.remove(&old_element);
+                        let old_element = child.set(index - cumulative_len, element.clone());
+                        self.index.replace(&old_element, &element);
                         return old_element;
                     }
                 }
