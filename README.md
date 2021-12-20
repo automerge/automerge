@@ -28,6 +28,12 @@ now working on writing a bunch more tests and cleaning up the API.
 
 ## Development
 
+### Running CI
+
+The steps CI will run are all defined in `./scripts/ci`. Obviously CI will run
+everything when you submit a PR, but if you want to run everything locally
+before you push you can run `./scripts/ci/run` to run everything.
+
 ### Running the JS tests
 
 You will need to have [node](https://nodejs.org/en/), [yarn](https://yarnpkg.com/getting-started/install), [rust](https://rustup.rs/) and [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/) installed.
