@@ -35,6 +35,8 @@ mod encoding;
 mod indexed_cache;
 mod legacy;
 mod sync;
+#[cfg(feature = "optree-visualisation")]
+mod visualisation;
 
 mod error;
 mod op_set;
@@ -110,6 +112,10 @@ impl Automerge {
         }
     }
 
+    pub fn maybe_get_actor(&self) -> Option<ActorId> {
+        self.actor.map(|i| self.ops.m.actors[i].clone())
+    }
+
     fn get_actor_index(&mut self) -> usize {
         if let Some(actor) = self.actor {
             actor
@@ -120,18 +126,20 @@ impl Automerge {
     }
 
     pub fn new_with_actor_id(actor: ActorId) -> Self {
-        Automerge {
+        let mut am = Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
             states: HashMap::new(),
-            ops: OpSet::with_actor(actor),
+            ops: Default::default(),
             deps: Default::default(),
             saved: Default::default(),
             actor: None,
             max_op: 0,
             transaction: None,
-        }
+        };
+        am.actor = Some(am.ops.m.actors.cache(actor));
+        am
     }
 
     pub fn pending_ops(&self) -> u64 {
@@ -356,25 +364,28 @@ impl Automerge {
         // TODO: Should we also no-op multiple delete operations?
         match self.local_op(obj.into(), prop.into(), OpType::Del)? {
             Some(opid) => Ok(opid),
-            None => { panic!("increment should always create a new op") }
+            None => { panic!("delete should always create a new op") }
         }
     }
 
+    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements
     pub fn splice(
         &mut self,
         obj: OpId,
         mut pos: usize,
         del: usize,
         vals: Vec<Value>,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<OpId>, AutomergeError> {
         for _ in 0..del {
             self.del(obj, pos)?;
         }
+        let mut result = Vec::with_capacity(vals.len());
         for v in vals {
-            self.insert(obj, pos, v)?;
+            result.push(self.insert(obj, pos, v)?);
             pos += 1;
         }
-        Ok(())
+        Ok(result)
     }
 
     pub fn splice_text(
@@ -383,7 +394,7 @@ impl Automerge {
         pos: usize,
         del: usize,
         text: &str,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<OpId>, AutomergeError> {
         let mut vals = vec![];
         for c in text.to_owned().graphemes(true) {
             vals.push(c.into());
@@ -576,7 +587,6 @@ impl Automerge {
 
         let pred = query.ops.iter().map(|op| op.id).collect();
 
-
         let op = Op {
             change: self.history.len(),
             id,
@@ -587,7 +597,6 @@ impl Automerge {
             pred,
             insert: false,
         };
-
 
         self.insert_local_op(op, query.pos, &query.ops_pos);
 
@@ -614,7 +623,6 @@ impl Automerge {
             }
             _ => {}
         }
-
 
         let op = Op {
             change: self.history.len(),
@@ -684,6 +692,18 @@ impl Automerge {
                 }
             })
             .collect()
+    }
+
+    /// Takes all the changes in `other` which are not in `self` and applies them
+    pub fn merge(&mut self, other: &mut Self) {
+        // TODO: Make this fallible and figure out how to do this transactionally
+        other.ensure_transaction_closed();
+        let changes = self
+            .get_changes_added(other)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.apply_changes(&changes).unwrap();
     }
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
@@ -1058,9 +1078,7 @@ impl Automerge {
 
     #[cfg(feature = "optree-visualisation")]
     pub fn visualise_optree(&self) -> String {
-        let mut out = Vec::new();
-        self.ops.visualise(&mut out).unwrap();
-        String::from_utf8_lossy(&out[..]).to_string()
+        self.ops.visualise()
     }
 }
 
