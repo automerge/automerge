@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+cargo deny --version
+cargo deny check advisories
+cargo deny check licenses
+cargo deny check bans
+cargo deny check sources
