@@ -1,5 +1,5 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, VisWindow, TreeQuery};
+use crate::query::{QueryResult, TreeQuery, VisWindow};
 use crate::{AutomergeError, ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
