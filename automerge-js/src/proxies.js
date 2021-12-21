@@ -3,7 +3,7 @@ const AutomergeWASM = require("automerge-wasm")
 const { Int, Uint, Float64 } = require("./numbers");
 const { Counter, getWriteableCounter } = require("./counter");
 const { Text } = require("./text");
-const { STATE, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
+const { STATE, HEADS, FROZEN, OBJECT_ID, READ_ONLY } = require("./constants")
 const { MAP, LIST, TABLE, TEXT } = require("automerge-wasm")
 
 function parseListIndex(key) {
@@ -19,22 +19,19 @@ function parseListIndex(key) {
 }
 
 function valueAt(target, prop) {
-      const { context, objectId, path, readonly, conflicts } = target
-      let values = context.values(objectId, prop)
-      if (values.length === 0) {
+      const { context, objectId, path, readonly, heads} = target
+      let value = context.value(objectId, prop, heads)
+      if (value === undefined) {
         return
       }
-      let value = values[0]
-      let local_conflict = values.length > 1
       const datatype = value[0]
       const val = value[1]
       switch (datatype) {
         case undefined: return;
-        case "map": return mapProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
-        case "list": return listProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
-        case "text": return textProxy(context, val, [ ... path, prop ], readonly, conflicts || local_conflict);
+        case "map": return mapProxy(context, val, [ ... path, prop ], readonly, heads);
+        case "list": return listProxy(context, val, [ ... path, prop ], readonly, heads);
+        case "text": return textProxy(context, val, [ ... path, prop ], readonly, heads);
         //case "table":
-        //case "text":
         //case "cursor":
         case "str": return val;
         case "uint": return val;
@@ -54,14 +51,6 @@ function valueAt(target, prop) {
         default:
           throw RangeError(`datatype ${datatype} unimplemented`)
       }
-}
-
-function local_conflicts(context, objectId, key) {
-    if (typeof key === "string" || typeof key === "number") {
-      const c = context.values(objectId, key)
-      return c.length > 1
-    }
-    return false
 }
 
 function import_value(value) {
@@ -110,17 +99,18 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) {
-    const { context, objectId, path, readonly, frozen } = target
+    const { context, objectId, path, readonly, frozen, heads } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
     if (key === READ_ONLY) return readonly
     if (key === FROZEN) return frozen
+    if (key === HEADS) return heads
     if (key === STATE) return context;
     return valueAt(target, key)
   },
 
   set (target, key, val) {
-    let { context, objectId, path, readonly, frozen, conflicts } = target
+    let { context, objectId, path, readonly, frozen} = target
     if (val && val[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
     }
@@ -128,11 +118,11 @@ const MapHandler = {
       target.frozen = val
       return
     }
-    conflicts = conflicts || local_conflicts(context, objectId, key)
-    let [ value, datatype ] = import_value(val)
-    if (this.get(target,key) === val && !conflicts) {
+    if (key === HEADS) {
+      target.heads = val
       return
     }
+    let [ value, datatype ] = import_value(val)
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -142,21 +132,21 @@ const MapHandler = {
     switch (datatype) {
       case "list":
         const list = context.set(objectId, key, LIST)
-        const proxyList = listProxy(context, list, [ ... path, key ], readonly, conflicts);
+        const proxyList = listProxy(context, list, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
         break;
       case "text":
         const text = context.set(objectId, key, TEXT)
-        const proxyText = textProxy(context, text, [ ... path, key ], readonly, conflicts);
+        const proxyText = textProxy(context, text, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyText[i] = value.get(i)
         }
         break;
       case "map":
         const map = context.set(objectId, key, MAP)
-        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly, conflicts);
+        const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -168,7 +158,7 @@ const MapHandler = {
   },
 
   deleteProperty (target, key) {
-    const { context, objectId, path, readonly, frozen, conflicts } = target
+    const { context, objectId, path, readonly, frozen } = target
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
@@ -192,22 +182,23 @@ const MapHandler = {
   },
 
   ownKeys (target) {
-    const { context, objectId } = target
-    return context.keys(objectId)
+    const { context, objectId, heads} = target
+    return context.keys(objectId, heads)
   },
 }
 
 
 const ListHandler = {
   get (target, index) {
-    const {context, objectId, path, readonly, frozen, conflicts} = target
+    const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
+    if (index === HEADS) return heads
     if (index === STATE) return context;
-    if (index === 'length') return context.length(objectId);
+    if (index === 'length') return context.length(objectId, heads);
     if (index === Symbol.iterator) {
       let i = 0;
       return function *() {
@@ -228,7 +219,7 @@ const ListHandler = {
   },
 
   set (target, index, val) {
-    let {context, objectId, path, readonly, frozen , conflicts} = target
+    let {context, objectId, path, readonly, frozen } = target
     index = parseListIndex(index)
     if (val && val[OBJECT_ID]) {
       throw new RangeError('Cannot create a reference to an existing document object')
@@ -237,14 +228,14 @@ const ListHandler = {
       target.frozen = val
       return
     }
+    if (index === HEADS) {
+      target.heads = val
+      return
+    }
     if (typeof index == "string") {
       throw new RangeError('list index must be a number')
     }
-    conflicts = conflicts || local_conflicts(context, objectId, index)
     const [ value, datatype] = import_value(val)
-    if (this.get(target,index) === val && !conflicts) {
-      return
-    }
     if (frozen) {
       throw new RangeError("Attempting to use an outdated Automerge document")
     }
@@ -259,7 +250,7 @@ const ListHandler = {
         } else {
           list = context.set(objectId, index, LIST)
         }
-        const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
+        const proxyList = listProxy(context, list, [ ... path, index ], readonly);
         proxyList.splice(0,0,...value)
         break;
       case "text":
@@ -269,7 +260,7 @@ const ListHandler = {
         } else {
           text = context.set(objectId, index, TEXT)
         }
-        const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
+        const proxyText = textProxy(context, text, [ ... path, index ], readonly);
         proxyText.splice(0,0,...value)
         break;
       case "map":
@@ -279,7 +270,7 @@ const ListHandler = {
         } else {
           map = context.set(objectId, index, MAP)
         }
-        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
+        const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
         for (const key in value) {
           proxyMap[key] = value[key]
         }
@@ -305,18 +296,18 @@ const ListHandler = {
   },
 
   has (target, key) {
-    const {context, objectId} = target
+    const {context, objectId, heads} = target
     key = parseListIndex(key)
     if (typeof key === 'number') {
-      return key < context.length(objectId)
+      return key < context.length(objectId, heads)
     }
     return key === 'length'
   },
 
   getOwnPropertyDescriptor (target, index) {
-    const {context, objectId, path, readonly, frozen} = target
+    const {context, objectId, path, readonly, frozen, heads} = target
 
-    if (index === 'length') return {writable: true, value: context.length(objectId) }
+    if (index === 'length') return {writable: true, value: context.length(objectId, heads) }
     if (index === OBJECT_ID) return {configurable: false, enumerable: false, value: objectId}
 
     index = parseListIndex(index)
@@ -333,14 +324,15 @@ const ListHandler = {
 const TextHandler = Object.assign(ListHandler, {
   get (target, index) {
     // FIXME this is a one line change from ListHandler.get()
-    const {context, objectId, path, readonly, frozen, conflicts} = target
+    const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
+    if (index === HEADS) return heads
     if (index === STATE) return context;
-    if (index === 'length') return context.length(objectId);
+    if (index === 'length') return context.length(objectId, heads);
     if (index === Symbol.iterator) {
       let i = 0;
       return function *() {
@@ -360,29 +352,28 @@ const TextHandler = Object.assign(ListHandler, {
   },
 })
 
-function mapProxy(context, objectId, path, readonly, conflicts) {
-  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, conflicts}, MapHandler)
+function mapProxy(context, objectId, path, readonly, heads) {
+  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads}, MapHandler)
 }
 
-function listProxy(context, objectId, path, readonly, conflicts) {
+function listProxy(context, objectId, path, readonly, heads) {
   let target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, conflicts})
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads})
   return new Proxy(target, ListHandler)
 }
 
-function textProxy(context, objectId, path, readonly, conflicts) {
+function textProxy(context, objectId, path, readonly, heads) {
   let target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, conflicts})
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false})
   return new Proxy(target, TextHandler)
 }
 
 function rootProxy(context, readonly) {
-  //context.instantiateObject = instantiateProxy
   return mapProxy(context, "_root", [], readonly, false)
 }
 
 function listMethods(target) {
-  const {context, objectId, path, readonly, frozen, conflicts} = target
+  const {context, objectId, path, readonly, frozen, heads} = target
   const methods = {
     deleteAt(index, numDelete) {
       index = parseListIndex(index)
@@ -472,17 +463,17 @@ function listMethods(target) {
         switch (datatype) {
           case "list":
             const list = context.insert(objectId, index, LIST)
-            const proxyList = listProxy(context, list, [ ... path, index ], readonly, conflicts);
+            const proxyList = listProxy(context, list, [ ... path, index ], readonly);
             proxyList.splice(0,0,...value)
             break;
           case "text":
             const text = context.insert(objectId, index, TEXT)
-            const proxyText = textProxy(context, text, [ ... path, index ], readonly, conflicts);
+            const proxyText = textProxy(context, text, [ ... path, index ], readonly);
             proxyText.splice(0,0,...value)
             break;
           case "map":
             const map = context.insert(objectId, index, MAP)
-            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly, conflicts);
+            const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]
             }
@@ -517,7 +508,7 @@ function listMethods(target) {
 
     keys() {
       let i = 0;
-      let len = context.length(objectId)
+      let len = context.length(objectId, heads)
       const iterator = {
         next: () => {
           let value = undefined
@@ -567,7 +558,7 @@ function listMethods(target) {
 }
 
 function textMethods(target) {
-  const {context, objectId, path, readonly, frozen, conflicts} = target
+  const {context, objectId, path, readonly, frozen} = target
   const methods = {
     set (index, value) {
       return this[index] = value
