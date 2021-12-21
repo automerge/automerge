@@ -1,7 +1,6 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{is_visible, visible_op, CounterData, QueryResult, TreeQuery};
-use crate::{AutomergeError, ElemId, Key, Op, OpId};
-use std::collections::HashMap;
+use crate::query::{VisWindow, QueryResult, TreeQuery};
+use crate::{AutomergeError, ElemId, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,7 +9,7 @@ pub(crate) struct Nth<const B: usize> {
     seen: usize,
     last_seen: Option<ElemId>,
     last_elem: Option<ElemId>,
-    counters: HashMap<OpId, CounterData>,
+    window: VisWindow,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
@@ -26,7 +25,7 @@ impl<const B: usize> Nth<B> {
             ops_pos: vec![],
             pos: 0,
             last_elem: None,
-            counters: HashMap::new(),
+            window: Default::default(),
         }
     }
 
@@ -71,13 +70,13 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
             self.last_elem = element.elemid();
             self.last_seen = None
         }
-        let visible = is_visible(element, self.pos, &mut self.counters);
+        let visible = self.window.visible(element, self.pos);
         if visible && self.last_seen.is_none() {
             self.seen += 1;
             self.last_seen = element.elemid()
         }
         if self.seen == self.target + 1 && visible {
-            for (vpos, vop) in visible_op(element, self.pos, &self.counters) {
+            for (vpos, vop) in self.window.seen_op(element, self.pos) {
                 self.ops.push(vop);
                 self.ops_pos.push(vpos);
             }

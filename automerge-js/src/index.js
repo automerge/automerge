@@ -43,7 +43,7 @@ function change(doc, options, callback) {
   if (doc[FROZEN] === true) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
-  if (doc[HEADS] === true) {
+  if (!!doc[HEADS] === true) {
     console.log("HEADS", doc[HEADS])
     throw new RangeError("Attempting to change an out of date document");
   }
@@ -269,7 +269,7 @@ function receiveSyncMessage(doc, syncState, message) {
   if (doc[FROZEN] === true) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
-  if (doc[HEADS] === true) {
+  if (!!doc[HEADS] === true) {
     throw new RangeError("Attempting to change an out of date document");
   }
   if (doc[READ_ONLY] === false) {
@@ -320,7 +320,7 @@ function getMissingDeps(doc, heads) {
 
 function getHeads(doc) {
   const state = doc[STATE]
-  return state.getHeads()
+  return doc[HEADS] || state.getHeads()
 }
 
 function dump(doc) {

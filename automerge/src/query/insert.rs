@@ -1,7 +1,6 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{is_visible, CounterData, QueryResult, TreeQuery};
-use crate::{AutomergeError, ElemId, Key, Op, OpId, HEAD};
-use std::collections::HashMap;
+use crate::query::{QueryResult, VisWindow, TreeQuery};
+use crate::{AutomergeError, ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,7 +10,7 @@ pub(crate) struct InsertNth<const B: usize> {
     pub pos: usize,
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
-    counters: HashMap<OpId, CounterData>,
+    window: VisWindow,
 }
 
 impl<const B: usize> InsertNth<B> {
@@ -22,7 +21,7 @@ impl<const B: usize> InsertNth<B> {
             pos: 0,
             last_seen: None,
             last_insert: None,
-            counters: Default::default(),
+            window: Default::default(),
         }
     }
 
@@ -34,10 +33,6 @@ impl<const B: usize> InsertNth<B> {
         } else {
             Err(AutomergeError::InvalidIndex(self.target))
         }
-    }
-
-    pub fn is_visible(&mut self, element: &Op) -> bool {
-        is_visible(element, self.pos, &mut self.counters)
     }
 }
 
@@ -75,7 +70,7 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
-        if self.last_seen.is_none() && self.is_visible(element) {
+        if self.last_seen.is_none() && self.window.visible(element, self.pos) {
             self.seen += 1;
             self.last_seen = element.elemid()
         }
