@@ -2,6 +2,7 @@
 name = "automerge"
 version = "0.1.0"
 edition = "2018"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -32,6 +33,6 @@ features = ["console"]
 
 [dev-dependencies]
 pretty_assertions = "1.0.0"
-proptest = { version = "0.10.1", default-features = false, features = ["std"] }
+proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features=true }
 maplit = { version = "^1.0" }
