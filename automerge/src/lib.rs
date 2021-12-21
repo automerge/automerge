@@ -51,7 +51,7 @@ use clock::Clock;
 use indexed_cache::IndexedCache;
 use op_set::OpSet;
 use std::collections::{HashMap, HashSet, VecDeque};
-use types::{ObjId, Op, HEAD};
+use types::{ObjId, Op, ElemId, Key, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub use change::{decode_change, Change};
@@ -59,7 +59,7 @@ pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{
-    ActorId, ChangeHash, ElemId, Export, Exportable, Importable, Key, ObjType, OpId, OpType, Patch,
+    ActorId, ChangeHash, Export, Exportable, Importable, ObjType, OpId, OpType, Patch,
     Peer, Prop, ROOT,
 };
 pub use value::{ScalarValue, Value};

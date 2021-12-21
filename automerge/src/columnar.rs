@@ -283,14 +283,14 @@ impl<'a> Iterator for ChangeIterator<'a> {
     }
 }
 
-pub struct ObjIterator<'a> {
+pub(crate) struct ObjIterator<'a> {
     //actors: &'a Vec<&'a [u8]>,
     pub(crate) actors: &'a [ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: RleDecoder<'a, u64>,
 }
 
-pub struct DepsIterator<'a> {
+pub(crate) struct DepsIterator<'a> {
     pub(crate) num: RleDecoder<'a, usize>,
     pub(crate) dep: DeltaDecoder<'a>,
 }
@@ -304,32 +304,32 @@ impl<'a> DepsIterator<'a> {
     }
 }
 
-pub struct ExtraIterator<'a> {
+pub(crate) struct ExtraIterator<'a> {
     pub(crate) len: RleDecoder<'a, usize>,
     pub(crate) extra: Decoder<'a>,
 }
 
-pub struct PredIterator<'a> {
+pub(crate) struct PredIterator<'a> {
     pub(crate) actors: &'a [ActorId],
     pub(crate) pred_num: RleDecoder<'a, usize>,
     pub(crate) pred_actor: RleDecoder<'a, usize>,
     pub(crate) pred_ctr: DeltaDecoder<'a>,
 }
 
-pub struct SuccIterator<'a> {
+pub(crate) struct SuccIterator<'a> {
     pub(crate) succ_num: RleDecoder<'a, usize>,
     pub(crate) succ_actor: RleDecoder<'a, usize>,
     pub(crate) succ_ctr: DeltaDecoder<'a>,
 }
 
-pub struct KeyIterator<'a> {
+pub(crate) struct KeyIterator<'a> {
     pub(crate) actors: &'a [ActorId],
     pub(crate) actor: RleDecoder<'a, usize>,
     pub(crate) ctr: DeltaDecoder<'a>,
     pub(crate) str: RleDecoder<'a, SmolStr>,
 }
 
-pub struct ValueIterator<'a> {
+pub(crate) struct ValueIterator<'a> {
     pub(crate) actors: &'a [ActorId],
     pub(crate) val_len: RleDecoder<'a, usize>,
     pub(crate) val_raw: Decoder<'a>,

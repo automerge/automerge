@@ -9,7 +9,7 @@ use std::fmt;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
-pub const HEAD: ElemId = ElemId(OpId(0, 0));
+pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
 pub const ROOT: OpId = OpId(0, 0);
 
 const ROOT_STR: &str = "_root";
@@ -328,7 +328,7 @@ impl From<ElemId> for Key {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
-pub enum Key {
+pub(crate) enum Key {
     Map(usize),
     Seq(ElemId),
 }
@@ -355,10 +355,10 @@ impl Key {
 pub struct OpId(pub u64, pub usize);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub struct ObjId(pub OpId);
+pub(crate) struct ObjId(pub OpId);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub struct ElemId(pub OpId);
+pub(crate) struct ElemId(pub OpId);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {

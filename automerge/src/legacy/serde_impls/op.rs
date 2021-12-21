@@ -62,7 +62,7 @@ impl Serialize for Op {
 // is the associated data
 // But we serialize `RawOpType` as a string, causing rmp-serde to choke on deserialization
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum RawOpType {
+pub(crate) enum RawOpType {
     MakeMap,
     MakeTable,
     MakeList,

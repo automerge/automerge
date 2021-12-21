@@ -20,15 +20,6 @@ where
         }
     }
 
-    pub fn from(cache: Vec<T>) -> Self {
-        let lookup = cache
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v.clone(), i))
-            .collect();
-        IndexedCache { cache, lookup }
-    }
-
     pub fn cache(&mut self, item: T) -> usize {
         if let Some(n) = self.lookup.get(&item) {
             *n

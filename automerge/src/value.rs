@@ -140,7 +140,7 @@ impl From<Value> for OpType {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
-pub enum DataType {
+pub(crate) enum DataType {
     #[serde(rename = "counter")]
     Counter,
     #[serde(rename = "timestamp")]
@@ -155,13 +155,6 @@ pub enum DataType {
     F64,
     #[serde(rename = "undefined")]
     Undefined,
-}
-
-impl DataType {
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn is_undefined(d: &DataType) -> bool {
-        matches!(d, DataType::Undefined)
-    }
 }
 
 #[derive(Serialize, PartialEq, Debug, Clone)]
@@ -179,7 +172,7 @@ pub enum ScalarValue {
 }
 
 impl ScalarValue {
-    pub fn as_datatype(
+    pub(crate) fn as_datatype(
         &self,
         datatype: DataType,
     ) -> Result<ScalarValue, error::InvalidScalarValue> {
@@ -255,19 +248,7 @@ impl ScalarValue {
     /// `self` represents a numerical scalar value
     /// This is necessary b/c numerical values are not self-describing
     /// (unlike strings / bytes / etc. )
-    pub fn as_numerical_datatype(&self) -> Option<DataType> {
-        match self {
-            ScalarValue::Counter(..) => Some(DataType::Counter),
-            ScalarValue::Timestamp(..) => Some(DataType::Timestamp),
-            ScalarValue::Int(..) => Some(DataType::Int),
-            ScalarValue::Uint(..) => Some(DataType::Uint),
-            ScalarValue::F64(..) => Some(DataType::F64),
-            _ => None,
-        }
-    }
-
-    // TODO: Should this method be combined with as_numerical_datatype??
-    pub fn datatype(&self) -> Option<DataType> {
+    pub(crate) fn as_numerical_datatype(&self) -> Option<DataType> {
         match self {
             ScalarValue::Counter(..) => Some(DataType::Counter),
             ScalarValue::Timestamp(..) => Some(DataType::Timestamp),

@@ -28,18 +28,6 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn with_actor(actor: ActorId) -> Self {
-        OpSetInternal {
-            trees: Default::default(),
-            objs: Default::default(),
-            length: 0,
-            m: OpSetMetadata {
-                actors: IndexedCache::from(vec![actor]),
-                props: IndexedCache::new(),
-            },
-        }
-    }
-
     pub fn iter(&self) -> Iter<'_, B> {
         Iter {
             inner: self,
