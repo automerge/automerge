@@ -1,9 +1,9 @@
 use crate::op_tree::OpTreeInternal;
-use crate::query::{TreeQuery};
-use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId };
+use crate::query::TreeQuery;
+use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 
 pub(crate) type OpSet = OpSetInternal<16>;
 

@@ -51,7 +51,7 @@ use clock::Clock;
 use indexed_cache::IndexedCache;
 use op_set::OpSet;
 use std::collections::{HashMap, HashSet, VecDeque};
-use types::{ObjId, Op, ElemId, Key, HEAD};
+use types::{ElemId, Key, ObjId, Op, HEAD};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub use change::{decode_change, Change};
@@ -59,8 +59,8 @@ pub use error::AutomergeError;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{
-    ActorId, ChangeHash, Export, Exportable, Importable, ObjType, OpId, OpType, Patch,
-    Peer, Prop, ROOT,
+    ActorId, ChangeHash, Export, Exportable, Importable, ObjType, OpId, OpType, Patch, Peer, Prop,
+    ROOT,
 };
 pub use value::{ScalarValue, Value};
 
@@ -359,7 +359,9 @@ impl Automerge {
         // TODO: Should we also no-op multiple delete operations?
         match self.local_op(obj.into(), prop.into(), OpType::Del)? {
             Some(opid) => Ok(opid),
-            None => { panic!("delete should always create a new op") }
+            None => {
+                panic!("delete should always create a new op")
+            }
         }
     }
 

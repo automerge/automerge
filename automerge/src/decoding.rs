@@ -115,7 +115,7 @@ impl<'a> Decoder<'a> {
     }
 }
 
-/// See discussion on [`BooleanEncoder`] for the format data is stored in.
+/// See discussion on [`crate::encoding::BooleanEncoder`] for the format data is stored in.
 pub(crate) struct BooleanDecoder<'a> {
     decoder: Decoder<'a>,
     last_value: bool,
@@ -155,7 +155,7 @@ impl<'a> Iterator for BooleanDecoder<'a> {
     }
 }
 
-/// See discussion on [`RleEncoder`] for the format data is stored in.
+/// See discussion on [`crate::encoding::RleEncoder`] for the format data is stored in.
 #[derive(Debug)]
 pub(crate) struct RleDecoder<'a, T> {
     pub decoder: Decoder<'a>,
@@ -223,7 +223,7 @@ where
     }
 }
 
-/// See discussion on [`DeltaEncoder`] for the format data is stored in.
+/// See discussion on [`crate::encoding::DeltaEncoder`] for the format data is stored in.
 pub(crate) struct DeltaDecoder<'a> {
     rle: RleDecoder<'a, i64>,
     absolute_val: u64,
