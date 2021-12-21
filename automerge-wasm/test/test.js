@@ -40,20 +40,48 @@ describe('Automerge', () => {
       let result
 
       doc.set(root, "hello", "world")
-      doc.set(root, "number", 5, "uint")
+      doc.set(root, "number1", 5, "uint")
+      doc.set(root, "number2", 5)
+      doc.set(root, "number3", 5.5)
+      doc.set(root, "number4", 5.5, "f64")
+      doc.set(root, "number5", 5.5, "int")
+      doc.set(root, "bool", true)
 
       result = doc.value(root,"hello")
       assert.deepEqual(result,["str","world"])
 
-      result = doc.value(root,"number")
+      result = doc.value(root,"number1")
       assert.deepEqual(result,["uint",5])
+
+      result = doc.value(root,"number2")
+      assert.deepEqual(result,["int",5])
+
+      result = doc.value(root,"number3")
+      assert.deepEqual(result,["f64",5.5])
+
+      result = doc.value(root,"number4")
+      assert.deepEqual(result,["f64",5.5])
+
+      result = doc.value(root,"number5")
+      assert.deepEqual(result,["int",5])
+
+      result = doc.value(root,"bool")
+      assert.deepEqual(result,["boolean",true])
+
+      doc.set(root, "bool", false, "boolean")
+
+      result = doc.value(root,"bool")
+      assert.deepEqual(result,["boolean",false])
     })
 
     it('should be able to use bytes', () => {
       let doc = Automerge.init()
-      doc.set("_root","data", new Uint8Array([10,11,12]));
-      let value = doc.value("_root", "data")
-      assert.deepEqual(value, ["bytes", new Uint8Array([10,11,12])]);
+      doc.set("_root","data1", new Uint8Array([10,11,12]));
+      doc.set("_root","data2", new Uint8Array([13,14,15]), "bytes");
+      let value1 = doc.value("_root", "data1")
+      assert.deepEqual(value1, ["bytes", new Uint8Array([10,11,12])]);
+      let value2 = doc.value("_root", "data2")
+      assert.deepEqual(value2, ["bytes", new Uint8Array([13,14,15])]);
     })
 
     it('should be able to make sub objects', () => {

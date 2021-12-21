@@ -503,6 +503,8 @@ impl Automerge {
             None => {
                 if value.is_null() {
                     Ok(am::ScalarValue::Null.into())
+                } else if let Some(b) = value.as_bool() {
+                    Ok(am::ScalarValue::Boolean(b).into())
                 } else if let Some(s) = value.as_string() {
                     // FIXME - we need to detect str vs int vs float vs bool here :/
                     Ok(am::ScalarValue::Str(s.into()).into())
