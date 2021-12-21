@@ -6,7 +6,7 @@ let { rootProxy, listProxy, textProxy, mapProxy } = require("./proxies")
 let { Counter  } = require("./counter")
 let { Text } = require("./text")
 let { Int, Uint, Float64  } = require("./numbers")
-let { STATE, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
+let { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
 
 function init(actor) {
   const state = AutomergeWASM.init(actor)
@@ -43,18 +43,23 @@ function change(doc, options, callback) {
   if (doc[FROZEN] === true) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
+  if (doc[HEADS] === true) {
+    console.log("HEADS", doc[HEADS])
+    throw new RangeError("Attempting to change an out of date document");
+  }
   if (doc[READ_ONLY] === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = doc[STATE].clone()
-  //state.begin(options.message, options.time)
+  const state = doc[STATE]
+  const heads = state.getHeads()
   try {
+    doc[HEADS] = heads
     doc[FROZEN] = true
     let root = rootProxy(state);
     callback(root)
     if (state.pending_ops() === 0) {
-      state.rollback()
       doc[FROZEN] = false
+      doc[HEADS] = undefined
       return doc
     } else {
       state.commit(options.message, options.time)
@@ -63,6 +68,7 @@ function change(doc, options, callback) {
   } catch (e) {
     //console.log("ERROR: ",e)
     doc[FROZEN] = false
+    doc[HEADS] = undefined
     state.rollback()
     throw e
   }
@@ -102,11 +108,16 @@ function save(doc) {
 }
 
 function merge(local, remote) {
-  const localState = local[STATE].clone()
+  if (local[HEADS] === true) {
+    throw new RangeError("Attempting to change an out of date document");
+  }
+  const localState = local[STATE]
+  const heads = localState.getHeads()
   const remoteState = remote[STATE]
   const changes = localState.getChangesAdded(remoteState)
   localState.applyChanges(changes)
-  return rootProxy(localState, true);
+  local[HEADS] = heads
+  return rootProxy(localState, true)
 }
 
 function getActorId(doc) {
@@ -175,7 +186,8 @@ function getObjectId(doc) {
 function getChanges(oldState, newState) {
   const o = oldState[STATE]
   const n = newState[STATE]
-  return n.getChanges(o.getHeads())
+  const heads = oldState[HEADS]
+  return n.getChanges(heads || o.getHeads())
 }
 
 function getAllChanges(doc) {
@@ -193,8 +205,10 @@ function applyChanges(doc, changes) {
   if (doc[READ_ONLY] === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = doc[STATE].clone()
+  const state = doc[STATE]
+  const heads = state.getHeads()
   state.applyChanges(changes)
+  doc[HEADS] = heads
   return [rootProxy(state, true)];
 }
 
@@ -255,11 +269,16 @@ function receiveSyncMessage(doc, syncState, message) {
   if (doc[FROZEN] === true) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
+  if (doc[HEADS] === true) {
+    throw new RangeError("Attempting to change an out of date document");
+  }
   if (doc[READ_ONLY] === false) {
     throw new RangeError("Calls to Automerge.change cannot be nested")
   }
-  const state = doc[STATE].clone()
+  const state = doc[STATE]
+  const heads = state.getHeads()
   state.receiveSyncMessage(syncState, message)
+  doc[HEADS] = heads
   return [rootProxy(state, true), syncState, null];
 }
 
