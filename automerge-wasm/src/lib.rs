@@ -256,10 +256,10 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn value(&mut self, obj: JsValue, arg: JsValue, heads: JsValue) -> Result<Array, JsValue> {
+    pub fn value(&mut self, obj: JsValue, prop: JsValue, heads: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();
-        let prop = to_prop(arg);
+        let prop = to_prop(prop);
         let heads = get_heads(heads);
         if let Ok(prop) = prop {
             let value = if let Some(h) = heads {

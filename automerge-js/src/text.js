@@ -3,17 +3,17 @@ const { isObject } = require('../src/common')
 
 class Text {
   constructor (text) {
+    const instance = Object.create(Text.prototype)
     if (typeof text === 'string') {
-      const elems = [...text].map(value => ({value}))
-      return instantiateText(undefined, elems) // eslint-disable-line
+      instance.elems = [...text]
     } else if (Array.isArray(text)) {
-      const elems = text.map(value => ({value}))
-      return instantiateText(undefined, elems) // eslint-disable-line
+      instance.elems = text
     } else if (text === undefined) {
-      return instantiateText(undefined, []) // eslint-disable-line
+      instance.elems = []
     } else {
       throw new TypeError(`Unsupported initial value for Text: ${text}`)
     }
+    return instance
   }
 
   get length () {
@@ -21,12 +21,11 @@ class Text {
   }
 
   get (index) {
-    const value = this.elems[index].value
-    return value
+    return this.elems[index]
   }
 
   getElemId (index) {
-    return this.elems[index].elemId
+    return undefined
   }
 
   /**
@@ -39,7 +38,7 @@ class Text {
       next () {
         index += 1
         if (index < elems.length) {
-          return {done: false, value: elems[index].value}
+          return {done: false, value: elems[index]}
         } else {
           return {done: true}
         }
@@ -57,7 +56,7 @@ class Text {
     // https://jsperf.com/join-vs-loop-w-type-test
     let str = ''
     for (const elem of this.elems) {
-      if (typeof elem.value === 'string') str += elem.value
+      if (typeof elem === 'string') str += elem
     }
     return str
   }
@@ -73,14 +72,14 @@ class Text {
     let spans = []
     let chars = ''
     for (const elem of this.elems) {
-      if (typeof elem.value === 'string') {
-        chars += elem.value
+      if (typeof elem === 'string') {
+        chars += elem
       } else {
         if (chars.length > 0) {
           spans.push(chars)
           chars = ''
         }
-        spans.push(elem.value)
+        spans.push(elem)
       }
     }
     if (chars.length > 0) {
@@ -101,14 +100,14 @@ class Text {
    * Updates the list item at position `index` to a new value `value`.
    */
   set (index, value) {
-    throw new TypeError('Automerge.Text object cannot be modified outside of a change block')
+    this.elems[index] = value
   }
 
   /**
    * Inserts new list items `values` starting at position `index`.
    */
   insertAt(index, ...values) {
-    throw new TypeError('Automerge.Text object cannot be modified outside of a change block')
+    this.elems.splice(index, 0, ... values)
   }
 
   /**
@@ -116,7 +115,7 @@ class Text {
    * if `numDelete` is not given, one item is deleted.
    */
   deleteAt(index, numDelete = 1) {
-    throw new TypeError('Automerge.Text object cannot be modified outside of a change block')
+    this.elems.splice(index, numDelete)
   }
 }
 
@@ -130,11 +129,4 @@ for (let method of ['concat', 'every', 'filter', 'find', 'findIndex', 'forEach',
   }
 }
 
-function instantiateText(objectId, elems) {
-  const instance = Object.create(Text.prototype)
-  instance[OBJECT_ID] = objectId
-  instance.elems = elems
-  return instance
-}
-
-module.exports = { Text, instantiateText }
+module.exports = { Text }

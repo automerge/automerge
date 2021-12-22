@@ -328,6 +328,30 @@ function dump(doc) {
   state.dump()
 }
 
+function toJS(doc) {
+  if (typeof doc === "object") {
+    if (doc instanceof Uint8Array) {
+      return doc
+    }
+    if (doc === null) {
+      return doc
+    }
+    if (doc instanceof Array) {
+      return doc.map((a) => toJS(a))
+    }
+    if (doc instanceof Text) {
+      return doc.map((a) => toJS(a))
+    }
+    let tmp = {}
+    for (index in doc) {
+      tmp[index] = toJS(doc[index])
+    }
+    return tmp
+  } else {
+    return doc
+  }
+}
+
 module.exports = {
     init, from, change, emptyChange, clone, free,
     load, save, merge, getChanges, getAllChanges, applyChanges,
@@ -336,7 +360,7 @@ module.exports = {
     generateSyncMessage, receiveSyncMessage, initSyncState,
     decodeSyncMessage, encodeSyncMessage, decodeSyncState, encodeSyncState,
     getMissingDeps,
-    dump, Text, Counter, Int, Uint, Float64
+    dump, Text, Counter, Int, Uint, Float64, toJS,
 }
 
 // depricated

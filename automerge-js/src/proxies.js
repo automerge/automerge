@@ -192,6 +192,7 @@ const ListHandler = {
   get (target, index) {
     const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
+    if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
@@ -295,13 +296,13 @@ const ListHandler = {
     return true
   },
 
-  has (target, key) {
+  has (target, index) {
     const {context, objectId, heads} = target
-    key = parseListIndex(key)
-    if (typeof key === 'number') {
-      return key < context.length(objectId, heads)
+    index = parseListIndex(index)
+    if (typeof index === 'number') {
+      return index < context.length(objectId, heads)
     }
-    return key === 'length'
+    return index === 'length'
   },
 
   getOwnPropertyDescriptor (target, index) {
@@ -316,17 +317,25 @@ const ListHandler = {
     return { configurable: true, enumerable: true, value }
   },
 
+  getPrototypeOf(target) { return Object.getPrototypeOf([]) },
   ownKeys (target) {
-    return ['length']
+    const {context, objectId, heads } = target
+    let keys = []
+    // uncommenting this causes assert.deepEqual() to fail when comparing to a pojo array
+    // but not uncommenting it causes for (i in list) {} to not enumerate values properly
+    //for (let i = 0; i < target.context.length(objectId, heads); i++) { keys.push(i.toString()) }
+    keys.push("length");
+    return keys
   }
 }
 
-const TextHandler = Object.assign(ListHandler, {
+const TextHandler = Object.assign({}, ListHandler, {
   get (target, index) {
     // FIXME this is a one line change from ListHandler.get()
     const {context, objectId, path, readonly, frozen, heads } = target
     index = parseListIndex(index)
     if (index === Symbol.toStringTag) { return target[Symbol.toStringTag] }
+    if (index === Symbol.hasInstance) { return (instance) => { return [].has(instance) } }
     if (index === OBJECT_ID) return objectId
     if (index === READ_ONLY) return readonly
     if (index === FROZEN) return frozen
@@ -350,6 +359,9 @@ const TextHandler = Object.assign(ListHandler, {
       return textMethods(target)[index] || listMethods(target)[index]
     }
   },
+  getPrototypeOf(target) {
+    return Object.getPrototypeOf(new Text())
+  },
 })
 
 function mapProxy(context, objectId, path, readonly, heads) {
@@ -364,7 +376,7 @@ function listProxy(context, objectId, path, readonly, heads) {
 
 function textProxy(context, objectId, path, readonly, heads) {
   let target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false})
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads})
   return new Proxy(target, TextHandler)
 }
 
@@ -376,11 +388,15 @@ function listMethods(target) {
   const {context, objectId, path, readonly, frozen, heads} = target
   const methods = {
     deleteAt(index, numDelete) {
-      index = parseListIndex(index)
+      // FIXME - what about many deletes?
       if (context.value(objectId, index)[0] == "counter") {
         throw new TypeError('Unsupported operation: deleting a counter from a list')
       }
-      context.del(objectId, index)
+      if (typeof numDelete === 'number') {
+        context.splice(objectId, index, numDelete)
+      } else {
+        context.del(objectId, index)
+      }
       return this
     },
 
@@ -395,7 +411,7 @@ function listMethods(target) {
     },
 
     indexOf(o, start = 0) {
-      // FIXME 
+      // FIXME
       const id = o[OBJECT_ID]
       if (id) {
         const list = context.getObject(objectId)
@@ -450,7 +466,7 @@ function listMethods(target) {
         throw new RangeError("Attempting to use an outdated Automerge document")
       }
       if (readonly) {
-        throw new RangeError(`Object property "${index}" cannot be modified`)
+        throw new RangeError("Sequence object cannot be modified outside of a change block")
       }
       let result = []
       for (let i = 0; i < del; i++) {
@@ -602,6 +618,6 @@ function textMethods(target) {
   }
   return methods
 }
-    
 
-module.exports = { rootProxy, textProxy, listProxy, mapProxy }
+
+module.exports = { rootProxy, textProxy, listProxy, mapProxy, MapHandler, ListHandler, TextHandler }

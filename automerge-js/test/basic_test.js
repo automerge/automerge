@@ -101,6 +101,7 @@ describe('Automerge', () => {
             assert.deepEqual(doc2.list[1], 2)
             assert.deepEqual(doc2.list[2], 3)
             assert.deepEqual(doc2, { list: [1,2,3] })
+           // assert.deepStrictEqual(Automerge.toJS(doc2), { list: [1,2,3] })
 
             let doc3 = Automerge.change(doc2, (d) => {
               d.list[1] = "a"
