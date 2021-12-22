@@ -12,6 +12,7 @@
   "dependencies": {
     "automerge-wasm": "file:../automerge-wasm",
     "fast-sha256": "^1.3.0",
-    "pako": "^2.0.4"
+    "pako": "^2.0.4",
+    "uuid": "^8.3"
   }
 }

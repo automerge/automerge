@@ -1,6 +1,5 @@
-
-let AutomergeWASM = require("automerge-wasm")
-//const { encodeChange, decodeChange } = require('./columnar')
+const AutomergeWASM = require("automerge-wasm")
+const uuid = require('./uuid')
 
 let { rootProxy, listProxy, textProxy, mapProxy } = require("./proxies")
 let { Counter  } = require("./counter")
@@ -236,9 +235,6 @@ function equals() {
     if (!equals(val1[keys1[i]], val2[keys2[i]])) return false
   }
   return true
-}
-
-function uuid() {
 }
 
 function encodeSyncMessage(msg) {
