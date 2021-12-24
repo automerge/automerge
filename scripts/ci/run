@@ -6,3 +6,4 @@ set -eou pipefail
 ./scripts/ci/build-test
 ./scripts/ci/docs
 ./scripts/ci/advisory
+./scripts/ci/js_tests
