@@ -53,6 +53,15 @@ jobs:
         with:
           command: check ${{ matrix.checks }}
 
+  js_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: run tests
+        run: ./scripts/ci/js_tests
+
   linux:
     runs-on: ubuntu-latest
     strategy:
