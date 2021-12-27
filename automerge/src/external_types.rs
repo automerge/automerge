@@ -21,9 +21,12 @@ impl ExternalOpId {
             })
     }
 
-    pub(crate) fn into_opid(&self, metadata: &mut OpSetMetadata) -> OpId {
-        let actor = metadata.actors.cache(self.actor.clone());
-        OpId::new(self.counter, actor)
+    pub(crate) fn counter(&self) -> u64 {
+        self.counter
+    }
+
+    pub(crate) fn actor(&self) -> &ActorId {
+        &self.actor
     }
 }
 

@@ -1,11 +1,15 @@
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
 use crate::{ActorId, IndexedCache, Key, types::{ObjId, OpId}, Op};
+use crate::external_types::ExternalOpId;
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::fmt::Debug;
+
+const EXTERNAL_OP_CACHE_SIZE: usize = 100;
 
 pub(crate) type OpSet = OpSetInternal<16>;
 
@@ -26,6 +30,7 @@ impl<const B: usize> OpSetInternal<B> {
             m: Rc::new(RefCell::new(OpSetMetadata {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
+                external_op_cache: lru::LruCache::with_hasher(EXTERNAL_OP_CACHE_SIZE, FxBuildHasher::default())
             })),
         }
     }
@@ -150,11 +155,32 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     }
 }
 
-#[derive(Clone, Debug)]
 pub(crate) struct OpSetMetadata {
     pub actors: IndexedCache<ActorId>,
     pub props: IndexedCache<String>,
+    external_op_cache: lru::LruCache<ExternalOpId, OpId, FxBuildHasher>,
 }
+
+impl Debug for OpSetMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpSetMetadata")
+            .field("actors", &self.actors)
+            .field("props", &self.props)
+            .field("external_op_cache", &format_args!("LruCache with {} keys", self.external_op_cache.len()))
+            .finish()
+    }
+}
+
+impl Clone for OpSetMetadata {
+    fn clone(&self) -> Self {
+        OpSetMetadata {
+            actors: self.actors.clone(),
+            props: self.props.clone(),
+            external_op_cache: lru::LruCache::with_hasher(EXTERNAL_OP_CACHE_SIZE, FxBuildHasher::default()),
+        }
+    }
+}
+
 
 impl OpSetMetadata {
     pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
@@ -166,6 +192,17 @@ impl OpSetMetadata {
 
     pub fn lamport_cmp<S: SuccinctLamport>(&self, left: S, right: S) -> Ordering {
         S::cmp(self, left, right)
+    }
+
+    pub fn import_opid(&mut self, ext_opid: &ExternalOpId) -> OpId {
+        if let Some(opid) = self.external_op_cache.get(ext_opid) {
+            *opid
+        } else {
+            let actor = self.actors.cache(ext_opid.actor().clone());
+            let opid = OpId::new(ext_opid.counter(), actor);
+            self.external_op_cache.put(ext_opid.clone(), opid);
+            opid
+        }
     }
 }
 

@@ -1110,7 +1110,7 @@ impl Automerge {
     }
 
     fn import_opid(&self, opid: &OpId) -> InternalOpId {
-        opid.into_opid(&mut *self.ops.m.borrow_mut())
+        self.ops.m.borrow_mut().import_opid(opid)
     }
 
     fn export_opid(&self, opid: &InternalOpId) -> Option<OpId> {
