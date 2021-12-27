@@ -43,6 +43,11 @@ where
         &self.cache[index]
     }
 
+    // Todo replace all uses of `get` with this
+    pub fn get_safe(&self, index: usize) -> Option<&T> {
+        self.cache.get(index)
+    }
+
     pub fn sorted(&self) -> IndexedCache<T> {
         let mut sorted = Self::new();
         self.cache.iter().sorted().cloned().for_each(|item| {

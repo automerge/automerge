@@ -11,8 +11,7 @@ use std::{
     str,
 };
 
-use crate::ROOT;
-use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, OpType, ScalarValue};
+use crate::{ActorId, ElemId, Key, ObjType, OpType, ScalarValue, types::{ObjId, OpId}};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -686,15 +685,15 @@ impl KeyEncoder {
                 self.ctr.append_null();
                 self.str.append_value(props[i].clone());
             }
-            Key::Seq(ElemId(OpId(0, 0))) => {
+            Key::Seq(ElemId(opid)) if opid.actor() == 0 && opid.counter() == 0 => {
                 // HEAD
                 self.actor.append_null();
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Key::Seq(ElemId(OpId(ctr, actor))) => {
-                self.actor.append_value(actors[actor]);
-                self.ctr.append_value(ctr);
+            Key::Seq(ElemId(opid)) => {
+                self.actor.append_value(actors[opid.actor()]);
+                self.ctr.append_value(opid.counter());
                 self.str.append_null();
             }
         }
@@ -773,8 +772,8 @@ impl SuccEncoder {
     fn append(&mut self, succ: &[OpId], actors: &[usize]) {
         self.num.append_value(succ.len());
         for s in succ.iter() {
-            self.ctr.append_value(s.0);
-            self.actor.append_value(actors[s.1]);
+            self.ctr.append_value(s.counter());
+            self.actor.append_value(actors[s.actor()]);
         }
     }
 
@@ -845,14 +844,14 @@ impl ObjEncoder {
     }
 
     fn append(&mut self, obj: &ObjId, actors: &[usize]) {
-        match obj.0 {
-            ROOT => {
+        match obj {
+            ObjId::Root => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
-            OpId(ctr, actor) => {
-                self.actor.append_value(actors[actor]);
-                self.ctr.append_value(ctr);
+            ObjId::Op(opid) => {
+                self.actor.append_value(actors[opid.actor()]);
+                self.ctr.append_value(opid.counter());
             }
         }
     }

@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
-use crate::{Key, ObjId, Op};
+use crate::{Key, types::ObjId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +31,7 @@ impl<const B: usize> TreeQuery<B> for Prop {
         m: &OpSetMetadata,
     ) -> QueryResult {
         let start = binary_search_by(child, |op| {
-            m.lamport_cmp(op.obj.0, self.obj.0)
+            m.lamport_cmp(op.obj, self.obj)
                 .then_with(|| m.key_cmp(&op.key, &self.key))
         });
         let mut counters = Default::default();

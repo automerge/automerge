@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::{Clock, ElemId, Op, OpId, OpType, ScalarValue};
+use crate::{Clock, ElemId, Op, ScalarValue, types::{OpId, OpType}};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};

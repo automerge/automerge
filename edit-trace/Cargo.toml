@@ -5,6 +5,9 @@ edition = "2018"
 license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "edit-trace"
+bench = false
 
 [dependencies]
 automerge = { path = "../automerge" }

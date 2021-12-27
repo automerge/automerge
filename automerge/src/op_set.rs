@@ -1,9 +1,11 @@
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
-use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId};
+use crate::{ActorId, IndexedCache, Key, types::{ObjId, OpId}, Op};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub(crate) type OpSet = OpSetInternal<16>;
 
@@ -12,7 +14,7 @@ pub(crate) struct OpSetInternal<const B: usize> {
     trees: HashMap<ObjId, OpTreeInternal<B>, FxBuildHasher>,
     objs: Vec<ObjId>,
     length: usize,
-    pub m: OpSetMetadata,
+    pub m: Rc<RefCell<OpSetMetadata>>,
 }
 
 impl<const B: usize> OpSetInternal<B> {
@@ -21,10 +23,10 @@ impl<const B: usize> OpSetInternal<B> {
             trees: Default::default(),
             objs: Default::default(),
             length: 0,
-            m: OpSetMetadata {
+            m: Rc::new(RefCell::new(OpSetMetadata {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
-            },
+            })),
         }
     }
 
@@ -41,7 +43,7 @@ impl<const B: usize> OpSetInternal<B> {
         Q: TreeQuery<B>,
     {
         if let Some(tree) = self.trees.get(&obj) {
-            tree.search(query, &self.m)
+            tree.search(query, &*self.m.borrow())
         } else {
             query
         }
@@ -83,7 +85,7 @@ impl<const B: usize> OpSetInternal<B> {
             .entry(element.obj)
             .or_insert_with(|| {
                 let pos = objs
-                    .binary_search_by(|probe| m.lamport_cmp(probe.0, element.obj.0))
+                    .binary_search_by(|probe| m.borrow().lamport_cmp(probe, &element.obj))
                     .unwrap_err();
                 objs.insert(pos, element.obj);
                 Default::default()
@@ -162,14 +164,42 @@ impl OpSetMetadata {
         }
     }
 
-    pub fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        match (left, right) {
-            (OpId(0, _), OpId(0, _)) => Ordering::Equal,
-            (OpId(0, _), OpId(_, _)) => Ordering::Less,
-            (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order?
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
-            (OpId(a, _), OpId(b, _)) => a.cmp(&b),
+    pub fn lamport_cmp<S: SuccinctLamport>(&self, left: S, right: S) -> Ordering {
+        S::cmp(self, left, right)
+    }
+}
+
+/// Lamport timestamps which don't contain their actor ID directly and therefore need access to
+/// some metadata to compare their actor ID parts
+pub(crate) trait SuccinctLamport {
+    fn cmp(m: &OpSetMetadata, left: Self, right: Self) -> Ordering;
+}
+
+impl SuccinctLamport for OpId {
+    fn cmp(m: &OpSetMetadata, left: Self, right: Self) -> Ordering {
+        match (left.counter(), right.counter()) {
+            (0, 0) => Ordering::Equal,
+            (0, _) => Ordering::Less,
+            (_, 0) => Ordering::Greater,
+            (a, b) if a == b => m.actors[right.actor()].cmp(&m.actors[left.actor()]),
+            (a, b) => a.cmp(&b),
         }
+    }
+}
+
+impl SuccinctLamport for ObjId {
+    fn cmp(m: &OpSetMetadata, left: Self, right: Self) -> Ordering {
+        match (left, right) {
+            (ObjId::Root, ObjId::Root) => Ordering::Equal,
+            (ObjId::Root, ObjId::Op(_)) => Ordering::Less,
+            (ObjId::Op(_), ObjId::Root) => Ordering::Greater,
+            (ObjId::Op(left_op), ObjId::Op(right_op)) => <OpId as SuccinctLamport>::cmp(m, left_op, right_op),
+        }
+    }
+}
+
+impl SuccinctLamport for &ObjId {
+    fn cmp(m: &OpSetMetadata, left: Self, right: Self) -> Ordering {
+        <ObjId as SuccinctLamport>::cmp(m, *left, *right)
     }
 }

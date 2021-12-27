@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
+use std::str::FromStr;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -149,7 +150,7 @@ impl Automerge {
     }
 
     pub fn keys(&mut self, obj: JsValue, heads: JsValue) -> Result<Array, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads) {
             self.0.keys_at(obj, &heads)
         } else {
@@ -162,7 +163,7 @@ impl Automerge {
     }
 
     pub fn text(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
             self.0.text_at(obj, &heads)
         } else {
@@ -179,7 +180,7 @@ impl Automerge {
         delete_count: JsValue,
         text: JsValue,
     ) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let start = to_usize(start, "start")?;
         let delete_count = to_usize(delete_count, "deleteCount")?;
         let mut vals = vec![];
@@ -214,7 +215,7 @@ impl Automerge {
         value: JsValue,
         datatype: JsValue,
     ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         //let key = self.insert_pos_for_index(&obj, prop)?;
         let index: Result<_, JsValue> = index
             .as_f64()
@@ -235,7 +236,7 @@ impl Automerge {
         value: JsValue,
         datatype: JsValue,
     ) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, datatype)?;
         let opid = self.0.set(obj, prop, value).map_err(to_js_err)?;
@@ -246,7 +247,7 @@ impl Automerge {
     }
 
     pub fn inc(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value: f64 = value
             .as_f64()
@@ -257,7 +258,7 @@ impl Automerge {
     }
 
     pub fn value(&mut self, obj: JsValue, prop: JsValue, heads: JsValue) -> Result<Array, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(prop);
         let heads = get_heads(heads);
@@ -284,7 +285,7 @@ impl Automerge {
     }
 
     pub fn values(&mut self, obj: JsValue, arg: JsValue, heads: JsValue) -> Result<Array, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
@@ -316,7 +317,7 @@ impl Automerge {
     }
 
     pub fn length(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
             Ok((self.0.length_at(obj, &heads) as f64).into())
         } else {
@@ -325,7 +326,7 @@ impl Automerge {
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
-        let obj = self.import(obj)?;
+        let obj: automerge::ObjId = self.import(obj)?;
         let prop = to_prop(prop)?;
         self.0.del(obj, prop).map_err(to_js_err)?;
         Ok(())
@@ -442,16 +443,18 @@ impl Automerge {
         }
     }
 
-    fn export<E: automerge::Exportable>(&self, val: E) -> JsValue {
-        self.0.export(val).into()
+    fn export<D: std::fmt::Display>(&self, val: D) -> JsValue {
+        val.to_string().into()
     }
 
-    fn import<I: automerge::Importable>(&self, id: JsValue) -> Result<I, JsValue> {
-        let id_str = id
+    fn import<F: FromStr>(&self, id: JsValue) -> Result<F, JsValue> 
+        where F::Err: std::fmt::Display
+    {
+        id
             .as_string()
-            .ok_or("invalid opid/objid/elemid")
-            .map_err(to_js_err)?;
-        self.0.import(&id_str).map_err(to_js_err)
+            .ok_or("invalid opid/objid/elemid")?
+            .parse::<F>()
+            .map_err(to_js_err)
     }
 
     fn import_prop(&mut self, prop: JsValue) -> Result<Prop, JsValue> {
