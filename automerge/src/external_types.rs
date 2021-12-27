@@ -1,27 +1,28 @@
-use std::{str::FromStr, borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 
-use crate::{ActorId, types::OpId, op_tree::OpSetMetadata};
+use crate::{op_tree::OpSetMetadata, types::OpId, ActorId};
 
 const ROOT_STR: &str = "_root";
 
-#[derive(Copy, Debug, PartialEq, Clone, Hash, Eq)]
-pub struct ExternalOpId<'a> {
+#[derive(Debug, PartialEq, Clone, Hash, Eq)]
+pub struct ExternalOpId {
     counter: u64,
-    actor: Cow<'a, ActorId>,
+    actor: ActorId,
 }
 
-impl<'a> ExternalOpId<'a> {
-    pub(crate) fn from_internal(opid: OpId, metadata: &OpSetMetadata) -> Option<ExternalOpId> {
-        metadata.actors.get_safe(opid.actor()).map(|actor| {
-            ExternalOpId{
+impl ExternalOpId {
+    pub(crate) fn from_internal(opid: &OpId, metadata: &OpSetMetadata) -> Option<ExternalOpId> {
+        metadata
+            .actors
+            .get_safe(opid.actor())
+            .map(|actor| ExternalOpId {
                 counter: opid.counter(),
-                actor: actor.into(),
-            }
-        })
+                actor: actor.clone(),
+            })
     }
 
-    pub(crate) fn into_opid(self, metadata: &mut OpSetMetadata) -> OpId {
-        let actor = metadata.actors.cache(self.actor);
+    pub(crate) fn into_opid(&self, metadata: &mut OpSetMetadata) -> OpId {
+        let actor = metadata.actors.cache(self.actor.clone());
         OpId::new(self.counter, actor)
     }
 }
@@ -29,12 +30,27 @@ impl<'a> ExternalOpId<'a> {
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub enum ExternalObjId<'a> {
     Root,
-    Op(ExternalOpId<'a>),
+    Op(Cow<'a, ExternalOpId>),
 }
 
-impl<'a> From<ExternalOpId<'a>> for ExternalObjId<'a> {
+impl<'a> ExternalObjId<'a> {
+    pub fn into_owned(self) -> ExternalObjId<'static> {
+        match self {
+            Self::Root => ExternalObjId::Root,
+            Self::Op(cow) => ExternalObjId::Op(Cow::<'static, _>::Owned(cow.into_owned().into())),
+        }
+    }
+}
+
+impl<'a> From<&'a ExternalOpId> for ExternalObjId<'a> {
+    fn from(op: &'a ExternalOpId) -> Self {
+        ExternalObjId::Op(Cow::Borrowed(op))
+    }
+}
+
+impl From<ExternalOpId> for ExternalObjId<'static> {
     fn from(op: ExternalOpId) -> Self {
-        ExternalObjId::Op(op)
+        ExternalObjId::Op(Cow::Owned(op))
     }
 }
 
@@ -48,7 +64,7 @@ pub enum ParseError {
     InvalidActor,
 }
 
-impl FromStr for ExternalOpId<'static> {
+impl FromStr for ExternalOpId {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -56,19 +72,20 @@ impl FromStr for ExternalOpId<'static> {
         let first_part = parts.next().ok_or(ParseError::BadFormat)?;
         let second_part = parts.next().ok_or(ParseError::BadFormat)?;
         let counter: u64 = first_part.parse().map_err(|_| ParseError::InvalidCounter)?;
-        let actor: ActorId = second_part.parse().map_err(|_| ParseError::InvalidActor)?; 
-        Ok(ExternalOpId{counter, actor})
+        let actor: ActorId = second_part.parse().map_err(|_| ParseError::InvalidActor)?;
+        Ok(ExternalOpId { counter, actor })
     }
 }
 
-impl<'a> FromStr for ExternalObjId<'a> {
+impl FromStr for ExternalObjId<'static> {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s == ROOT_STR {
             Ok(ExternalObjId::Root)
         } else {
-            Ok(s.parse::<ExternalOpId>()?.into())
+            let op = s.parse::<ExternalOpId>()?.into();
+            Ok(ExternalObjId::Op(Cow::Owned(op)))
         }
     }
 }
@@ -79,7 +96,7 @@ impl Display for ExternalOpId {
     }
 }
 
-impl Display for ExternalObjId {
+impl<'a> Display for ExternalObjId<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Root => write!(f, "{}", ROOT_STR),

@@ -25,7 +25,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 
 /// This macro makes it easy to make assertions about a document. It is called with two arguments,
 /// the first is a reference to an `automerge::Automerge`, the second is an instance of
-/// `RealizedObject<ExportableOpId>`.
+/// `RealizedObject`.
 ///
 /// What - I hear you ask - is a `RealizedObject`? It's a fully hydrated version of the contents of
 /// an automerge document. You don't need to think about this too much though because you can
@@ -67,22 +67,11 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     map!{
 ///         "field" => {
 ///             op1 => "one",
-///             op2.translate(&doc2) => "two"
+///             op2 => "two"
 ///         }
 ///     }
 /// );
 /// ```
-///
-/// ## Translating OpIds
-///
-/// One thing you may have noticed in the example above is the `op2.translate(&doc2)` call. What is
-/// that doing there? Well, the problem is that automerge OpIDs (in the current API) are specific
-/// to a document. Using an opid from one document in a different document will not work. Therefore
-/// this module defines an `OpIdExt` trait with a `translate` method on it. This method takes a
-/// document and converts the opid into something which knows how to be compared with opids from
-/// another document by using the document you pass to `translate`. Again, all you really need to
-/// know is that when constructing a document for comparison you should call `translate(fromdoc)`
-/// on opids which come from a document other than the one you pass to `assert_doc`.
 #[macro_export]
 macro_rules! assert_doc {
     ($doc: expr, $expected: expr) => {{
@@ -147,7 +136,7 @@ macro_rules! map {
             use std::collections::HashMap;
             let mut inner: HashMap<ObjId, RealizedObject> = HashMap::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert(ObjId::from((&$opid)).into_owned(), $value.into());
             )*
             inner
         }
@@ -195,7 +184,7 @@ macro_rules! list {
             use std::collections::HashMap;
             let mut inner: HashMap<ObjId, RealizedObject> = HashMap::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert(ObjId::from(&$opid).into_owned(), $value.into());
             )*
             inner
         }
@@ -231,13 +220,13 @@ impl std::fmt::Display for ExportedOpId {
 /// A `RealizedObject` is a representation of all the current values in a document - including
 /// conflicts.
 #[derive(PartialEq, Debug)]
-pub enum RealizedObject {
-    Map(HashMap<String, HashMap<ObjId, RealizedObject>>),
-    Sequence(Vec<HashMap<ObjId, RealizedObject>>),
+pub enum RealizedObject<'a> {
+    Map(HashMap<String, HashMap<ObjId<'a>, RealizedObject<'a>>>),
+    Sequence(Vec<HashMap<ObjId<'a>, RealizedObject<'a>>>),
     Value(automerge::ScalarValue),
 }
 
-impl serde::Serialize for RealizedObject {
+impl serde::Serialize for RealizedObject<'static> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -270,7 +259,7 @@ impl serde::Serialize for RealizedObject {
     }
 }
 
-pub fn realize(doc: &automerge::Automerge) -> RealizedObject {
+pub fn realize<'a>(doc: &automerge::Automerge) -> RealizedObject<'a> {
     realize_obj(doc, ObjId::Root, automerge::ObjType::Map)
 }
 
@@ -278,7 +267,7 @@ pub fn realize_prop<P: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
     obj_id: automerge::ObjId,
     prop: P,
-) -> RealizedObject {
+) -> RealizedObject<'static> {
     let (val, obj_id) = doc.value(obj_id, prop).unwrap().unwrap();
     match val {
         automerge::Value::Object(obj_type) => realize_obj(doc, obj_id.into(), obj_type),
@@ -290,7 +279,7 @@ pub fn realize_obj(
     doc: &automerge::Automerge,
     obj_id: automerge::ObjId,
     objtype: automerge::ObjType,
-) -> RealizedObject {
+) -> RealizedObject<'static> {
     match objtype {
         automerge::ObjType::Map | automerge::ObjType::Table => {
             let mut result = HashMap::new();
@@ -314,7 +303,7 @@ fn realize_values<K: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
     obj_id: automerge::ObjId,
     key: K,
-) -> HashMap<ObjId, RealizedObject> {
+) -> HashMap<ObjId<'static>, RealizedObject<'static>> {
     let mut values_by_objid: HashMap<ObjId, RealizedObject> = HashMap::new();
     for (value, opid) in doc.values(obj_id, key).unwrap() {
         let realized = match value {
@@ -327,10 +316,10 @@ fn realize_values<K: Into<automerge::Prop>>(
 }
 
 
-impl<I: Into<RealizedObject>>
-    From<HashMap<&str, HashMap<ObjId, I>>> for RealizedObject
+impl<'a, I: Into<RealizedObject<'a>>>
+    From<HashMap<&str, HashMap<ObjId<'a>, I>>> for RealizedObject<'a>
 {
-    fn from(values: HashMap<&str, HashMap<ObjId, I>>) -> Self {
+    fn from(values: HashMap<&str, HashMap<ObjId<'a>, I>>) -> Self {
         let intoed = values
             .into_iter()
             .map(|(k, v)| {
@@ -344,39 +333,39 @@ impl<I: Into<RealizedObject>>
     }
 }
 
-impl<I: Into<RealizedObject>>
-    From<Vec<HashMap<ObjId, I>>> for RealizedObject
+impl<'a, I: Into<RealizedObject<'a>>>
+    From<Vec<HashMap<ObjId<'a>, I>>> for RealizedObject<'a>
 {
-    fn from(values: Vec<HashMap<ObjId, I>>) -> Self {
+    fn from(values: Vec<HashMap<ObjId<'a>, I>>) -> Self {
         RealizedObject::Sequence(
             values
                 .into_iter()
-                .map(|v| v.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
+                .map(|v| v.into_iter().map(|(k, v)| (k, v.into())).collect())
                 .collect(),
         )
     }
 }
 
-impl From<bool> for RealizedObject {
+impl From<bool> for RealizedObject<'static> {
     fn from(b: bool) -> Self {
         RealizedObject::Value(b.into())
     }
 }
 
-impl From<usize> for RealizedObject {
+impl From<usize> for RealizedObject<'static> {
     fn from(u: usize) -> Self {
         let v = u.try_into().unwrap();
         RealizedObject::Value(automerge::ScalarValue::Int(v))
     }
 }
 
-impl From<automerge::ScalarValue> for RealizedObject {
+impl From<automerge::ScalarValue> for RealizedObject<'static> {
     fn from(s: automerge::ScalarValue) -> Self {
         RealizedObject::Value(s)
     }
 }
 
-impl From<&str> for RealizedObject {
+impl From<&str> for RealizedObject<'static> {
     fn from(s: &str) -> Self {
         RealizedObject::Value(automerge::ScalarValue::Str(s.into()))
     }

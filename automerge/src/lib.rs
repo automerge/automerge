@@ -201,7 +201,7 @@ impl Automerge {
 
     pub fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
-            let change = export_change(&tx, &self.ops.m.borrow_mut().actors, &self.ops.m.borrow().props);
+            let change = export_change(&tx, &self.ops.m.borrow().actors, &self.ops.m.borrow().props);
             self.update_history(change);
         }
     }
@@ -265,25 +265,25 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
-    pub fn keys<O: Into<ObjId>>(&self, obj: O) -> Vec<String> {
-        let obj = self.import_objid(obj.into());
+    pub fn keys<'a, O: Into<ObjId<'a>>>(&self, obj: O) -> Vec<String> {
+        let obj = self.import_objid(obj);
         let q = self.ops.search(obj.into(), query::Keys::new());
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
-    pub fn keys_at<O: Into<ObjId>>(&mut self, obj: O, heads: &[ChangeHash]) -> Vec<String> {
+    pub fn keys_at<'a, O: Into<ObjId<'a>>>(&mut self, obj: O, heads: &[ChangeHash]) -> Vec<String> {
         let obj = self.import_objid(obj.into());
         let clock = self.clock_at(heads);
         let q = self.ops.search(obj.into(), query::KeysAt::new(clock));
         q.keys.iter().map(|k| self.export(*k)).collect()
     }
 
-    pub fn length<O: Into<ObjId>>(&self, obj: O) -> usize {
+    pub fn length<'a, O: Into<ObjId<'a>>>(&self, obj: O) -> usize {
         let obj = self.import_objid(obj.into());
         self.ops.search(obj.into(), query::Len::new(obj.into())).len
     }
 
-    pub fn length_at<O: Into<ObjId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+    pub fn length_at<'a, O: Into<ObjId<'a>>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         let obj = self.import_objid(obj.into());
         let clock = self.clock_at(heads);
         self.ops.search(obj.into(), query::LenAt::new(clock)).len
@@ -307,7 +307,7 @@ impl Automerge {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<O: Into<ObjId>, P: Into<Prop>, V: Into<Value>>(
+    pub fn set<'a, O: Into<ObjId<'a>>, P: Into<Prop>, V: Into<Value>>(
         &mut self,
         obj: O,
         prop: P,
@@ -318,7 +318,7 @@ impl Automerge {
         self.local_op(obj.into(), prop.into(), value.into())
     }
 
-    pub fn insert<O: Into<ObjId>, V: Into<Value>>(
+    pub fn insert<'a, O: Into<ObjId<'a>>, V: Into<Value>>(
         &mut self,
         obj: O,
         index: usize,
@@ -346,10 +346,10 @@ impl Automerge {
         self.ops.insert(query.pos, op.clone());
         self.tx().operations.push(op);
 
-        Ok(self.export_opid(id).unwrap())
+        Ok(self.export_opid(&id).unwrap())
     }
 
-    pub fn inc<O: Into<ObjId>, P: Into<Prop>>(
+    pub fn inc<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -363,7 +363,7 @@ impl Automerge {
         }
     }
 
-    pub fn del<O: Into<ObjId>, P: Into<Prop>>(&mut self, obj: O, prop: P) -> Result<OpId, AutomergeError> {
+    pub fn del<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(&mut self, obj: O, prop: P) -> Result<OpId, AutomergeError> {
         // TODO: Should we also no-op multiple delete operations?
         match self.local_op(self.import_objid(obj.into()).into(), prop.into(), OpType::Del)? {
             Some(opid) => Ok(opid),
@@ -375,7 +375,7 @@ impl Automerge {
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    pub fn splice<O: Into<ObjId>>(
+    pub fn splice<'a, O: Into<ObjId<'a>>>(
         &mut self,
         obj: O,
         mut pos: usize,
@@ -394,7 +394,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn splice_text<O: Into<ObjId>>(
+    pub fn splice_text<'a, O: Into<ObjId<'a>>>(
         &mut self,
         obj: O,
         pos: usize,
@@ -408,7 +408,7 @@ impl Automerge {
         self.splice(obj, pos, del, vals)
     }
 
-    pub fn text<O: Into<ObjId>>(&self, obj: O) -> Result<String, AutomergeError> {
+    pub fn text<'a, O: Into<ObjId<'a>>>(&self, obj: O) -> Result<String, AutomergeError> {
         let obj = self.import_objid(obj.into()).into();
         let query = self.ops.search(obj, query::ListVals::new(obj));
         let mut buffer = String::new();
@@ -420,7 +420,7 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn text_at<O: Into<ObjId>>(&self, obj: O, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
+    pub fn text_at<'a, O: Into<ObjId<'a>>>(&self, obj: O, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
         let clock = self.clock_at(heads);
         let obj = self.import_objid(obj.into()).into();
         let query = self.ops.search(obj, query::ListValsAt::new(clock));
@@ -436,7 +436,7 @@ impl Automerge {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    pub fn value<O: Into<ObjId>, P: Into<Prop>>(
+    pub fn value<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -444,7 +444,7 @@ impl Automerge {
         Ok(self.values(obj, prop.into())?.first().cloned())
     }
 
-    pub fn value_at<O: Into<ObjId>, P: Into<Prop>>(
+    pub fn value_at<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -453,7 +453,7 @@ impl Automerge {
         Ok(self.values_at(obj, prop, heads)?.first().cloned())
     }
 
-    pub fn values<O: Into<ObjId>, P: Into<Prop>>(
+    pub fn values<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -484,14 +484,14 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn values_at<O: Into<ObjId>, P: Into<Prop>>(
+    pub fn values_at<'a, O: Into<ObjId<'a>>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, OpId)>, AutomergeError> {
         let prop = prop.into();
-        let obj = self.import_objid(obj.into()).into();
+        let obj = self.import_objid(obj).into();
         let clock = self.clock_at(heads);
         let result = match prop {
             Prop::Map(p) => {
@@ -615,7 +615,7 @@ impl Automerge {
 
         self.insert_local_op(op, query.pos, &query.ops_pos);
 
-        Ok(Some(self.export_opid(id).unwrap()))
+        Ok(Some(self.export_opid(&id).unwrap()))
     }
 
     fn local_list_op(
@@ -658,7 +658,7 @@ impl Automerge {
 
         self.insert_local_op(op, query.pos, &query.ops_pos);
 
-        Ok(Some(self.export_opid(id).unwrap()))
+        Ok(Some(self.export_opid(&id).unwrap()))
     }
 
     fn is_causally_ready(&self, change: &Change) -> bool {
@@ -1058,15 +1058,15 @@ impl Automerge {
         opid.into_opid(&mut *self.ops.m.borrow_mut())
     }
 
-    fn export_opid(&self, opid: InternalOpId) -> Option<OpId> {
+    fn export_opid(&self, opid: &InternalOpId) -> Option<OpId> {
         OpId::from_internal(opid, &self.ops.m.borrow_mut())
     }
 
-    fn import_objid<O: AsRef<ObjId>>(&self, objid: O) -> InternalObjId {
-        match objid.as_ref() {
+    fn import_objid<'a, A: Into<ObjId<'a>>>(&self, objid: A) -> InternalObjId {
+        match objid.into() {
             ObjId::Root => InternalObjId::Root,
             ObjId::Op(external_op) => {
-                let op = self.import_opid(external_op);
+                let op = self.import_opid(&external_op);
                 InternalObjId::Op(op)
             }
         }
@@ -1123,7 +1123,7 @@ impl Automerge {
     }
 
     fn labelled_value(&self, op: &Op) -> (Value, OpId) {
-        let id = self.export_opid(op.id).unwrap();
+        let id = self.export_opid(&op.id).unwrap();
         let value = match &op.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
             OpType::Set(scalar) => Value::Scalar(scalar.clone()),
@@ -1174,14 +1174,14 @@ mod tests {
         let list_id = doc.set(ObjId::Root, "items", Value::list())?.unwrap().into();
         doc.set(ObjId::Root, "zzz", "zzzval")?;
         assert!(doc.value(ObjId::Root, "items")?.unwrap().1 == list_id);
-        doc.insert(list_id, 0, "a")?;
-        doc.insert(list_id, 0, "b")?;
-        doc.insert(list_id, 2, "c")?;
-        doc.insert(list_id, 1, "d")?;
-        assert!(doc.value(list_id.clone(), 0)?.unwrap().0 == "b".into());
-        assert!(doc.value(list_id.clone(), 1)?.unwrap().0 == "d".into());
-        assert!(doc.value(list_id.clone(), 2)?.unwrap().0 == "a".into());
-        assert!(doc.value(list_id.clone(), 3)?.unwrap().0 == "c".into());
+        doc.insert(&list_id, 0, "a")?;
+        doc.insert(&list_id, 0, "b")?;
+        doc.insert(&list_id, 2, "c")?;
+        doc.insert(&list_id, 1, "d")?;
+        assert!(doc.value(&list_id, 0)?.unwrap().0 == "b".into());
+        assert!(doc.value(&list_id, 1)?.unwrap().0 == "d".into());
+        assert!(doc.value(&list_id, 2)?.unwrap().0 == "a".into());
+        assert!(doc.value(&list_id, 3)?.unwrap().0 == "c".into());
         assert!(doc.length(list_id) == 4);
         doc.save()?;
         Ok(())
@@ -1202,11 +1202,11 @@ mod tests {
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let id = doc.set(ObjId::Root, "counter", Value::counter(10))?.unwrap();
-        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(10), id)));
+        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(10), id.clone())));
         doc.inc(ObjId::Root, "counter", 10)?;
-        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(20), id)));
+        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(20), id.clone())));
         doc.inc(ObjId::Root, "counter", -5)?;
-        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(15), id)));
+        assert!(doc.value(ObjId::Root, "counter")? == Some((Value::counter(15), id.clone())));
         Ok(())
     }
 
@@ -1252,15 +1252,15 @@ mod tests {
         let mut doc = Automerge::new();
         let text = doc.set(ObjId::Root, "text", Value::text())?.unwrap();
         let heads1 = doc.commit(None, None);
-        doc.splice_text(text, 0, 0, "hello world")?;
+        doc.splice_text(&text, 0, 0, "hello world")?;
         let heads2 = doc.commit(None, None);
-        doc.splice_text(text, 6, 0, "big bad ")?;
+        doc.splice_text(&text, 6, 0, "big bad ")?;
         let heads3 = doc.commit(None, None);
 
-        assert!(&doc.text(text)? == "hello big bad world");
-        assert!(&doc.text_at(text, &heads1)?.is_empty());
-        assert!(&doc.text_at(text, &heads2)? == "hello world");
-        assert!(&doc.text_at(text, &heads3)? == "hello big bad world");
+        assert!(&doc.text(&text)? == "hello big bad world");
+        assert!(&doc.text_at(&text, &heads1)?.is_empty());
+        assert!(&doc.text_at(&text, &heads2)? == "hello world");
+        assert!(&doc.text_at(&text, &heads3)? == "hello big bad world");
 
         Ok(())
     }
@@ -1324,44 +1324,44 @@ mod tests {
         let list = doc.set(ObjId::Root, "list", Value::list())?.unwrap();
         let heads1 = doc.commit(None, None);
 
-        doc.insert(list, 0, Value::int(10))?;
+        doc.insert(&list, 0, Value::int(10))?;
         let heads2 = doc.commit(None, None);
 
-        doc.set(list, 0, Value::int(20))?;
-        doc.insert(list, 0, Value::int(30))?;
+        doc.set(&list, 0, Value::int(20))?;
+        doc.insert(&list, 0, Value::int(30))?;
         let heads3 = doc.commit(None, None);
 
-        doc.set(list, 1, Value::int(40))?;
-        doc.insert(list, 1, Value::int(50))?;
+        doc.set(&list, 1, Value::int(40))?;
+        doc.insert(&list, 1, Value::int(50))?;
         let heads4 = doc.commit(None, None);
 
-        doc.del(list, 2)?;
+        doc.del(&list, 2)?;
         let heads5 = doc.commit(None, None);
 
-        doc.del(list, 0)?;
+        doc.del(&list, 0)?;
         let heads6 = doc.commit(None, None);
 
-        assert!(doc.length_at(list, &heads1) == 0);
-        assert!(doc.value_at(list, 0, &heads1)?.is_none());
+        assert!(doc.length_at(&list, &heads1) == 0);
+        assert!(doc.value_at(&list, 0, &heads1)?.is_none());
 
-        assert!(doc.length_at(list, &heads2) == 1);
-        assert!(doc.value_at(list, 0, &heads2)?.unwrap().0 == Value::int(10));
+        assert!(doc.length_at(&list, &heads2) == 1);
+        assert!(doc.value_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
 
-        assert!(doc.length_at(list, &heads3) == 2);
-        assert!(doc.value_at(list, 0, &heads3)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(list, 1, &heads3)?.unwrap().0 == Value::int(20));
+        assert!(doc.length_at(&list, &heads3) == 2);
+        assert!(doc.value_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
 
-        assert!(doc.length_at(list, &heads4) == 3);
-        assert!(doc.value_at(list, 0, &heads4)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(list, 1, &heads4)?.unwrap().0 == Value::int(50));
-        assert!(doc.value_at(list, 2, &heads4)?.unwrap().0 == Value::int(40));
+        assert!(doc.length_at(&list, &heads4) == 3);
+        assert!(doc.value_at(&list, 0, &heads4)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(&list, 1, &heads4)?.unwrap().0 == Value::int(50));
+        assert!(doc.value_at(&list, 2, &heads4)?.unwrap().0 == Value::int(40));
 
-        assert!(doc.length_at(list, &heads5) == 2);
-        assert!(doc.value_at(list, 0, &heads5)?.unwrap().0 == Value::int(30));
-        assert!(doc.value_at(list, 1, &heads5)?.unwrap().0 == Value::int(50));
+        assert!(doc.length_at(&list, &heads5) == 2);
+        assert!(doc.value_at(&list, 0, &heads5)?.unwrap().0 == Value::int(30));
+        assert!(doc.value_at(&list, 1, &heads5)?.unwrap().0 == Value::int(50));
 
-        assert!(doc.length_at(list, &heads6) == 1);
-        assert!(doc.value_at(list, 0, &heads6)?.unwrap().0 == Value::int(50));
+        assert!(doc.length_at(&list, &heads6) == 1);
+        assert!(doc.value_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
 
         Ok(())
     }

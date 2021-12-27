@@ -29,24 +29,24 @@ fn no_change_on_repeated_map_set() {
 #[test]
 fn no_change_on_repeated_list_set() {
     let mut doc = new_doc();
-    let list_id: ObjId = doc
+    let list_id = doc
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
         .unwrap().into();
-    doc.insert(list_id.clone(), 0, 1).unwrap();
-    doc.set(list_id.clone(), 0, 1).unwrap();
+    doc.insert(&list_id, 0, 1).unwrap();
+    doc.set(&list_id, 0, 1).unwrap();
     assert!(doc.set(list_id, 0, 1).unwrap().is_none());
 }
 
 #[test]
 fn no_change_on_list_insert_followed_by_set_of_same_value() {
     let mut doc = new_doc();
-    let list_id: ObjId = doc
+    let list_id = doc
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
-        .unwrap().into();
-    doc.insert(list_id.clone(), 0, 1).unwrap();
-    assert!(doc.set(list_id.clone(), 0, 1).unwrap().is_none());
+        .unwrap();
+    doc.insert(&list_id, 0, 1).unwrap();
+    assert!(doc.set(&list_id, 0, 1).unwrap().is_none());
 }
 
 #[test]
@@ -75,15 +75,15 @@ fn repeated_map_assignment_which_resolves_conflict_not_ignored() {
 fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id: ObjId = doc1
+    let list_id = doc1
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
-        .unwrap().into();
-    doc1.insert(list_id.clone(), 0, 123).unwrap();
+        .unwrap();
+    doc1.insert(&list_id, 0, 123).unwrap();
     doc2.merge(&mut doc1);
-    doc2.set(list_id.clone(), 0, 456).unwrap().unwrap();
+    doc2.set(&list_id, 0, 456).unwrap().unwrap();
     doc1.merge(&mut doc2);
-    let doc1_op = doc1.set(list_id.clone(), 0, 789).unwrap().unwrap();
+    let doc1_op = doc1.set(&list_id, 0, 789).unwrap().unwrap();
 
     assert_doc!(
         &doc1,
@@ -100,14 +100,14 @@ fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
 #[test]
 fn list_deletion() {
     let mut doc = new_doc();
-    let list_id: ObjId = doc
+    let list_id = doc
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
-        .unwrap().into();
-    let op1 = doc.insert(list_id.clone(), 0, 123).unwrap();
-    doc.insert(list_id.clone(), 1, 456).unwrap();
-    let op3 = doc.insert(list_id.clone(), 2, 789).unwrap();
-    doc.del(list_id.clone(), 1).unwrap();
+        .unwrap();
+    let op1 = doc.insert(&list_id, 0, 123).unwrap();
+    doc.insert(&list_id, 1, 456).unwrap();
+    let op3 = doc.insert(&list_id.clone(), 2, 789).unwrap();
+    doc.del(&list_id, 1).unwrap();
     assert_doc!(
         &doc,
         map! {
@@ -124,10 +124,10 @@ fn merge_concurrent_map_prop_updates() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let op1 = doc1.set(ObjId::Root, "foo", "bar").unwrap().unwrap();
-    let hello: ObjId = doc2
+    let hello = doc2
         .set(ObjId::Root, "hello", "world")
         .unwrap()
-        .unwrap().into();
+        .unwrap();
     doc1.merge(&mut doc2);
     assert_eq!(
         doc1.value(ObjId::Root, "foo").unwrap().unwrap().0,
@@ -136,8 +136,8 @@ fn merge_concurrent_map_prop_updates() {
     assert_doc!(
         &doc1,
         map! {
-            "foo" => { op1.clone() => "bar" },
-            "hello" => { hello.clone() => "world" },
+            "foo" => { op1 => "bar" },
+            "hello" => { hello => "world" },
         }
     );
     doc2.merge(&mut doc1);
@@ -230,14 +230,14 @@ fn concurrent_updates_of_same_field() {
 fn concurrent_updates_of_same_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id: ObjId = doc1
+    let list_id = doc1
         .set(ObjId::Root, "birds", automerge::Value::list())
         .unwrap()
-        .unwrap().into();
+        .unwrap();
     doc1.insert(list_id.clone(), 0, "finch").unwrap();
     doc2.merge(&mut doc1);
-    let set_one_op = doc1.set(list_id.clone(), 0, "greenfinch").unwrap().unwrap();
-    let set_op_two = doc2.set(list_id.clone(), 0, "goldfinch").unwrap().unwrap();
+    let set_one_op = doc1.set(&list_id, 0, "greenfinch").unwrap().unwrap();
+    let set_op_two = doc2.set(&list_id, 0, "goldfinch").unwrap().unwrap();
 
     doc1.merge(&mut doc2);
 
@@ -295,11 +295,11 @@ fn changes_within_conflicting_map_field() {
         .set(ObjId::Root, "field", "string")
         .unwrap()
         .unwrap();
-    let map_id: ObjId = doc2
+    let map_id = doc2
         .set(ObjId::Root, "field", automerge::Value::map())
         .unwrap()
-        .unwrap().into();
-    let set_in_doc2 = doc2.set(map_id.clone(), "innerKey", 42).unwrap().unwrap();
+        .unwrap();
+    let set_in_doc2 = doc2.set(&map_id, "innerKey", 42).unwrap().unwrap();
     doc1.merge(&mut doc2);
 
     assert_doc!(
@@ -326,23 +326,23 @@ fn changes_within_conflicting_list_element() {
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
         .unwrap();
-    doc1.insert(list_id.clone(), 0, "hello").unwrap();
+    doc1.insert(&list_id, 0, "hello").unwrap();
     doc2.merge(&mut doc1);
 
     let map_in_doc1 = doc1
-        .set(list_id.clone(), 0, automerge::Value::map())
+        .set(&list_id, 0, automerge::Value::map())
         .unwrap()
         .unwrap();
-    let set_map1 = doc1.set(map_in_doc1.clone(), "map1", true).unwrap().unwrap();
-    let set_key1 = doc1.set(map_in_doc1.clone(), "key", 1).unwrap().unwrap();
+    let set_map1 = doc1.set(&map_in_doc1, "map1", true).unwrap().unwrap();
+    let set_key1 = doc1.set(&map_in_doc1, "key", 1).unwrap().unwrap();
 
     let map_in_doc2 = doc2
-        .set(list_id.clone(), 0, automerge::Value::map())
+        .set(&list_id, 0, automerge::Value::map())
         .unwrap()
         .unwrap();
     doc1.merge(&mut doc2);
-    let set_map2 = doc2.set(map_in_doc2.clone(), "map2", true).unwrap().unwrap();
-    let set_key2 = doc2.set(map_in_doc2.clone(), "key", 2).unwrap().unwrap();
+    let set_map2 = doc2.set(&map_in_doc2, "map2", true).unwrap().unwrap();
+    let set_key2 = doc2.set(&map_in_doc2, "key", 2).unwrap().unwrap();
 
     doc1.merge(&mut doc2);
 
@@ -419,11 +419,11 @@ fn concurrent_insertions_at_different_list_positions() {
         .unwrap()
         .unwrap();
 
-    let one = doc1.insert(list_id.clone(), 0, "one").unwrap();
-    let three = doc1.insert(list_id.clone(), 1, "three").unwrap();
+    let one = doc1.insert(&list_id, 0, "one").unwrap();
+    let three = doc1.insert(&list_id, 1, "three").unwrap();
     doc2.merge(&mut doc1);
-    let two = doc1.splice(list_id.clone(), 1, 0, vec!["two".into()]).unwrap()[0].clone();
-    let four = doc2.insert(list_id.clone(), 2, "four").unwrap();
+    let two = doc1.splice(&list_id, 1, 0, vec!["two".into()]).unwrap()[0].clone();
+    let four = doc2.insert(&list_id, 2, "four").unwrap();
 
     doc1.merge(&mut doc2);
 
@@ -453,11 +453,11 @@ fn concurrent_insertions_at_same_list_position() {
         .set(ObjId::Root, "birds", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let parakeet = doc1.insert(list_id.clone(), 0, "parakeet").unwrap();
+    let parakeet = doc1.insert(&list_id, 0, "parakeet").unwrap();
 
     doc2.merge(&mut doc1);
-    let starling = doc1.insert(list_id.clone(), 1, "starling").unwrap();
-    let chaffinch = doc2.insert(list_id.clone(), 1, "chaffinch").unwrap();
+    let starling = doc1.insert(&list_id, 1, "starling").unwrap();
+    let chaffinch = doc2.insert(&list_id, 1, "chaffinch").unwrap();
     doc1.merge(&mut doc2);
 
     assert_doc!(
@@ -512,21 +512,21 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
         .set(ObjId::Root, "birds", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let blackbird = doc1.insert(list_id.clone(), 0, "blackbird").unwrap();
-    doc1.insert(list_id.clone(), 1, "thrush").unwrap();
-    let goldfinch = doc1.insert(list_id.clone(), 2, "goldfinch").unwrap();
+    let blackbird = doc1.insert(&list_id, 0, "blackbird").unwrap();
+    doc1.insert(&list_id, 1, "thrush").unwrap();
+    let goldfinch = doc1.insert(&list_id, 2, "goldfinch").unwrap();
     doc2.merge(&mut doc1);
 
-    let starling = doc1.set(list_id.clone(), 1, "starling").unwrap().unwrap();
+    let starling = doc1.set(&list_id, 1, "starling").unwrap().unwrap();
 
-    doc2.del(list_id.clone(), 1).unwrap();
+    doc2.del(&list_id, 1).unwrap();
 
     assert_doc!(
         &doc2,
         map! {
-            "birds" => {list_id.clone() => list![
-                { blackbird.clone() => "blackbird"},
-                { goldfinch.clone() => "goldfinch"},
+            "birds" => {list_id => list![
+                { blackbird => "blackbird"},
+                { goldfinch => "goldfinch"},
             ]}
         }
     );
@@ -535,9 +535,9 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
         &doc1,
         map! {
             "birds" => {list_id.clone() => list![
-                { blackbird.clone() => "blackbird" },
+                { blackbird => "blackbird" },
                 { starling.clone() => "starling" },
-                { goldfinch.clone() => "goldfinch" },
+                { goldfinch => "goldfinch" },
             ]}
         }
     );
@@ -566,15 +566,15 @@ fn insertion_after_a_deleted_list_element() {
         .unwrap();
 
     let blackbird = doc1.insert(list_id.clone(), 0, "blackbird").unwrap();
-    doc1.insert(list_id.clone(), 1, "thrush").unwrap();
-    doc1.insert(list_id.clone(), 2, "goldfinch").unwrap();
+    doc1.insert(&list_id, 1, "thrush").unwrap();
+    doc1.insert(&list_id, 2, "goldfinch").unwrap();
 
     doc2.merge(&mut doc1);
 
-    doc1.splice(list_id.clone(), 1, 2, Vec::new()).unwrap();
+    doc1.splice(&list_id, 1, 2, Vec::new()).unwrap();
 
     let starling = doc2
-        .splice(list_id.clone(), 2, 0, vec!["starling".into()])
+        .splice(&list_id, 2, 0, vec!["starling".into()])
         .unwrap()[0].clone();
 
     doc1.merge(&mut doc2);
@@ -582,9 +582,9 @@ fn insertion_after_a_deleted_list_element() {
     assert_doc!(
         &doc1,
         map! {
-            "birds" => {list_id.clone() => list![
-                { blackbird.clone() => "blackbird" },
-                { starling.clone() => "starling" }
+            "birds" => {list_id => list![
+                { blackbird => "blackbird" },
+                { starling => "starling" }
             ]}
         }
     );
@@ -611,14 +611,14 @@ fn concurrent_deletion_of_same_list_element() {
         .unwrap();
 
     let albatross = doc1.insert(list_id.clone(), 0, "albatross").unwrap();
-    doc1.insert(list_id.clone(), 1, "buzzard").unwrap();
-    let cormorant = doc1.insert(list_id.clone(), 2, "cormorant").unwrap();
+    doc1.insert(&list_id, 1, "buzzard").unwrap();
+    let cormorant = doc1.insert(&list_id, 2, "cormorant").unwrap();
 
     doc2.merge(&mut doc1);
 
-    doc1.del(list_id.clone(), 1).unwrap();
+    doc1.del(&list_id, 1).unwrap();
 
-    doc2.del(list_id.clone(), 1).unwrap();
+    doc2.del(&list_id, 1).unwrap();
 
     doc1.merge(&mut doc2);
 
@@ -654,23 +654,23 @@ fn concurrent_updates_at_different_levels() {
         .unwrap()
         .unwrap();
     let birds = doc1
-        .set(animals.clone(), "birds", automerge::Value::map())
+        .set(&animals, "birds", automerge::Value::map())
         .unwrap()
         .unwrap();
-    doc1.set(birds.clone(), "pink", "flamingo").unwrap().unwrap();
-    doc1.set(birds.clone(), "black", "starling").unwrap().unwrap();
+    doc1.set(&birds, "pink", "flamingo").unwrap().unwrap();
+    doc1.set(&birds, "black", "starling").unwrap().unwrap();
 
     let mammals = doc1
-        .set(animals.clone(), "mammals", automerge::Value::list())
+        .set(&animals, "mammals", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let badger = doc1.insert(mammals.clone(), 0, "badger").unwrap();
+    let badger = doc1.insert(&mammals, 0, "badger").unwrap();
 
     doc2.merge(&mut doc1);
 
-    doc1.set(birds, "brown", "sparrow").unwrap().unwrap();
+    doc1.set(&birds, "brown", "sparrow").unwrap().unwrap();
 
-    doc2.del(animals, "birds").unwrap();
+    doc2.del(&animals, "birds").unwrap();
     doc1.merge(&mut doc2);
 
     assert_obj!(
@@ -679,7 +679,7 @@ fn concurrent_updates_at_different_levels() {
         "animals",
         map! {
             "mammals" => {
-                mammals.clone() => list![{ badger.clone() => "badger" }],
+                mammals => list![{ badger => "badger" }],
             }
         }
     );
@@ -706,16 +706,16 @@ fn concurrent_updates_of_concurrently_deleted_objects() {
         .unwrap()
         .unwrap();
     let blackbird = doc1
-        .set(birds.clone(), "blackbird", automerge::Value::map())
+        .set(&birds, "blackbird", automerge::Value::map())
         .unwrap()
         .unwrap();
-    doc1.set(blackbird.clone(), "feathers", "black").unwrap().unwrap();
+    doc1.set(&blackbird, "feathers", "black").unwrap().unwrap();
 
     doc2.merge(&mut doc1);
 
-    doc1.del(birds.clone(), "blackbird").unwrap();
+    doc1.del(&birds, "blackbird").unwrap();
 
-    doc2.set(blackbird.clone(), "beak", "orange").unwrap();
+    doc2.set(&blackbird, "beak", "orange").unwrap();
 
     doc1.merge(&mut doc2);
 
@@ -743,7 +743,7 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
 
     let doc1elems = doc1
         .splice(
-            wisdom.clone(),
+            &wisdom,
             0,
             0,
             vec![
@@ -758,7 +758,7 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
 
     let doc2elems = doc2
         .splice(
-            wisdom.clone(),
+            &wisdom,
             0,
             0,
             vec![
@@ -777,16 +777,16 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
         &doc1,
         map! {
             "wisdom" => {wisdom => list![
-                {doc1elems[0].clone() => "to"},
-                {doc1elems[1].clone() => "be"},
-                {doc1elems[2].clone() => "is"},
-                {doc1elems[3].clone() => "to"},
-                {doc1elems[4].clone() => "do"},
-                {doc2elems[0].clone() => "to"},
-                {doc2elems[1].clone() => "do"},
-                {doc2elems[2].clone() => "is"},
-                {doc2elems[3].clone() => "to"},
-                {doc2elems[4].clone() => "be"},
+                {doc1elems[0] => "to"},
+                {doc1elems[1] => "be"},
+                {doc1elems[2] => "is"},
+                {doc1elems[3] => "to"},
+                {doc1elems[4] => "do"},
+                {doc2elems[0] => "to"},
+                {doc2elems[1] => "do"},
+                {doc2elems[2] => "is"},
+                {doc2elems[3] => "to"},
+                {doc2elems[4] => "be"},
             ]}
         }
     );
@@ -803,10 +803,10 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_greater_actor_id(
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let two = doc1.insert(list.clone(), 0, "two").unwrap();
+    let two = doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1);
 
-    let one = doc2.insert(list.clone(), 0, "one").unwrap();
+    let one = doc2.insert(&list, 0, "one").unwrap();
     assert_doc!(
         &doc2,
         map! {
@@ -829,10 +829,10 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_lesser_actor_id()
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let two = doc1.insert(list.clone(), 0, "two").unwrap();
+    let two = doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1);
 
-    let one = doc2.insert(list.clone(), 0, "one").unwrap();
+    let one = doc2.insert(&list, 0, "one").unwrap();
     assert_doc!(
         &doc2,
         map! {
@@ -853,13 +853,13 @@ fn insertion_consistent_with_causality() {
         .set(ObjId::Root, "list", automerge::Value::list())
         .unwrap()
         .unwrap();
-    let four = doc1.insert(list.clone(), 0, "four").unwrap();
+    let four = doc1.insert(&list, 0, "four").unwrap();
     doc2.merge(&mut doc1);
-    let three = doc2.insert(list.clone(), 0, "three").unwrap();
+    let three = doc2.insert(&list, 0, "three").unwrap();
     doc1.merge(&mut doc2);
-    let two = doc1.insert(list.clone(), 0, "two").unwrap();
+    let two = doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1);
-    let one = doc2.insert(list.clone(), 0, "one").unwrap();
+    let one = doc2.insert(&list, 0, "one").unwrap();
 
     assert_doc!(
         &doc2,
@@ -878,14 +878,14 @@ fn insertion_consistent_with_causality() {
 fn should_handle_arbitrary_depth_nesting() {
     let mut doc1 = new_doc();
     let a = doc1.set(ObjId::Root, "a", automerge::Value::map()).unwrap().unwrap(); 
-    let b = doc1.set(a.clone(), "b", automerge::Value::map()).unwrap().unwrap();
-    let c = doc1.set(b.clone(), "c", automerge::Value::map()).unwrap().unwrap();
-    let d = doc1.set(c.clone(), "d", automerge::Value::map()).unwrap().unwrap();
-    let e = doc1.set(d.clone(), "e", automerge::Value::map()).unwrap().unwrap();
-    let f = doc1.set(e.clone(), "f", automerge::Value::map()).unwrap().unwrap();
-    let g = doc1.set(f.clone(), "g", automerge::Value::map()).unwrap().unwrap();
-    let h = doc1.set(g.clone(), "h", "h").unwrap().unwrap();
-    let j = doc1.set(f.clone(), "i", "j").unwrap().unwrap();
+    let b = doc1.set(&a, "b", automerge::Value::map()).unwrap().unwrap();
+    let c = doc1.set(&b, "c", automerge::Value::map()).unwrap().unwrap();
+    let d = doc1.set(&c, "d", automerge::Value::map()).unwrap().unwrap();
+    let e = doc1.set(&d, "e", automerge::Value::map()).unwrap().unwrap();
+    let f = doc1.set(&e, "f", automerge::Value::map()).unwrap().unwrap();
+    let g = doc1.set(&f, "g", automerge::Value::map()).unwrap().unwrap();
+    let h = doc1.set(&g, "h", "h").unwrap().unwrap();
+    let j = doc1.set(&f, "i", "j").unwrap().unwrap();
 
     assert_doc!(
         &doc1,
@@ -929,7 +929,7 @@ fn save_restore_complex() {
         .unwrap();
 
     let first_todo = doc1.insert(todos.clone(), 0, automerge::Value::map()).unwrap();
-    doc1.set(first_todo.clone(), "title", "water plants")
+    doc1.set(&first_todo, "title", "water plants")
         .unwrap()
         .unwrap();
     let first_done = doc1.set(first_todo.clone(), "done", false).unwrap().unwrap();
@@ -942,7 +942,7 @@ fn save_restore_complex() {
         .unwrap();
 
     let kill_title = doc1
-        .set(first_todo.clone(), "title", "kill plants")
+        .set(&first_todo, "title", "kill plants")
         .unwrap()
         .unwrap();
     doc1.merge(&mut doc2);
