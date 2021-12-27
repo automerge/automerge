@@ -1,6 +1,7 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::{Key, Op, HEAD};
+use crate::types::{ElemId, Key};
+use crate::Op;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -56,7 +57,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
             return QueryResult::Decend;
         }
         match self.op.key {
-            Key::Seq(e) if e == HEAD => {
+            Key::Seq(ElemId::Head) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
                     if self.op.overwrites(op) {
@@ -69,8 +70,8 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 }
                 QueryResult::Finish
             }
-            Key::Seq(e) => {
-                if self.found || child.index.ops.contains(&e.0) {
+            Key::Seq(ElemId::Op(op)) => {
+                if self.found || child.index.ops.contains(&op) {
                     QueryResult::Decend
                 } else {
                     self.pos += child.len();

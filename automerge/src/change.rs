@@ -7,8 +7,8 @@ use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::legacy as amp;
 use crate::{
-    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, OpType, Transaction, HEAD,
-    ROOT,
+    types::{ElemId, Key, ObjId, OpId},
+    ActorId, AutomergeError, IndexedCache, Op, OpType, Transaction,
 };
 use core::ops::Range;
 use flate2::{
@@ -417,23 +417,21 @@ fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
 }
 
 fn export_objid(id: &ObjId, actors: &IndexedCache<ActorId>) -> amp::ObjectId {
-    if id.0 == ROOT {
-        amp::ObjectId::Root
-    } else {
-        export_opid(&id.0, actors).into()
+    match id {
+        ObjId::Root => amp::ObjectId::Root,
+        ObjId::Op(op) => export_opid(op, actors).into(),
     }
 }
 
 fn export_elemid(id: &ElemId, actors: &IndexedCache<ActorId>) -> amp::ElementId {
-    if id == &HEAD {
-        amp::ElementId::Head
-    } else {
-        export_opid(&id.0, actors).into()
+    match id {
+        ElemId::Head => amp::ElementId::Head,
+        ElemId::Op(op) => export_opid(op, actors).into(),
     }
 }
 
 fn export_opid(id: &OpId, actors: &IndexedCache<ActorId>) -> amp::OpId {
-    amp::OpId(id.0, actors.get(id.1).clone())
+    amp::OpId(id.counter(), actors.get(id.actor()).clone())
 }
 
 fn export_op(op: &Op, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> amp::Op {

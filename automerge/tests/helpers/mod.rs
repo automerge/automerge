@@ -1,3 +1,5 @@
+use automerge::ObjId;
+
 use std::{collections::HashMap, convert::TryInto, hash::Hash};
 
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -23,7 +25,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 
 /// This macro makes it easy to make assertions about a document. It is called with two arguments,
 /// the first is a reference to an `automerge::Automerge`, the second is an instance of
-/// `RealizedObject<ExportableOpId>`.
+/// `RealizedObject`.
 ///
 /// What - I hear you ask - is a `RealizedObject`? It's a fully hydrated version of the contents of
 /// an automerge document. You don't need to think about this too much though because you can
@@ -65,29 +67,17 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     map!{
 ///         "field" => {
 ///             op1 => "one",
-///             op2.translate(&doc2) => "two"
+///             op2 => "two"
 ///         }
 ///     }
 /// );
 /// ```
-///
-/// ## Translating OpIds
-///
-/// One thing you may have noticed in the example above is the `op2.translate(&doc2)` call. What is
-/// that doing there? Well, the problem is that automerge OpIDs (in the current API) are specific
-/// to a document. Using an opid from one document in a different document will not work. Therefore
-/// this module defines an `OpIdExt` trait with a `translate` method on it. This method takes a
-/// document and converts the opid into something which knows how to be compared with opids from
-/// another document by using the document you pass to `translate`. Again, all you really need to
-/// know is that when constructing a document for comparison you should call `translate(fromdoc)`
-/// on opids which come from a document other than the one you pass to `assert_doc`.
 #[macro_export]
 macro_rules! assert_doc {
     ($doc: expr, $expected: expr) => {{
-        use $crate::helpers::{realize, ExportableOpId};
+        use $crate::helpers::realize;
         let realized = realize($doc);
-        let to_export: RealizedObject<ExportableOpId<'_>> = $expected.into();
-        let exported = to_export.export($doc);
+        let exported: RealizedObject = $expected.into();
         if realized != exported {
             let serde_right = serde_json::to_string_pretty(&realized).unwrap();
             let serde_left = serde_json::to_string_pretty(&exported).unwrap();
@@ -105,10 +95,9 @@ macro_rules! assert_doc {
 #[macro_export]
 macro_rules! assert_obj {
     ($doc: expr, $obj_id: expr, $prop: expr, $expected: expr) => {{
-        use $crate::helpers::{realize_prop, ExportableOpId};
+        use $crate::helpers::realize_prop;
         let realized = realize_prop($doc, $obj_id, $prop);
-        let to_export: RealizedObject<ExportableOpId<'_>> = $expected.into();
-        let exported = to_export.export($doc);
+        let exported: RealizedObject = $expected.into();
         if realized != exported {
             let serde_right = serde_json::to_string_pretty(&realized).unwrap();
             let serde_left = serde_json::to_string_pretty(&exported).unwrap();
@@ -145,9 +134,9 @@ macro_rules! map {
     (@inner { $($opid:expr => $value:expr),* }) => {
         {
             use std::collections::HashMap;
-            let mut inner: HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>> = HashMap::new();
+            let mut inner: HashMap<ObjId, RealizedObject> = HashMap::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert(ObjId::from((&$opid)).into_owned(), $value.into());
             )*
             inner
         }
@@ -159,9 +148,8 @@ macro_rules! map {
     ($($key:expr => $inner:tt),*) => {
         {
             use std::collections::HashMap;
-            use crate::helpers::ExportableOpId;
             let _cap = map!(@count $($key),*);
-            let mut _map: HashMap<String, HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>>> = ::std::collections::HashMap::with_capacity(_cap);
+            let mut _map: HashMap<String, HashMap<ObjId, RealizedObject>> = ::std::collections::HashMap::with_capacity(_cap);
             $(
                 let inner = map!(@inner $inner);
                 let _ = _map.insert($key.to_string(), inner);
@@ -194,9 +182,9 @@ macro_rules! list {
     (@inner { $($opid:expr => $value:expr),* }) => {
         {
             use std::collections::HashMap;
-            let mut inner: HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>> = HashMap::new();
+            let mut inner: HashMap<ObjId, RealizedObject> = HashMap::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert(ObjId::from(&$opid).into_owned(), $value.into());
             )*
             inner
         }
@@ -204,9 +192,8 @@ macro_rules! list {
     ($($inner:tt,)+) => { list!($($inner),+) };
     ($($inner:tt),*) => {
         {
-            use crate::helpers::ExportableOpId;
             let _cap = list!(@count $($inner),*);
-            let mut _list: Vec<HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>>> = Vec::new();
+            let mut _list: Vec<HashMap<ObjId, RealizedObject>> = Vec::new();
             $(
                 //println!("{}", stringify!($inner));
                 let inner = list!(@inner $inner);
@@ -215,26 +202,6 @@ macro_rules! list {
             RealizedObject::Sequence(_list)
         }
     }
-}
-
-/// Translate an op ID produced by one document to an op ID which can be understood by
-/// another
-///
-/// The current API of automerge exposes OpIds of the form (u64, usize) where the first component
-/// is the counter of an actors lamport timestamp and the second component is the index into an
-/// array of actor IDs stored by the document where the opid was generated. Obviously this is not
-/// portable between documents as the index of the actor array is unlikely to match between two
-/// documents. This function translates between the two representations.
-///
-/// At some point we will probably change the API to not be document specific but this function
-/// allows us to write tests first.
-pub fn translate_obj_id(
-    from: &automerge::Automerge,
-    to: &automerge::Automerge,
-    id: automerge::OpId,
-) -> automerge::OpId {
-    let exported = from.export(id);
-    to.import(&exported).unwrap()
 }
 
 pub fn mk_counter(value: i64) -> automerge::ScalarValue {
@@ -253,13 +220,13 @@ impl std::fmt::Display for ExportedOpId {
 /// A `RealizedObject` is a representation of all the current values in a document - including
 /// conflicts.
 #[derive(PartialEq, Debug)]
-pub enum RealizedObject<Oid: PartialEq + Eq + Hash> {
-    Map(HashMap<String, HashMap<Oid, RealizedObject<Oid>>>),
-    Sequence(Vec<HashMap<Oid, RealizedObject<Oid>>>),
+pub enum RealizedObject<'a> {
+    Map(HashMap<String, HashMap<ObjId<'a>, RealizedObject<'a>>>),
+    Sequence(Vec<HashMap<ObjId<'a>, RealizedObject<'a>>>),
     Value(automerge::ScalarValue),
 }
 
-impl serde::Serialize for RealizedObject<ExportedOpId> {
+impl serde::Serialize for RealizedObject<'static> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -271,7 +238,7 @@ impl serde::Serialize for RealizedObject<ExportedOpId> {
                     let kvs_serded = kvs
                         .iter()
                         .map(|(opid, value)| (opid.to_string(), value))
-                        .collect::<HashMap<String, &RealizedObject<ExportedOpId>>>();
+                        .collect::<HashMap<String, &RealizedObject>>();
                     map_ser.serialize_entry(k, &kvs_serded)?;
                 }
                 map_ser.end()
@@ -282,7 +249,7 @@ impl serde::Serialize for RealizedObject<ExportedOpId> {
                     let kvs_serded = elem
                         .iter()
                         .map(|(opid, value)| (opid.to_string(), value))
-                        .collect::<HashMap<String, &RealizedObject<ExportedOpId>>>();
+                        .collect::<HashMap<String, &RealizedObject>>();
                     list_ser.serialize_element(&kvs_serded)?;
                 }
                 list_ser.end()
@@ -292,40 +259,40 @@ impl serde::Serialize for RealizedObject<ExportedOpId> {
     }
 }
 
-pub fn realize(doc: &automerge::Automerge) -> RealizedObject<ExportedOpId> {
-    realize_obj(doc, automerge::ROOT, automerge::ObjType::Map)
+pub fn realize<'a>(doc: &automerge::Automerge) -> RealizedObject<'a> {
+    realize_obj(doc, ObjId::Root, automerge::ObjType::Map)
 }
 
 pub fn realize_prop<P: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: automerge::ObjId,
     prop: P,
-) -> RealizedObject<ExportedOpId> {
+) -> RealizedObject<'static> {
     let (val, obj_id) = doc.value(obj_id, prop).unwrap().unwrap();
     match val {
-        automerge::Value::Object(obj_type) => realize_obj(doc, obj_id, obj_type),
+        automerge::Value::Object(obj_type) => realize_obj(doc, obj_id.into(), obj_type),
         automerge::Value::Scalar(v) => RealizedObject::Value(v),
     }
 }
 
 pub fn realize_obj(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: automerge::ObjId,
     objtype: automerge::ObjType,
-) -> RealizedObject<ExportedOpId> {
+) -> RealizedObject<'static> {
     match objtype {
         automerge::ObjType::Map | automerge::ObjType::Table => {
             let mut result = HashMap::new();
-            for key in doc.keys(obj_id) {
-                result.insert(key.clone(), realize_values(doc, obj_id, key));
+            for key in doc.keys(obj_id.clone()) {
+                result.insert(key.clone(), realize_values(doc, obj_id.clone(), key));
             }
             RealizedObject::Map(result)
         }
         automerge::ObjType::List | automerge::ObjType::Text => {
-            let length = doc.length(obj_id);
+            let length = doc.length(obj_id.clone());
             let mut result = Vec::with_capacity(length);
             for i in 0..length {
-                result.push(realize_values(doc, obj_id, i));
+                result.push(realize_values(doc, obj_id.clone(), i));
             }
             RealizedObject::Sequence(result)
         }
@@ -334,61 +301,30 @@ pub fn realize_obj(
 
 fn realize_values<K: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: automerge::ObjId,
     key: K,
-) -> HashMap<ExportedOpId, RealizedObject<ExportedOpId>> {
-    let mut values_by_opid = HashMap::new();
+) -> HashMap<ObjId<'static>, RealizedObject<'static>> {
+    let mut values_by_objid: HashMap<ObjId, RealizedObject> = HashMap::new();
     for (value, opid) in doc.values(obj_id, key).unwrap() {
         let realized = match value {
-            automerge::Value::Object(objtype) => realize_obj(doc, opid, objtype),
+            automerge::Value::Object(objtype) => realize_obj(doc, opid.clone().into(), objtype),
             automerge::Value::Scalar(v) => RealizedObject::Value(v),
         };
-        let exported_opid = ExportedOpId(doc.export(opid));
-        values_by_opid.insert(exported_opid, realized);
+        values_by_objid.insert(opid.into(), realized);
     }
-    values_by_opid
+    values_by_objid
 }
 
-impl<'a> RealizedObject<ExportableOpId<'a>> {
-    pub fn export(self, doc: &automerge::Automerge) -> RealizedObject<ExportedOpId> {
-        match self {
-            Self::Map(kvs) => RealizedObject::Map(
-                kvs.into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k,
-                            v.into_iter()
-                                .map(|(k, v)| (k.export(doc), v.export(doc)))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ),
-            Self::Sequence(values) => RealizedObject::Sequence(
-                values
-                    .into_iter()
-                    .map(|v| {
-                        v.into_iter()
-                            .map(|(k, v)| (k.export(doc), v.export(doc)))
-                            .collect()
-                    })
-                    .collect(),
-            ),
-            Self::Value(v) => RealizedObject::Value(v),
-        }
-    }
-}
-
-impl<'a, O: Into<ExportableOpId<'a>>, I: Into<RealizedObject<ExportableOpId<'a>>>>
-    From<HashMap<&str, HashMap<O, I>>> for RealizedObject<ExportableOpId<'a>>
+impl<'a, I: Into<RealizedObject<'a>>> From<HashMap<&str, HashMap<ObjId<'a>, I>>>
+    for RealizedObject<'a>
 {
-    fn from(values: HashMap<&str, HashMap<O, I>>) -> Self {
+    fn from(values: HashMap<&str, HashMap<ObjId<'a>, I>>) -> Self {
         let intoed = values
             .into_iter()
             .map(|(k, v)| {
                 (
                     k.to_string(),
-                    v.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+                    v.into_iter().map(|(k, v)| (k, v.into())).collect(),
                 )
             })
             .collect();
@@ -396,104 +332,39 @@ impl<'a, O: Into<ExportableOpId<'a>>, I: Into<RealizedObject<ExportableOpId<'a>>
     }
 }
 
-impl<'a, O: Into<ExportableOpId<'a>>, I: Into<RealizedObject<ExportableOpId<'a>>>>
-    From<Vec<HashMap<O, I>>> for RealizedObject<ExportableOpId<'a>>
-{
-    fn from(values: Vec<HashMap<O, I>>) -> Self {
+impl<'a, I: Into<RealizedObject<'a>>> From<Vec<HashMap<ObjId<'a>, I>>> for RealizedObject<'a> {
+    fn from(values: Vec<HashMap<ObjId<'a>, I>>) -> Self {
         RealizedObject::Sequence(
             values
                 .into_iter()
-                .map(|v| v.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
+                .map(|v| v.into_iter().map(|(k, v)| (k, v.into())).collect())
                 .collect(),
         )
     }
 }
 
-impl From<bool> for RealizedObject<ExportableOpId<'_>> {
+impl From<bool> for RealizedObject<'static> {
     fn from(b: bool) -> Self {
         RealizedObject::Value(b.into())
     }
 }
 
-impl From<usize> for RealizedObject<ExportableOpId<'_>> {
+impl From<usize> for RealizedObject<'static> {
     fn from(u: usize) -> Self {
         let v = u.try_into().unwrap();
         RealizedObject::Value(automerge::ScalarValue::Int(v))
     }
 }
 
-impl From<automerge::ScalarValue> for RealizedObject<ExportableOpId<'_>> {
+impl From<automerge::ScalarValue> for RealizedObject<'static> {
     fn from(s: automerge::ScalarValue) -> Self {
         RealizedObject::Value(s)
     }
 }
 
-impl From<&str> for RealizedObject<ExportableOpId<'_>> {
+impl From<&str> for RealizedObject<'static> {
     fn from(s: &str) -> Self {
         RealizedObject::Value(automerge::ScalarValue::Str(s.into()))
-    }
-}
-
-#[derive(Eq, PartialEq, Hash)]
-pub enum ExportableOpId<'a> {
-    Native(automerge::OpId),
-    Translate(Translate<'a>),
-}
-
-impl<'a> ExportableOpId<'a> {
-    fn export(self, doc: &automerge::Automerge) -> ExportedOpId {
-        let oid = match self {
-            Self::Native(oid) => oid,
-            Self::Translate(Translate { from, opid }) => translate_obj_id(from, doc, opid),
-        };
-        ExportedOpId(doc.export(oid))
-    }
-}
-
-pub struct Translate<'a> {
-    from: &'a automerge::Automerge,
-    opid: automerge::OpId,
-}
-
-impl<'a> PartialEq for Translate<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.from.maybe_get_actor().unwrap() == other.from.maybe_get_actor().unwrap()
-            && self.opid == other.opid
-    }
-}
-
-impl<'a> Eq for Translate<'a> {}
-
-impl<'a> Hash for Translate<'a> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.from.maybe_get_actor().unwrap().hash(state);
-        self.opid.hash(state);
-    }
-}
-
-pub trait OpIdExt {
-    fn native(self) -> ExportableOpId<'static>;
-    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_>;
-}
-
-impl OpIdExt for automerge::OpId {
-    /// Use this opid directly when exporting
-    fn native(self) -> ExportableOpId<'static> {
-        ExportableOpId::Native(self)
-    }
-
-    /// Translate this OpID from `doc` when exporting
-    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_> {
-        ExportableOpId::Translate(Translate {
-            from: doc,
-            opid: self,
-        })
-    }
-}
-
-impl From<automerge::OpId> for ExportableOpId<'_> {
-    fn from(oid: automerge::OpId) -> Self {
-        ExportableOpId::Native(oid)
     }
 }
 

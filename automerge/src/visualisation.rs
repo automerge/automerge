@@ -1,6 +1,12 @@
 use fxhash::FxHasher;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
+use crate::{
+    op_set::OpSetMetadata,
+    op_tree::OpTreeNode,
+    types::{ElemId, Key, ObjId, OpId, OpType},
+};
+
 use rand::Rng;
 
 #[derive(Copy, Clone, PartialEq, Hash, Eq)]
@@ -19,13 +25,13 @@ pub(crate) struct Node<'a, const B: usize> {
     id: NodeId,
     children: Vec<NodeId>,
     node_type: NodeType<'a, B>,
-    metadata: &'a crate::op_set::OpSetMetadata,
+    metadata: &'a OpSetMetadata,
 }
 
 #[derive(Clone)]
 pub(crate) enum NodeType<'a, const B: usize> {
-    ObjRoot(crate::ObjId),
-    ObjTreeNode(&'a crate::op_tree::OpTreeNode<B>),
+    ObjRoot(ObjId),
+    ObjTreeNode(&'a OpTreeNode<B>),
 }
 
 #[derive(Clone)]
@@ -150,7 +156,7 @@ impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisua
                     .into(),
             ),
             NodeType::ObjRoot(objid) => {
-                dot::LabelText::label(print_opid(&objid.0, &self.actor_shorthands))
+                dot::LabelText::label(print_objid(&objid, &self.actor_shorthands))
             }
         }
     }
@@ -226,18 +232,18 @@ impl OpTableRow {
 impl OpTableRow {
     fn create(
         op: &super::Op,
-        metadata: &crate::op_set::OpSetMetadata,
+        metadata: &OpSetMetadata,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
         let op_description = match &op.action {
-            crate::OpType::Del => "del".to_string(),
-            crate::OpType::Set(v) => format!("set {}", v),
-            crate::OpType::Make(obj) => format!("make {}", obj),
-            crate::OpType::Inc(v) => format!("inc {}", v),
+            OpType::Del => "del".to_string(),
+            OpType::Set(v) => format!("set {}", v),
+            OpType::Make(obj) => format!("make {}", obj),
+            OpType::Inc(v) => format!("inc {}", v),
         };
         let prop = match op.key {
-            crate::Key::Map(k) => metadata.props[k].clone(),
-            crate::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
+            Key::Map(k) => metadata.props[k].clone(),
+            Key::Seq(e) => print_elemid(&e, actor_shorthands),
         };
         let succ = op
             .succ
@@ -246,7 +252,7 @@ impl OpTableRow {
             .collect();
         OpTableRow {
             op_description,
-            obj_id: print_opid(&op.obj.0, actor_shorthands),
+            obj_id: print_objid(&op.obj, actor_shorthands),
             op_id: print_opid(&op.id, actor_shorthands),
             prop,
             succ,
@@ -254,6 +260,20 @@ impl OpTableRow {
     }
 }
 
-fn print_opid(opid: &crate::OpId, actor_shorthands: &HashMap<usize, String>) -> String {
+fn print_elemid(elemid: &ElemId, actor_shorthands: &HashMap<usize, String>) -> String {
+    match elemid {
+        ElemId::Head => "_head".to_string(),
+        ElemId::Op(op) => print_opid(op, actor_shorthands),
+    }
+}
+
+fn print_objid(objid: &ObjId, actor_shorthands: &HashMap<usize, String>) -> String {
+    match objid {
+        ObjId::Root => "_root".to_string(),
+        ObjId::Op(op) => print_opid(op, actor_shorthands),
+    }
+}
+
+fn print_opid(opid: &OpId, actor_shorthands: &HashMap<usize, String>) -> String {
     format!("{}@{}", opid.counter(), actor_shorthands[&opid.actor()])
 }
