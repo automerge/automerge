@@ -9,8 +9,6 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::fmt::Debug;
 
-const EXTERNAL_OP_CACHE_SIZE: usize = 100;
-
 pub(crate) type OpSet = OpSetInternal<16>;
 
 #[derive(Debug, Clone)]
@@ -30,7 +28,7 @@ impl<const B: usize> OpSetInternal<B> {
             m: Rc::new(RefCell::new(OpSetMetadata {
                 actors: IndexedCache::new(),
                 props: IndexedCache::new(),
-                external_op_cache: lru::LruCache::with_hasher(EXTERNAL_OP_CACHE_SIZE, FxBuildHasher::default())
+                last_opid: None,
             })),
         }
     }
@@ -155,30 +153,13 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct OpSetMetadata {
     pub actors: IndexedCache<ActorId>,
     pub props: IndexedCache<String>,
-    external_op_cache: lru::LruCache<ExternalOpId, OpId, FxBuildHasher>,
-}
-
-impl Debug for OpSetMetadata {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OpSetMetadata")
-            .field("actors", &self.actors)
-            .field("props", &self.props)
-            .field("external_op_cache", &format_args!("LruCache with {} keys", self.external_op_cache.len()))
-            .finish()
-    }
-}
-
-impl Clone for OpSetMetadata {
-    fn clone(&self) -> Self {
-        OpSetMetadata {
-            actors: self.actors.clone(),
-            props: self.props.clone(),
-            external_op_cache: lru::LruCache::with_hasher(EXTERNAL_OP_CACHE_SIZE, FxBuildHasher::default()),
-        }
-    }
+    // For the common case of many subsequent operations on the same object we cache the last
+    // object we looked up
+    last_opid: Option<(ExternalOpId, OpId)>,
 }
 
 
@@ -195,14 +176,15 @@ impl OpSetMetadata {
     }
 
     pub fn import_opid(&mut self, ext_opid: &ExternalOpId) -> OpId {
-        if let Some(opid) = self.external_op_cache.get(ext_opid) {
-            *opid
-        } else {
-            let actor = self.actors.cache(ext_opid.actor().clone());
-            let opid = OpId::new(ext_opid.counter(), actor);
-            self.external_op_cache.put(ext_opid.clone(), opid);
-            opid
+        if let Some((last_ext, last_int)) = &self.last_opid {
+            if last_ext == ext_opid {
+                return *last_int;
+            }
         }
+        let actor = self.actors.cache(ext_opid.actor().clone());
+        let opid = OpId::new(ext_opid.counter(), actor);
+        self.last_opid = Some((ext_opid.clone(), opid));
+        opid
     }
 }
 

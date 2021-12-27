@@ -26,7 +26,6 @@ tinyvec = { version = "^1.5.1", features = ["alloc"] }
 unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
 dot = { version = "0.1.4", optional = true }
-lru = "^0.7.1"
 
 [dependencies.web-sys]
 version = "^0.3.55"
