@@ -17,14 +17,15 @@
   ],
   "main": "./dev/index.js",
   "scripts": {
-    "build": "rm -rf dev && wasm-pack build --target nodejs --dev --out-name index -d dev",
-    "release": "rm -rf dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt",
-    "prof": "rm -rf dev && wasm-pack build --target nodejs --profiling --out-name index -d dev",
+    "build": "rimraf ./dev && wasm-pack build --target nodejs --dev --out-name index -d dev",
+    "release": "rimraf ./dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt",
+    "prof": "rimraf ./dev && wasm-pack build --target nodejs --profiling --out-name index -d dev",
     "opt": "wasm-opt -Oz dev/index_bg.wasm -o tmp.wasm && mv tmp.wasm dev/index_bg.wasm",
     "test": "yarn build && mocha --bail --full-trace"
   },
   "dependencies": {},
   "devDependencies": {
-    "mocha": "^9.1.3"
+    "mocha": "^9.1.3",
+    "rimraf": "^3.0.2"
   }
 }
