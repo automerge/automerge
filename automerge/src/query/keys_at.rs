@@ -26,9 +26,9 @@ impl<const B: usize> KeysAt<B> {
 impl<const B: usize> TreeQuery<B> for KeysAt<B> {
     fn query_element(&mut self, op: &Op) -> QueryResult {
         let visible = self.window.visible_at(op, self.pos, &self.clock);
-        if Some(op.key) != self.last && visible {
-            self.keys.push(op.key);
-            self.last = Some(op.key);
+        if Some(&op.key) != self.last.as_ref() && visible {
+            self.keys.push(op.key.clone());
+            self.last = Some(op.key.clone());
         }
         self.pos += 1;
         QueryResult::Next

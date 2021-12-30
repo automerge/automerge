@@ -5,8 +5,10 @@ use std::iter::FromIterator;
 pub(crate) use crate::value::DataType;
 pub(crate) use crate::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::collections::HashSet;
 
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
@@ -249,6 +251,29 @@ pub struct Change {
     pub deps: Vec<ChangeHash>,
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,
+}
+
+impl Change {
+    pub(crate) fn actors(&self) -> Vec<ActorId> {
+        let first = self.actor_id.clone();
+        let mut set = HashSet::new();
+        for o in &self.operations {
+            if let ObjectId::Id(OpId(_, a)) = &o.obj {
+                set.insert(a.clone());
+            }
+            if let Key::Seq(ElementId::Id(OpId(_, a))) = &o.key {
+                set.insert(a.clone());
+            }
+            for p in o.pred.iter() {
+                set.insert(p.1.clone());
+            }
+        }
+        set.remove(&first);
+        let mut result = vec![first];
+        let set: Vec<ActorId> = set.iter().sorted().cloned().collect();
+        result.extend(set);
+        result
+    }
 }
 
 impl PartialEq for Change {

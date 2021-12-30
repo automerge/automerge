@@ -3,17 +3,13 @@ use crate::legacy as amp;
 use crate::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
+use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt;
+use std::rc::Rc;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
-
-pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
-pub const ROOT: OpId = OpId(0, 0);
-
-const ROOT_STR: &str = "_root";
-const HEAD_STR: &str = "_head";
 
 /// An actor id is a sequence of bytes. By default we use a uuid which can be nicely stack
 /// allocated.
@@ -107,6 +103,39 @@ impl fmt::Display for ActorId {
     }
 }
 
+impl fmt::Display for OpId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}@{}", &self.counter, &self.actor)
+    }
+}
+
+impl fmt::Display for ObjId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ObjId::Root => write!(f, "_root"),
+            ObjId::Id(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+impl fmt::Display for ElemId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ElemId::Head => write!(f, "_head"),
+            ElemId::Id(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Map(s) => write!(f, "{}", s),
+            Key::Seq(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Copy, Hash)]
 #[serde(rename_all = "camelCase", untagged)]
 pub enum ObjType {
@@ -160,128 +189,103 @@ pub enum OpType {
     Set(ScalarValue),
 }
 
-#[derive(Debug)]
-pub enum Export {
-    Id(OpId),
-    Special(String),
-    Prop(usize),
-}
-
-pub trait Exportable {
-    fn export(&self) -> Export;
-}
-
-pub trait Importable {
-    fn wrap(id: OpId) -> Self;
-    fn from(s: &str) -> Option<Self>
-    where
-        Self: std::marker::Sized;
-}
-
-impl OpId {
-    #[inline]
-    pub fn counter(&self) -> u64 {
-        self.0
-    }
-    #[inline]
-    pub fn actor(&self) -> usize {
-        self.1
-    }
-}
-
-impl Exportable for ObjId {
-    fn export(&self) -> Export {
-        if self.0 == ROOT {
-            Export::Special(ROOT_STR.to_owned())
-        } else {
-            Export::Id(self.0)
-        }
-    }
-}
-
-impl Exportable for &ObjId {
-    fn export(&self) -> Export {
-        if self.0 == ROOT {
-            Export::Special(ROOT_STR.to_owned())
-        } else {
-            Export::Id(self.0)
-        }
-    }
-}
-
-impl Exportable for ElemId {
-    fn export(&self) -> Export {
-        if self == &HEAD {
-            Export::Special(HEAD_STR.to_owned())
-        } else {
-            Export::Id(self.0)
-        }
-    }
-}
-
-impl Exportable for OpId {
-    fn export(&self) -> Export {
-        Export::Id(*self)
-    }
-}
-
-impl Exportable for Key {
-    fn export(&self) -> Export {
-        match self {
-            Key::Map(p) => Export::Prop(*p),
-            Key::Seq(e) => e.export(),
-        }
-    }
-}
-
-impl Importable for ObjId {
-    fn wrap(id: OpId) -> Self {
-        ObjId(id)
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == ROOT_STR {
-            Some(ROOT.into())
-        } else {
-            None
-        }
-    }
-}
-
-impl Importable for OpId {
-    fn wrap(id: OpId) -> Self {
-        id
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == ROOT_STR {
-            Some(ROOT)
-        } else {
-            None
-        }
-    }
-}
-
-impl Importable for ElemId {
-    fn wrap(id: OpId) -> Self {
-        ElemId(id)
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == HEAD_STR {
-            Some(HEAD)
-        } else {
-            None
-        }
-    }
-}
-
 impl From<OpId> for ObjId {
     fn from(o: OpId) -> Self {
-        ObjId(o)
+        ObjId::Id(o)
+    }
+}
+
+impl From<&OpId> for ObjId {
+    fn from(o: &OpId) -> Self {
+        ObjId::Id(o.clone())
+    }
+}
+
+impl From<OpId> for amp::OpId {
+    fn from(o: OpId) -> Self {
+        amp::OpId(o.counter, o.actor.as_ref().clone())
+    }
+}
+
+impl From<&OpId> for amp::OpId {
+    fn from(o: &OpId) -> Self {
+        amp::OpId(o.counter, o.actor.as_ref().clone())
+    }
+}
+
+impl From<Key> for amp::Key {
+    fn from(k: Key) -> Self {
+        match k {
+            Key::Map(s) => amp::Key::Map(s.into()),
+            Key::Seq(e) => amp::Key::Seq(e.into()),
+        }
+    }
+}
+
+impl From<&Key> for amp::Key {
+    fn from(k: &Key) -> Self {
+        match k {
+            Key::Map(s) => amp::Key::Map(s.into()),
+            Key::Seq(e) => amp::Key::Seq(e.into()),
+        }
+    }
+}
+
+impl From<ObjId> for amp::ObjectId {
+    fn from(o: ObjId) -> Self {
+        match o {
+            ObjId::Root => amp::ObjectId::Root,
+            ObjId::Id(id) => amp::ObjectId::Id(id.into()),
+        }
+    }
+}
+
+impl From<&ObjId> for amp::ObjectId {
+    fn from(o: &ObjId) -> Self {
+        match o {
+            ObjId::Root => amp::ObjectId::Root,
+            ObjId::Id(id) => amp::ObjectId::Id(id.into()),
+        }
+    }
+}
+
+impl From<&ElemId> for amp::ElementId {
+    fn from(o: &ElemId) -> Self {
+        match o {
+            ElemId::Head => amp::ElementId::Head,
+            ElemId::Id(id) => amp::ElementId::Id(id.into()),
+        }
+    }
+}
+
+impl From<ElemId> for amp::ElementId {
+    fn from(o: ElemId) -> Self {
+        match o {
+            ElemId::Head => amp::ElementId::Head,
+            ElemId::Id(id) => amp::ElementId::Id(id.into()),
+        }
+    }
+}
+
+impl From<&Op> for amp::Op {
+    fn from(op: &Op) -> Self {
+        let action = op.action.clone();
+        let key = (&op.key).into();
+        let obj = (&op.obj).into();
+        let pred = op.pred.iter().map(|id| id.into()).collect();
+        amp::Op {
+            action,
+            obj,
+            insert: op.insert,
+            pred,
+            key,
+        }
     }
 }
 
 impl From<OpId> for ElemId {
     fn from(o: OpId) -> Self {
-        ElemId(o)
+        ElemId::Id(o)
     }
 }
 
@@ -317,7 +321,7 @@ impl From<f64> for Prop {
 
 impl From<OpId> for Key {
     fn from(id: OpId) -> Self {
-        Key::Seq(ElemId(id))
+        Key::Seq(ElemId::Id(id))
     }
 }
 
@@ -327,9 +331,9 @@ impl From<ElemId> for Key {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
 pub(crate) enum Key {
-    Map(usize),
+    Map(String),
     Seq(ElemId),
 }
 
@@ -346,19 +350,38 @@ impl Key {
     pub fn elemid(&self) -> Option<ElemId> {
         match self {
             Key::Map(_) => None,
-            Key::Seq(id) => Some(*id),
+            Key::Seq(id) => Some(id.clone()),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-pub struct OpId(pub u64, pub usize);
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub struct OpId {
+    pub counter: u64,
+    pub actor: Rc<ActorId>,
+}
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ObjId(pub OpId);
+impl OpId {
+    #[cfg(test)]
+    pub(crate) fn at(counter: u64, actor: &ActorId) -> OpId {
+        OpId {
+            counter,
+            actor: Rc::new(actor.clone()),
+        }
+    }
+}
 
-#[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ElemId(pub OpId);
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum ObjId {
+    Root,
+    Id(OpId),
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub(crate) enum ElemId {
+    Head,
+    Id(OpId),
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
@@ -383,7 +406,7 @@ impl Op {
 
     pub fn elemid(&self) -> Option<ElemId> {
         if self.insert {
-            Some(ElemId(self.id))
+            Some(ElemId::Id(self.id.clone()))
         } else {
             self.key.elemid()
         }
@@ -448,6 +471,71 @@ impl TryFrom<&[u8]> for ChangeHash {
             let mut array = [0; 32];
             array.copy_from_slice(bytes);
             Ok(ChangeHash(array))
+        }
+    }
+}
+
+impl Ord for OpId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.counter.cmp(&other.counter) {
+            Ordering::Equal => other.actor.cmp(&self.actor),
+            order => order,
+        }
+    }
+}
+
+impl PartialOrd for OpId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialOrd for Key {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialOrd for ElemId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialOrd for ObjId {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ElemId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (ElemId::Head, ElemId::Head) => Ordering::Equal,
+            (ElemId::Head, _) => Ordering::Less,
+            (_, ElemId::Head) => Ordering::Greater,
+            (ElemId::Id(a), ElemId::Id(b)) => a.cmp(b),
+        }
+    }
+}
+
+impl Ord for ObjId {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (ObjId::Root, ObjId::Root) => Ordering::Equal,
+            (ObjId::Root, _) => Ordering::Less,
+            (_, ObjId::Root) => Ordering::Greater,
+            (ObjId::Id(a), ObjId::Id(b)) => a.cmp(b),
+        }
+    }
+}
+
+impl Ord for Key {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Key::Map(a), Key::Map(b)) => a.cmp(b),
+            (Key::Seq(a), Key::Seq(b)) => a.cmp(b),
+            (_, _) => panic!("comparing seq key to map key"),
         }
     }
 }

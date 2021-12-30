@@ -1,4 +1,4 @@
-use crate::{error, ObjType, Op, OpId, OpType};
+use crate::{error, ObjId, ObjType, Op, OpType};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::convert::TryFrom;
@@ -110,21 +110,21 @@ impl From<ScalarValue> for Value {
     }
 }
 
-impl From<&Op> for (Value, OpId) {
+impl From<&Op> for (Value, ObjId) {
     fn from(op: &Op) -> Self {
         match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id.clone().into()),
+            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id.clone().into()),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
 }
 
-impl From<Op> for (Value, OpId) {
+impl From<Op> for (Value, ObjId) {
     fn from(op: Op) -> Self {
         match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id.clone().into()),
+            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id.clone().into()),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }

@@ -1,11 +1,10 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::OpTreeNode;
 use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
-use crate::{Key, ObjId, Op};
+use crate::{Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Prop {
-    obj: ObjId,
     key: Key,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
@@ -13,9 +12,8 @@ pub(crate) struct Prop {
 }
 
 impl Prop {
-    pub fn new(obj: ObjId, prop: usize) -> Self {
+    pub fn new(prop: String) -> Self {
         Prop {
-            obj,
             key: Key::Map(prop),
             ops: vec![],
             ops_pos: vec![],
@@ -25,20 +23,13 @@ impl Prop {
 }
 
 impl<const B: usize> TreeQuery<B> for Prop {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
-        let start = binary_search_by(child, |op| {
-            m.lamport_cmp(op.obj.0, self.obj.0)
-                .then_with(|| m.key_cmp(&op.key, &self.key))
-        });
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+        let start = binary_search_by(child, |op| op.key.cmp(&self.key));
         let mut counters = Default::default();
         self.pos = start;
         for pos in start..child.len() {
             let op = child.get(pos).unwrap();
-            if !(op.obj == self.obj && op.key == self.key) {
+            if op.key != self.key {
                 break;
             }
             if is_visible(op, pos, &mut counters) {

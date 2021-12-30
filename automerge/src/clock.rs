@@ -1,26 +1,25 @@
-use crate::OpId;
-use fxhash::FxBuildHasher;
+use crate::{ActorId, OpId};
 use std::cmp;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Clock(HashMap<usize, u64, FxBuildHasher>);
+pub(crate) struct Clock(HashMap<ActorId, u64>);
 
 impl Clock {
     pub fn new() -> Self {
-        Clock(Default::default())
+        Clock(HashMap::new())
     }
 
-    pub fn include(&mut self, key: usize, n: u64) {
+    pub fn include(&mut self, key: &ActorId, n: u64) {
         self.0
-            .entry(key)
+            .entry(key.clone())
             .and_modify(|m| *m = cmp::max(n, *m))
             .or_insert(n);
     }
 
     pub fn covers(&self, id: &OpId) -> bool {
-        if let Some(val) = self.0.get(&id.1) {
-            val >= &id.0
+        if let Some(val) = self.0.get(&id.actor) {
+            val >= &id.counter
         } else {
             false
         }
@@ -34,19 +33,22 @@ mod tests {
     #[test]
     fn covers() {
         let mut clock = Clock::new();
+        let a1 = ActorId::random();
+        let a2 = ActorId::random();
+        let a3 = ActorId::random();
 
-        clock.include(1, 20);
-        clock.include(2, 10);
+        clock.include(&a1, 20);
+        clock.include(&a2, 10);
 
-        assert!(clock.covers(&OpId(10, 1)));
-        assert!(clock.covers(&OpId(20, 1)));
-        assert!(!clock.covers(&OpId(30, 1)));
+        assert!(clock.covers(&OpId::at(10, &a1)));
+        assert!(clock.covers(&OpId::at(20, &a1)));
+        assert!(!clock.covers(&OpId::at(30, &a1)));
 
-        assert!(clock.covers(&OpId(5, 2)));
-        assert!(clock.covers(&OpId(10, 2)));
-        assert!(!clock.covers(&OpId(15, 2)));
+        assert!(clock.covers(&OpId::at(5, &a2)));
+        assert!(clock.covers(&OpId::at(10, &a2)));
+        assert!(!clock.covers(&OpId::at(15, &a2)));
 
-        assert!(!clock.covers(&OpId(1, 3)));
-        assert!(!clock.covers(&OpId(100, 3)));
+        assert!(!clock.covers(&OpId::at(1, &a3)));
+        assert!(!clock.covers(&OpId::at(100, &a3)));
     }
 }

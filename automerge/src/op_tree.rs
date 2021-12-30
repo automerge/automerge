@@ -4,7 +4,6 @@ use std::{
     mem,
 };
 
-pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{Index, QueryResult, TreeQuery};
 use crate::{Op, OpId};
 use std::collections::HashSet;
@@ -36,14 +35,14 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub fn search<Q>(&self, mut query: Q) -> Q
     where
         Q: TreeQuery<B>,
     {
         self.root_node
             .as_ref()
-            .map(|root| match query.query_node_with_metadata(root, m) {
-                QueryResult::Decend => root.search(&mut query, m),
+            .map(|root| match query.query_node(root) {
+                QueryResult::Decend => root.search(&mut query),
                 _ => true,
             });
         query
@@ -177,22 +176,22 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub fn search<Q>(&self, query: &mut Q) -> bool
     where
         Q: TreeQuery<B>,
     {
         if self.is_leaf() {
             for e in &self.elements {
-                if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                if query.query_element(e) == QueryResult::Finish {
                     return true;
                 }
             }
             false
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
-                match query.query_node_with_metadata(child, m) {
+                match query.query_node(child) {
                     QueryResult::Decend => {
-                        if child.search(query, m) {
+                        if child.search(query) {
                             return true;
                         }
                     }
@@ -200,7 +199,7 @@ impl<const B: usize> OpTreeNode<B> {
                     QueryResult::Next => (),
                 }
                 if let Some(e) = self.elements.get(child_index) {
-                    if query.query_element_with_metadata(e, m) == QueryResult::Finish {
+                    if query.query_element(e) == QueryResult::Finish {
                         return true;
                     }
                 }
@@ -627,13 +626,14 @@ struct CounterData {
 
 #[cfg(test)]
 mod tests {
+    /* FIXME
     use crate::legacy as amp;
     use crate::{Op, OpId};
 
     use super::*;
 
     fn op(n: usize) -> Op {
-        let zero = OpId(0, 0);
+        let zero = OpId(0,0);
         Op {
             change: n,
             id: zero,
@@ -680,4 +680,5 @@ mod tests {
             assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
         }
     }
+    */
 }

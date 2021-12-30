@@ -1,6 +1,6 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::OpTreeNode;
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::{Key, Op, HEAD};
+use crate::{ElemId, Key, Op};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
@@ -26,12 +26,12 @@ impl<const B: usize> SeekOp<B> {
         op.obj != self.op.obj
     }
 
-    fn lesser_insert(&self, op: &Op, m: &OpSetMetadata) -> bool {
-        op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less
+    fn lesser_insert(&self, op: &Op) -> bool {
+        op.insert && op.id.cmp(&self.op.id) == Ordering::Less
     }
 
-    fn greater_opid(&self, op: &Op, m: &OpSetMetadata) -> bool {
-        m.lamport_cmp(op.id, self.op.id) == Ordering::Greater
+    fn greater_opid(&self, op: &Op) -> bool {
+        op.id.cmp(&self.op.id) == Ordering::Greater
     }
 
     fn is_target_insert(&self, op: &Op) -> bool {
@@ -47,30 +47,26 @@ impl<const B: usize> SeekOp<B> {
 }
 
 impl<const B: usize> TreeQuery<B> for SeekOp<B> {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         if self.found {
             return QueryResult::Decend;
         }
-        match self.op.key {
-            Key::Seq(e) if e == HEAD => {
+        match &self.op.key {
+            Key::Seq(ElemId::Head) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
                     if self.op.overwrites(op) {
                         self.succ.push(self.pos);
                     }
-                    if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
+                    if op.insert && op.id.cmp(&self.op.id) == Ordering::Less {
                         break;
                     }
                     self.pos += 1;
                 }
                 QueryResult::Finish
             }
-            Key::Seq(e) => {
-                if self.found || child.index.ops.contains(&e.0) {
+            Key::Seq(ElemId::Id(id)) => {
+                if self.found || child.index.ops.contains(id) {
                     QueryResult::Decend
                 } else {
                     self.pos += child.len();
@@ -78,7 +74,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 }
             }
             Key::Map(_) => {
-                self.pos = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
+                self.pos = binary_search_by(child, |op| op.key.cmp(&self.op.key));
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
                     if op.key != self.op.key {
@@ -87,7 +83,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                     if self.op.overwrites(op) {
                         self.succ.push(self.pos);
                     }
-                    if m.lamport_cmp(op.id, self.op.id) == Ordering::Greater {
+                    if op.id.cmp(&self.op.id) == Ordering::Greater {
                         break;
                     }
                     self.pos += 1;
@@ -97,7 +93,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
         }
     }
 
-    fn query_element_with_metadata(&mut self, e: &Op, m: &OpSetMetadata) -> QueryResult {
+    fn query_element(&mut self, e: &Op) -> QueryResult {
         if !self.found {
             if self.is_target_insert(e) {
                 self.found = true;
@@ -112,13 +108,13 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 self.succ.push(self.pos);
             }
             if self.op.insert {
-                if self.different_obj(e) || self.lesser_insert(e, m) {
+                if self.different_obj(e) || self.lesser_insert(e) {
                     QueryResult::Finish
                 } else {
                     self.pos += 1;
                     QueryResult::Next
                 }
-            } else if e.insert || self.different_obj(e) || self.greater_opid(e, m) {
+            } else if e.insert || self.different_obj(e) || self.greater_opid(e) {
                 QueryResult::Finish
             } else {
                 self.pos += 1;

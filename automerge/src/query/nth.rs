@@ -30,8 +30,8 @@ impl<const B: usize> Nth<B> {
     }
 
     pub fn key(&self) -> Result<Key, AutomergeError> {
-        if let Some(e) = self.last_elem {
-            Ok(Key::Seq(e))
+        if let Some(e) = &self.last_elem {
+            Ok(Key::Seq(e.clone()))
         } else {
             Err(AutomergeError::InvalidIndex(self.target))
         }

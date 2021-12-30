@@ -1,6 +1,6 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::{AutomergeError, ElemId, Key, Op, HEAD};
+use crate::{AutomergeError, ElemId, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,9 +27,9 @@ impl<const B: usize> InsertNth<B> {
 
     pub fn key(&self) -> Result<Key, AutomergeError> {
         if self.target == 0 {
-            Ok(HEAD.into())
+            Ok(Key::Seq(ElemId::Head))
         } else if self.seen == self.target && self.last_insert.is_some() {
-            Ok(Key::Seq(self.last_insert.unwrap()))
+            Ok(Key::Seq(self.last_insert.clone().unwrap()))
         } else {
             Err(AutomergeError::InvalidIndex(self.target))
         }

@@ -6,10 +6,7 @@ use crate::decoding;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::legacy as amp;
-use crate::{
-    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, OpType, Transaction, HEAD,
-    ROOT,
-};
+use crate::{ActorId, AutomergeError, Op, OpType, Transaction};
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -50,33 +47,15 @@ fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
 pub(crate) fn encode_document(
     changes: &[amp::Change],
     doc_ops: &[Op],
-    actors_index: &IndexedCache<ActorId>,
-    props: &[String],
+    actors: &[ActorId],
 ) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
 
     let heads = get_heads(changes);
 
-    let actors_map = actors_index.encode_index();
-    let actors = actors_index.sorted();
+    let (change_bytes, change_info) = ChangeEncoder::encode_changes(changes, actors);
 
-    /*
-    // this assumes that all actor_ids referenced are seen in changes.actor_id which is true
-    // so long as we have a full history
-    let mut actors: Vec<_> = changes
-        .iter()
-        .map(|c| &c.actor)
-        .unique()
-        .sorted()
-        .cloned()
-        .collect();
-    */
-
-    let (change_bytes, change_info) = ChangeEncoder::encode_changes(changes, &actors);
-
-    //let doc_ops = group_doc_ops(changes, &actors);
-
-    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &actors_map, props);
+    let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, actors);
 
     bytes.extend(&MAGIC_BYTES);
     bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
@@ -86,7 +65,7 @@ pub(crate) fn encode_document(
 
     actors.len().encode(&mut chunk)?;
 
-    for a in actors.into_iter() {
+    for a in actors.iter() {
         a.to_bytes().encode(&mut chunk)?;
     }
 
@@ -200,7 +179,8 @@ fn encode_chunk(change: &amp::Change, deps: &[amp::ChangeHash]) -> ChunkIntermed
     }
 
     // encode first actor
-    let mut actors = vec![change.actor_id.clone()];
+    //let mut actors = vec![change.actor_id.clone()];
+    let mut actors = change.actors();
     change.actor_id.to_bytes().encode(&mut bytes).unwrap();
 
     // encode seq, start_op, time, message
@@ -416,61 +396,16 @@ fn increment_range_map(ranges: &mut HashMap<u32, Range<usize>>, len: usize) {
     }
 }
 
-fn export_objid(id: &ObjId, actors: &IndexedCache<ActorId>) -> amp::ObjectId {
-    if id.0 == ROOT {
-        amp::ObjectId::Root
-    } else {
-        export_opid(&id.0, actors).into()
-    }
-}
-
-fn export_elemid(id: &ElemId, actors: &IndexedCache<ActorId>) -> amp::ElementId {
-    if id == &HEAD {
-        amp::ElementId::Head
-    } else {
-        export_opid(&id.0, actors).into()
-    }
-}
-
-fn export_opid(id: &OpId, actors: &IndexedCache<ActorId>) -> amp::OpId {
-    amp::OpId(id.0, actors.get(id.1).clone())
-}
-
-fn export_op(op: &Op, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> amp::Op {
-    let action = op.action.clone();
-    let key = match &op.key {
-        Key::Map(n) => amp::Key::Map(props.get(*n).clone().into()),
-        Key::Seq(id) => amp::Key::Seq(export_elemid(id, actors)),
-    };
-    let obj = export_objid(&op.obj, actors);
-    let pred = op.pred.iter().map(|id| export_opid(id, actors)).collect();
-    amp::Op {
-        action,
-        obj,
-        insert: op.insert,
-        pred,
-        key,
-    }
-}
-
-pub(crate) fn export_change(
-    change: &Transaction,
-    actors: &IndexedCache<ActorId>,
-    props: &IndexedCache<String>,
-) -> Change {
+pub(crate) fn export_change(change: &Transaction) -> Change {
     amp::Change {
-        actor_id: actors.get(change.actor).clone(),
+        actor_id: change.actor.as_ref().clone(),
         seq: change.seq,
         start_op: change.start_op,
         time: change.time,
         deps: change.deps.clone(),
         message: change.message.clone(),
         hash: change.hash,
-        operations: change
-            .operations
-            .iter()
-            .map(|op| export_op(op, actors, props))
-            .collect(),
+        operations: change.operations.iter().map(|op| op.into()).collect(),
         extra_bytes: change.extra_bytes.clone(),
     }
     .into()

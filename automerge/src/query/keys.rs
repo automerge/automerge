@@ -24,9 +24,10 @@ impl<const B: usize> TreeQuery<B> for Keys<B> {
         for i in 0..child.len() {
             let op = child.get(i).unwrap();
             let visible = self.window.visible(op, i);
-            if Some(op.key) != last && visible {
-                self.keys.push(op.key);
-                last = Some(op.key);
+            // FIXME - clone?
+            if Some(op.key.clone()) != last && visible {
+                self.keys.push(op.key.clone());
+                last = Some(op.key.clone());
             }
         }
         QueryResult::Finish

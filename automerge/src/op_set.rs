@@ -1,8 +1,7 @@
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
-use crate::{ActorId, IndexedCache, Key, ObjId, Op, OpId};
+use crate::{ObjId, Op};
 use fxhash::FxBuildHasher;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub(crate) type OpSet = OpSetInternal<16>;
@@ -12,7 +11,6 @@ pub(crate) struct OpSetInternal<const B: usize> {
     trees: HashMap<ObjId, OpTreeInternal<B>, FxBuildHasher>,
     objs: Vec<ObjId>,
     length: usize,
-    pub m: OpSetMetadata,
 }
 
 impl<const B: usize> OpSetInternal<B> {
@@ -21,10 +19,6 @@ impl<const B: usize> OpSetInternal<B> {
             trees: Default::default(),
             objs: Default::default(),
             length: 0,
-            m: OpSetMetadata {
-                actors: IndexedCache::new(),
-                props: IndexedCache::new(),
-            },
         }
     }
 
@@ -36,34 +30,34 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn search<Q>(&self, obj: ObjId, query: Q) -> Q
+    pub fn search<Q>(&self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<B>,
     {
-        if let Some(tree) = self.trees.get(&obj) {
-            tree.search(query, &self.m)
+        if let Some(tree) = self.trees.get(obj) {
+            tree.search(query)
         } else {
             query
         }
     }
 
-    pub fn replace<F>(&mut self, obj: ObjId, index: usize, f: F) -> Option<Op>
+    pub fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F) -> Option<Op>
     where
         F: FnMut(&mut Op),
     {
-        if let Some(tree) = self.trees.get_mut(&obj) {
+        if let Some(tree) = self.trees.get_mut(obj) {
             tree.replace(index, f)
         } else {
             None
         }
     }
 
-    pub fn remove(&mut self, obj: ObjId, index: usize) -> Op {
-        let tree = self.trees.get_mut(&obj).unwrap();
+    pub fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
+        let tree = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
         let op = tree.remove(index);
         if tree.is_empty() {
-            self.trees.remove(&obj);
+            self.trees.remove(obj);
         }
         op
     }
@@ -76,16 +70,15 @@ impl<const B: usize> OpSetInternal<B> {
         let Self {
             ref mut trees,
             ref mut objs,
-            ref mut m,
             ..
         } = self;
         trees
-            .entry(element.obj)
+            .entry(element.obj.clone())
             .or_insert_with(|| {
                 let pos = objs
-                    .binary_search_by(|probe| m.lamport_cmp(probe.0, element.obj.0))
+                    .binary_search_by(|probe| probe.cmp(&element.obj))
                     .unwrap_err();
-                objs.insert(pos, element.obj);
+                objs.insert(pos, element.obj.clone());
                 Default::default()
             })
             .insert(index, element);
@@ -144,32 +137,6 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
             let obj = self.inner.objs.get(self.index)?;
             let tree = self.inner.trees.get(obj)?;
             tree.get(self.sub_index - 1)
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct OpSetMetadata {
-    pub actors: IndexedCache<ActorId>,
-    pub props: IndexedCache<String>,
-}
-
-impl OpSetMetadata {
-    pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
-        match (left, right) {
-            (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
-            _ => panic!("can only compare map keys"),
-        }
-    }
-
-    pub fn lamport_cmp(&self, left: OpId, right: OpId) -> Ordering {
-        match (left, right) {
-            (OpId(0, _), OpId(0, _)) => Ordering::Equal,
-            (OpId(0, _), OpId(_, _)) => Ordering::Less,
-            (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order?
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
-            (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
     }
 }

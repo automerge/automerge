@@ -11,7 +11,6 @@ use std::{
     str,
 };
 
-use crate::ROOT;
 use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, OpType, ScalarValue};
 
 use crate::legacy as amp;
@@ -23,7 +22,7 @@ use tracing::instrument;
 use crate::{
     decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
-    IndexedCache, Op,
+    Op,
 };
 
 impl Encodable for Action {
@@ -42,12 +41,14 @@ impl Encodable for [ActorId] {
     }
 }
 
-fn map_actor(actor: &ActorId, actors: &mut Vec<ActorId>) -> usize {
+fn map_actor(actor: &ActorId, actors: &[ActorId]) -> usize {
     if let Some(pos) = actors.iter().position(|a| a == actor) {
         pos
     } else {
-        actors.push(actor.clone());
-        actors.len() - 1
+        panic!(
+            "map_actor cant find actor! seeking={} actors={:?}",
+            actor, actors
+        );
     }
 }
 
@@ -558,7 +559,7 @@ impl ValEncoder {
         }
     }
 
-    fn append_value(&mut self, val: &ScalarValue, actors: &[usize]) {
+    fn append_value(&mut self, val: &ScalarValue, actors: &[ActorId]) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
@@ -679,22 +680,21 @@ impl KeyEncoder {
         }
     }
 
-    fn append(&mut self, key: Key, actors: &[usize], props: &[String]) {
+    fn append(&mut self, key: Key, actors: &[ActorId]) {
         match key {
             Key::Map(i) => {
                 self.actor.append_null();
                 self.ctr.append_null();
-                self.str.append_value(props[i].clone());
+                self.str.append_value(i);
             }
-            Key::Seq(ElemId(OpId(0, 0))) => {
-                // HEAD
+            Key::Seq(ElemId::Head) => {
                 self.actor.append_null();
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Key::Seq(ElemId(OpId(ctr, actor))) => {
-                self.actor.append_value(actors[actor]);
-                self.ctr.append_value(ctr);
+            Key::Seq(ElemId::Id(OpId { counter, actor })) => {
+                self.actor.append_value(map_actor(&actor, actors));
+                self.ctr.append_value(counter);
                 self.str.append_null();
             }
         }
@@ -770,11 +770,11 @@ impl SuccEncoder {
         }
     }
 
-    fn append(&mut self, succ: &[OpId], actors: &[usize]) {
+    fn append(&mut self, succ: &[OpId], actors: &[ActorId]) {
         self.num.append_value(succ.len());
         for s in succ.iter() {
-            self.ctr.append_value(s.0);
-            self.actor.append_value(actors[s.1]);
+            self.ctr.append_value(s.counter);
+            self.actor.append_value(map_actor(&s.actor, actors));
         }
     }
 
@@ -844,15 +844,15 @@ impl ObjEncoder {
         }
     }
 
-    fn append(&mut self, obj: &ObjId, actors: &[usize]) {
-        match obj.0 {
-            ROOT => {
+    fn append(&mut self, obj: &ObjId, actors: &[ActorId]) {
+        match obj {
+            ObjId::Root => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
-            OpId(ctr, actor) => {
-                self.actor.append_value(actors[actor]);
-                self.ctr.append_value(ctr);
+            ObjId::Id(id) => {
+                self.actor.append_value(map_actor(&id.actor, actors));
+                self.ctr.append_value(id.counter);
             }
         }
     }
@@ -915,10 +915,7 @@ pub(crate) struct ChangeEncoder {
 
 impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
-    pub fn encode_changes<'a, 'b, I>(
-        changes: I,
-        actors: &'a IndexedCache<ActorId>,
-    ) -> (Vec<u8>, Vec<u8>)
+    pub fn encode_changes<'a, 'b, I>(changes: I, actors: &'a [ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'b amp::Change>,
     {
@@ -941,7 +938,7 @@ impl ChangeEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<ActorId>)
+    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b [ActorId])
     where
         I: IntoIterator<Item = &'c amp::Change>,
     {
@@ -950,8 +947,7 @@ impl ChangeEncoder {
             if let Some(hash) = change.hash {
                 index_by_hash.insert(hash, index);
             }
-            self.actor
-                .append_value(actors.lookup(change.actor_id.clone()).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
+            self.actor.append_value(map_actor(&change.actor_id, actors));
             self.seq.append_value(change.seq);
             // FIXME iterops.count is crazy slow
             self.max_op
@@ -1024,16 +1020,12 @@ pub(crate) struct DocOpEncoder {
 
 impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
-    pub(crate) fn encode_doc_ops<'a, I>(
-        ops: I,
-        actors: &'a [usize],
-        props: &'a [String],
-    ) -> (Vec<u8>, Vec<u8>)
+    pub(crate) fn encode_doc_ops<'a, I>(ops: I, actors: &'a [ActorId]) -> (Vec<u8>, Vec<u8>)
     where
         I: IntoIterator<Item = &'a Op>,
     {
         let mut e = Self::new();
-        e.encode(ops, actors, props);
+        e.encode(ops, actors);
         e.finish()
     }
 
@@ -1050,15 +1042,15 @@ impl DocOpEncoder {
         }
     }
 
-    fn encode<'a, I>(&mut self, ops: I, actors: &[usize], props: &[String])
+    fn encode<'a, I>(&mut self, ops: I, actors: &[ActorId])
     where
         I: IntoIterator<Item = &'a Op>,
     {
         for op in ops {
-            self.actor.append_value(actors[op.id.actor()]);
-            self.ctr.append_value(op.id.counter());
+            self.actor.append_value(map_actor(&op.id.actor, actors));
+            self.ctr.append_value(op.id.counter);
             self.obj.append(&op.obj, actors);
-            self.key.append(op.key, actors, props);
+            self.key.append(op.key.clone(), actors);
             self.insert.append(op.insert);
             self.succ.append(&op.succ, actors);
             let action = match &op.action {

@@ -1,4 +1,4 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
+use crate::op_tree::OpTreeNode;
 use crate::{Clock, ElemId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
@@ -40,22 +40,8 @@ pub(crate) struct CounterData {
 }
 
 pub(crate) trait TreeQuery<const B: usize> {
-    #[inline(always)]
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        _m: &OpSetMetadata,
-    ) -> QueryResult {
-        self.query_node(child)
-    }
-
     fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
         QueryResult::Decend
-    }
-
-    #[inline(always)]
-    fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
-        self.query_element(element)
     }
 
     fn query_element(&mut self, _element: &Op) -> QueryResult {
@@ -97,7 +83,7 @@ impl Index {
     pub fn replace(&mut self, old: &Op, new: &Op) {
         if old.id != new.id {
             self.ops.remove(&old.id);
-            self.ops.insert(new.id);
+            self.ops.insert(new.id.clone());
         }
 
         assert!(new.key == old.key);
@@ -127,7 +113,7 @@ impl Index {
     }
 
     pub fn insert(&mut self, op: &Op) {
-        self.ops.insert(op.id);
+        self.ops.insert(op.id.clone());
         if op.succ.is_empty() {
             if let Some(elem) = op.elemid() {
                 match self.visible.get(&elem).copied() {
@@ -163,16 +149,16 @@ impl Index {
 
     pub fn merge(&mut self, other: &Index) {
         for id in &other.ops {
-            self.ops.insert(*id);
+            self.ops.insert(id.clone());
         }
         for (elem, n) in other.visible.iter() {
             match self.visible.get(elem).cloned() {
                 None => {
-                    self.visible.insert(*elem, 1);
+                    self.visible.insert(elem.clone(), 1);
                     self.len += 1;
                 }
                 Some(m) => {
-                    self.visible.insert(*elem, m + n);
+                    self.visible.insert(elem.clone(), m + n);
                 }
             }
         }
@@ -196,7 +182,7 @@ impl VisWindow {
         match op.action {
             OpType::Set(ScalarValue::Counter(val)) => {
                 self.counters.insert(
-                    op.id,
+                    op.id.clone(),
                     CounterData {
                         pos,
                         val,
@@ -238,7 +224,7 @@ impl VisWindow {
         match op.action {
             OpType::Set(ScalarValue::Counter(val)) => {
                 self.counters.insert(
-                    op.id,
+                    op.id.clone(),
                     CounterData {
                         pos,
                         val,
@@ -292,7 +278,7 @@ pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, Count
     match op.action {
         OpType::Set(ScalarValue::Counter(val)) => {
             counters.insert(
-                op.id,
+                op.id.clone(),
                 CounterData {
                     pos,
                     val,
