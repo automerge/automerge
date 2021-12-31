@@ -692,7 +692,7 @@ impl KeyEncoder {
                 self.ctr.append_value(0);
                 self.str.append_null();
             }
-            Key::Seq(ElemId::Id(OpId { counter, actor })) => {
+            Key::Seq(ElemId::Id(OpId{ counter, actor, .. })) => {
                 self.actor.append_value(map_actor(&actor, actors));
                 self.ctr.append_value(counter);
                 self.str.append_null();

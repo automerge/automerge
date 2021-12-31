@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
@@ -355,18 +356,30 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct OpId {
     pub counter: u64,
     pub actor: Rc<ActorId>,
+    hash: u64,
+}
+
+impl Hash for OpId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.hash);
+    }
 }
 
 impl OpId {
-    #[cfg(test)]
-    pub(crate) fn at(counter: u64, actor: &ActorId) -> OpId {
+    pub(crate) fn at(counter: u64, actor: Rc<ActorId>) -> OpId {
+        use fxhash::FxHasher;
+
+        let mut hasher = FxHasher::default();
+        (counter, &actor).hash(&mut hasher);
+        let hash = hasher.finish();
         OpId {
             counter,
-            actor: Rc::new(actor.clone()),
+            actor: actor.clone(),
+            hash,
         }
     }
 }

@@ -108,7 +108,7 @@ impl Automerge {
                 .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             if let Some(actor) = self.actors.get(&actor).cloned() {
-                Ok(ObjId::Id(OpId { counter, actor }))
+                Ok(ObjId::Id(OpId::at(counter, actor)))
             } else {
                 Err(AutomergeError::InvalidOpId(s.to_owned()))
             }
@@ -251,10 +251,10 @@ impl Automerge {
 
     fn next_id(&mut self) -> OpId {
         let tx = self.tx();
-        OpId {
-            counter: tx.start_op + tx.operations.len() as u64,
-            actor: tx.actor.clone(),
-        }
+        OpId::at(
+            tx.start_op + tx.operations.len() as u64,
+            tx.actor.clone(),
+        )
     }
 
     fn insert_local_op(&mut self, op: Op, pos: usize, succ_pos: &[usize]) {
@@ -685,33 +685,33 @@ impl Automerge {
             .iter_ops()
             .enumerate()
             .map(|(i, c)| {
-                let id = OpId {
-                    counter: change.start_op + i as u64,
-                    actor: self.import_actor(change.actor_id()),
-                };
+                let id = OpId::at(
+                    change.start_op + i as u64,
+                    self.import_actor(change.actor_id()),
+                );
                 let obj: ObjId = match &c.obj {
                     amp::ObjectId::Root => ObjId::Root,
-                    amp::ObjectId::Id(amp::OpId(c, a)) => ObjId::Id(OpId {
-                        counter: *c,
-                        actor: self.import_actor(a),
-                    }),
+                    amp::ObjectId::Id(amp::OpId(c, a)) => ObjId::Id(OpId::at(
+                        *c,
+                        self.import_actor(a),
+                    )),
                 };
                 let pred = c
                     .pred
                     .iter()
-                    .map(|amp::OpId(c, a)| OpId {
-                        counter: *c,
-                        actor: self.import_actor(a),
-                    })
+                    .map(|amp::OpId(c, a)| OpId::at(
+                        *c,
+                        self.import_actor(a),
+                    ))
                     .collect();
                 let key = match &c.key {
                     amp::Key::Map(n) => Key::Map(n.to_string()),
                     amp::Key::Seq(amp::ElementId::Head) => Key::Seq(ElemId::Head),
                     amp::Key::Seq(amp::ElementId::Id(amp::OpId(c, a))) => {
-                        Key::Seq(ElemId::Id(OpId {
-                            counter: *c,
-                            actor: self.import_actor(a),
-                        }))
+                        Key::Seq(ElemId::Id(OpId::at(
+                            *c,
+                            self.import_actor(a),
+                        )))
                     }
                 };
                 Op {
