@@ -1,17 +1,15 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::ObjId;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Len<const B: usize> {
-    obj: ObjId,
     pub len: usize,
 }
 
 impl<const B: usize> Len<B> {
-    pub fn new(obj: ObjId) -> Self {
-        Len { obj, len: 0 }
+    pub fn new() -> Self {
+        Len { len: 0 }
     }
 }
 

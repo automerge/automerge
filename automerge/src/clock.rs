@@ -1,4 +1,4 @@
-use crate::OpId;
+use crate::types::OpId;
 use fxhash::FxBuildHasher;
 use std::cmp;
 use std::collections::HashMap;

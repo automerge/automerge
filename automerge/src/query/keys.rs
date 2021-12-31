@@ -1,6 +1,6 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::Key;
+use crate::types::Key;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,6 +1,6 @@
 use crate::decoding;
+use crate::types::ScalarValue;
 use crate::value::DataType;
-use crate::ScalarValue;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -17,6 +17,8 @@ pub enum AutomergeError {
     InvalidSeq(u64),
     #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
+    #[error("generic automerge error")]
+    Fail,
 }
 
 impl From<std::io::Error> for AutomergeError {

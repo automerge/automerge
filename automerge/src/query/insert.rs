@@ -1,6 +1,7 @@
+use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::{AutomergeError, ElemId, Key, Op, HEAD};
+use crate::types::{ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]

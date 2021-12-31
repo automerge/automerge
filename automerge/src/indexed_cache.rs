@@ -31,8 +31,8 @@ where
         }
     }
 
-    pub fn lookup(&self, item: T) -> Option<usize> {
-        self.lookup.get(&item).cloned()
+    pub fn lookup(&self, item: &T) -> Option<usize> {
+        self.lookup.get(item).cloned()
     }
 
     pub fn len(&self) -> usize {

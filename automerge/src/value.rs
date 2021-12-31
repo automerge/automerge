@@ -1,4 +1,5 @@
-use crate::{error, ObjType, Op, OpId, OpType};
+use crate::error;
+use crate::types::{ObjType, Op, OpId, OpType};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::convert::TryFrom;

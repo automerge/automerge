@@ -24,7 +24,7 @@ pub(crate) struct Node<'a, const B: usize> {
 
 #[derive(Clone)]
 pub(crate) enum NodeType<'a, const B: usize> {
-    ObjRoot(crate::ObjId),
+    ObjRoot(crate::types::ObjId),
     ObjTreeNode(&'a crate::op_tree::OpTreeNode<B>),
 }
 
@@ -225,7 +225,7 @@ impl OpTableRow {
 
 impl OpTableRow {
     fn create(
-        op: &super::Op,
+        op: &super::types::Op,
         metadata: &crate::op_set::OpSetMetadata,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
@@ -236,8 +236,8 @@ impl OpTableRow {
             crate::OpType::Inc(v) => format!("inc {}", v),
         };
         let prop = match op.key {
-            crate::Key::Map(k) => metadata.props[k].clone(),
-            crate::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
+            crate::types::Key::Map(k) => metadata.props[k].clone(),
+            crate::types::Key::Seq(e) => print_opid(&e.0, actor_shorthands),
         };
         let succ = op
             .succ
@@ -254,6 +254,6 @@ impl OpTableRow {
     }
 }
 
-fn print_opid(opid: &crate::OpId, actor_shorthands: &HashMap<usize, String>) -> String {
+fn print_opid(opid: &crate::types::OpId, actor_shorthands: &HashMap<usize, String>) -> String {
     format!("{}@{}", opid.counter(), actor_shorthands[&opid.actor()])
 }

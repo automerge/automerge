@@ -5,9 +5,9 @@ use std::fs;
 fn replay_trace(commands: Vec<(usize, usize, Vec<Value>)>) -> Automerge {
     let mut doc = Automerge::new();
 
-    let text = doc.set(ROOT, "text", Value::text()).unwrap().unwrap();
+    let text = doc.set(&ROOT, "text", Value::text()).unwrap().unwrap();
     for (pos, del, vals) in commands {
-        doc.splice(text, pos, del, vals).unwrap();
+        doc.splice(&text, pos, del, vals).unwrap();
     }
     doc.commit(None, None);
     doc
