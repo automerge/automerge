@@ -357,6 +357,12 @@ pub struct OpId(pub u64, pub usize);
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub OpId);
 
+impl ObjId {
+    pub fn root() -> Self {
+        ObjId(OpId(0,0))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ElemId(pub OpId);
 
@@ -374,7 +380,11 @@ pub(crate) struct Op {
 
 impl Op {
     pub fn is_del(&self) -> bool {
-        matches!(self.action, OpType::Del)
+        matches!(&self.action, OpType::Del)
+    }
+
+    pub fn is_noop(&self, action: &OpType) -> bool {
+        matches!((&self.action, action), (OpType::Set(n), OpType::Set(m)) if n == m)
     }
 
     pub fn overwrites(&self, other: &Op) -> bool {

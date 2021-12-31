@@ -11,7 +11,6 @@ use std::{
     str,
 };
 
-use crate::ROOT;
 use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, OpType, ScalarValue};
 
 use crate::legacy as amp;
@@ -846,7 +845,7 @@ impl ObjEncoder {
 
     fn append(&mut self, obj: &ObjId, actors: &[usize]) {
         match obj.0 {
-            ROOT => {
+            OpId(ctr, _) if ctr == 0 => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
@@ -951,7 +950,7 @@ impl ChangeEncoder {
                 index_by_hash.insert(hash, index);
             }
             self.actor
-                .append_value(actors.lookup(change.actor_id.clone()).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
+                .append_value(actors.lookup(&change.actor_id).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq);
             // FIXME iterops.count is crazy slow
             self.max_op
