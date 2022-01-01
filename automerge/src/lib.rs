@@ -365,9 +365,12 @@ impl Automerge {
         match id {
             ExId::Root => Ok(ObjId::root()),
             ExId::Id(ctr,actor,idx) => {
+                // do a direct get here b/c this could be foriegn and not be within the array
+                // bounds
                 if self.ops.m.actors.cache.get(*idx) == Some(actor) {
                     Ok(ObjId(OpId(*ctr,*idx)))
                 } else {
+                    // FIXME - make a real error
                     let idx = self.ops.m.actors.lookup(actor).ok_or(AutomergeError::Fail)?;
                     Ok(ObjId(OpId(*ctr,idx)))
                 }
