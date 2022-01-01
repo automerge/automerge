@@ -3,11 +3,12 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::change::{encode_document, export_change};
 use crate::op_set::OpSet;
-use crate::types::{Export, Exportable};
+use crate::types::{ActorId, Clock, ChangeHash, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, ScalarValue, Value, Patch};
 use crate::{legacy, query, types};
+use crate::exid::ExId;
 use crate::{
-    ActorId, AutomergeError, Change, ChangeHash, Clock, ElemId, ExId, Key, ObjId, Op, OpId, OpType,
-    Patch, Prop, ScalarValue, Value,
+    AutomergeError, Change,
+    Prop,
 };
 
 #[derive(Debug, Clone)]

@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery, VisWindow};
-use crate::{Clock, Key, Op};
+use crate::types::{Clock, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]

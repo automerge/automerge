@@ -43,17 +43,13 @@ mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
-use clock::Clock;
-use indexed_cache::IndexedCache;
-use types::{ElemId, Key, ObjId, Op, OpId};
-
+pub use value::{ ScalarValue, Value };
 pub use crate::automerge::Automerge;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
-pub use exid::ExId;
+pub use exid::ExId as ObjId;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
-pub use types::{ActorId, ChangeHash, ObjType, OpType, Patch, Peer, Prop};
-pub use value::{ScalarValue, Value};
+pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
 
-pub const ROOT: ExId = ExId::Root;
+pub const ROOT: ObjId = ObjId::Root;

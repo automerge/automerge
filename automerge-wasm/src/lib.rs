@@ -1,6 +1,6 @@
 extern crate web_sys;
 use automerge as am;
-use automerge::{Change, ChangeHash, Prop, Value, ExId};
+use automerge::{Change, ChangeHash, Prop, Value, ObjId};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -445,11 +445,11 @@ impl Automerge {
         }
     }
 
-    fn export(&self, val: ExId) -> JsValue {
+    fn export(&self, val: ObjId) -> JsValue {
         val.to_string().into()
     }
 
-    fn import(&self, id: JsValue) -> Result<ExId, JsValue> {
+    fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
         let id_str = id
             .as_string()
             .ok_or("invalid opid/objid/elemid")

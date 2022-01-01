@@ -3,7 +3,7 @@ mod utility_impls;
 use std::iter::FromIterator;
 
 pub(crate) use crate::value::DataType;
-pub(crate) use crate::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
+pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
 
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;

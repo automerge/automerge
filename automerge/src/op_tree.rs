@@ -6,7 +6,7 @@ use std::{
 
 pub(crate) use crate::op_set::OpSetMetadata;
 use crate::query::{Index, QueryResult, TreeQuery};
-use crate::{Op, OpId};
+use crate::types::{Op, OpId};
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -628,7 +628,7 @@ struct CounterData {
 #[cfg(test)]
 mod tests {
     use crate::legacy as amp;
-    use crate::{Op, OpId};
+    use crate::types::{Op, OpId};
 
     use super::*;
 

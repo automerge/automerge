@@ -1,6 +1,5 @@
 use crate::error;
 use crate::legacy as amp;
-use crate::{ScalarValue, Value};
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::convert::TryFrom;
@@ -8,6 +7,9 @@ use std::convert::TryInto;
 use std::fmt;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
+
+pub(crate) use crate::value::{ScalarValue, Value};
+pub(crate) use crate::clock::Clock;
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
 pub(crate) const ROOT: OpId = OpId(0, 0);

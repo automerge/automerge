@@ -6,9 +6,10 @@ use std::{
     io::Write,
 };
 
+use crate::types::Patch;
 use crate::{
     decoding, decoding::Decoder, encoding, encoding::Encodable, Automerge, AutomergeError, Change,
-    ChangeHash, Patch,
+    ChangeHash,
 };
 
 mod bloom;

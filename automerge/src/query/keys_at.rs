@@ -1,5 +1,5 @@
 use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::{Clock, Key, Op};
+use crate::types::{Clock, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]

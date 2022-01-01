@@ -11,7 +11,7 @@ use std::{
     str,
 };
 
-use crate::{ActorId, ElemId, Key, ObjId, ObjType, OpId, OpType, ScalarValue};
+use crate::types::{ActorId, ElemId, Key, ObjId, ObjType, Op, OpId, OpType, ScalarValue};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -19,10 +19,10 @@ use flate2::bufread::DeflateDecoder;
 use smol_str::SmolStr;
 use tracing::instrument;
 
+use crate::indexed_cache::IndexedCache;
 use crate::{
     decoding::{BooleanDecoder, Decodable, Decoder, DeltaDecoder, RleDecoder},
     encoding::{BooleanEncoder, ColData, DeltaEncoder, Encodable, RleEncoder},
-    IndexedCache, Op,
 };
 
 impl Encodable for Action {
