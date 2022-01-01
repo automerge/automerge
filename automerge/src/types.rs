@@ -1,6 +1,6 @@
 use crate::error;
 use crate::legacy as amp;
-use crate::{ Value, ScalarValue };
+use crate::{ScalarValue, Value};
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::convert::TryFrom;
@@ -313,7 +313,7 @@ pub(crate) struct ObjId(pub OpId);
 
 impl ObjId {
     pub fn root() -> Self {
-        ObjId(OpId(0,0))
+        ObjId(OpId(0, 0))
     }
 }
 

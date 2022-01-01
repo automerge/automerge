@@ -1,3 +1,4 @@
+use crate::automerge::Transaction;
 use crate::columnar::{
     ChangeEncoder, ChangeIterator, ColumnEncoder, DepsIterator, DocChange, DocOp, DocOpEncoder,
     DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
@@ -6,9 +7,8 @@ use crate::decoding;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::legacy as amp;
-use crate::{
-    ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, OpType, Transaction, HEAD,
-};
+use crate::types;
+use crate::{ActorId, AutomergeError, ElemId, IndexedCache, Key, ObjId, Op, OpId, OpType};
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},
@@ -424,7 +424,7 @@ fn export_objid(id: &ObjId, actors: &IndexedCache<ActorId>) -> amp::ObjectId {
 }
 
 fn export_elemid(id: &ElemId, actors: &IndexedCache<ActorId>) -> amp::ElementId {
-    if id == &HEAD {
+    if id == &types::HEAD {
         amp::ElementId::Head
     } else {
         export_opid(&id.0, actors).into()

@@ -48,7 +48,7 @@ where
         self.cache.iter().sorted().cloned().for_each(|item| {
             let n = sorted.cache.len();
             sorted.cache.push(item.clone());
-            sorted.lookup.insert(item.clone(), n);
+            sorted.lookup.insert(item, n);
         });
         sorted
     }

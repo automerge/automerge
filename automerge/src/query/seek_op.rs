@@ -1,6 +1,6 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::{Key, Op, HEAD};
+use crate::types::{Key, Op, HEAD};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 
