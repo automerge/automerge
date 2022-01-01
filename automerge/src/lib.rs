@@ -365,7 +365,7 @@ impl Automerge {
         match id {
             ExId::Root => Ok(ObjId::root()),
             ExId::Id(ctr,actor,idx) => {
-                if &self.ops.m.actors.cache[*idx] == actor {
+                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
                     Ok(ObjId(OpId(*ctr,*idx)))
                 } else {
                     let idx = self.ops.m.actors.lookup(actor).ok_or(AutomergeError::Fail)?;
