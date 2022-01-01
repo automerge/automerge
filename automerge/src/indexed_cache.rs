@@ -2,11 +2,10 @@ use itertools::Itertools;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Index;
-use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub(crate) struct IndexedCache<T> {
-    pub cache: Vec<Rc<T>>,
+    pub cache: Vec<T>,
     lookup: HashMap<T, usize>,
 }
 
@@ -26,7 +25,7 @@ where
             *n
         } else {
             let n = self.cache.len();
-            self.cache.push(Rc::new(item.clone()));
+            self.cache.push(item.clone());
             self.lookup.insert(item, n);
             n
         }
@@ -49,7 +48,7 @@ where
         self.cache.iter().sorted().cloned().for_each(|item| {
             let n = sorted.cache.len();
             sorted.cache.push(item.clone());
-            sorted.lookup.insert(item.as_ref().clone(), n);
+            sorted.lookup.insert(item.clone(), n);
         });
         sorted
     }
@@ -64,7 +63,7 @@ where
 }
 
 impl<T> IntoIterator for IndexedCache<T> {
-    type Item = Rc<T>;
+    type Item = T;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {

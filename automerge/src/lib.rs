@@ -46,7 +46,6 @@ mod query;
 mod types;
 mod value;
 
-use std::rc::Rc;
 use std::fmt;
 use change::{encode_document, export_change};
 use clock::Clock;
@@ -82,7 +81,7 @@ pub struct Automerge {
 #[derive(Debug, Clone)]
 pub enum ExId {
     Root,
-    Id(u64, Rc<ActorId>, usize),
+    Id(u64, ActorId, usize),
 }
 
 impl PartialEq for ExId {
@@ -803,7 +802,7 @@ impl Automerge {
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         let ops: Vec<_> = self.ops.iter().cloned().collect();
         // TODO - can we make encode_document error free
-        let tmp : Vec<_> = self.ops.m.props.cache.iter().map(|a| a.as_ref().clone()).collect();
+        let tmp : Vec<_> = self.ops.m.props.cache.iter().map(|a| a.clone()).collect();
         // FIXME : tmp
         let bytes = encode_document(
             &c,
