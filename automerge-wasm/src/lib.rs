@@ -1,6 +1,6 @@
 extern crate web_sys;
 use automerge as am;
-use automerge::{Change, ChangeHash, Prop, Value, ObjId};
+use automerge::{Change, ChangeHash, ObjId, Prop, Value};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;

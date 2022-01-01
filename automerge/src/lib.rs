@@ -43,7 +43,6 @@ mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
-pub use value::{ ScalarValue, Value };
 pub use crate::automerge::Automerge;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
@@ -51,5 +50,6 @@ pub use exid::ExId as ObjId;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
+pub use value::{ScalarValue, Value};
 
 pub const ROOT: ObjId = ObjId::Root;

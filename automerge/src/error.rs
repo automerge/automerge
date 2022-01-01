@@ -1,6 +1,6 @@
 use crate::decoding;
-use crate::value::DataType;
 use crate::types::ScalarValue;
+use crate::value::DataType;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

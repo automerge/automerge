@@ -1,7 +1,7 @@
+use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
-use crate::indexed_cache::IndexedCache;
-use crate::types::{ ActorId, Key, Op, ObjId, OpId };
+use crate::types::{ActorId, Key, ObjId, Op, OpId};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;

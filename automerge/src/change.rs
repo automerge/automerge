@@ -6,11 +6,11 @@ use crate::columnar::{
 use crate::decoding;
 use crate::decoding::{Decodable, InvalidChangeError};
 use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
+use crate::error::AutomergeError;
+use crate::indexed_cache::IndexedCache;
 use crate::legacy as amp;
 use crate::types;
 use crate::types::{ActorId, ElemId, Key, ObjId, Op, OpId, OpType};
-use crate::error::AutomergeError;
-use crate::indexed_cache::IndexedCache;
 use core::ops::Range;
 use flate2::{
     bufread::{DeflateDecoder, DeflateEncoder},

@@ -1,4 +1,8 @@
-use std::{collections::HashMap, convert::TryInto, hash::Hash};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    convert::TryInto,
+    hash::Hash,
+};
 
 use serde::ser::{SerializeMap, SerializeSeq};
 
@@ -42,7 +46,7 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     map!{
 ///         "todos" => {
 ///             todos => list![
-///                 { todo => map!{ title = "water plants" } }
+///                 { map!{ title = "water plants" } }
 ///             ]
 ///         }
 ///     }
@@ -50,9 +54,9 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///
 /// ```
 ///
-/// This might look more complicated than you were expecting. Why are there OpIds (`todos`, `todo`,
-/// `title`) in there? Well the `RealizedObject` contains all the changes in the document tagged by
-/// OpId. This makes it easy to test for conflicts:
+/// This might look more complicated than you were expecting. Why is the first element in the list
+/// wrapped in braces? Because every property in an automerge document can have multiple
+/// conflicting values we must capture all of these.
 ///
 /// ```rust
 /// let mut doc1 = automerge::Automerge::new();
@@ -70,33 +74,20 @@ pub fn sorted_actors() -> (automerge::ActorId, automerge::ActorId) {
 ///     }
 /// );
 /// ```
-///
-/// ## Translating OpIds
-///
-/// One thing you may have noticed in the example above is the `op2.translate(&doc2)` call. What is
-/// that doing there? Well, the problem is that automerge OpIDs (in the current API) are specific
-/// to a document. Using an opid from one document in a different document will not work. Therefore
-/// this module defines an `OpIdExt` trait with a `translate` method on it. This method takes a
-/// document and converts the opid into something which knows how to be compared with opids from
-/// another document by using the document you pass to `translate`. Again, all you really need to
-/// know is that when constructing a document for comparison you should call `translate(fromdoc)`
-/// on opids which come from a document other than the one you pass to `assert_doc`.
 #[macro_export]
 macro_rules! assert_doc {
     ($doc: expr, $expected: expr) => {{
-        use $crate::helpers::{realize, ExportableOpId};
+        use $crate::helpers::realize;
         let realized = realize($doc);
-        let to_export: RealizedObject<ExportableOpId<'_>> = $expected.into();
-        let exported = to_export.export($doc);
-        if realized != exported {
+        let expected_obj = $expected.into();
+        if realized != expected_obj {
             let serde_right = serde_json::to_string_pretty(&realized).unwrap();
-            let serde_left = serde_json::to_string_pretty(&exported).unwrap();
+            let serde_left = serde_json::to_string_pretty(&expected_obj).unwrap();
             panic!(
                 "documents didn't match\n expected\n{}\n got\n{}",
                 &serde_left, &serde_right
             );
         }
-        pretty_assertions::assert_eq!(realized, exported);
     }};
 }
 
@@ -105,63 +96,52 @@ macro_rules! assert_doc {
 #[macro_export]
 macro_rules! assert_obj {
     ($doc: expr, $obj_id: expr, $prop: expr, $expected: expr) => {{
-        use $crate::helpers::{realize_prop, ExportableOpId};
+        use $crate::helpers::realize_prop;
         let realized = realize_prop($doc, $obj_id, $prop);
-        let to_export: RealizedObject<ExportableOpId<'_>> = $expected.into();
-        let exported = to_export.export($doc);
-        if realized != exported {
+        let expected_obj = $expected.into();
+        if realized != expected_obj {
             let serde_right = serde_json::to_string_pretty(&realized).unwrap();
-            let serde_left = serde_json::to_string_pretty(&exported).unwrap();
+            let serde_left = serde_json::to_string_pretty(&expected_obj).unwrap();
             panic!(
                 "documents didn't match\n expected\n{}\n got\n{}",
                 &serde_left, &serde_right
             );
         }
-        pretty_assertions::assert_eq!(realized, exported);
     }};
 }
 
 /// Construct `RealizedObject::Map`. This macro takes a nested set of curl braces. The outer set is
-/// the keys of the map, the inner set is the opid tagged values:
+/// the keys of the map, the inner set is the set of values for that key:
 ///
 /// ```
 /// map!{
 ///     "key" => {
-///         opid1 => "value1",
-///         opid2 => "value2",
+///         "value1",
+///         "value2",
 ///     }
 /// }
 /// ```
 ///
 /// The map above would represent a map with a conflict on the "key" property. The values can be
-/// anything which implements `Into<RealizedObject<ExportableOpId<'_>>`. Including nested calls to
-/// `map!` or `list!`.
+/// anything which implements `Into<RealizedObject>`. Including nested calls to `map!` or `list!`.
 #[macro_export]
 macro_rules! map {
-    (@single $($x:tt)*) => (());
-    (@count $($rest:expr),*) => (<[()]>::len(&[$(map!(@single $rest)),*]));
-
-    (@inner { $($opid:expr => $value:expr,)+ }) => { map!(@inner { $($opid => $value),+ }) };
-    (@inner { $($opid:expr => $value:expr),* }) => {
+    (@inner { $($value:expr,)+ }) => { map!(@inner { $($value),+ }) };
+    (@inner { $($value:expr),* }) => {
         {
-            use std::collections::HashMap;
-            let mut inner: HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>> = HashMap::new();
+            use std::collections::BTreeSet;
+            let mut inner: BTreeSet<RealizedObject> = BTreeSet::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert($value.into());
             )*
             inner
         }
     };
-    //(&inner $map:expr, $opid:expr => $value:expr, $($tail:tt),*) => {
-        //$map.insert($opid.into(), $value.into());
-    //}
     ($($key:expr => $inner:tt,)+) => { map!($($key => $inner),+) };
     ($($key:expr => $inner:tt),*) => {
         {
-            use std::collections::HashMap;
-            use crate::helpers::ExportableOpId;
-            let _cap = map!(@count $($key),*);
-            let mut _map: HashMap<String, HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>>> = ::std::collections::HashMap::with_capacity(_cap);
+            use std::collections::{BTreeMap, BTreeSet};
+            let mut _map: BTreeMap<String, BTreeSet<RealizedObject>> = ::std::collections::BTreeMap::new();
             $(
                 let inner = map!(@inner $inner);
                 let _ = _map.insert($key.to_string(), inner);
@@ -171,32 +151,32 @@ macro_rules! map {
     }
 }
 
-/// Construct `RealizedObject::Sequence`. This macro represents a sequence of opid tagged values
+/// Construct `RealizedObject::Sequence`. This macro represents a sequence of values
 ///
 /// ```
 /// list![
 ///     {
-///         opid1 => "value1",
-///         opid2 => "value2",
+///         "value1",
+///         "value2",
 ///     }
 /// ]
 /// ```
 ///
 /// The list above would represent a list with a conflict on the 0 index. The values can be
-/// anything which implements `Into<RealizedObject<ExportableOpId<'_>>` including nested calls to
+/// anything which implements `Into<RealizedObject>` including nested calls to
 /// `map!` or `list!`.
 #[macro_export]
 macro_rules! list {
     (@single $($x:tt)*) => (());
     (@count $($rest:tt),*) => (<[()]>::len(&[$(list!(@single $rest)),*]));
 
-    (@inner { $($opid:expr => $value:expr,)+ }) => { list!(@inner { $($opid => $value),+ }) };
-    (@inner { $($opid:expr => $value:expr),* }) => {
+    (@inner { $($value:expr,)+ }) => { list!(@inner { $($value),+ }) };
+    (@inner { $($value:expr),* }) => {
         {
-            use std::collections::HashMap;
-            let mut inner: HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>> = HashMap::new();
+            use std::collections::BTreeSet;
+            let mut inner: BTreeSet<RealizedObject> = BTreeSet::new();
             $(
-                let _ = inner.insert($opid.into(), $value.into());
+                let _ = inner.insert($value.into());
             )*
             inner
         }
@@ -204,9 +184,8 @@ macro_rules! list {
     ($($inner:tt,)+) => { list!($($inner),+) };
     ($($inner:tt),*) => {
         {
-            use crate::helpers::ExportableOpId;
             let _cap = list!(@count $($inner),*);
-            let mut _list: Vec<HashMap<ExportableOpId<'_>, RealizedObject<ExportableOpId<'_>>>> = Vec::new();
+            let mut _list: Vec<BTreeSet<RealizedObject>> = Vec::new();
             $(
                 //println!("{}", stringify!($inner));
                 let inner = list!(@inner $inner);
@@ -215,26 +194,6 @@ macro_rules! list {
             RealizedObject::Sequence(_list)
         }
     }
-}
-
-/// Translate an op ID produced by one document to an op ID which can be understood by
-/// another
-///
-/// The current API of automerge exposes OpIds of the form (u64, usize) where the first component
-/// is the counter of an actors lamport timestamp and the second component is the index into an
-/// array of actor IDs stored by the document where the opid was generated. Obviously this is not
-/// portable between documents as the index of the actor array is unlikely to match between two
-/// documents. This function translates between the two representations.
-///
-/// At some point we will probably change the API to not be document specific but this function
-/// allows us to write tests first.
-pub fn translate_obj_id(
-    from: &automerge::Automerge,
-    to: &automerge::Automerge,
-    id: automerge::OpId,
-) -> automerge::OpId {
-    let exported = from.export(id);
-    to.import(&exported).unwrap()
 }
 
 pub fn mk_counter(value: i64) -> automerge::ScalarValue {
@@ -252,14 +211,72 @@ impl std::fmt::Display for ExportedOpId {
 
 /// A `RealizedObject` is a representation of all the current values in a document - including
 /// conflicts.
-#[derive(PartialEq, Debug)]
-pub enum RealizedObject<Oid: PartialEq + Eq + Hash> {
-    Map(HashMap<String, HashMap<Oid, RealizedObject<Oid>>>),
-    Sequence(Vec<HashMap<Oid, RealizedObject<Oid>>>),
-    Value(automerge::ScalarValue),
+#[derive(PartialEq, PartialOrd, Ord, Eq, Hash, Debug)]
+pub enum RealizedObject {
+    Map(BTreeMap<String, BTreeSet<RealizedObject>>),
+    Sequence(Vec<BTreeSet<RealizedObject>>),
+    Value(OrdScalarValue),
 }
 
-impl serde::Serialize for RealizedObject<ExportedOpId> {
+// A copy of automerge::ScalarValue which uses decorum::Total for floating point values. This makes the type
+// orderable, which is useful when we want to compare conflicting values of a register in an
+// automerge document.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum OrdScalarValue {
+    Bytes(Vec<u8>),
+    Str(smol_str::SmolStr),
+    Int(i64),
+    Uint(u64),
+    F64(decorum::Total<f64>),
+    Counter(i64),
+    Timestamp(i64),
+    Boolean(bool),
+    Null,
+}
+
+impl From<automerge::ScalarValue> for OrdScalarValue {
+    fn from(v: automerge::ScalarValue) -> Self {
+        match v {
+            automerge::ScalarValue::Bytes(v) => OrdScalarValue::Bytes(v),
+            automerge::ScalarValue::Str(v) => OrdScalarValue::Str(v),
+            automerge::ScalarValue::Int(v) => OrdScalarValue::Int(v),
+            automerge::ScalarValue::Uint(v) => OrdScalarValue::Uint(v),
+            automerge::ScalarValue::F64(v) => OrdScalarValue::F64(decorum::Total::from(v)),
+            automerge::ScalarValue::Counter(v) => OrdScalarValue::Counter(v),
+            automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
+            automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
+            automerge::ScalarValue::Null => OrdScalarValue::Null,
+        }
+    }
+}
+
+impl From<&OrdScalarValue> for automerge::ScalarValue {
+    fn from(v: &OrdScalarValue) -> Self {
+        match v {
+            OrdScalarValue::Bytes(v) => automerge::ScalarValue::Bytes(v.clone()),
+            OrdScalarValue::Str(v) => automerge::ScalarValue::Str(v.clone()),
+            OrdScalarValue::Int(v) => automerge::ScalarValue::Int(*v),
+            OrdScalarValue::Uint(v) => automerge::ScalarValue::Uint(*v),
+            OrdScalarValue::F64(v) => automerge::ScalarValue::F64(v.into_inner()),
+            OrdScalarValue::Counter(v) => automerge::ScalarValue::Counter(*v),
+            OrdScalarValue::Timestamp(v) => automerge::ScalarValue::Timestamp(*v),
+            OrdScalarValue::Boolean(v) => automerge::ScalarValue::Boolean(*v),
+            OrdScalarValue::Null => automerge::ScalarValue::Null,
+        }
+    }
+}
+
+impl serde::Serialize for OrdScalarValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = automerge::ScalarValue::from(self);
+        s.serialize(serializer)
+    }
+}
+
+impl serde::Serialize for RealizedObject {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -267,23 +284,17 @@ impl serde::Serialize for RealizedObject<ExportedOpId> {
         match self {
             Self::Map(kvs) => {
                 let mut map_ser = serializer.serialize_map(Some(kvs.len()))?;
-                for (k, kvs) in kvs {
-                    let kvs_serded = kvs
-                        .iter()
-                        .map(|(opid, value)| (opid.to_string(), value))
-                        .collect::<HashMap<String, &RealizedObject<ExportedOpId>>>();
-                    map_ser.serialize_entry(k, &kvs_serded)?;
+                for (k, vs) in kvs {
+                    let vs_serded = vs.iter().collect::<Vec<&RealizedObject>>();
+                    map_ser.serialize_entry(k, &vs_serded)?;
                 }
                 map_ser.end()
             }
             Self::Sequence(elems) => {
                 let mut list_ser = serializer.serialize_seq(Some(elems.len()))?;
                 for elem in elems {
-                    let kvs_serded = elem
-                        .iter()
-                        .map(|(opid, value)| (opid.to_string(), value))
-                        .collect::<HashMap<String, &RealizedObject<ExportedOpId>>>();
-                    list_ser.serialize_element(&kvs_serded)?;
+                    let vs_serded = elem.iter().collect::<Vec<&RealizedObject>>();
+                    list_ser.serialize_element(&vs_serded)?;
                 }
                 list_ser.end()
             }
@@ -292,30 +303,30 @@ impl serde::Serialize for RealizedObject<ExportedOpId> {
     }
 }
 
-pub fn realize(doc: &automerge::Automerge) -> RealizedObject<ExportedOpId> {
-    realize_obj(doc, automerge::ROOT, automerge::ObjType::Map)
+pub fn realize(doc: &automerge::Automerge) -> RealizedObject {
+    realize_obj(doc, &automerge::ROOT, automerge::ObjType::Map)
 }
 
 pub fn realize_prop<P: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: &automerge::ObjId,
     prop: P,
-) -> RealizedObject<ExportedOpId> {
+) -> RealizedObject {
     let (val, obj_id) = doc.value(obj_id, prop).unwrap().unwrap();
     match val {
-        automerge::Value::Object(obj_type) => realize_obj(doc, obj_id, obj_type),
-        automerge::Value::Scalar(v) => RealizedObject::Value(v),
+        automerge::Value::Object(obj_type) => realize_obj(doc, &obj_id, obj_type),
+        automerge::Value::Scalar(v) => RealizedObject::Value(OrdScalarValue::from(v)),
     }
 }
 
 pub fn realize_obj(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: &automerge::ObjId,
     objtype: automerge::ObjType,
-) -> RealizedObject<ExportedOpId> {
+) -> RealizedObject {
     match objtype {
         automerge::ObjType::Map | automerge::ObjType::Table => {
-            let mut result = HashMap::new();
+            let mut result = BTreeMap::new();
             for key in doc.keys(obj_id) {
                 result.insert(key.clone(), realize_values(doc, obj_id, key));
             }
@@ -334,166 +345,63 @@ pub fn realize_obj(
 
 fn realize_values<K: Into<automerge::Prop>>(
     doc: &automerge::Automerge,
-    obj_id: automerge::OpId,
+    obj_id: &automerge::ObjId,
     key: K,
-) -> HashMap<ExportedOpId, RealizedObject<ExportedOpId>> {
-    let mut values_by_opid = HashMap::new();
-    for (value, opid) in doc.values(obj_id, key).unwrap() {
+) -> BTreeSet<RealizedObject> {
+    let mut values = BTreeSet::new();
+    for (value, objid) in doc.values(obj_id, key).unwrap() {
         let realized = match value {
-            automerge::Value::Object(objtype) => realize_obj(doc, opid, objtype),
-            automerge::Value::Scalar(v) => RealizedObject::Value(v),
+            automerge::Value::Object(objtype) => realize_obj(doc, &objid, objtype),
+            automerge::Value::Scalar(v) => RealizedObject::Value(OrdScalarValue::from(v)),
         };
-        let exported_opid = ExportedOpId(doc.export(opid));
-        values_by_opid.insert(exported_opid, realized);
+        values.insert(realized);
     }
-    values_by_opid
+    values
 }
 
-impl<'a> RealizedObject<ExportableOpId<'a>> {
-    pub fn export(self, doc: &automerge::Automerge) -> RealizedObject<ExportedOpId> {
-        match self {
-            Self::Map(kvs) => RealizedObject::Map(
-                kvs.into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k,
-                            v.into_iter()
-                                .map(|(k, v)| (k.export(doc), v.export(doc)))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ),
-            Self::Sequence(values) => RealizedObject::Sequence(
-                values
-                    .into_iter()
-                    .map(|v| {
-                        v.into_iter()
-                            .map(|(k, v)| (k.export(doc), v.export(doc)))
-                            .collect()
-                    })
-                    .collect(),
-            ),
-            Self::Value(v) => RealizedObject::Value(v),
-        }
-    }
-}
-
-impl<'a, O: Into<ExportableOpId<'a>>, I: Into<RealizedObject<ExportableOpId<'a>>>>
-    From<HashMap<&str, HashMap<O, I>>> for RealizedObject<ExportableOpId<'a>>
-{
-    fn from(values: HashMap<&str, HashMap<O, I>>) -> Self {
+impl<I: Into<RealizedObject>> From<BTreeMap<&str, BTreeSet<I>>> for RealizedObject {
+    fn from(values: BTreeMap<&str, BTreeSet<I>>) -> Self {
         let intoed = values
             .into_iter()
-            .map(|(k, v)| {
-                (
-                    k.to_string(),
-                    v.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
-                )
-            })
+            .map(|(k, v)| (k.to_string(), v.into_iter().map(|v| v.into()).collect()))
             .collect();
         RealizedObject::Map(intoed)
     }
 }
 
-impl<'a, O: Into<ExportableOpId<'a>>, I: Into<RealizedObject<ExportableOpId<'a>>>>
-    From<Vec<HashMap<O, I>>> for RealizedObject<ExportableOpId<'a>>
-{
-    fn from(values: Vec<HashMap<O, I>>) -> Self {
+impl<I: Into<RealizedObject>> From<Vec<BTreeSet<I>>> for RealizedObject {
+    fn from(values: Vec<BTreeSet<I>>) -> Self {
         RealizedObject::Sequence(
             values
                 .into_iter()
-                .map(|v| v.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
+                .map(|v| v.into_iter().map(|v| v.into()).collect())
                 .collect(),
         )
     }
 }
 
-impl From<bool> for RealizedObject<ExportableOpId<'_>> {
+impl From<bool> for RealizedObject {
     fn from(b: bool) -> Self {
-        RealizedObject::Value(b.into())
+        RealizedObject::Value(OrdScalarValue::Boolean(b))
     }
 }
 
-impl From<usize> for RealizedObject<ExportableOpId<'_>> {
+impl From<usize> for RealizedObject {
     fn from(u: usize) -> Self {
         let v = u.try_into().unwrap();
-        RealizedObject::Value(automerge::ScalarValue::Int(v))
+        RealizedObject::Value(OrdScalarValue::Int(v))
     }
 }
 
-impl From<automerge::ScalarValue> for RealizedObject<ExportableOpId<'_>> {
+impl From<automerge::ScalarValue> for RealizedObject {
     fn from(s: automerge::ScalarValue) -> Self {
-        RealizedObject::Value(s)
+        RealizedObject::Value(OrdScalarValue::from(s))
     }
 }
 
-impl From<&str> for RealizedObject<ExportableOpId<'_>> {
+impl From<&str> for RealizedObject {
     fn from(s: &str) -> Self {
-        RealizedObject::Value(automerge::ScalarValue::Str(s.into()))
-    }
-}
-
-#[derive(Eq, PartialEq, Hash)]
-pub enum ExportableOpId<'a> {
-    Native(automerge::OpId),
-    Translate(Translate<'a>),
-}
-
-impl<'a> ExportableOpId<'a> {
-    fn export(self, doc: &automerge::Automerge) -> ExportedOpId {
-        let oid = match self {
-            Self::Native(oid) => oid,
-            Self::Translate(Translate { from, opid }) => translate_obj_id(from, doc, opid),
-        };
-        ExportedOpId(doc.export(oid))
-    }
-}
-
-pub struct Translate<'a> {
-    from: &'a automerge::Automerge,
-    opid: automerge::OpId,
-}
-
-impl<'a> PartialEq for Translate<'a> {
-    fn eq(&self, other: &Self) -> bool {
-        self.from.maybe_get_actor().unwrap() == other.from.maybe_get_actor().unwrap()
-            && self.opid == other.opid
-    }
-}
-
-impl<'a> Eq for Translate<'a> {}
-
-impl<'a> Hash for Translate<'a> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.from.maybe_get_actor().unwrap().hash(state);
-        self.opid.hash(state);
-    }
-}
-
-pub trait OpIdExt {
-    fn native(self) -> ExportableOpId<'static>;
-    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_>;
-}
-
-impl OpIdExt for automerge::OpId {
-    /// Use this opid directly when exporting
-    fn native(self) -> ExportableOpId<'static> {
-        ExportableOpId::Native(self)
-    }
-
-    /// Translate this OpID from `doc` when exporting
-    fn translate(self, doc: &automerge::Automerge) -> ExportableOpId<'_> {
-        ExportableOpId::Translate(Translate {
-            from: doc,
-            opid: self,
-        })
-    }
-}
-
-impl From<automerge::OpId> for ExportableOpId<'_> {
-    fn from(oid: automerge::OpId) -> Self {
-        ExportableOpId::Native(oid)
+        RealizedObject::Value(OrdScalarValue::Str(smol_str::SmolStr::from(s)))
     }
 }
 
