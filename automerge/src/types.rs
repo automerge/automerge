@@ -1,6 +1,6 @@
 use crate::error;
 use crate::legacy as amp;
-use crate::ScalarValue;
+use crate::{ Value, ScalarValue };
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
 use std::convert::TryFrom;
@@ -10,7 +10,7 @@ use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
-pub const ROOT: OpId = OpId(0, 0);
+pub(crate) const ROOT: OpId = OpId(0, 0);
 
 const ROOT_STR: &str = "_root";
 const HEAD_STR: &str = "_head";
@@ -161,21 +161,14 @@ pub enum OpType {
 }
 
 #[derive(Debug)]
-pub enum Export {
+pub(crate) enum Export {
     Id(OpId),
     Special(String),
     Prop(usize),
 }
 
-pub trait Exportable {
+pub(crate) trait Exportable {
     fn export(&self) -> Export;
-}
-
-pub trait Importable {
-    fn wrap(id: OpId) -> Self;
-    fn from(s: &str) -> Option<Self>
-    where
-        Self: std::marker::Sized;
 }
 
 impl OpId {
@@ -230,45 +223,6 @@ impl Exportable for Key {
         match self {
             Key::Map(p) => Export::Prop(*p),
             Key::Seq(e) => e.export(),
-        }
-    }
-}
-
-impl Importable for ObjId {
-    fn wrap(id: OpId) -> Self {
-        ObjId(id)
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == ROOT_STR {
-            Some(ROOT.into())
-        } else {
-            None
-        }
-    }
-}
-
-impl Importable for OpId {
-    fn wrap(id: OpId) -> Self {
-        id
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == ROOT_STR {
-            Some(ROOT)
-        } else {
-            None
-        }
-    }
-}
-
-impl Importable for ElemId {
-    fn wrap(id: OpId) -> Self {
-        ElemId(id)
-    }
-    fn from(s: &str) -> Option<Self> {
-        if s == HEAD_STR {
-            Some(HEAD)
-        } else {
-            None
         }
     }
 }
@@ -352,7 +306,7 @@ impl Key {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-pub struct OpId(pub u64, pub usize);
+pub(crate) struct OpId(pub u64, pub usize);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub OpId);
@@ -396,6 +350,14 @@ impl Op {
             Some(ElemId(self.id))
         } else {
             self.key.elemid()
+        }
+    }
+
+    pub fn value(&self) -> Value {
+        match &self.action {
+            OpType::Make(obj_type) => Value::Object(*obj_type),
+            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
 

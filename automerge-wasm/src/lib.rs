@@ -1,6 +1,6 @@
 extern crate web_sys;
 use automerge as am;
-use automerge::{Change, ChangeHash, Prop, Value};
+use automerge::{Change, ChangeHash, Prop, Value, ExId};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -151,9 +151,9 @@ impl Automerge {
     pub fn keys(&mut self, obj: JsValue, heads: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads) {
-            self.0.keys_at(obj, &heads)
+            self.0.keys_at(&obj, &heads)
         } else {
-            self.0.keys(obj)
+            self.0.keys(&obj)
         }
         .iter()
         .map(|s| JsValue::from_str(s))
@@ -164,9 +164,9 @@ impl Automerge {
     pub fn text(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
-            self.0.text_at(obj, &heads)
+            self.0.text_at(&obj, &heads)
         } else {
-            self.0.text(obj)
+            self.0.text(&obj)
         }
         .map_err(to_js_err)
         .map(|t| t.into())
@@ -185,7 +185,7 @@ impl Automerge {
         let mut vals = vec![];
         if let Some(t) = text.as_string() {
             self.0
-                .splice_text(obj, start, delete_count, &t)
+                .splice_text(&obj, start, delete_count, &t)
                 .map_err(to_js_err)?;
         } else {
             if let Ok(array) = text.dyn_into::<Array>() {
@@ -201,7 +201,7 @@ impl Automerge {
                 }
             }
             self.0
-                .splice(obj, start, delete_count, vals)
+                .splice(&obj, start, delete_count, vals)
                 .map_err(to_js_err)?;
         }
         Ok(())
@@ -223,9 +223,12 @@ impl Automerge {
         let value = self.import_value(value, datatype)?;
         let opid = self
             .0
-            .insert(obj, index as usize, value)
+            .insert(&obj, index as usize, value)
             .map_err(to_js_err)?;
-        Ok(self.export(opid))
+        match opid {
+            Some(opid) => Ok(self.export(opid)),
+            None => Ok(JsValue::null()),
+        }
     }
 
     pub fn set(
@@ -238,7 +241,7 @@ impl Automerge {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, datatype)?;
-        let opid = self.0.set(obj, prop, value).map_err(to_js_err)?;
+        let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
         match opid {
             Some(opid) => Ok(self.export(opid)),
             None => Ok(JsValue::null()),
@@ -252,7 +255,7 @@ impl Automerge {
             .as_f64()
             .ok_or("inc needs a numberic value")
             .map_err(to_js_err)?;
-        self.0.inc(obj, prop, value as i64).map_err(to_js_err)?;
+        self.0.inc(&obj, prop, value as i64).map_err(to_js_err)?;
         Ok(())
     }
 
@@ -263,9 +266,9 @@ impl Automerge {
         let heads = get_heads(heads);
         if let Ok(prop) = prop {
             let value = if let Some(h) = heads {
-                self.0.value_at(obj, prop, &h)
+                self.0.value_at(&obj, prop, &h)
             } else {
-                self.0.value(obj, prop)
+                self.0.value(&obj, prop)
             }
             .map_err(to_js_err)?;
             match value {
@@ -289,9 +292,9 @@ impl Automerge {
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
             let values = if let Some(heads) = get_heads(heads) {
-                self.0.values_at(obj, prop, &heads)
+                self.0.values_at(&obj, prop, &heads)
             } else {
-                self.0.values(obj, prop)
+                self.0.values(&obj, prop)
             }
             .map_err(to_js_err)?;
             for value in values {
@@ -318,16 +321,16 @@ impl Automerge {
     pub fn length(&mut self, obj: JsValue, heads: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
-            Ok((self.0.length_at(obj, &heads) as f64).into())
+            Ok((self.0.length_at(&obj, &heads) as f64).into())
         } else {
-            Ok((self.0.length(obj) as f64).into())
+            Ok((self.0.length(&obj) as f64).into())
         }
     }
 
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
-        self.0.del(obj, prop).map_err(to_js_err)?;
+        self.0.del(&obj, prop).map_err(to_js_err)?;
         Ok(())
     }
 
@@ -442,11 +445,11 @@ impl Automerge {
         }
     }
 
-    fn export<E: automerge::Exportable>(&self, val: E) -> JsValue {
-        self.0.export(val).into()
+    fn export(&self, val: ExId) -> JsValue {
+        val.to_string().into()
     }
 
-    fn import<I: automerge::Importable>(&self, id: JsValue) -> Result<I, JsValue> {
+    fn import(&self, id: JsValue) -> Result<ExId, JsValue> {
         let id_str = id
             .as_string()
             .ok_or("invalid opid/objid/elemid")
