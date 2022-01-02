@@ -41,22 +41,13 @@ impl Encodable for [ActorId] {
     }
 }
 
-fn map_actor(actor: &ActorId, actors: &mut Vec<ActorId>) -> usize {
-    if let Some(pos) = actors.iter().position(|a| a == actor) {
-        pos
-    } else {
-        actors.push(actor.clone());
-        actors.len() - 1
-    }
+fn actor_index(actor: &ActorId, actors: &[ActorId]) -> usize {
+    actors.iter().position(|a| a == actor).unwrap()
 }
 
 impl Encodable for ActorId {
-    fn encode_with_actors<R: Write>(
-        &self,
-        buf: &mut R,
-        actors: &mut Vec<ActorId>,
-    ) -> io::Result<usize> {
-        map_actor(self, actors).encode(buf)
+    fn encode_with_actors<R: Write>(&self, buf: &mut R, actors: &[ActorId]) -> io::Result<usize> {
+        actor_index(self, actors).encode(buf)
     }
 
     fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
@@ -601,7 +592,7 @@ impl ValEncoder {
         }
     }
 
-    fn append_value2(&mut self, val: &ScalarValue, actors: &mut Vec<ActorId>) {
+    fn append_value2(&mut self, val: &ScalarValue, actors: &[ActorId]) {
         // It may seem weird to have two consecutive matches on the same value. The reason is so
         // that we don't have to repeat the `append_null` calls on ref_actor and ref_counter in
         // every arm of the next match
@@ -725,7 +716,7 @@ impl KeyEncoderOld {
         }
     }
 
-    fn append(&mut self, key: amp::Key, actors: &mut Vec<ActorId>) {
+    fn append(&mut self, key: amp::Key, actors: &[ActorId]) {
         match key {
             amp::Key::Map(s) => {
                 self.actor.append_null();
@@ -738,7 +729,7 @@ impl KeyEncoderOld {
                 self.str.append_null();
             }
             amp::Key::Seq(amp::ElementId::Id(amp::OpId(ctr, actor))) => {
-                self.actor.append_value(map_actor(&actor, actors));
+                self.actor.append_value(actor_index(&actor, actors));
                 self.ctr.append_value(ctr);
                 self.str.append_null();
             }
@@ -811,11 +802,11 @@ impl PredEncoder {
         }
     }
 
-    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &mut Vec<ActorId>) {
+    fn append(&mut self, pred: &SortedVec<amp::OpId>, actors: &[ActorId]) {
         self.num.append_value(pred.len());
         for p in pred.iter() {
             self.ctr.append_value(p.0);
-            self.actor.append_value(map_actor(&p.1, actors));
+            self.actor.append_value(actor_index(&p.1, actors));
         }
     }
 
@@ -879,14 +870,14 @@ impl ObjEncoderOld {
         }
     }
 
-    fn append(&mut self, obj: &amp::ObjectId, actors: &mut Vec<ActorId>) {
+    fn append(&mut self, obj: &amp::ObjectId, actors: &[ActorId]) {
         match obj {
             amp::ObjectId::Root => {
                 self.actor.append_null();
                 self.ctr.append_null();
             }
             amp::ObjectId::Id(amp::OpId(ctr, actor)) => {
-                self.actor.append_value(map_actor(actor, actors));
+                self.actor.append_value(actor_index(actor, actors));
                 self.ctr.append_value(*ctr);
             }
         }
@@ -1131,10 +1122,7 @@ pub(crate) struct ColumnEncoder {
 }
 
 impl ColumnEncoder {
-    pub fn encode_ops<'a, I>(
-        ops: I,
-        actors: &'a mut Vec<ActorId>,
-    ) -> (Vec<u8>, HashMap<u32, Range<usize>>)
+    pub fn encode_ops<'a, I>(ops: I, actors: &[ActorId]) -> (Vec<u8>, HashMap<u32, Range<usize>>)
     where
         I: IntoIterator<Item = &'a amp::Op>,
     {
@@ -1154,7 +1142,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn encode<'a, 'b, I>(&'a mut self, ops: I, actors: &'b mut Vec<ActorId>)
+    fn encode<'a, 'b, I>(&'a mut self, ops: I, actors: &[ActorId])
     where
         I: IntoIterator<Item = &'b amp::Op>,
     {
@@ -1163,7 +1151,7 @@ impl ColumnEncoder {
         }
     }
 
-    fn append(&mut self, op: &amp::Op, actors: &mut Vec<ActorId>) {
+    fn append(&mut self, op: &amp::Op, actors: &[ActorId]) {
         self.obj.append(&op.obj, actors);
         self.key.append(op.key.clone(), actors);
         self.insert.append(op.insert);

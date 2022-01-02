@@ -246,11 +246,7 @@ pub(crate) trait Encodable {
         Ok(buf)
     }
 
-    fn encode_with_actors<R: Write>(
-        &self,
-        buf: &mut R,
-        _actors: &mut Vec<ActorId>,
-    ) -> io::Result<usize> {
+    fn encode_with_actors<R: Write>(&self, buf: &mut R, _actors: &[ActorId]) -> io::Result<usize> {
         self.encode(buf)
     }
 
