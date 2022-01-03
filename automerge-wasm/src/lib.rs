@@ -178,7 +178,7 @@ impl Automerge {
         start: JsValue,
         delete_count: JsValue,
         text: JsValue,
-    ) -> Result<(), JsValue> {
+    ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let start = to_usize(start, "start")?;
         let delete_count = to_usize(delete_count, "deleteCount")?;
@@ -187,24 +187,31 @@ impl Automerge {
             self.0
                 .splice_text(&obj, start, delete_count, &t)
                 .map_err(to_js_err)?;
+            Ok(JsValue::null())
         } else {
             if let Ok(array) = text.dyn_into::<Array>() {
                 for i in array.iter() {
-                    if let Some(t) = i.as_string() {
-                        vals.push(t.into());
-                    } else if let Ok(array) = i.dyn_into::<Array>() {
+                    if let Ok(array) = i.clone().dyn_into::<Array>() {
                         let value = array.get(1);
                         let datatype = array.get(2);
-                        let value = self.import_value(value, datatype)?;
+                        let value = self.import_value(value, datatype.as_string())?;
                         vals.push(value);
+                    } else {
+                        let value = self.import_value(i, None)?;
+                        vals.push(value.into());
                     }
                 }
             }
-            self.0
+            let result = self.0
                 .splice(&obj, start, delete_count, vals)
                 .map_err(to_js_err)?;
+            if result.len() == 0 {
+                Ok(JsValue::null())
+            } else {
+                let result : Array = result.iter().map(|r| JsValue::from(r.to_string())).collect();
+                Ok(result.into())
+            }
         }
-        Ok(())
     }
 
     pub fn insert(
@@ -220,7 +227,7 @@ impl Automerge {
             .as_f64()
             .ok_or_else(|| "insert index must be a number".into());
         let index = index?;
-        let value = self.import_value(value, datatype)?;
+        let value = self.import_value(value, datatype.as_string())?;
         let opid = self
             .0
             .insert(&obj, index as usize, value)
@@ -240,7 +247,7 @@ impl Automerge {
     ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value = self.import_value(value, datatype)?;
+        let value = self.import_value(value, datatype.as_string())?;
         let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
         match opid {
             Some(opid) => Ok(self.export(opid)),
@@ -467,8 +474,7 @@ impl Automerge {
         }
     }
 
-    fn import_value(&mut self, value: JsValue, datatype: JsValue) -> Result<Value, JsValue> {
-        let datatype = datatype.as_string();
+    fn import_value(&mut self, value: JsValue, datatype: Option<String>) -> Result<Value, JsValue> {
         match datatype.as_deref() {
             Some("boolean") => value
                 .as_bool()

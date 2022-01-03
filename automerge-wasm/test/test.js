@@ -280,5 +280,27 @@ describe('Automerge', () => {
       assert.deepEqual(doc4.save(), save);
     })
 
+    it('only returns an object id when objects are created', () => {
+      let doc = Automerge.init("aaaa")
+      let r1 = doc.set("_root","foo","bar")
+      let r2 = doc.set("_root","list",LIST)
+      let r3 = doc.set("_root","counter",10, "counter")
+      let r4 = doc.inc("_root","counter",1)
+      let r5 = doc.del("_root","counter")
+      let r6 = doc.insert(r2,0,10);
+      let r7 = doc.insert(r2,0,MAP);
+      let r8 = doc.splice(r2,1,0,["a","b","c"]);
+      let r9 = doc.splice(r2,1,0,["a",LIST,MAP,"d"]);
+      assert.deepEqual(r1,null);
+      assert.deepEqual(r2,"2@aaaa");
+      assert.deepEqual(r3,null);
+      assert.deepEqual(r4,null);
+      assert.deepEqual(r5,null);
+      assert.deepEqual(r6,null);
+      assert.deepEqual(r7,"7@aaaa");
+      assert.deepEqual(r8,null);
+      assert.deepEqual(r9,["12@aaaa","13@aaaa"]);
+    })
+
   })
 })

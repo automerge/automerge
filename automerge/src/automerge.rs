@@ -388,7 +388,7 @@ impl Automerge {
         let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(obj, pos, v)?;
+            let id = self.do_insert(obj, pos, v.clone())?;
             if let Some(id) = id {
                 results.push(self.id_to_exid(id));
             }
