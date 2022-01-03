@@ -129,6 +129,7 @@ impl Automerge {
 
     pub fn free(self) {}
 
+    #[wasm_bindgen(js_name = pendingOps)]
     pub fn pending_ops(&self) -> JsValue {
         (self.0.pending_ops() as u32).into()
     }

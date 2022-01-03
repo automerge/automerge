@@ -25,6 +25,7 @@ describe('Automerge', () => {
     it('should be able to start and commit', () => {
       let doc = Automerge.init()
       doc.commit()
+      doc.free()
     })
 
     it('getting a nonexistant prop does not throw an error', () => {
@@ -32,6 +33,7 @@ describe('Automerge', () => {
       let root = "_root"
       let result = doc.value(root,"hello")
       assert.deepEqual(result,[])
+      doc.free()
     })
 
     it('should be able to set and get a simple value', () => {
@@ -72,6 +74,7 @@ describe('Automerge', () => {
 
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",false])
+      doc.free()
     })
 
     it('should be able to use bytes', () => {
@@ -82,6 +85,7 @@ describe('Automerge', () => {
       assert.deepEqual(value1, ["bytes", new Uint8Array([10,11,12])]);
       let value2 = doc.value("_root", "data2")
       assert.deepEqual(value2, ["bytes", new Uint8Array([13,14,15])]);
+      doc.free()
     })
 
     it('should be able to make sub objects', () => {
@@ -91,13 +95,14 @@ describe('Automerge', () => {
 
       let submap = doc.set(root, "submap", MAP)
       doc.set(submap, "number", 6, "uint")
-      assert.strictEqual(doc.pending_ops(),2)
+      assert.strictEqual(doc.pendingOps(),2)
 
       result = doc.value(root,"submap")
       assert.deepEqual(result,["map",submap])
 
       result = doc.value(submap,"number")
       assert.deepEqual(result,["uint",6])
+      doc.free()
     })
 
     it('should be able to make lists', () => {
@@ -120,6 +125,7 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.value(submap, 2),["str","b v2"])
       assert.deepEqual(doc.length(submap),4)
+      doc.free()
     })
 
     it('should be able delete non-existant props', () => {
@@ -138,6 +144,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.keys("_root"),["bip"])
       assert.deepEqual(doc.keys("_root", heads1),["bip", "foo"])
       assert.deepEqual(doc.keys("_root", heads2),["bip"])
+      doc.free()
     })
 
     it('should be able to del', () => {
@@ -148,6 +155,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(root, "xxx"),["str","xxx"])
       doc.del(root, "xxx");
       assert.deepEqual(doc.value(root, "xxx"),[])
+      doc.free()
     })
 
     it('should be able to use counters', () => {
@@ -160,6 +168,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(root, "counter"),["counter",20])
       doc.inc(root, "counter", -5);
       assert.deepEqual(doc.value(root, "counter"),["counter",15])
+      doc.free()
     })
 
     it('should be able to splice text', () => {
@@ -176,6 +185,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.value(text, 10),["str","d"])
       assert.deepEqual(doc.value(text, 11),["str","!"])
       assert.deepEqual(doc.value(text, 12),["str","?"])
+      doc.free()
     })
 
     it('should be able save all or incrementally', () => {
@@ -208,6 +218,10 @@ describe('Automerge', () => {
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
       assert.deepEqual(docA.save(), docC.save());
+      doc.free()
+      docA.free()
+      docB.free()
+      docC.free()
     })
 
     it('should be able to splice text', () => {
@@ -223,6 +237,7 @@ describe('Automerge', () => {
       assert.strictEqual(doc.length(text, heads1), 11)
       assert.strictEqual(doc.text(text, heads2), "hello big bad world")
       assert.strictEqual(doc.length(text, heads2), 19)
+      doc.free()
     })
 
     it('local inc increments all visible counters in a map', () => {
@@ -250,6 +265,10 @@ describe('Automerge', () => {
       let save1 = doc1.save()
       let doc4 = Automerge.load(save1)
       assert.deepEqual(doc4.save(), save1);
+      doc1.free()
+      doc2.free()
+      doc3.free()
+      doc4.free()
     })
 
     it('local inc increments all visible counters in a sequence', () => {
@@ -278,6 +297,10 @@ describe('Automerge', () => {
       let save = doc1.save()
       let doc4 = Automerge.load(save)
       assert.deepEqual(doc4.save(), save);
+      doc1.free()
+      doc2.free()
+      doc3.free()
+      doc4.free()
     })
 
     it('only returns an object id when objects are created', () => {
@@ -300,6 +323,26 @@ describe('Automerge', () => {
       assert.deepEqual(r7,"7@aaaa");
       assert.deepEqual(r8,null);
       assert.deepEqual(r9,["12@aaaa","13@aaaa"]);
+      doc.free()
+    })
+
+    it('objects without properties are preserved', () => {
+      let doc1 = Automerge.init("aaaa")
+      let a = doc1.set("_root","a",MAP);
+      let b = doc1.set("_root","b",MAP);
+      let c = doc1.set("_root","c",MAP);
+      let d = doc1.set(c,"d","dd");
+      let saved = doc1.save();
+      let doc2 = Automerge.load(saved);
+      assert.deepEqual(doc2.value("_root","a"),["map",a])
+      assert.deepEqual(doc2.keys(a),[])
+      assert.deepEqual(doc2.value("_root","b"),["map",b])
+      assert.deepEqual(doc2.keys(b),[])
+      assert.deepEqual(doc2.value("_root","c"),["map",c])
+      assert.deepEqual(doc2.keys(c),["d"])
+      assert.deepEqual(doc2.value(c,"d"),["str","dd"])
+      doc1.free()
+      doc2.free()
     })
 
   })
