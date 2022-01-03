@@ -1,5 +1,6 @@
 use crate::ActorId;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone)]
 pub enum ExId {
@@ -28,6 +29,18 @@ impl fmt::Display for ExId {
         match self {
             ExId::Root => write!(f, "_root"),
             ExId::Id(ctr, actor, _) => write!(f, "{}@{}", ctr, actor),
+        }
+    }
+}
+
+impl Hash for ExId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            ExId::Root => 0.hash(state),
+            ExId::Id(ctr, actor, _) => {
+                ctr.hash(state);
+                actor.hash(state);
+            }
         }
     }
 }
