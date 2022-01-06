@@ -389,6 +389,12 @@ impl fmt::Debug for ChangeHash {
     }
 }
 
+impl fmt::Display for ChangeHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum ParseChangeHashError {
     #[error(transparent)]

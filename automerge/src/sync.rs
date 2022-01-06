@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -152,16 +153,20 @@ impl Automerge {
             .collect::<Vec<_>>();
         if known_heads.len() == message_heads.len() {
             sync_state.shared_heads = message_heads.clone();
+            // If the remote peer has lost all its data, reset our state to perform a full resync
+            if message_heads.is_empty() {
+                sync_state.last_sent_heads = Some(Default::default());
+                sync_state.sent_hashes = Default::default();
+            }
         } else {
             sync_state.shared_heads = sync_state
                 .shared_heads
                 .iter()
                 .chain(known_heads)
-                .collect::<HashSet<_>>()
-                .into_iter()
                 .copied()
+                .unique()
+                .sorted()
                 .collect::<Vec<_>>();
-            sync_state.shared_heads.sort();
         }
 
         sync_state.their_have = Some(message_have);

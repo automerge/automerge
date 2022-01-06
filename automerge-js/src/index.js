@@ -56,7 +56,7 @@ function change(doc, options, callback) {
     doc[FROZEN] = true
     let root = rootProxy(state);
     callback(root)
-    if (state.pending_ops() === 0) {
+    if (state.pendingOps() === 0) {
       doc[FROZEN] = false
       doc[HEADS] = undefined
       return doc
@@ -255,7 +255,8 @@ function decodeSyncState() {
 
 function generateSyncMessage(doc, syncState) {
   const state = doc[STATE]
-  return [ syncState, state.generateSyncMessage(syncState) ]
+  const result = state.generateSyncMessage(syncState)
+  return result
 }
 
 function receiveSyncMessage(doc, syncState, message) {
@@ -273,9 +274,9 @@ function receiveSyncMessage(doc, syncState, message) {
   }
   const state = doc[STATE]
   const heads = state.getHeads()
-  state.receiveSyncMessage(syncState, message)
+  const newSyncState = state.receiveSyncMessage(syncState, message)
   doc[HEADS] = heads
-  return [rootProxy(state, true), syncState, null];
+  return [rootProxy(state, true), newSyncState, null];
 }
 
 function initSyncState() {

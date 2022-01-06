@@ -88,12 +88,14 @@ impl SyncState {
         self.0.sent_hashes = hashes_set
     }
 
+/*
     fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
         let data = data.to_vec();
         let s = am::SyncState::decode(&data);
         let s = s.map_err(to_js_err)?;
         Ok(SyncState(s))
     }
+*/
 }
 
 #[derive(Debug)]
@@ -199,17 +201,21 @@ impl Automerge {
                         vals.push(value);
                     } else {
                         let value = self.import_value(i, None)?;
-                        vals.push(value.into());
+                        vals.push(value);
                     }
                 }
             }
-            let result = self.0
+            let result = self
+                .0
                 .splice(&obj, start, delete_count, vals)
                 .map_err(to_js_err)?;
-            if result.len() == 0 {
+            if result.is_empty() {
                 Ok(JsValue::null())
             } else {
-                let result : Array = result.iter().map(|r| JsValue::from(r.to_string())).collect();
+                let result: Array = result
+                    .iter()
+                    .map(|r| JsValue::from(r.to_string()))
+                    .collect();
                 Ok(result.into())
             }
         }
@@ -391,19 +397,19 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getHeads)]
-    pub fn get_heads(&mut self) -> Result<Array, JsValue> {
+    pub fn get_heads(&mut self) -> Array {
         let heads = self.0.get_heads();
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
             .collect();
-        Ok(heads)
+        heads
     }
 
     #[wasm_bindgen(js_name = getActorId)]
-    pub fn get_actor_id(&mut self) -> Result<JsValue, JsValue> {
+    pub fn get_actor_id(&mut self) -> JsValue {
         let actor = self.0.get_actor();
-        Ok(actor.to_string().into())
+        actor.to_string().into()
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
@@ -433,24 +439,30 @@ impl Automerge {
     #[wasm_bindgen(js_name = receiveSyncMessage)]
     pub fn receive_sync_message(
         &mut self,
-        state: &mut SyncState,
+        state: JsValue,
         message: Uint8Array,
-    ) -> Result<(), JsValue> {
+    ) -> Result<JsValue, JsValue> {
+        let mut state = JS(state).try_into()?;
         let message = message.to_vec();
         let message = am::SyncMessage::decode(message.as_slice()).map_err(to_js_err)?;
         self.0
-            .receive_sync_message(&mut state.0, message)
+            .receive_sync_message(&mut state, message)
             .map_err(to_js_err)?;
-        Ok(())
+        Ok(JS::from(state).0)
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]
-    pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
-        if let Some(message) = self.0.generate_sync_message(&mut state.0) {
-            Ok(Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into())
+    pub fn generate_sync_message(&mut self, state: JsValue) -> Result<Array, JsValue> {
+        let mut state = JS(state).try_into()?;
+        let result = Array::new();
+        if let Some(message) = self.0.generate_sync_message(&mut state) {
+            result.push(&JS::from(state).0);
+            result.push(&Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into());
         } else {
-            Ok(JsValue::null())
+            result.push(&JS::from(state).0);
+            result.push(&JsValue::null());
         }
+        Ok(result)
     }
 
     fn export(&self, val: ObjId) -> JsValue {
@@ -619,8 +631,8 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = initSyncState)]
-pub fn init_sync_state() -> SyncState {
-    SyncState(Default::default())
+pub fn init_sync_state() -> JsValue {
+    JS::from(am::SyncState::new()).0
 }
 
 #[wasm_bindgen(js_name = encodeSyncMessage)]
@@ -649,7 +661,7 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
     let heads: Array = VH(&msg.heads).into();
     let need: Array = VH(&msg.need).into();
     let changes: Array = VC(&msg.changes).into();
-    let have: Array = VSH(&msg.have).try_into()?;
+    let have: Array = VSH(&msg.have).into();
     let obj = Object::new().into();
     set(&obj, "heads", heads)?;
     set(&obj, "need", need)?;
@@ -659,15 +671,20 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
+pub fn encode_sync_state(state: JsValue) -> Result<Uint8Array, JsValue> {
+    let state: am::SyncState = JS(state).try_into()?;
     Ok(Uint8Array::from(
-        state.0.encode().map_err(to_js_err)?.as_slice(),
+        state.encode().map_err(to_js_err)?.as_slice(),
     ))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(state: Uint8Array) -> Result<SyncState, JsValue> {
-    SyncState::decode(state)
+pub fn decode_sync_state(data: Uint8Array) -> Result<JsValue, JsValue> {
+    //SyncState::decode(state)
+    let data = data.to_vec();
+    let s = am::SyncState::decode(&data);
+    let s = s.map_err(to_js_err)?;
+    Ok(JS::from(s).0)
 }
 
 #[wasm_bindgen(js_name = MAP)]
@@ -695,6 +712,79 @@ fn set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsVa
 }
 
 struct JS(JsValue);
+
+impl From<am::SyncState> for JS {
+    fn from(state: am::SyncState) -> Self {
+        let shared_heads: JS = state.shared_heads.into();
+        let last_sent_heads: JS = state.last_sent_heads.into();
+        let their_heads: JS = state.their_heads.into();
+        let their_need: JS = state.their_need.into();
+        let sent_hashes: JS = state.sent_hashes.into();
+        let their_have = if let Some(have) = &state.their_have {
+            let tmp: Array = VSH(have).into();
+            JsValue::from(&tmp)
+        } else {
+            JsValue::null()
+        };
+        let result: JsValue = Object::new().into();
+        // we can unwrap here b/c we made the object and know its not frozen
+        Reflect::set(&result, &"sharedHeads".into(), &shared_heads.0).unwrap();
+        Reflect::set(&result, &"lastSentHeads".into(), &last_sent_heads.0).unwrap();
+        Reflect::set(&result, &"theirHeads".into(), &their_heads.0).unwrap();
+        Reflect::set(&result, &"theirNeed".into(), &their_need.0).unwrap();
+        Reflect::set(&result, &"theirHave".into(), &their_have).unwrap();
+        Reflect::set(&result, &"sentHashes".into(), &sent_hashes.0).unwrap();
+        JS(result)
+    }
+}
+
+impl From<Vec<ChangeHash>> for JS {
+    fn from(heads: Vec<ChangeHash>) -> Self {
+        let heads: Array = heads
+            .iter()
+            .map(|h| JsValue::from_str(&h.to_string()))
+            .collect();
+        JS(heads.into())
+    }
+}
+
+impl From<HashSet<ChangeHash>> for JS {
+    fn from(heads: HashSet<ChangeHash>) -> Self {
+        let result: JsValue = Object::new().into();
+        for key in &heads {
+            Reflect::set(&result, &key.to_string().into(), &true.into()).unwrap();
+        }
+        JS(result)
+    }
+}
+
+impl From<Option<Vec<ChangeHash>>> for JS {
+    fn from(heads: Option<Vec<ChangeHash>>) -> Self {
+        if let Some(v) = heads {
+            let v: Array = v
+                .iter()
+                .map(|h| JsValue::from_str(&h.to_string()))
+                .collect();
+            JS(v.into())
+        } else {
+            JS(JsValue::null())
+        }
+    }
+}
+
+impl TryFrom<JS> for HashSet<ChangeHash> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let mut result = HashSet::new();
+        for key in Reflect::own_keys(&value.0)?.iter() {
+            if let Some(true) = Reflect::get(&value.0, &key)?.as_bool() {
+                result.insert(key.into_serde().map_err(to_js_err)?);
+            }
+        }
+        Ok(result)
+    }
+}
 
 impl TryFrom<JS> for Vec<ChangeHash> {
     type Error = JsValue;
@@ -729,6 +819,40 @@ impl TryFrom<JS> for Vec<Change> {
             .collect();
         let changes = changes.map_err(to_js_err)?;
         Ok(changes)
+    }
+}
+
+impl TryFrom<JS> for am::SyncState {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        let value = value.0;
+        let shared_heads = get(&value, "sharedHeads")?.try_into()?;
+        let last_sent_heads = get(&value, "lastSentHeads")?.into();
+        let their_heads = get(&value, "theirHeads")?.into();
+        let their_need = get(&value, "theirNeed")?.into();
+        let their_have = get(&value, "theirHave")?.try_into()?;
+        let sent_hashes = get(&value, "sentHashes")?.try_into()?;
+        Ok(am::SyncState {
+            shared_heads,
+            last_sent_heads,
+            their_heads,
+            their_need,
+            their_have,
+            sent_hashes,
+        })
+    }
+}
+
+impl TryFrom<JS> for Option<Vec<am::SyncHave>> {
+    type Error = JsValue;
+
+    fn try_from(value: JS) -> Result<Self, Self::Error> {
+        if value.0.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(value.try_into()?))
+        }
     }
 }
 
@@ -790,11 +914,9 @@ impl<'a> From<VC<'a>> for Array {
 #[allow(clippy::upper_case_acronyms)]
 struct VSH<'a>(&'a [am::SyncHave]);
 
-impl<'a> TryFrom<VSH<'a>> for Array {
-    type Error = JsValue;
-
-    fn try_from(value: VSH<'a>) -> Result<Self, Self::Error> {
-        let have: Result<Array, JsValue> = value
+impl<'a> From<VSH<'a>> for Array {
+    fn from(value: VSH<'a>) -> Self {
+        value
             .0
             .iter()
             .map(|have| {
@@ -806,13 +928,12 @@ impl<'a> TryFrom<VSH<'a>> for Array {
                 // FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
                 let bloom = Uint8Array::from(have.bloom.clone().into_bytes().unwrap().as_slice());
                 let obj: JsValue = Object::new().into();
-                Reflect::set(&obj, &"lastSync".into(), &last_sync.into())?;
-                Reflect::set(&obj, &"bloom".into(), &bloom.into())?;
-                Ok(obj)
+                // we can unwrap here b/c we created the object and know its not frozen
+                Reflect::set(&obj, &"lastSync".into(), &last_sync.into()).unwrap();
+                Reflect::set(&obj, &"bloom".into(), &bloom.into()).unwrap();
+                obj
             })
-            .collect();
-        let have = have?;
-        Ok(have)
+            .collect()
     }
 }
 
