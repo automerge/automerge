@@ -544,11 +544,11 @@ impl Automerge {
                     self.apply_change(c.clone());
                 } else {
                     self.queue.push(c.clone());
-                    while let Some(c) = self.pop_next_causally_ready_change() {
-                        self.apply_change(c);
-                    }
                 }
             }
+        }
+        while let Some(c) = self.pop_next_causally_ready_change() {
+            self.apply_change(c);
         }
         Ok(Patch {})
     }
