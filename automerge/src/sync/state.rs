@@ -8,7 +8,7 @@ const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for id
 #[derive(Debug, Clone)]
 pub struct SyncState {
     pub shared_heads: Vec<ChangeHash>,
-    pub last_sent_heads: Option<Vec<ChangeHash>>,
+    pub last_sent_heads: Vec<ChangeHash>,
     pub their_heads: Option<Vec<ChangeHash>>,
     pub their_need: Option<Vec<ChangeHash>>,
     pub their_have: Option<Vec<SyncHave>>,
@@ -46,7 +46,7 @@ impl SyncState {
         let shared_heads = decode_hashes(&mut decoder)?;
         Ok(Self {
             shared_heads,
-            last_sent_heads: Some(Vec::new()),
+            last_sent_heads: Vec::new(),
             their_heads: None,
             their_need: None,
             their_have: Some(Vec::new()),
@@ -59,7 +59,7 @@ impl Default for SyncState {
     fn default() -> Self {
         Self {
             shared_heads: Vec::new(),
-            last_sent_heads: Some(Vec::new()),
+            last_sent_heads: Vec::new(),
             their_heads: None,
             their_need: None,
             their_have: None,

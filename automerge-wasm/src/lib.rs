@@ -72,12 +72,12 @@ impl SyncState {
 
     #[wasm_bindgen(getter, js_name = lastSentHeads)]
     pub fn last_sent_heads(&self) -> JsValue {
-        rust_to_js(self.0.last_sent_heads.as_ref()).unwrap()
+        rust_to_js(&self.0.last_sent_heads).unwrap()
     }
 
     #[wasm_bindgen(setter, js_name = lastSentHeads)]
     pub fn set_last_sent_heads(&mut self, heads: JsValue) {
-        let heads: Option<Vec<ChangeHash>> = js_to_rust(&heads).unwrap();
+        let heads: Vec<ChangeHash> = js_to_rust(&heads).unwrap();
         self.0.last_sent_heads = heads
     }
 
@@ -87,15 +87,6 @@ impl SyncState {
         let hashes_set: HashSet<ChangeHash> = hashes_map.keys().cloned().collect();
         self.0.sent_hashes = hashes_set
     }
-
-/*
-    fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
-        let data = data.to_vec();
-        let s = am::SyncState::decode(&data);
-        let s = s.map_err(to_js_err)?;
-        Ok(SyncState(s))
-    }
-*/
 }
 
 #[derive(Debug)]
@@ -454,14 +445,14 @@ impl Automerge {
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: JsValue) -> Result<Array, JsValue> {
         let mut state = JS(state).try_into()?;
-        let result = Array::new();
-        if let Some(message) = self.0.generate_sync_message(&mut state) {
-            result.push(&JS::from(state).0);
-            result.push(&Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into());
+        let message = if let Some(message) = self.0.generate_sync_message(&mut state) {
+            Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into()
         } else {
-            result.push(&JS::from(state).0);
-            result.push(&JsValue::null());
-        }
+            JsValue::null()
+        };
+        let result = Array::new();
+        result.push(&JS::from(state).0);
+        result.push(&message);
         Ok(result)
     }
 
@@ -635,6 +626,16 @@ pub fn init_sync_state() -> JsValue {
     JS::from(am::SyncState::new()).0
 }
 
+#[wasm_bindgen(js_name = importSyncState)]
+pub fn import_sync_state(state: JsValue) -> Result<SyncState,JsValue> {
+    Ok(SyncState(JS(state).try_into()?))
+}
+
+#[wasm_bindgen(js_name = exportSyncState)]
+pub fn export_sync_state(state: SyncState) -> JsValue {
+    JS::from(state.0).into()
+}
+
 #[wasm_bindgen(js_name = encodeSyncMessage)]
 pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
     let heads = get(&message, "heads")?.try_into()?;
@@ -658,10 +659,10 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
     let data = msg.to_vec();
     let msg = am::SyncMessage::decode(&data).map_err(to_js_err)?;
-    let heads: Array = VH(&msg.heads).into();
-    let need: Array = VH(&msg.need).into();
-    let changes: Array = VC(&msg.changes).into();
-    let have: Array = VSH(&msg.have).into();
+    let heads = AR::from(msg.heads.as_slice());
+    let need = AR::from(msg.need.as_slice());
+    let changes = AR::from(msg.changes.as_slice());
+    let have = AR::from(msg.have.as_slice());
     let obj = Object::new().into();
     set(&obj, "heads", heads)?;
     set(&obj, "need", need)?;
@@ -703,8 +704,8 @@ fn to_js_err<T: Display>(err: T) -> JsValue {
     js_sys::Error::new(&std::format!("{}", err)).into()
 }
 
-fn get(obj: &JsValue, prop: &str) -> Result<JS, JsValue> {
-    Ok(JS(Reflect::get(obj, &prop.into())?))
+fn get<J: Into<JsValue>>(obj: J, prop: &str) -> Result<JS, JsValue> {
+    Ok(JS(Reflect::get(&obj.into(), &prop.into())?))
 }
 
 fn set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsValue> {
@@ -712,6 +713,19 @@ fn set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsVa
 }
 
 struct JS(JsValue);
+struct AR(Array);
+
+impl From<AR> for JsValue {
+    fn from(ar: AR) -> Self {
+      ar.0.into()
+    }
+}
+
+impl From<JS> for JsValue {
+    fn from(js: JS) -> Self {
+      js.0
+    }
+}
 
 impl From<am::SyncState> for JS {
     fn from(state: am::SyncState) -> Self {
@@ -721,8 +735,7 @@ impl From<am::SyncState> for JS {
         let their_need: JS = state.their_need.into();
         let sent_hashes: JS = state.sent_hashes.into();
         let their_have = if let Some(have) = &state.their_have {
-            let tmp: Array = VSH(have).into();
-            JsValue::from(&tmp)
+            JsValue::from(AR::from(have.as_slice()).0)
         } else {
             JsValue::null()
         };
@@ -828,7 +841,7 @@ impl TryFrom<JS> for am::SyncState {
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         let value = value.0;
         let shared_heads = get(&value, "sharedHeads")?.try_into()?;
-        let last_sent_heads = get(&value, "lastSentHeads")?.into();
+        let last_sent_heads = get(&value, "lastSentHeads")?.try_into()?;
         let their_heads = get(&value, "theirHeads")?.into();
         let their_need = get(&value, "theirNeed")?.into();
         let their_have = get(&value, "theirHave")?.try_into()?;
@@ -885,39 +898,28 @@ impl TryFrom<JS> for am::BloomFilter {
     }
 }
 
-struct VH<'a>(&'a [ChangeHash]);
-
-impl<'a> From<VH<'a>> for Array {
-    fn from(value: VH<'a>) -> Self {
-        let heads: Array = value
-            .0
+impl From<&[ChangeHash]> for AR {
+    fn from(value: &[ChangeHash]) -> Self {
+        AR(value
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
-            .collect();
-        heads
+            .collect())
     }
 }
 
-struct VC<'a>(&'a [Change]);
-
-impl<'a> From<VC<'a>> for Array {
-    fn from(value: VC<'a>) -> Self {
+impl From<&[Change]> for AR {
+    fn from(value: &[Change]) -> Self {
         let changes: Array = value
-            .0
             .iter()
             .map(|c| Uint8Array::from(c.raw_bytes()))
             .collect();
-        changes
+        AR(changes)
     }
 }
 
-#[allow(clippy::upper_case_acronyms)]
-struct VSH<'a>(&'a [am::SyncHave]);
-
-impl<'a> From<VSH<'a>> for Array {
-    fn from(value: VSH<'a>) -> Self {
-        value
-            .0
+impl From<&[am::SyncHave]> for AR {
+    fn from(value: &[am::SyncHave]) -> Self {
+        AR(value
             .iter()
             .map(|have| {
                 let last_sync: Array = have
@@ -933,7 +935,7 @@ impl<'a> From<VSH<'a>> for Array {
                 Reflect::set(&obj, &"bloom".into(), &bloom.into()).unwrap();
                 obj
             })
-            .collect()
+            .collect())
     }
 }
 

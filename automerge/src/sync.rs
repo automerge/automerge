@@ -71,11 +71,7 @@ impl Automerge {
             Vec::new()
         };
 
-        let heads_unchanged = if let Some(last_sent_heads) = sync_state.last_sent_heads.as_ref() {
-            last_sent_heads == &our_heads
-        } else {
-            false
-        };
+        let heads_unchanged = sync_state.last_sent_heads == our_heads;
 
         let heads_equal = if let Some(their_heads) = sync_state.their_heads.as_ref() {
             their_heads == &our_heads
@@ -90,7 +86,7 @@ impl Automerge {
         // deduplicate the changes to send with those we have already sent
         changes_to_send.retain(|change| !sync_state.sent_hashes.contains(&change.hash));
 
-        sync_state.last_sent_heads = Some(our_heads.clone());
+        sync_state.last_sent_heads = our_heads.clone();
         sync_state
             .sent_hashes
             .extend(changes_to_send.iter().map(|c| c.hash));
@@ -144,7 +140,7 @@ impl Automerge {
         self.filter_changes(&message_heads, &mut sync_state.sent_hashes);
 
         if changes_is_empty && message_heads == before_heads {
-            sync_state.last_sent_heads = Some(message_heads.clone());
+            sync_state.last_sent_heads = message_heads.clone();
         }
 
         let known_heads = message_heads
@@ -155,7 +151,7 @@ impl Automerge {
             sync_state.shared_heads = message_heads.clone();
             // If the remote peer has lost all its data, reset our state to perform a full resync
             if message_heads.is_empty() {
-                sync_state.last_sent_heads = Some(Default::default());
+                sync_state.last_sent_heads = Default::default();
                 sync_state.sent_hashes = Default::default();
             }
         } else {
