@@ -253,13 +253,16 @@ function decodeSyncState() {
   return AutomergeWASM.decodeSyncState(state)
 }
 
-function generateSyncMessage(doc, syncState) {
+function generateSyncMessage(doc, inState) {
   const state = doc[STATE]
-  const result = state.generateSyncMessage(syncState)
-  return result
+  const syncState = AutomergeWASM.importSyncState(inState)
+  const message = state.generateSyncMessage(syncState)
+  const outState = AutomergeWASM.exportSyncState(syncState)
+  return [ outState, message ]
 }
 
-function receiveSyncMessage(doc, syncState, message) {
+function receiveSyncMessage(doc, inState, message) {
+  const syncState = AutomergeWASM.importSyncState(inState)
   if (doc === undefined || doc[STATE] === undefined || doc[OBJECT_ID] !== "_root") {
     throw new RangeError("must be the document root");
   }
@@ -274,13 +277,14 @@ function receiveSyncMessage(doc, syncState, message) {
   }
   const state = doc[STATE]
   const heads = state.getHeads()
-  const newSyncState = state.receiveSyncMessage(syncState, message)
+  state.receiveSyncMessage(syncState, message)
+  const outState = AutomergeWASM.exportSyncState(syncState)
   doc[HEADS] = heads
-  return [rootProxy(state, true), newSyncState, null];
+  return [rootProxy(state, true), outState, null];
 }
 
 function initSyncState() {
-  return AutomergeWASM.initSyncState(change)
+  return AutomergeWASM.exportSyncState(AutomergeWASM.initSyncState(change))
 }
 
 function encodeChange(change) {
