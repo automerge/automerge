@@ -9,9 +9,6 @@
   1. single pass (fast) load
   2. micro-patches / bare bones observation API / fully hydrated documents
 
-### sync
-  1. get all sync tests passing
-
 ### maybe:
   1. tables
 
