@@ -238,10 +238,7 @@ impl Automerge {
         let obj = self.import(obj)?;
         let value = self.import_value(value, datatype.as_string())?;
         let index = self.0.length(&obj);
-        let opid = self
-            .0
-            .insert(&obj, index, value)
-            .map_err(to_js_err)?;
+        let opid = self.0.insert(&obj, index, value).map_err(to_js_err)?;
         match opid {
             Some(opid) => Ok(self.export(opid)),
             None => Ok(JsValue::null()),
