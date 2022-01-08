@@ -1,10 +1,8 @@
 extern crate web_sys;
 use automerge as am;
-use automerge::{Change, ChangeHash, ObjId, Prop, Value};
+use automerge::{Change, ChangeHash, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Reflect, Uint8Array};
-//use serde::de::DeserializeOwned;
-//use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::Display;
@@ -48,7 +46,7 @@ impl From<ScalarValue> for JsValue {
             am::ScalarValue::Uint(v) => (*v as f64).into(),
             am::ScalarValue::F64(v) => (*v).into(),
             am::ScalarValue::Counter(v) => (*v as f64).into(),
-            am::ScalarValue::Timestamp(v) => (*v as f64).into(),
+            am::ScalarValue::Timestamp(v) => js_sys::Date::new(&(*v as f64).into()).into(),
             am::ScalarValue::Boolean(v) => (*v).into(),
             am::ScalarValue::Null => JsValue::null(),
         }
@@ -63,7 +61,6 @@ pub struct Automerge(automerge::Automerge);
 #[derive(Debug)]
 pub struct SyncState(am::SyncState);
 
-/*
 #[wasm_bindgen]
 impl SyncState {
     #[wasm_bindgen(getter, js_name = sharedHeads)]
@@ -77,19 +74,32 @@ impl SyncState {
     }
 
     #[wasm_bindgen(setter, js_name = lastSentHeads)]
-    pub fn set_last_sent_heads(&mut self, heads: JsValue) {
-        let heads: Vec<ChangeHash> = JS(heads).try_into().unwrap();
-        self.0.last_sent_heads = heads
+    pub fn set_last_sent_heads(&mut self, heads: JsValue) -> Result<(), JsValue> {
+        let heads: Vec<ChangeHash> = JS(heads).try_into()?;
+        self.0.last_sent_heads = heads;
+        Ok(())
     }
 
     #[wasm_bindgen(setter, js_name = sentHashes)]
-    pub fn set_sent_hashes(&mut self, hashes: JsValue) {
-        let hashes_map: HashMap<ChangeHash, bool> = js_to_rust(&hashes).unwrap();
+    pub fn set_sent_hashes(&mut self, hashes: JsValue) -> Result<(), JsValue> {
+        let hashes_map: HashMap<ChangeHash, bool> = hashes.into_serde().map_err(to_js_err)?;
         let hashes_set: HashSet<ChangeHash> = hashes_map.keys().cloned().collect();
-        self.0.sent_hashes = hashes_set
+        self.0.sent_hashes = hashes_set;
+        Ok(())
+    }
+
+    fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
+        let data = data.to_vec();
+        let s = am::SyncState::decode(&data);
+        let s = s.map_err(to_js_err)?;
+        Ok(SyncState(s))
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn clone(&self) -> Self {
+        SyncState(self.0.clone())
     }
 }
-*/
 
 #[derive(Debug)]
 pub struct JsErr(String);
@@ -118,8 +128,13 @@ impl Automerge {
     }
 
     #[allow(clippy::should_implement_trait)]
-    pub fn clone(&self) -> Self {
-        Automerge(self.0.clone())
+    pub fn clone(&self, actor: JsValue) -> Result<Automerge, JsValue> {
+        let mut automerge = Automerge(self.0.clone());
+        if let Some(s) = actor.as_string() {
+            let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+            automerge.0.set_actor(actor)
+        }
+        Ok(automerge)
     }
 
     pub fn free(self) {}
@@ -211,6 +226,25 @@ impl Automerge {
                     .collect();
                 Ok(result.into())
             }
+        }
+    }
+
+    pub fn push(
+        &mut self,
+        obj: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let value = self.import_value(value, datatype.as_string())?;
+        let index = self.0.length(&obj);
+        let opid = self
+            .0
+            .insert(&obj, index, value)
+            .map_err(to_js_err)?;
+        match opid {
+            Some(opid) => Ok(self.export(opid)),
+            None => Ok(JsValue::null()),
         }
     }
 
@@ -420,7 +454,7 @@ impl Automerge {
 
     #[wasm_bindgen(js_name = getMissingDeps)]
     pub fn get_missing_deps(&mut self, heads: JsValue) -> Result<Array, JsValue> {
-        let heads: Vec<_> = JS(heads).try_into()?;
+        let heads: Vec<_> = JS(heads).try_into().unwrap_or_default();
         let deps = self.0.get_missing_deps(&heads);
         let deps: Array = deps
             .iter()
@@ -450,6 +484,11 @@ impl Automerge {
         } else {
             Ok(JsValue::null())
         }
+    }
+
+    #[wasm_bindgen(js_name = toJS)]
+    pub fn to_js(&mut self) -> JsValue {
+        map_to_js(&mut self.0, &ROOT)
     }
 
     fn export(&self, val: ObjId) -> JsValue {
@@ -525,6 +564,8 @@ impl Automerge {
                     }
                 } else if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
+                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                    Ok(am::ScalarValue::Timestamp(d.get_time() as i64).into())
                 } else if let Ok(o) = &value.dyn_into::<Uint8Array>() {
                     Ok(am::ScalarValue::Bytes(o.to_vec()).into())
                 } else {
@@ -670,20 +711,16 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 }
 
 #[wasm_bindgen(js_name = encodeSyncState)]
-pub fn encode_sync_state(state: JsValue) -> Result<Uint8Array, JsValue> {
-    let state: am::SyncState = JS(state).try_into()?;
+pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
+    let state = state.0;
     Ok(Uint8Array::from(
         state.encode().map_err(to_js_err)?.as_slice(),
     ))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]
-pub fn decode_sync_state(data: Uint8Array) -> Result<JsValue, JsValue> {
-    //SyncState::decode(state)
-    let data = data.to_vec();
-    let s = am::SyncState::decode(&data);
-    let s = s.map_err(to_js_err)?;
-    Ok(JS::from(s).0)
+pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, JsValue> {
+    SyncState::decode(data)
 }
 
 #[wasm_bindgen(js_name = MAP)]
@@ -937,16 +974,52 @@ impl From<&[am::SyncHave]> for AR {
     }
 }
 
-/*
-fn rust_to_js<T: Serialize>(value: T) -> Result<JsValue, JsValue> {
-    JsValue::from_serde(&value).map_err(to_js_err)
-}
-
-fn js_to_rust<T: DeserializeOwned>(value: &JsValue) -> Result<T, JsValue> {
-    value.into_serde().map_err(to_js_err)
-}
-*/
-
 fn get_heads(heads: JsValue) -> Option<Vec<ChangeHash>> {
     JS(heads).into()
+}
+
+fn map_to_js(doc: &mut am::Automerge, obj: &ObjId) -> JsValue {
+    let keys = doc.keys(obj);
+    let map = Object::new();
+    for k in keys {
+        let val = doc.value(obj, &k);
+        match val {
+            Ok(Some((Value::Object(o), exid)))
+                if o == am::ObjType::Map || o == am::ObjType::Table =>
+            {
+                Reflect::set(&map, &k.into(), &map_to_js(doc, &exid)).unwrap();
+            }
+            Ok(Some((Value::Object(_), exid))) => {
+                Reflect::set(&map, &k.into(), &list_to_js(doc, &exid)).unwrap();
+            }
+            Ok(Some((Value::Scalar(v), _))) => {
+                Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
+            }
+            _ => (),
+        };
+    }
+    map.into()
+}
+
+fn list_to_js(doc: &mut am::Automerge, obj: &ObjId) -> JsValue {
+    let len = doc.length(obj);
+    let array = Array::new();
+    for i in 0..len {
+        let val = doc.value(obj, i as usize);
+        match val {
+            Ok(Some((Value::Object(o), exid)))
+                if o == am::ObjType::Map || o == am::ObjType::Table =>
+            {
+                array.push(&map_to_js(doc, &exid));
+            }
+            Ok(Some((Value::Object(_), exid))) => {
+                array.push(&list_to_js(doc, &exid));
+            }
+            Ok(Some((Value::Scalar(v), _))) => {
+                array.push(&ScalarValue(v).into());
+            }
+            _ => (),
+        };
+    }
+    array.into()
 }

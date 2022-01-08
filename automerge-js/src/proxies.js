@@ -40,6 +40,7 @@ function valueAt(target, prop) {
         case "boolean": return val;
         case "null": return null;
         case "bytes": return val;
+        case "timestamp": return val;
         case "counter": {
           if (readonly) {
             return new Counter(val);
@@ -47,7 +48,6 @@ function valueAt(target, prop) {
             return getWriteableCounter(val, context, path, objectId, prop)
           }
         }
-        case "timestamp": return new Date(val);
         default:
           throw RangeError(`datatype ${datatype} unimplemented`)
       }

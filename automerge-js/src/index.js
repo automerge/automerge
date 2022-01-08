@@ -246,11 +246,11 @@ function decodeSyncMessage(msg) {
 }
 
 function encodeSyncState(state) {
-  return AutomergeWASM.encodeSyncState(state)
+  return AutomergeWASM.encodeSyncState(AutomergeWASM.importSyncState(state))
 }
 
-function decodeSyncState() {
-  return AutomergeWASM.decodeSyncState(state)
+function decodeSyncState(state) {
+  return AutomergeWASM.exportSyncState(AutomergeWASM.decodeSyncState(state))
 }
 
 function generateSyncMessage(doc, inState) {
@@ -303,19 +303,8 @@ function decodeSyncMessage(data) {
   return AutomergeWASM.decodeSyncMessage(data)
 }
 
-function encodeSyncState(change) {
-  return AutomergeWASM.encodeSyncState(change)
-}
-
-function decodeSyncState(data) {
-  return AutomergeWASM.decodeSyncState(data)
-}
-
 function getMissingDeps(doc, heads) {
   const state = doc[STATE]
-  if (!heads) {
-    heads = []
-  }
   return state.getMissingDeps(heads)
 }
 
