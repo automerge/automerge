@@ -5,7 +5,7 @@ use crate::{decoding, decoding::Decoder, encoding, BloomFilter, ChangeHash};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SyncState {
     pub shared_heads: Vec<ChangeHash>,
     pub last_sent_heads: Vec<ChangeHash>,
@@ -52,18 +52,5 @@ impl SyncState {
             their_have: Some(Vec::new()),
             sent_hashes: HashSet::new(),
         })
-    }
-}
-
-impl Default for SyncState {
-    fn default() -> Self {
-        Self {
-            shared_heads: Vec::new(),
-            last_sent_heads: Vec::new(),
-            their_heads: None,
-            their_need: None,
-            their_have: None,
-            sent_hashes: HashSet::new(),
-        }
     }
 }
