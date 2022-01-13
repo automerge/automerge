@@ -466,9 +466,9 @@ impl Automerge {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
-                    self.ops
-                        .search(obj, query::Prop::new(obj, p))
-                        .ops
+                    let mut result = self.ops.search(obj, query::Prop::new(obj, p));
+                    result.ops.sort_by(|a,b| self.ops.m.lamport_cmp(a.id,b.id));
+                    result.ops
                         .into_iter()
                         .map(|o| (o.value(), self.id_to_exid(o.id)))
                         .collect()
@@ -476,13 +476,14 @@ impl Automerge {
                     vec![]
                 }
             }
-            Prop::Seq(n) => self
-                .ops
-                .search(obj, query::Nth::new(n))
-                .ops
-                .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) => {
+                let mut result = self.ops.search(obj, query::Nth::new(n));
+                result.ops.sort_by(|a,b| self.ops.m.lamport_cmp(a.id,b.id));
+                result.ops
+                  .into_iter()
+                  .map(|o| (o.value(), self.id_to_exid(o.id)))
+                  .collect()
+            }
         };
         Ok(result)
     }
@@ -500,9 +501,10 @@ impl Automerge {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
-                    self.ops
-                        .search(obj, query::PropAt::new(p, clock))
-                        .ops
+                    let mut result = self.ops
+                        .search(obj, query::PropAt::new(p, clock));
+                    result.ops.sort_by(|a,b| self.ops.m.lamport_cmp(a.id,b.id));
+                    result.ops
                         .into_iter()
                         .map(|o| (o.value(), self.id_to_exid(o.id)))
                         .collect()
@@ -510,13 +512,14 @@ impl Automerge {
                     vec![]
                 }
             }
-            Prop::Seq(n) => self
-                .ops
-                .search(obj, query::NthAt::new(n, clock))
-                .ops
-                .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
-                .collect(),
+            Prop::Seq(n) => {
+                let mut result = self.ops.search(obj, query::NthAt::new(n, clock));
+                result.ops.sort_by(|a,b| self.ops.m.lamport_cmp(a.id,b.id));
+                result.ops
+                  .into_iter()
+                  .map(|o| (o.value(), self.id_to_exid(o.id)))
+                  .collect()
+            }
         };
         Ok(result)
     }
