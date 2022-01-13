@@ -2,7 +2,7 @@ use std::fmt;
 
 use smol_str::SmolStr;
 
-use crate::legacy::ScalarValue;
+use crate::value::ScalarValue;
 
 impl From<&str> for ScalarValue {
     fn from(s: &str) -> Self {
@@ -48,7 +48,7 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Int(i) => write!(f, "{}", i),
             ScalarValue::Uint(i) => write!(f, "{}", i),
             ScalarValue::F64(n) => write!(f, "{:.324}", n),
-            ScalarValue::Counter(_, c, _) => write!(f, "Counter: {}", c),
+            ScalarValue::Counter(c) => write!(f, "Counter: {}", c),
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
             ScalarValue::Null => write!(f, "null"),

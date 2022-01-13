@@ -9,7 +9,7 @@ use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
 pub(crate) use crate::clock::Clock;
-pub(crate) use crate::value::{ScalarValue, Value};
+pub(crate) use crate::value::{Counter, ScalarValue, Value};
 
 pub(crate) const HEAD: ElemId = ElemId(OpId(0, 0));
 pub(crate) const ROOT: OpId = OpId(0, 0);
@@ -337,20 +337,30 @@ pub(crate) struct Op {
 impl Op {
     pub(crate) fn add_succ(&mut self, op: &Op) {
         self.succ.push(op.id);
-        if let OpType::Set(ScalarValue::Counter(_orig, total, incs)) = &mut self.action {
+        if let OpType::Set(ScalarValue::Counter(Counter {
+            current,
+            increments,
+            ..
+        })) = &mut self.action
+        {
             if let OpType::Inc(n) = &op.action {
-                *total += *n;
-                *incs += 1;
+                *current += *n;
+                *increments += 1;
             }
         }
     }
 
     pub(crate) fn remove_succ(&mut self, op: &Op) {
         self.succ.retain(|id| id != &op.id);
-        if let OpType::Set(ScalarValue::Counter(_orig, total, incs)) = &mut self.action {
+        if let OpType::Set(ScalarValue::Counter(Counter {
+            current,
+            increments,
+            ..
+        })) = &mut self.action
+        {
             if let OpType::Inc(n) = &op.action {
-                *total -= *n;
-                *incs -= 1;
+                *current -= *n;
+                *increments -= 1;
             }
         }
     }
@@ -366,8 +376,8 @@ impl Op {
     }
 
     pub fn incs(&self) -> usize {
-        if let OpType::Set(ScalarValue::Counter(_, _, incs)) = &self.action {
-            *incs
+        if let OpType::Set(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
+            *increments
         } else {
             0
         }
@@ -382,7 +392,7 @@ impl Op {
     }
 
     pub fn is_counter(&self) -> bool {
-        matches!(&self.action, OpType::Set(ScalarValue::Counter(_, _, _)))
+        matches!(&self.action, OpType::Set(ScalarValue::Counter(_)))
     }
 
     pub fn is_noop(&self, action: &OpType) -> bool {

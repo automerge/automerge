@@ -242,7 +242,7 @@ impl From<automerge::ScalarValue> for OrdScalarValue {
             automerge::ScalarValue::Int(v) => OrdScalarValue::Int(v),
             automerge::ScalarValue::Uint(v) => OrdScalarValue::Uint(v),
             automerge::ScalarValue::F64(v) => OrdScalarValue::F64(decorum::Total::from(v)),
-            automerge::ScalarValue::Counter(v, _, _) => OrdScalarValue::Counter(v),
+            automerge::ScalarValue::Counter(c) => OrdScalarValue::Counter(c.into()),
             automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
             automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
             automerge::ScalarValue::Null => OrdScalarValue::Null,

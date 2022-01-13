@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::query::{binary_search_by, is_visible, visible_op, QueryResult, TreeQuery};
+use crate::query::{binary_search_by, QueryResult, TreeQuery};
 use crate::types::{Key, ObjId, Op};
 use std::fmt::Debug;
 
@@ -34,18 +34,15 @@ impl<const B: usize> TreeQuery<B> for Prop {
             m.lamport_cmp(op.obj.0, self.obj.0)
                 .then_with(|| m.key_cmp(&op.key, &self.key))
         });
-        let mut counters = Default::default();
         self.pos = start;
         for pos in start..child.len() {
             let op = child.get(pos).unwrap();
             if !(op.obj == self.obj && op.key == self.key) {
                 break;
             }
-            if is_visible(op, pos, &mut counters) {
-                for (vpos, vop) in visible_op(op, pos, &counters) {
-                    self.ops.push(vop);
-                    self.ops_pos.push(vpos);
-                }
+            if op.visible() {
+                self.ops.push(op.clone());
+                self.ops_pos.push(pos);
             }
             self.pos += 1;
         }

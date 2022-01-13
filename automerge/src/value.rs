@@ -1,8 +1,9 @@
 use crate::error;
 use crate::types::{ObjType, Op, OpId, OpType};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
 use std::convert::TryFrom;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -158,7 +159,73 @@ pub(crate) enum DataType {
     Undefined,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Debug, Clone)]
+pub struct Counter {
+    pub(crate) start: i64,
+    pub(crate) current: i64,
+    pub(crate) increments: usize,
+}
+
+impl Serialize for Counter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i64(self.start)
+    }
+}
+
+impl fmt::Display for Counter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.current)
+    }
+}
+
+impl From<i64> for Counter {
+    fn from(n: i64) -> Self {
+        Counter {
+            start: n,
+            current: n,
+            increments: 0,
+        }
+    }
+}
+
+impl From<&i64> for Counter {
+    fn from(n: &i64) -> Self {
+        Counter {
+            start: *n,
+            current: *n,
+            increments: 0,
+        }
+    }
+}
+
+impl From<&Counter> for i64 {
+    fn from(val: &Counter) -> Self {
+        val.current
+    }
+}
+
+impl From<Counter> for i64 {
+    fn from(val: Counter) -> Self {
+        val.current
+    }
+}
+
+impl From<&Counter> for u64 {
+    fn from(val: &Counter) -> Self {
+        val.current as u64
+    }
+}
+
+impl From<&Counter> for f64 {
+    fn from(val: &Counter) -> Self {
+        val.current as f64
+    }
+}
+
+#[derive(Serialize, PartialEq, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
@@ -166,27 +233,15 @@ pub enum ScalarValue {
     Int(i64),
     Uint(u64),
     F64(f64),
-    Counter(i64, i64, usize),
+    Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
     Null,
 }
 
-// we need to define manually now b/c of Counter
-impl PartialEq for ScalarValue {
+impl PartialEq for Counter {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Str(a), Self::Str(b)) => a == b,
-            (Self::Int(a), Self::Int(b)) => a == b,
-            (Self::Uint(a), Self::Uint(b)) => a == b,
-            (Self::Counter(_, a, _), Self::Counter(_, b, _)) => a == b,
-            (Self::Timestamp(a), Self::Timestamp(b)) => a == b,
-            (Self::Boolean(a), Self::Boolean(b)) => a == b,
-            (Self::Null, Self::Null) => true,
-            (Self::F64(a), Self::F64(b)) => a.eq(b),
-            (Self::Bytes(a), Self::Bytes(b)) => a.eq(b),
-            _ => false,
-        }
+        self.current == other.current
     }
 }
 
@@ -196,9 +251,9 @@ impl ScalarValue {
         datatype: DataType,
     ) -> Result<ScalarValue, error::InvalidScalarValue> {
         match (datatype, self) {
-            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i, *i, 0)),
+            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(i.into())),
             (DataType::Counter, ScalarValue::Uint(u)) => match i64::try_from(*u) {
-                Ok(i) => Ok(ScalarValue::Counter(i, i, 0)),
+                Ok(i) => Ok(ScalarValue::Counter(i.into())),
                 Err(_) => Err(error::InvalidScalarValue {
                     raw_value: self.clone(),
                     expected: "an integer".to_string(),
@@ -284,7 +339,7 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n),
             ScalarValue::Uint(n) => Some(*n as i64),
             ScalarValue::F64(n) => Some(*n as i64),
-            ScalarValue::Counter(_, n, _) => Some(*n),
+            ScalarValue::Counter(n) => Some(n.into()),
             ScalarValue::Timestamp(n) => Some(*n),
             _ => None,
         }
@@ -295,7 +350,7 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n as u64),
             ScalarValue::Uint(n) => Some(*n),
             ScalarValue::F64(n) => Some(*n as u64),
-            ScalarValue::Counter(_, n, _) => Some(*n as u64),
+            ScalarValue::Counter(n) => Some(n.into()),
             ScalarValue::Timestamp(n) => Some(*n as u64),
             _ => None,
         }
@@ -306,13 +361,13 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n as f64),
             ScalarValue::Uint(n) => Some(*n as f64),
             ScalarValue::F64(n) => Some(*n),
-            ScalarValue::Counter(_, n, _) => Some(*n as f64),
+            ScalarValue::Counter(n) => Some(n.into()),
             ScalarValue::Timestamp(n) => Some(*n as f64),
             _ => None,
         }
     }
 
     pub fn counter(n: i64) -> ScalarValue {
-        ScalarValue::Counter(n, n, 0)
+        ScalarValue::Counter(n.into())
     }
 }
