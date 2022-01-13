@@ -1,19 +1,17 @@
-use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::query::{binary_search_by, QueryResult, TreeQuery};
-use crate::types::{ElemId, ObjId, Op};
+use crate::op_tree::OpTreeNode;
+use crate::query::{QueryResult, TreeQuery};
+use crate::types::{ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ListVals {
-    obj: ObjId,
     last_elem: Option<ElemId>,
     pub ops: Vec<Op>,
 }
 
 impl ListVals {
-    pub fn new(obj: ObjId) -> Self {
+    pub fn new() -> Self {
         ListVals {
-            obj,
             last_elem: None,
             ops: vec![],
         }
@@ -21,17 +19,10 @@ impl ListVals {
 }
 
 impl<const B: usize> TreeQuery<B> for ListVals {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
-        let start = binary_search_by(child, |op| m.lamport_cmp(op.obj.0, self.obj.0));
+    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+        let start = 0;
         for pos in start..child.len() {
             let op = child.get(pos).unwrap();
-            if op.obj != self.obj {
-                break;
-            }
             if op.insert {
                 self.last_elem = None;
             }
