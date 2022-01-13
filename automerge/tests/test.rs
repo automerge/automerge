@@ -1,4 +1,4 @@
-use automerge::Automerge;
+use automerge::{ Automerge, ActorId, ROOT, Value };
 
 mod helpers;
 #[allow(unused_imports)]
@@ -883,4 +883,80 @@ fn save_restore_complex() {
             ]}
         }
     );
+}
+
+#[test]
+fn list_counter_del() -> Result<(), automerge::AutomergeError> {
+    let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
+    v.sort();
+    println!("{:?}", v);
+    let actor1 = v[2].clone();
+    let actor2 = v[1].clone();
+    let actor3 = v[0].clone();
+
+    let mut doc1 = new_doc_with_actor(actor1);
+
+    let list = doc1.set(&ROOT, "list", Value::list())?.unwrap();
+    doc1.insert(&list, 0, "a")?;
+    doc1.insert(&list, 1, "b")?;
+    doc1.insert(&list, 2, "c")?;
+
+    let mut doc2 = Automerge::load(&doc1.save()?)?;
+    doc2.set_actor(actor2);
+
+    let mut doc3 = Automerge::load(&doc1.save()?)?;
+    doc3.set_actor(actor3);
+
+    doc1.set(&list, 1, Value::counter(0))?;
+    doc2.set(&list, 1, Value::counter(10))?;
+    doc3.set(&list, 1, Value::counter(100))?;
+
+    doc1.set(&list, 2, Value::counter(0))?;
+    doc2.set(&list, 2, Value::counter(10))?;
+    doc3.set(&list, 2, Value::int(100))?;
+
+    doc1.inc(&list, 1, 1)?;
+    doc1.inc(&list, 2, 1)?;
+
+    doc1.merge(&mut doc2);
+    doc1.merge(&mut doc3);
+
+    let values = doc1.values(&list, 1)?;
+    assert_eq!(values.len(), 3);
+    assert_eq!(&values[0].0, &Value::counter(1));
+    assert_eq!(&values[1].0, &Value::counter(10));
+    assert_eq!(&values[2].0, &Value::counter(100));
+
+    let values = doc1.values(&list, 2)?;
+    assert_eq!(values.len(), 3);
+    assert_eq!(&values[0].0, &Value::counter(1));
+    assert_eq!(&values[1].0, &Value::counter(10));
+    assert_eq!(&values[2].0, &Value::int(100));
+
+    doc1.inc(&list, 1, 1)?;
+    doc1.inc(&list, 2, 1)?;
+
+    let values = doc1.values(&list, 1)?;
+    assert_eq!(values.len(), 3);
+    assert_eq!(&values[0].0, &Value::counter(2));
+    assert_eq!(&values[1].0, &Value::counter(11));
+    assert_eq!(&values[2].0, &Value::counter(101));
+
+    let values = doc1.values(&list, 2)?;
+    assert_eq!(values.len(), 2);
+    assert_eq!(&values[0].0, &Value::counter(2));
+    assert_eq!(&values[1].0, &Value::counter(11));
+
+    assert_eq!(doc1.length(&list), 3);
+
+    println!("-------------");
+    doc1.del(&list,2)?;
+
+    //assert_eq!(doc1.length(&list), 2);
+
+    //let doc2 = Automerge::load(&doc1.save()?);
+
+    //assert_eq!(doc1.length(&list), 2);
+
+    Ok(())
 }
