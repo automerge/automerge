@@ -197,7 +197,7 @@ macro_rules! list {
 }
 
 pub fn mk_counter(value: i64) -> automerge::ScalarValue {
-    automerge::ScalarValue::Counter(value)
+    automerge::ScalarValue::counter(value)
 }
 
 #[derive(Eq, Hash, PartialEq, Debug)]
@@ -242,7 +242,7 @@ impl From<automerge::ScalarValue> for OrdScalarValue {
             automerge::ScalarValue::Int(v) => OrdScalarValue::Int(v),
             automerge::ScalarValue::Uint(v) => OrdScalarValue::Uint(v),
             automerge::ScalarValue::F64(v) => OrdScalarValue::F64(decorum::Total::from(v)),
-            automerge::ScalarValue::Counter(v) => OrdScalarValue::Counter(v),
+            automerge::ScalarValue::Counter(v, _, _) => OrdScalarValue::Counter(v),
             automerge::ScalarValue::Timestamp(v) => OrdScalarValue::Timestamp(v),
             automerge::ScalarValue::Boolean(v) => OrdScalarValue::Boolean(v),
             automerge::ScalarValue::Null => OrdScalarValue::Null,
@@ -258,7 +258,7 @@ impl From<&OrdScalarValue> for automerge::ScalarValue {
             OrdScalarValue::Int(v) => automerge::ScalarValue::Int(*v),
             OrdScalarValue::Uint(v) => automerge::ScalarValue::Uint(*v),
             OrdScalarValue::F64(v) => automerge::ScalarValue::F64(v.into_inner()),
-            OrdScalarValue::Counter(v) => automerge::ScalarValue::Counter(*v),
+            OrdScalarValue::Counter(v) => automerge::ScalarValue::counter(*v),
             OrdScalarValue::Timestamp(v) => automerge::ScalarValue::Timestamp(*v),
             OrdScalarValue::Boolean(v) => automerge::ScalarValue::Boolean(*v),
             OrdScalarValue::Null => automerge::ScalarValue::Null,

@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery, VisWindow};
+use crate::query::{QueryResult, TreeQuery};
 use crate::types::{ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
@@ -11,7 +11,6 @@ pub(crate) struct InsertNth<const B: usize> {
     pub pos: usize,
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
-    window: VisWindow,
 }
 
 impl<const B: usize> InsertNth<B> {
@@ -22,7 +21,6 @@ impl<const B: usize> InsertNth<B> {
             pos: 0,
             last_seen: None,
             last_insert: None,
-            window: Default::default(),
         }
     }
 
@@ -71,7 +69,7 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
-        if self.last_seen.is_none() && self.window.visible(element, self.pos) {
+        if self.last_seen.is_none() && element.visible() {
             self.seen += 1;
             self.last_seen = element.elemid()
         }

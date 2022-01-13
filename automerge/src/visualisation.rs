@@ -131,7 +131,7 @@ impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisua
     }
 
     fn node_id(&'a self, n: &&Node<'a, B>) -> dot::Id<'a> {
-        dot::Id::new(format!("node_{}", n.id.0.to_string())).unwrap()
+        dot::Id::new(format!("node_{}", n.id.0)).unwrap()
     }
 
     fn node_shape(&'a self, node: &&'a Node<'a, B>) -> Option<dot::LabelText<'a>> {

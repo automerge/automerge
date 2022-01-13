@@ -204,7 +204,7 @@ impl<'de> Deserialize<'de> for Op {
                         Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
                         Some(ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::Counter(n)) => Ok(OpType::Inc(n)),
+                        Some(ScalarValue::Counter(n, _, _)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
                         Some(ScalarValue::Bytes(s)) => {
                             Err(Error::invalid_value(Unexpected::Bytes(&s), &"a number"))
@@ -376,7 +376,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Counter(123)),
+                    action: OpType::Set(ScalarValue::Counter(123, 123, 0)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,

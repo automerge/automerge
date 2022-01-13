@@ -47,8 +47,19 @@ impl<const B: usize> TreeQuery<B> for NthAt<B> {
         }
         if self.seen == self.target + 1 && visible {
             for (vpos, vop) in self.window.seen_op(element, self.pos) {
-                self.ops.push(vop);
-                self.ops_pos.push(vpos);
+                if vop.is_counter() {
+                    // this could be out of order because of inc's - we can find the right place
+                    // since pos will always be in order
+                    let pos = self
+                        .ops_pos
+                        .binary_search_by(|probe| probe.cmp(&vpos))
+                        .unwrap_err();
+                    self.ops.insert(pos, vop);
+                    self.ops_pos.insert(pos, vpos);
+                } else {
+                    self.ops.push(vop);
+                    self.ops_pos.push(vpos);
+                }
             }
         }
         self.pos += 1;
