@@ -47,7 +47,7 @@ impl Value {
     }
 
     pub fn counter(n: i64) -> Value {
-        Value::Scalar(ScalarValue::Counter(n))
+        Value::Scalar(ScalarValue::counter(n))
     }
 
     pub fn timestamp(n: i64) -> Value {
@@ -158,7 +158,7 @@ pub(crate) enum DataType {
     Undefined,
 }
 
-#[derive(Serialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),
@@ -166,10 +166,28 @@ pub enum ScalarValue {
     Int(i64),
     Uint(u64),
     F64(f64),
-    Counter(i64),
+    Counter(i64, i64, usize),
     Timestamp(i64),
     Boolean(bool),
     Null,
+}
+
+// we need to define manually now b/c of Counter
+impl PartialEq for ScalarValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Str(a), Self::Str(b)) => a == b,
+            (Self::Int(a), Self::Int(b)) => a == b,
+            (Self::Uint(a), Self::Uint(b)) => a == b,
+            (Self::Counter(_, a, _), Self::Counter(_, b, _)) => a == b,
+            (Self::Timestamp(a), Self::Timestamp(b)) => a == b,
+            (Self::Boolean(a), Self::Boolean(b)) => a == b,
+            (Self::Null, Self::Null) => true,
+            (Self::F64(a), Self::F64(b)) => a.eq(b),
+            (Self::Bytes(a), Self::Bytes(b)) => a.eq(b),
+            _ => false,
+        }
+    }
 }
 
 impl ScalarValue {
@@ -178,9 +196,9 @@ impl ScalarValue {
         datatype: DataType,
     ) -> Result<ScalarValue, error::InvalidScalarValue> {
         match (datatype, self) {
-            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i)),
+            (DataType::Counter, ScalarValue::Int(i)) => Ok(ScalarValue::Counter(*i, *i, 0)),
             (DataType::Counter, ScalarValue::Uint(u)) => match i64::try_from(*u) {
-                Ok(i) => Ok(ScalarValue::Counter(i)),
+                Ok(i) => Ok(ScalarValue::Counter(i, i, 0)),
                 Err(_) => Err(error::InvalidScalarValue {
                     raw_value: self.clone(),
                     expected: "an integer".to_string(),
@@ -266,7 +284,7 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n),
             ScalarValue::Uint(n) => Some(*n as i64),
             ScalarValue::F64(n) => Some(*n as i64),
-            ScalarValue::Counter(n) => Some(*n),
+            ScalarValue::Counter(_, n, _) => Some(*n),
             ScalarValue::Timestamp(n) => Some(*n),
             _ => None,
         }
@@ -277,7 +295,7 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n as u64),
             ScalarValue::Uint(n) => Some(*n),
             ScalarValue::F64(n) => Some(*n as u64),
-            ScalarValue::Counter(n) => Some(*n as u64),
+            ScalarValue::Counter(_, n, _) => Some(*n as u64),
             ScalarValue::Timestamp(n) => Some(*n as u64),
             _ => None,
         }
@@ -288,9 +306,13 @@ impl ScalarValue {
             ScalarValue::Int(n) => Some(*n as f64),
             ScalarValue::Uint(n) => Some(*n as f64),
             ScalarValue::F64(n) => Some(*n),
-            ScalarValue::Counter(n) => Some(*n as f64),
+            ScalarValue::Counter(_, n, _) => Some(*n as f64),
             ScalarValue::Timestamp(n) => Some(*n as f64),
             _ => None,
         }
+    }
+
+    pub fn counter(n: i64) -> ScalarValue {
+        ScalarValue::Counter(n, n, 0)
     }
 }

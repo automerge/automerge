@@ -102,7 +102,7 @@ impl Index {
 
         assert!(new.key == old.key);
 
-        match (new.succ.is_empty(), old.succ.is_empty(), new.elemid()) {
+        match (new.visible(), old.visible(), new.elemid()) {
             (false, true, Some(elem)) => match self.visible.get(&elem).copied() {
                 Some(n) if n == 1 => {
                     self.len -= 1;
@@ -128,7 +128,7 @@ impl Index {
 
     pub fn insert(&mut self, op: &Op) {
         self.ops.insert(op.id);
-        if op.succ.is_empty() {
+        if op.visible() {
             if let Some(elem) = op.elemid() {
                 match self.visible.get(&elem).copied() {
                     Some(n) => {
@@ -145,7 +145,7 @@ impl Index {
 
     pub fn remove(&mut self, op: &Op) {
         self.ops.remove(&op.id);
-        if op.succ.is_empty() {
+        if op.visible() {
             if let Some(elem) = op.elemid() {
                 match self.visible.get(&elem).copied() {
                     Some(n) if n == 1 => {
@@ -191,44 +191,6 @@ pub(crate) struct VisWindow {
 }
 
 impl VisWindow {
-    fn visible(&mut self, op: &Op, pos: usize) -> bool {
-        let mut visible = false;
-        match op.action {
-            OpType::Set(ScalarValue::Counter(val)) => {
-                self.counters.insert(
-                    op.id,
-                    CounterData {
-                        pos,
-                        val,
-                        succ: op.succ.iter().cloned().collect(),
-                        op: op.clone(),
-                    },
-                );
-                if op.succ.is_empty() {
-                    visible = true;
-                }
-            }
-            OpType::Inc(inc_val) => {
-                for id in &op.pred {
-                    if let Some(mut entry) = self.counters.get_mut(id) {
-                        entry.succ.remove(&op.id);
-                        entry.val += inc_val;
-                        entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
-                        if entry.succ.is_empty() {
-                            visible = true;
-                        }
-                    }
-                }
-            }
-            _ => {
-                if op.succ.is_empty() {
-                    visible = true;
-                }
-            }
-        };
-        visible
-    }
-
     fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
         if !clock.covers(&op.id) {
             return false;
@@ -236,7 +198,7 @@ impl VisWindow {
 
         let mut visible = false;
         match op.action {
-            OpType::Set(ScalarValue::Counter(val)) => {
+            OpType::Set(ScalarValue::Counter(val, _, _)) => {
                 self.counters.insert(
                     op.id,
                     CounterData {
@@ -256,7 +218,7 @@ impl VisWindow {
                     if let Some(mut entry) = self.counters.get_mut(id) {
                         entry.succ.remove(&op.id);
                         entry.val += inc_val;
-                        entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
+                        entry.op.action = OpType::Set(ScalarValue::counter(entry.val));
                         if !entry.succ.iter().any(|i| clock.covers(i)) {
                             visible = true;
                         }
@@ -290,7 +252,7 @@ impl VisWindow {
 pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
     let mut visible = false;
     match op.action {
-        OpType::Set(ScalarValue::Counter(val)) => {
+        OpType::Set(ScalarValue::Counter(val, _, _)) => {
             counters.insert(
                 op.id,
                 CounterData {
@@ -309,7 +271,7 @@ pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, Count
                 if let Some(mut entry) = counters.get_mut(id) {
                     entry.succ.remove(&op.id);
                     entry.val += inc_val;
-                    entry.op.action = OpType::Set(ScalarValue::Counter(entry.val));
+                    entry.op.action = OpType::Set(ScalarValue::counter(entry.val));
                     if entry.succ.is_empty() {
                         visible = true;
                     }

@@ -448,7 +448,7 @@ impl Automerge {
             Some("counter") => value
                 .as_f64()
                 .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Counter(v as i64).into()),
+                .map(|v| am::ScalarValue::counter(v as i64).into()),
             Some("timestamp") => value
                 .as_f64()
                 .ok_or_else(|| "value must be a number".into())

@@ -1,6 +1,6 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery, VisWindow};
+use crate::query::{QueryResult, TreeQuery};
 use crate::types::{ElemId, Key, Op};
 use std::fmt::Debug;
 
@@ -10,7 +10,6 @@ pub(crate) struct Nth<const B: usize> {
     seen: usize,
     last_seen: Option<ElemId>,
     last_elem: Option<ElemId>,
-    window: VisWindow,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
@@ -26,7 +25,6 @@ impl<const B: usize> Nth<B> {
             ops_pos: vec![],
             pos: 0,
             last_elem: None,
-            window: Default::default(),
         }
     }
 
@@ -71,16 +69,14 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
             self.last_elem = element.elemid();
             self.last_seen = None
         }
-        let visible = self.window.visible(element, self.pos);
+        let visible = element.visible();
         if visible && self.last_seen.is_none() {
             self.seen += 1;
             self.last_seen = element.elemid()
         }
         if self.seen == self.target + 1 && visible {
-            for (vpos, vop) in self.window.seen_op(element, self.pos) {
-                self.ops.push(vop);
-                self.ops_pos.push(vpos);
-            }
+            self.ops.push(element.clone());
+            self.ops_pos.push(self.pos);
         }
         self.pos += 1;
         QueryResult::Next

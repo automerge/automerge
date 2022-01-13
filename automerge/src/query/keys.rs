@@ -1,20 +1,16 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery, VisWindow};
+use crate::query::{QueryResult, TreeQuery};
 use crate::types::Key;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Keys<const B: usize> {
     pub keys: Vec<Key>,
-    window: VisWindow,
 }
 
 impl<const B: usize> Keys<B> {
     pub fn new() -> Self {
-        Keys {
-            keys: vec![],
-            window: Default::default(),
-        }
+        Keys { keys: vec![] }
     }
 }
 
@@ -23,8 +19,7 @@ impl<const B: usize> TreeQuery<B> for Keys<B> {
         let mut last = None;
         for i in 0..child.len() {
             let op = child.get(i).unwrap();
-            let visible = self.window.visible(op, i);
-            if Some(op.key) != last && visible {
+            if Some(op.key) != last && op.visible() {
                 self.keys.push(op.key);
                 last = Some(op.key);
             }

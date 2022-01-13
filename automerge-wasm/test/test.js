@@ -1184,13 +1184,10 @@ describe('Automerge', () => {
         n2.applyChanges(n1.getChanges([]))
         n1.set("_root","x",`3 @ n1`); n1.commit("",0)
         n2.set("_root","x",`3 @ n2`); n2.commit("",0)
-//n1 = Automerge.change(n1, {time: 0}, doc => doc.x = `3 @ n1`)
-//n2 = Automerge.change(n2, {time: 0}, doc => doc.x = `3 @ n2`)
 
         for (let i = 0; i < 3; i++) {
           n3.set("_root","x",`${i} @ n3`); n3.commit("",0)
         }
-//n3 = Automerge.change(n3, {time: 0}, doc => doc.x = `${i} @ n3`)
         const n1c3 = n1.getHeads()[0], n2c3 = n2.getHeads()[0], n3c3 = n3.getHeads()[0]
         s13 = decodeSyncState(encodeSyncState(s13))
         s31 = decodeSyncState(encodeSyncState(s31))

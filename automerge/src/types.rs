@@ -335,8 +335,54 @@ pub(crate) struct Op {
 }
 
 impl Op {
+    pub(crate) fn add_succ(&mut self, op: &Op) {
+        self.succ.push(op.id);
+        if let OpType::Set(ScalarValue::Counter(_orig, total, incs)) = &mut self.action {
+            if let OpType::Inc(n) = &op.action {
+                *total += *n;
+                *incs += 1;
+            }
+        }
+    }
+
+    pub(crate) fn remove_succ(&mut self, op: &Op) {
+        self.succ.retain(|id| id != &op.id);
+        if let OpType::Set(ScalarValue::Counter(_orig, total, incs)) = &mut self.action {
+            if let OpType::Inc(n) = &op.action {
+                *total -= *n;
+                *incs -= 1;
+            }
+        }
+    }
+
+    pub fn visible(&self) -> bool {
+        if self.is_inc() {
+            false
+        } else if self.is_counter() {
+            self.succ.len() <= self.incs()
+        } else {
+            self.succ.is_empty()
+        }
+    }
+
+    pub fn incs(&self) -> usize {
+        if let OpType::Set(ScalarValue::Counter(_, _, incs)) = &self.action {
+            *incs
+        } else {
+            0
+        }
+    }
+
     pub fn is_del(&self) -> bool {
         matches!(&self.action, OpType::Del)
+    }
+
+    pub fn is_inc(&self) -> bool {
+        matches!(&self.action, OpType::Inc(_))
+    }
+
+    pub fn is_counter(&self) -> bool {
+        matches!(&self.action, OpType::Set(ScalarValue::Counter(_, _, _)))
     }
 
     pub fn is_noop(&self, action: &OpType) -> bool {

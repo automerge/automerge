@@ -775,12 +775,14 @@ describe('Automerge', () => {
       })
 
       // counter
-      it.skip('should not allow deleting counters from lists', () => {
+      /*
+      it('should not allow deleting counters from lists', () => {
         const s1 = Automerge.change(Automerge.init(), doc => doc.recordings = [new Automerge.Counter(1)])
         const s2 = Automerge.change(s1, doc => doc.recordings[0].increment(2))
         assert.deepStrictEqual(s2, {recordings: [new Automerge.Counter(3)]})
         assert.throws(() => { Automerge.change(s2, doc => doc.recordings.deleteAt(0)) }, /Unsupported operation/)
       })
+      */
     })
   })
 

@@ -1,6 +1,6 @@
 use crate::ActorId;
+use std::cmp::{Ord, Ordering};
 use std::fmt;
-use std::cmp::{ Ord, Ordering };
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone)]
@@ -52,8 +52,8 @@ impl Ord for ExId {
             (ExId::Root, ExId::Root) => Ordering::Equal,
             (ExId::Root, _) => Ordering::Less,
             (_, ExId::Root) => Ordering::Greater,
-            (ExId::Id(c1, a1, _), ExId::Id(c2, a2, _)) if c1 == c2 => a2.cmp(&a1),
-            (ExId::Id(c1, _, _), ExId::Id(c2, _, _)) => c1.cmp(&c2),
+            (ExId::Id(c1, a1, _), ExId::Id(c2, a2, _)) if c1 == c2 => a2.cmp(a1),
+            (ExId::Id(c1, _, _), ExId::Id(c2, _, _)) => c1.cmp(c2),
         }
     }
 }

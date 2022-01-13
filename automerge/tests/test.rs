@@ -1,4 +1,4 @@
-use automerge::{ Automerge, ActorId, ROOT, Value };
+use automerge::{ActorId, Automerge, Value, ROOT};
 
 mod helpers;
 #[allow(unused_imports)]
@@ -949,14 +949,21 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 3);
 
-    println!("-------------");
-    doc1.del(&list,2)?;
+    doc1.del(&list, 2)?;
 
-    //assert_eq!(doc1.length(&list), 2);
+    assert_eq!(doc1.length(&list), 2);
 
-    //let doc2 = Automerge::load(&doc1.save()?);
+    let doc4 = Automerge::load(&doc1.save()?)?;
 
-    //assert_eq!(doc1.length(&list), 2);
+    assert_eq!(doc4.length(&list), 2);
+
+    doc1.del(&list, 1)?;
+
+    assert_eq!(doc1.length(&list), 1);
+
+    let doc5 = Automerge::load(&doc1.save()?)?;
+
+    assert_eq!(doc5.length(&list), 1);
 
     Ok(())
 }

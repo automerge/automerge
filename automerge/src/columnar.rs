@@ -397,7 +397,7 @@ impl<'a> Iterator for ValueIterator<'a> {
                 if len != self.val_raw.last_read {
                     return None;
                 }
-                Some(ScalarValue::Counter(val))
+                Some(ScalarValue::counter(val))
             }
             v if v % 16 == VALUE_TYPE_TIMESTAMP => {
                 let len = v >> 4;
@@ -569,7 +569,7 @@ impl ValEncoder {
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            ScalarValue::Counter(count) => {
+            ScalarValue::Counter(count, _, _) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
@@ -613,7 +613,7 @@ impl ValEncoder {
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            ScalarValue::Counter(count) => {
+            ScalarValue::Counter(count, _, _) => {
                 let len = count.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
