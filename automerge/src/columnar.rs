@@ -569,8 +569,8 @@ impl ValEncoder {
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            ScalarValue::Counter(count, _, _) => {
-                let len = count.encode(&mut self.raw).unwrap();
+            ScalarValue::Counter(count) => {
+                let len = count.start.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
             ScalarValue::Timestamp(time) => {
@@ -613,8 +613,8 @@ impl ValEncoder {
                 self.raw.extend(bytes);
                 self.len.append_value(len << 4 | VALUE_TYPE_UTF8);
             }
-            ScalarValue::Counter(count, _, _) => {
-                let len = count.encode(&mut self.raw).unwrap();
+            ScalarValue::Counter(c) => {
+                let len = c.start.encode(&mut self.raw).unwrap();
                 self.len.append_value(len << 4 | VALUE_TYPE_COUNTER);
             }
             ScalarValue::Timestamp(time) => {

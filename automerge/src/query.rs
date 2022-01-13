@@ -1,5 +1,5 @@
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
-use crate::types::{Clock, ElemId, Op, OpId, OpType, ScalarValue};
+use crate::types::{Clock, Counter, ElemId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -198,12 +198,12 @@ impl VisWindow {
 
         let mut visible = false;
         match op.action {
-            OpType::Set(ScalarValue::Counter(val, _, _)) => {
+            OpType::Set(ScalarValue::Counter(Counter { start, .. })) => {
                 self.counters.insert(
                     op.id,
                     CounterData {
                         pos,
-                        val,
+                        val: start,
                         succ: op.succ.iter().cloned().collect(),
                         op: op.clone(),
                     },
@@ -246,62 +246,6 @@ impl VisWindow {
         } else {
             result
         }
-    }
-}
-
-pub(crate) fn is_visible(op: &Op, pos: usize, counters: &mut HashMap<OpId, CounterData>) -> bool {
-    let mut visible = false;
-    match op.action {
-        OpType::Set(ScalarValue::Counter(val, _, _)) => {
-            counters.insert(
-                op.id,
-                CounterData {
-                    pos,
-                    val,
-                    succ: op.succ.iter().cloned().collect(),
-                    op: op.clone(),
-                },
-            );
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-        OpType::Inc(inc_val) => {
-            for id in &op.pred {
-                if let Some(mut entry) = counters.get_mut(id) {
-                    entry.succ.remove(&op.id);
-                    entry.val += inc_val;
-                    entry.op.action = OpType::Set(ScalarValue::counter(entry.val));
-                    if entry.succ.is_empty() {
-                        visible = true;
-                    }
-                }
-            }
-        }
-        _ => {
-            if op.succ.is_empty() {
-                visible = true;
-            }
-        }
-    };
-    visible
-}
-
-pub(crate) fn visible_op(
-    op: &Op,
-    pos: usize,
-    counters: &HashMap<OpId, CounterData>,
-) -> Vec<(usize, Op)> {
-    let mut result = vec![];
-    for pred in &op.pred {
-        if let Some(entry) = counters.get(pred) {
-            result.push((entry.pos, entry.op.clone()));
-        }
-    }
-    if result.is_empty() {
-        vec![(pos, op.clone())]
-    } else {
-        result
     }
 }
 
