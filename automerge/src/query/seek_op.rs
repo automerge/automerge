@@ -22,10 +22,6 @@ impl<const B: usize> SeekOp<B> {
         }
     }
 
-    fn different_obj(&self, op: &Op) -> bool {
-        op.obj != self.op.obj
-    }
-
     fn lesser_insert(&self, op: &Op, m: &OpSetMetadata) -> bool {
         op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less
     }
@@ -112,13 +108,13 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 self.succ.push(self.pos);
             }
             if self.op.insert {
-                if self.different_obj(e) || self.lesser_insert(e, m) {
+                if self.lesser_insert(e, m) {
                     QueryResult::Finish
                 } else {
                     self.pos += 1;
                     QueryResult::Next
                 }
-            } else if e.insert || self.different_obj(e) || self.greater_opid(e, m) {
+            } else if e.insert || self.greater_opid(e, m) {
                 QueryResult::Finish
             } else {
                 self.pos += 1;

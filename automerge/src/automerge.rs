@@ -411,7 +411,7 @@ impl Automerge {
 
     pub fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let query = self.ops.search(obj, query::ListVals::new(obj));
+        let query = self.ops.search(obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -465,7 +465,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(obj, query::Prop::new(obj, p))
+                        .search(obj, query::Prop::new(p))
                         .ops
                         .into_iter()
                         .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -584,7 +584,7 @@ impl Automerge {
 
         let id = self.next_id();
         let prop = self.ops.m.props.cache(prop);
-        let query = self.ops.search(obj, query::Prop::new(obj, prop));
+        let query = self.ops.search(obj, query::Prop::new(prop));
 
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
             return Ok(None);
