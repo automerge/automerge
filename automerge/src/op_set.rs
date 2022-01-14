@@ -1,7 +1,7 @@
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
-use crate::types::{ActorId, Key, ObjId, Op, OpId};
+use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -11,16 +11,16 @@ pub(crate) type OpSet = OpSetInternal<16>;
 #[derive(Debug, Clone)]
 pub(crate) struct OpSetInternal<const B: usize> {
     trees: HashMap<ObjId, OpTreeInternal<B>, FxBuildHasher>,
-    objs: Vec<ObjId>,
     length: usize,
     pub m: OpSetMetadata,
 }
 
 impl<const B: usize> OpSetInternal<B> {
     pub fn new() -> Self {
+        let mut trees: HashMap<_, _, _> = Default::default();
+        trees.insert(ObjId::root(), Default::default());
         OpSetInternal {
-            trees: Default::default(),
-            objs: Default::default(),
+            trees,
             length: 0,
             m: OpSetMetadata {
                 actors: IndexedCache::new(),
@@ -30,10 +30,13 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn iter(&self) -> Iter<'_, B> {
+        let mut objs: Vec<_> = self.trees.keys().collect();
+        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
         Iter {
             inner: self,
             index: 0,
             sub_index: 0,
+            objs,
         }
     }
 
@@ -74,23 +77,15 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn insert(&mut self, index: usize, element: Op) {
-        let Self {
-            ref mut trees,
-            ref mut objs,
-            ref mut m,
-            ..
-        } = self;
-        trees
-            .entry(element.obj)
-            .or_insert_with(|| {
-                let pos = objs
-                    .binary_search_by(|probe| m.lamport_cmp(probe.0, element.obj.0))
-                    .unwrap_err();
-                objs.insert(pos, element.obj);
-                Default::default()
-            })
-            .insert(index, element);
-        self.length += 1;
+        if let OpType::Make(_) = element.action {
+            self.trees.insert(element.id.into(), Default::default());
+        }
+
+        if let Some(tree) = self.trees.get_mut(&element.obj) {
+            //let tree = self.trees.get_mut(&element.obj).unwrap();
+            tree.insert(index, element);
+            self.length += 1;
+        }
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -114,9 +109,12 @@ impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
     type IntoIter = Iter<'a, B>;
 
     fn into_iter(self) -> Self::IntoIter {
+        let mut objs: Vec<_> = self.trees.keys().collect();
+        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
         Iter {
             inner: self,
             index: 0,
+            objs,
             sub_index: 0,
         }
     }
@@ -125,6 +123,7 @@ impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
 pub(crate) struct Iter<'a, const B: usize> {
     inner: &'a OpSetInternal<B>,
     index: usize,
+    objs: Vec<&'a ObjId>,
     sub_index: usize,
 }
 
@@ -132,20 +131,19 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     type Item = &'a Op;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let obj = self.inner.objs.get(self.index)?;
-        let tree = self.inner.trees.get(obj)?;
-        self.sub_index += 1;
-        if let Some(op) = tree.get(self.sub_index - 1) {
-            Some(op)
-        } else {
-            self.index += 1;
-            self.sub_index = 1;
-            // FIXME is it possible that a rolled back transaction could break the iterator by
-            // having an empty tree?
-            let obj = self.inner.objs.get(self.index)?;
+        let mut result = None;
+        for obj in self.objs.iter().skip(self.index) {
             let tree = self.inner.trees.get(obj)?;
-            tree.get(self.sub_index - 1)
+            result = tree.get(self.sub_index);
+            if result.is_some() {
+                self.sub_index += 1;
+                break;
+            } else {
+                self.index += 1;
+                self.sub_index = 0;
+            }
         }
+        result
     }
 }
 
