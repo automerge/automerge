@@ -40,6 +40,7 @@ mod query;
 mod sync;
 mod types;
 mod value;
+mod value_ref;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 

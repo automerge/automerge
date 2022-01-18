@@ -40,6 +40,12 @@ impl From<char> for ScalarValue {
     }
 }
 
+impl From<()> for ScalarValue {
+    fn from(_: ()) -> Self {
+        ScalarValue::Null
+    }
+}
+
 impl fmt::Display for ScalarValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

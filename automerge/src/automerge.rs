@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -8,7 +9,8 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
 };
-use crate::{legacy, query, types};
+use crate::value_ref::MapRef;
+use crate::{legacy, query, types, ROOT};
 use crate::{AutomergeError, Change, Prop};
 
 #[derive(Debug, Clone)]
@@ -226,8 +228,9 @@ impl Automerge {
         }
     }
 
-    pub fn length(&self, obj: &ExId) -> usize {
-        if let Ok(obj) = self.exid_to_obj(obj) {
+    /// Get the length of an object.
+    pub fn length<O: Borrow<ExId>>(&self, obj: O) -> usize {
+        if let Ok(obj) = self.exid_to_obj(obj.borrow()) {
             self.ops.search(obj, query::Len::new()).len
         } else {
             0
@@ -261,13 +264,13 @@ impl Automerge {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<Value>>(
+    pub fn set<O: Borrow<ExId>, P: Into<Prop>, V: Into<Value>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
+        let obj = self.exid_to_obj(obj.borrow())?;
         let value = value.into();
         if let Some(id) = self.local_op(obj, prop.into(), value.into())? {
             Ok(Some(self.id_to_exid(id)))
@@ -302,13 +305,13 @@ impl Automerge {
         ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
     }
 
-    pub fn insert<V: Into<Value>>(
+    pub fn insert<O: Borrow<ExId>, V: Into<Value>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
+        let obj = self.exid_to_obj(obj.borrow())?;
         if let Some(id) = self.do_insert(obj, index, value)? {
             Ok(Some(self.id_to_exid(id)))
         } else {
@@ -434,15 +437,22 @@ impl Automerge {
         Ok(buffer)
     }
 
+    pub fn root(&self) -> MapRef {
+        MapRef {
+            obj: ROOT,
+            doc: self,
+        }
+    }
+
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    pub fn value<P: Into<Prop>>(
+    pub fn value<O: Borrow<ExId>, P: Into<Prop>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.values(obj, prop.into())?.first().cloned())
+        Ok(self.values(obj.borrow(), prop.into())?.first().cloned())
     }
 
     pub fn value_at<P: Into<Prop>>(
