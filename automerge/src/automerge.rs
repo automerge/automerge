@@ -253,7 +253,7 @@ impl Automerge {
     /// # Returns
     ///
     /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
+    /// document or create a new object.
     ///
     /// # Errors
     ///
@@ -1132,6 +1132,20 @@ mod tests {
         doc.set(&ROOT, "hello", "world")?;
         assert!(doc.pending_ops() == 1);
         doc.value(&ROOT, "hello")?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_set() -> Result<(), AutomergeError> {
+        let mut doc = Automerge::new();
+        // setting a scalar value shouldn't return an opid as no object was created.
+        assert!(doc.set(&ROOT, "a", 1)?.is_none());
+        // setting the same value shouldn't return an opid as there is no change.
+        assert!(doc.set(&ROOT, "a", 1)?.is_none());
+
+        assert!(doc.set(&ROOT, "b", Value::map())?.is_some());
+        // object already exists at b but setting a map again overwrites it so we get an opid.
+        assert!(doc.set(&ROOT, "b", Value::map())?.is_some());
         Ok(())
     }
 
