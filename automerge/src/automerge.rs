@@ -1253,31 +1253,38 @@ mod tests {
         doc.commit(None, None);
         let heads5 = doc.get_heads();
         assert!(doc.keys_at(&ROOT, &heads1) == vec!["prop1".to_owned()]);
+        assert_eq!(doc.length_at(&ROOT, &heads1), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
         assert!(doc.value_at(&ROOT, "prop2", &heads1)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads1)? == None);
 
         assert!(doc.keys_at(&ROOT, &heads2) == vec!["prop1".to_owned()]);
+        assert_eq!(doc.length_at(&ROOT, &heads2), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads2)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads2)? == None);
 
         assert!(doc.keys_at(&ROOT, &heads3) == vec!["prop1".to_owned(), "prop2".to_owned()]);
+        assert_eq!(doc.length_at(&ROOT, &heads3), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads3)? == None);
 
         assert!(doc.keys_at(&ROOT, &heads4) == vec!["prop2".to_owned()]);
+        assert_eq!(doc.length_at(&ROOT, &heads4), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads4)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads4)? == None);
 
         assert!(doc.keys_at(&ROOT, &heads5) == vec!["prop2".to_owned(), "prop3".to_owned()]);
+        assert_eq!(doc.length_at(&ROOT, &heads5), 2);
+        assert_eq!(doc.length(&ROOT), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads5)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
         assert!(doc.keys_at(&ROOT, &[]).is_empty());
+        assert_eq!(doc.length_at(&ROOT, &[]), 0);
         assert!(doc.value_at(&ROOT, "prop1", &[])? == None);
         assert!(doc.value_at(&ROOT, "prop2", &[])? == None);
         assert!(doc.value_at(&ROOT, "prop3", &[])? == None);
@@ -1329,6 +1336,7 @@ mod tests {
         assert!(doc.value_at(&list, 1, &heads5)?.unwrap().0 == Value::int(50));
 
         assert!(doc.length_at(&list, &heads6) == 1);
+        assert!(doc.length(&list) == 1);
         assert!(doc.value_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
 
         Ok(())
