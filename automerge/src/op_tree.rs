@@ -49,11 +49,6 @@ impl<const B: usize> OpTreeInternal<B> {
         query
     }
 
-    /// Check if the sequence is empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
     /// Create an iterator through the sequence.
     pub fn iter(&self) -> Iter<'_, B> {
         Iter {
