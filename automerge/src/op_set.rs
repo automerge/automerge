@@ -2,6 +2,7 @@ use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
+use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -10,7 +11,7 @@ pub(crate) type OpSet = OpSetInternal<16>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSetInternal<const B: usize> {
-    trees: HashMap<ObjId, OpTreeInternal<B>, FxBuildHasher>,
+    trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
     length: usize,
     pub m: OpSetMetadata,
 }
@@ -18,7 +19,7 @@ pub(crate) struct OpSetInternal<const B: usize> {
 impl<const B: usize> OpSetInternal<B> {
     pub fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), Default::default());
+        trees.insert(ObjId::root(), (ObjType::Map, Default::default()));
         OpSetInternal {
             trees,
             length: 0,
@@ -44,7 +45,7 @@ impl<const B: usize> OpSetInternal<B> {
     where
         Q: TreeQuery<B>,
     {
-        if let Some(tree) = self.trees.get(&obj) {
+        if let Some((_typ, tree)) = self.trees.get(&obj) {
             tree.search(query, &self.m)
         } else {
             query
@@ -55,7 +56,7 @@ impl<const B: usize> OpSetInternal<B> {
     where
         F: FnMut(&mut Op),
     {
-        if let Some(tree) = self.trees.get_mut(&obj) {
+        if let Some((_typ, tree)) = self.trees.get_mut(&obj) {
             tree.replace(index, f)
         } else {
             None
@@ -63,7 +64,7 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn remove(&mut self, obj: ObjId, index: usize) -> Op {
-        let tree = self.trees.get_mut(&obj).unwrap();
+        let (_typ, tree) = self.trees.get_mut(&obj).unwrap();
         self.length -= 1;
         let op = tree.remove(index);
         if tree.is_empty() {
@@ -77,15 +78,20 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn insert(&mut self, index: usize, element: Op) {
-        if let OpType::Make(_) = element.action {
-            self.trees.insert(element.id.into(), Default::default());
+        if let OpType::Make(typ) = element.action {
+            self.trees
+                .insert(element.id.into(), (typ, Default::default()));
         }
 
-        if let Some(tree) = self.trees.get_mut(&element.obj) {
+        if let Some((_typ, tree)) = self.trees.get_mut(&element.obj) {
             //let tree = self.trees.get_mut(&element.obj).unwrap();
             tree.insert(index, element);
             self.length += 1;
         }
+    }
+
+    pub fn object_type(&self, id: &ObjId) -> Option<ObjType> {
+        self.trees.get(id).map(|(typ, _)| *typ)
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -133,7 +139,7 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
-            let tree = self.inner.trees.get(obj)?;
+            let (_typ, tree) = self.inner.trees.get(obj)?;
             result = tree.get(self.sub_index);
             if result.is_some() {
                 self.sub_index += 1;

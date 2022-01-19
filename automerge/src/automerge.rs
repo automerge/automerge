@@ -8,7 +8,7 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
 };
-use crate::{legacy, query, types};
+use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 
 #[derive(Debug, Clone)]
@@ -227,17 +227,29 @@ impl Automerge {
     }
 
     pub fn length(&self, obj: &ExId) -> usize {
-        if let Ok(obj) = self.exid_to_obj(obj) {
-            self.ops.search(obj, query::Len::new()).len
+        if let Ok(inner_obj) = self.exid_to_obj(obj) {
+            match self.ops.object_type(&inner_obj) {
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).len(),
+                Some(ObjType::List) | Some(ObjType::Text) => {
+                    self.ops.search(inner_obj, query::Len::new()).len
+                }
+                None => 0,
+            }
         } else {
             0
         }
     }
 
     pub fn length_at(&self, obj: &ExId, heads: &[ChangeHash]) -> usize {
-        if let Ok(obj) = self.exid_to_obj(obj) {
+        if let Ok(inner_obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
-            self.ops.search(obj, query::LenAt::new(clock)).len
+            match self.ops.object_type(&inner_obj) {
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).len(),
+                Some(ObjType::List) | Some(ObjType::Text) => {
+                    self.ops.search(inner_obj, query::LenAt::new(clock)).len
+                }
+                None => 0,
+            }
         } else {
             0
         }

@@ -43,13 +43,13 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
     pub(super) fn construct(
         trees: &'a HashMap<
             crate::types::ObjId,
-            crate::op_tree::OpTreeInternal<B>,
+            (crate::types::ObjType, crate::op_tree::OpTreeInternal<B>),
             BuildHasherDefault<FxHasher>,
         >,
         metadata: &'a crate::op_set::OpSetMetadata,
     ) -> GraphVisualisation<'a, B> {
         let mut nodes = HashMap::new();
-        for (obj_id, tree) in trees {
+        for (obj_id, (_, tree)) in trees {
             if let Some(root_node) = &tree.root_node {
                 let tree_id = Self::construct_nodes(root_node, &mut nodes, metadata);
                 let obj_tree_id = NodeId::default();
