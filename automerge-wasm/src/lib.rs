@@ -8,6 +8,7 @@ use wasm_bindgen::JsCast;
 
 mod interop;
 mod sync;
+mod transaction;
 mod value;
 
 use interop::{
@@ -15,6 +16,8 @@ use interop::{
 };
 use sync::SyncState;
 use value::{datatype, ScalarValue};
+
+pub use transaction::Transaction;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -92,6 +95,10 @@ impl Automerge {
 
     pub fn rollback(&mut self) -> f64 {
         self.0.rollback() as f64
+    }
+
+    pub fn tx(&mut self) -> Transaction {
+        Transaction(self.0.tx())
     }
 
     pub fn keys(&mut self, obj: String, heads: Option<Array>) -> Result<Array, JsValue> {
