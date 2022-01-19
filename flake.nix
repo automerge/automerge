@@ -42,6 +42,7 @@
                 cargo-criterion
                 cargo-fuzz
                 cargo-flamegraph
+                cargo-deny
                 crate2nix
                 wasm-pack
                 pkgconfig

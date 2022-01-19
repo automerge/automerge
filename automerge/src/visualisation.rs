@@ -69,8 +69,8 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
             actor_shorthands.insert(actor, format!("actor{}", actor));
         }
         GraphVisualisation {
-            actor_shorthands,
             nodes,
+            actor_shorthands,
         }
     }
 
