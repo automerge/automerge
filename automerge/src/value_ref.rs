@@ -1,15 +1,18 @@
 #[cfg(test)]
-use crate::{Automerge, ObjId, Value, ROOT};
+use crate::{Automerge, ObjId, ROOT};
 #[cfg(test)]
 use std::convert::TryFrom;
 
+use crate::Value;
 use crate::{Prop, ScalarValue};
 
 mod list;
 mod map;
 
 pub use list::ListRef;
+pub use list::ListRefMut;
 pub use map::MapRef;
+pub use map::MapRefMut;
 
 #[derive(Debug, PartialEq)]
 pub enum ValueRef<'a> {
@@ -39,9 +42,9 @@ impl<'a> ValueRef<'a> {
         self.len() == 0
     }
 
-    pub fn map(&self) -> Option<MapRef<'a>> {
+    pub fn map(&mut self) -> Option<&mut MapRef<'a>> {
         if let ValueRef::Map(map) = self {
-            Some(map.clone())
+            Some(map)
         } else {
             None
         }
@@ -57,6 +60,89 @@ impl<'a> ValueRef<'a> {
 
     pub fn scalar(&self) -> Option<ScalarValue> {
         if let ValueRef::Scalar(scalar) = self {
+            Some(scalar.clone())
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ValueRefMut<'a> {
+    Map(MapRefMut<'a>),
+    List(ListRefMut<'a>),
+    Scalar(ScalarValue),
+}
+
+impl<'a> ValueRefMut<'a> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef> {
+        match self {
+            ValueRefMut::Map(map) => map.get(prop),
+            ValueRefMut::List(l) => l.get(prop),
+            ValueRefMut::Scalar(_) => None,
+        }
+    }
+
+    pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<ValueRefMut> {
+        match self {
+            ValueRefMut::Map(map) => map.get_mut(prop),
+            ValueRefMut::List(l) => l.get_mut(prop),
+            ValueRefMut::Scalar(_) => None,
+        }
+    }
+
+    pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
+        match self {
+            ValueRefMut::Map(map) => map.insert(prop, value),
+            ValueRefMut::List(l) => todo!(),
+            ValueRefMut::Scalar(_) => {}
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            ValueRefMut::Map(map) => map.len(),
+            ValueRefMut::List(list) => list.len(),
+            ValueRefMut::Scalar(_) => 0,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn map(&self) -> Option<MapRef> {
+        if let ValueRefMut::Map(map) = self {
+            Some(MapRef {
+                obj: map.obj.clone(),
+                doc: map.doc,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn map_mut(&mut self) -> Option<&mut MapRefMut<'a>> {
+        if let ValueRefMut::Map(map) = self {
+            Some(map)
+        } else {
+            None
+        }
+    }
+
+    pub fn list(&self) -> Option<ListRef> {
+        if let ValueRefMut::List(list) = self {
+            Some(ListRef {
+                obj: list.obj.clone(),
+                doc: list.doc,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn scalar(&self) -> Option<ScalarValue> {
+        if let ValueRefMut::Scalar(scalar) = self {
             Some(scalar.clone())
         } else {
             None

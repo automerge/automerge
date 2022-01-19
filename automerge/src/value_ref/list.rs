@@ -1,7 +1,9 @@
 use crate::{Automerge, ObjId, ObjType, Prop, Value};
 
 use super::MapRef;
+use super::MapRefMut;
 use super::ValueRef;
+use super::ValueRefMut;
 
 #[derive(Debug, Clone)]
 pub struct ListRef<'a> {
@@ -40,6 +42,72 @@ impl<'a> ListRef<'a> {
                 })),
                 Value::Object(ObjType::Text) => todo!(),
                 Value::Scalar(s) => Some(ValueRef::Scalar(s)),
+            },
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = ValueRef> {
+        (0..self.len()).map(move |i| self.get(i).unwrap())
+    }
+}
+
+#[derive(Debug)]
+pub struct ListRefMut<'a> {
+    pub(crate) obj: ObjId,
+    pub(crate) doc: &'a mut Automerge,
+}
+
+impl<'a> PartialEq for ListRefMut<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.obj == other.obj
+            && self.len() == other.len()
+            && self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl<'a> ListRefMut<'a> {
+    pub fn len(&self) -> usize {
+        self.doc.length(&self.obj)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef> {
+        match self.doc.value(&self.obj, prop) {
+            Ok(Some((value, id))) => match value {
+                Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
+                    obj: id,
+                    doc: self.doc,
+                })),
+                Value::Object(ObjType::Table) => todo!(),
+                Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
+                    obj: id,
+                    doc: self.doc,
+                })),
+                Value::Object(ObjType::Text) => todo!(),
+                Value::Scalar(s) => Some(ValueRef::Scalar(s)),
+            },
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<ValueRefMut> {
+        match self.doc.value(&self.obj, prop) {
+            Ok(Some((value, id))) => match value {
+                Value::Object(ObjType::Map) => Some(ValueRefMut::Map(MapRefMut {
+                    obj: id,
+                    doc: self.doc,
+                })),
+                Value::Object(ObjType::Table) => todo!(),
+                Value::Object(ObjType::List) => Some(ValueRefMut::List(ListRefMut {
+                    obj: id,
+                    doc: self.doc,
+                })),
+                Value::Object(ObjType::Text) => todo!(),
+                Value::Scalar(s) => Some(ValueRefMut::Scalar(s)),
             },
             Ok(None) | Err(_) => None,
         }

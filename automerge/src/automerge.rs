@@ -10,6 +10,7 @@ use crate::types::{
     ScalarValue, Value,
 };
 use crate::value_ref::MapRef;
+use crate::value_ref::MapRefMut;
 use crate::{legacy, query, types, ROOT};
 use crate::{AutomergeError, Change, Prop};
 
@@ -366,6 +367,7 @@ impl Automerge {
         Ok(())
     }
 
+    /// Delete a prop if it exists.
     pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         self.local_op(obj, prop.into(), OpType::Del)?;
@@ -439,6 +441,13 @@ impl Automerge {
 
     pub fn root(&self) -> MapRef {
         MapRef {
+            obj: ROOT,
+            doc: self,
+        }
+    }
+
+    pub fn root_mut(&mut self) -> MapRefMut {
+        MapRefMut {
             obj: ROOT,
             doc: self,
         }
