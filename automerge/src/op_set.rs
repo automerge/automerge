@@ -64,11 +64,12 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn remove(&mut self, obj: ObjId, index: usize) -> Op {
+        // this happens on rollback - be sure to go back to the old state
         let (_typ, tree) = self.trees.get_mut(&obj).unwrap();
         self.length -= 1;
         let op = tree.remove(index);
-        if tree.is_empty() {
-            self.trees.remove(&obj);
+        if let OpType::Make(_) = &op.action {
+            self.trees.remove(&op.id.into());
         }
         op
     }
