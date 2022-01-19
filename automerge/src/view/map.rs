@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use itertools::Itertools;
 
-use crate::{Automerge, ChangeHash, ObjId, ObjType, Prop, Value};
+use crate::{Automerge, ChangeHash, ObjId, ObjType, Value};
 
 use super::{list::MutableListView, ListView, MutableView, View};
 
@@ -34,8 +34,8 @@ impl<'a, 'h> MapView<'a, 'h> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<View<'a, 'h>> {
-        match self.doc.value_at(&self.obj, key, &self.heads) {
+    pub fn get<S: Into<String>>(&self, key: S) -> Option<View<'a, 'h>> {
+        match self.doc.value_at(&self.obj, key.into(), &self.heads) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
@@ -55,7 +55,7 @@ impl<'a, 'h> MapView<'a, 'h> {
         }
     }
 
-    pub fn contains_key<P: Into<Prop>>(&self, key: P) -> bool {
+    pub fn contains_key<S: Into<String>>(&self, key: S) -> bool {
         self.get(key).is_some()
     }
 
@@ -112,8 +112,8 @@ impl<'a> MutableMapView<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<View> {
-        match self.doc.value(&self.obj, key) {
+    pub fn get<S: Into<String>>(&self, key: S) -> Option<View> {
+        match self.doc.value(&self.obj, key.into()) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
@@ -133,8 +133,8 @@ impl<'a> MutableMapView<'a> {
         }
     }
 
-    pub fn get_mut<P: Into<Prop>>(&mut self, key: P) -> Option<MutableView> {
-        match self.doc.value(&self.obj, key) {
+    pub fn get_mut<S: Into<String>>(&mut self, key: S) -> Option<MutableView> {
+        match self.doc.value(&self.obj, key.into()) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(MutableView::Map(MutableMapView {
                     obj: id,
@@ -152,20 +152,20 @@ impl<'a> MutableMapView<'a> {
         }
     }
 
-    pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
-        self.doc.set(&self.obj, prop, value).unwrap();
+    pub fn insert<S: Into<String>, V: Into<Value>>(&mut self, key: S, value: V) {
+        self.doc.set(&self.obj, key.into(), value).unwrap();
     }
 
     // TODO: change this to return the valueref that was removed, using the old heads, once
     // valueref can work in the past
-    pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
-        let prop = prop.into();
-        let exists = self.get(prop.clone()).is_some();
-        self.doc.del(&self.obj, prop).unwrap();
+    pub fn remove<S: Into<String>>(&mut self, key: S) -> bool {
+        let key = key.into();
+        let exists = self.get(key.clone()).is_some();
+        self.doc.del(&self.obj, key).unwrap();
         exists
     }
 
-    pub fn contains_key<P: Into<Prop>>(&self, key: P) -> bool {
+    pub fn contains_key<S: Into<String>>(&self, key: S) -> bool {
         self.get(key).is_some()
     }
 

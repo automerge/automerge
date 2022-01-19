@@ -24,10 +24,12 @@ pub enum View<'a, 'h> {
 
 impl<'a, 'h> View<'a, 'h> {
     pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View<'a, 'h>> {
-        match self {
-            View::Map(map) => map.get(prop),
-            View::List(l) => l.get(prop),
-            View::Scalar(_) => None,
+        match (prop.into(), self) {
+            (Prop::Map(key), View::Map(map)) => map.get(key),
+            (Prop::Seq(index), View::List(l)) => l.get(index),
+            (Prop::Seq(_), View::Map(_)) | (Prop::Map(_), View::List(_)) | (_, View::Scalar(_)) => {
+                None
+            }
         }
     }
 
@@ -77,34 +79,42 @@ pub enum MutableView<'a> {
 
 impl<'a> MutableView<'a> {
     pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View> {
-        match self {
-            MutableView::Map(map) => map.get(prop),
-            MutableView::List(l) => l.get(prop),
-            MutableView::Scalar(_) => None,
+        match (prop.into(), self) {
+            (Prop::Map(key), MutableView::Map(map)) => map.get(key),
+            (Prop::Seq(index), MutableView::List(l)) => l.get(index),
+            (Prop::Seq(_), MutableView::Map(_))
+            | (Prop::Map(_), MutableView::List(_))
+            | (_, MutableView::Scalar(_)) => None,
         }
     }
 
     pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<MutableView> {
-        match self {
-            MutableView::Map(map) => map.get_mut(prop),
-            MutableView::List(l) => l.get_mut(prop),
-            MutableView::Scalar(_) => None,
+        match (prop.into(), self) {
+            (Prop::Map(key), MutableView::Map(map)) => map.get_mut(key),
+            (Prop::Seq(index), MutableView::List(l)) => l.get_mut(index),
+            (Prop::Map(_), MutableView::List(_))
+            | (Prop::Seq(_), MutableView::Map(_))
+            | (_, MutableView::Scalar(_)) => None,
         }
     }
 
     pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
-        match self {
-            MutableView::Map(map) => map.insert(prop, value),
-            MutableView::List(list) => list.insert(prop, value),
-            MutableView::Scalar(_) => {}
+        match (prop.into(), self) {
+            (Prop::Map(key), MutableView::Map(map)) => map.insert(key, value),
+            (Prop::Seq(index), MutableView::List(list)) => list.insert(index, value),
+            (Prop::Map(_), MutableView::List(_))
+            | (Prop::Seq(_), MutableView::Map(_))
+            | (_, MutableView::Scalar(_)) => {}
         }
     }
 
     pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
-        match self {
-            MutableView::Map(map) => map.remove(prop),
-            MutableView::List(list) => list.remove(prop),
-            MutableView::Scalar(_) => false,
+        match (prop.into(), self) {
+            (Prop::Map(key), MutableView::Map(map)) => map.remove(key),
+            (Prop::Seq(index), MutableView::List(list)) => list.remove(index),
+            (Prop::Map(_), MutableView::List(_))
+            | (Prop::Seq(_), MutableView::Map(_))
+            | (_, MutableView::Scalar(_)) => false,
         }
     }
 

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::ChangeHash;
-use crate::{Automerge, ObjId, ObjType, Prop, Value};
+use crate::{Automerge, ObjId, ObjType, Value};
 
 use super::MapView;
 use super::MutableMapView;
@@ -32,8 +32,8 @@ impl<'a, 'h> ListView<'a, 'h> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View<'a, 'h>> {
-        match self.doc.value(&self.obj, prop) {
+    pub fn get(&self, index: usize) -> Option<View<'a, 'h>> {
+        match self.doc.value(&self.obj, index) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
@@ -81,8 +81,8 @@ impl<'a> MutableListView<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View> {
-        match self.doc.value(&self.obj, prop) {
+    pub fn get(&self, index: usize) -> Option<View> {
+        match self.doc.value(&self.obj, index) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
@@ -102,8 +102,8 @@ impl<'a> MutableListView<'a> {
         }
     }
 
-    pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<MutableView> {
-        match self.doc.value(&self.obj, prop) {
+    pub fn get_mut(&mut self, index: usize) -> Option<MutableView> {
+        match self.doc.value(&self.obj, index) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(MutableView::Map(MutableMapView {
                     obj: id,
@@ -121,16 +121,15 @@ impl<'a> MutableListView<'a> {
         }
     }
 
-    pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
-        self.doc.set(&self.obj, prop, value).unwrap();
+    pub fn insert<V: Into<Value>>(&mut self, index: usize, value: V) {
+        self.doc.set(&self.obj, index, value).unwrap();
     }
 
     // TODO: change this to return the valueref that was removed, using the old heads, once
     // valueref can work in the past
-    pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
-        let prop = prop.into();
-        let exists = self.get(prop.clone()).is_some();
-        self.doc.del(&self.obj, prop).unwrap();
+    pub fn remove(&mut self, index: usize) -> bool {
+        let exists = self.get(index).is_some();
+        self.doc.del(&self.obj, index).unwrap();
         exists
     }
 
