@@ -201,7 +201,7 @@ mod tests {
         }))
         .unwrap();
 
-        let root = doc.root();
+        let root = doc.view();
 
         assert!(matches!(
             root.get("a"),
@@ -239,7 +239,7 @@ mod tests {
         }))
         .unwrap();
 
-        let mut root = doc.root_mut();
+        let mut root = doc.view_mut();
 
         assert!(matches!(
             root.get("a"),
@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn nested_map() {
         let mut doc = Automerge::new();
-        let mut root = doc.root_mut();
+        let mut root = doc.view_mut();
 
         root.insert("a", Value::map());
         let mut a = root.get_mut("a").unwrap();

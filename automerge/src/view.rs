@@ -257,7 +257,7 @@ mod tests {
     fn get_map_key() {
         let mut doc = Automerge::try_from(json!({"a": 1})).unwrap();
 
-        let a_val = doc.root().get("a");
+        let a_val = doc.view().get("a");
         assert!(matches!(a_val, Some(View::Scalar(ScalarValue::Uint(1)))));
     }
 
@@ -265,7 +265,7 @@ mod tests {
     fn get_nested_map() {
         let mut doc = Automerge::try_from(json!({"a": {"b": 1}})).unwrap();
 
-        let b_val = doc.root().get("a").unwrap().get("b");
+        let b_val = doc.view().get("a").unwrap().get("b");
 
         assert!(matches!(b_val, Some(View::Scalar(ScalarValue::Uint(1)))));
     }
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn set_nested_map() {
         let mut doc = Automerge::new();
-        let mut root = doc.root_mut();
+        let mut root = doc.view_mut();
         root.insert("a", Value::map());
         let mut a = root.get_mut("a").unwrap();
         a.insert("b", 1);

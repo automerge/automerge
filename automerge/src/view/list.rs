@@ -154,7 +154,7 @@ mod tests {
         }))
         .unwrap();
 
-        let list = doc.root().get("a").unwrap().list().unwrap();
+        let list = doc.view().get("a").unwrap().list().unwrap();
 
         assert_eq!(list.get(0), Some(View::Scalar(ScalarValue::Uint(1))));
 

@@ -439,7 +439,7 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn root(&mut self) -> MapView {
+    pub fn view(&mut self) -> MapView {
         let heads = self.get_heads();
         MapView {
             obj: ROOT,
@@ -448,7 +448,7 @@ impl Automerge {
         }
     }
 
-    pub fn root_at<'a, 'h>(&'a self, heads: &'h [ChangeHash]) -> MapView<'a, 'h> {
+    pub fn view_at<'a, 'h>(&'a self, heads: &'h [ChangeHash]) -> MapView<'a, 'h> {
         MapView {
             obj: ROOT,
             doc: self,
@@ -456,7 +456,7 @@ impl Automerge {
         }
     }
 
-    pub fn root_mut(&mut self) -> MutableMapView {
+    pub fn view_mut(&mut self) -> MutableMapView {
         MutableMapView {
             obj: ROOT,
             doc: self,
