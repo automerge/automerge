@@ -1,4 +1,3 @@
-use crate::automerge::Transaction;
 use crate::columnar::{
     ChangeEncoder, ChangeIterator, ColumnEncoder, DepsIterator, DocChange, DocOp, DocOpEncoder,
     DocOpIterator, OperationIterator, COLUMN_TYPE_DEFLATE,
@@ -9,6 +8,7 @@ use crate::encoding::{Encodable, DEFLATE_MIN_SIZE};
 use crate::error::AutomergeError;
 use crate::indexed_cache::IndexedCache;
 use crate::legacy as amp;
+use crate::transaction::Transaction;
 use crate::types;
 use crate::types::{ActorId, ElemId, Key, ObjId, Op, OpId, OpType};
 use core::ops::Range;

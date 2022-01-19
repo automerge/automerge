@@ -23,7 +23,6 @@ const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identif
 
 impl Automerge {
     pub fn generate_sync_message(&mut self, sync_state: &mut SyncState) -> Option<SyncMessage> {
-        self.ensure_transaction_closed();
         self._generate_sync_message(sync_state)
     }
 
@@ -105,7 +104,6 @@ impl Automerge {
         sync_state: &mut SyncState,
         message: SyncMessage,
     ) -> Result<Option<Patch>, AutomergeError> {
-        self.ensure_transaction_closed();
         self._receive_sync_message(sync_state, message)
     }
 

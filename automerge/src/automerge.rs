@@ -1,6 +1,9 @@
-use crate::change::{encode_document, export_change};
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::op_set::OpSet;
+use crate::transaction::Transaction;
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
@@ -8,21 +11,18 @@ use crate::types::{
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
-use std::collections::{HashMap, HashSet, VecDeque};
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
     queue: Vec<Change>,
-    history: Vec<Change>,
+    pub(crate) history: Vec<Change>,
     history_index: HashMap<ChangeHash, usize>,
     states: HashMap<usize, Vec<usize>>,
     deps: HashSet<ChangeHash>,
     saved: Vec<ChangeHash>,
-    ops: OpSet,
+    pub(crate) ops: OpSet,
     actor: Option<usize>,
     max_op: u64,
-    transaction: Option<Transaction>,
 }
 
 impl Automerge {
@@ -37,12 +37,10 @@ impl Automerge {
             saved: Default::default(),
             actor: None,
             max_op: 0,
-            transaction: None,
         }
     }
 
     pub fn set_actor(&mut self, actor: ActorId) {
-        self.ensure_transaction_closed();
         self.actor = Some(self.ops.m.actors.cache(actor))
     }
 
@@ -84,117 +82,152 @@ impl Automerge {
             saved: Default::default(),
             actor: None,
             max_op: 0,
-            transaction: None,
         };
         am.actor = Some(am.ops.m.actors.cache(actor));
         am
     }
 
-    pub fn pending_ops(&self) -> u64 {
-        self.transaction
-            .as_ref()
-            .map(|t| t.operations.len() as u64)
-            .unwrap_or(0)
-    }
+    pub fn tx(&mut self) -> Transaction {
+        let actor = self.get_actor_index();
 
-    fn tx(&mut self) -> &mut Transaction {
-        if self.transaction.is_none() {
-            let actor = self.get_actor_index();
-
-            let seq = self.states.entry(actor).or_default().len() as u64 + 1;
-            let mut deps = self.get_heads();
-            if seq > 1 {
-                let last_hash = self.get_hash(actor, seq - 1).unwrap();
-                if !deps.contains(&last_hash) {
-                    deps.push(last_hash);
-                }
+        let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+        let mut deps = self.get_heads();
+        if seq > 1 {
+            let last_hash = self.get_hash(actor, seq - 1).unwrap();
+            if !deps.contains(&last_hash) {
+                deps.push(last_hash);
             }
-
-            self.transaction = Some(Transaction {
-                actor,
-                seq,
-                start_op: self.max_op + 1,
-                time: 0,
-                message: None,
-                extra_bytes: Default::default(),
-                hash: None,
-                operations: vec![],
-                deps,
-            });
         }
 
-        self.transaction.as_mut().unwrap()
+        Transaction {
+            actor,
+            seq,
+            start_op: self.max_op + 1,
+            time: 0,
+            message: None,
+            extra_bytes: Default::default(),
+            hash: None,
+            operations: vec![],
+            deps,
+            doc: self,
+        }
     }
 
     pub fn fork(&mut self) -> Self {
-        self.ensure_transaction_closed();
         let mut f = self.clone();
         f.actor = None;
         f
     }
 
-    pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
-        let tx = self.tx();
-
-        if message.is_some() {
-            tx.message = message;
-        }
-
-        if let Some(t) = time {
-            tx.time = t;
-        }
-
-        tx.operations.len();
-
-        self.ensure_transaction_closed();
-
-        self.get_heads()
-    }
-
-    pub fn ensure_transaction_closed(&mut self) {
-        if let Some(tx) = self.transaction.take() {
-            self.update_history(export_change(&tx, &self.ops.m.actors, &self.ops.m.props));
-        }
-    }
-
-    pub fn rollback(&mut self) -> usize {
-        if let Some(tx) = self.transaction.take() {
-            let num = tx.operations.len();
-            // remove in reverse order so sets are removed before makes etc...
-            for op in tx.operations.iter().rev() {
-                for pred_id in &op.pred {
-                    // FIXME - use query to make this fast
-                    if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
-                        self.ops.replace(op.obj, p, |o| o.remove_succ(op));
-                    }
-                }
-                if let Some(pos) = self.ops.iter().position(|o| o.id == op.id) {
-                    self.ops.remove(op.obj, pos);
-                }
+    pub fn set<P: Into<Prop>, V: Into<Value>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<Option<ExId>, AutomergeError> {
+        let mut tx = self.tx();
+        match tx.set(obj, prop, value) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
             }
-            num
-        } else {
-            0
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
         }
     }
 
-    fn next_id(&mut self) -> OpId {
-        let tx = self.tx();
-        OpId(tx.start_op + tx.operations.len() as u64, tx.actor)
+    pub fn insert<V: Into<Value>>(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<Option<ExId>, AutomergeError> {
+        let mut tx = self.tx();
+        match tx.insert(obj, index, value) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
+            }
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
+        }
     }
 
-    fn insert_local_op(&mut self, op: Op, pos: usize, succ_pos: &[usize]) {
-        for succ in succ_pos {
-            self.ops.replace(op.obj, *succ, |old_op| {
-                old_op.add_succ(&op);
-            });
+    pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
+        let mut tx = self.tx();
+        match tx.del(obj, prop) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
+            }
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
         }
+    }
 
-        if !op.is_del() {
-            self.ops.insert(pos, op.clone());
+    pub fn inc<P: Into<Prop>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: i64,
+    ) -> Result<(), AutomergeError> {
+        let mut tx = self.tx();
+        match tx.inc(obj, prop, value) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
+            }
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
         }
+    }
 
-        self.tx().operations.push(op);
+    pub fn splice(
+        &mut self,
+        obj: &ExId,
+        pos: usize,
+        del: usize,
+        vals: Vec<Value>,
+    ) -> Result<Vec<ExId>, AutomergeError> {
+        let mut tx = self.tx();
+        match tx.splice(obj, pos, del, vals) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
+            }
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
+        }
+    }
+
+    pub fn splice_text(
+        &mut self,
+        obj: &ExId,
+        pos: usize,
+        del: usize,
+        text: &str,
+    ) -> Result<Vec<ExId>, AutomergeError> {
+        let mut tx = self.tx();
+        match tx.splice_text(obj, pos, del, text) {
+            Ok(opt) => {
+                tx.commit(None, None);
+                Ok(opt)
+            }
+            Err(e) => {
+                tx.rollback();
+                Err(e)
+            }
+        }
     }
 
     fn insert_op(&mut self, op: Op) -> Op {
@@ -263,40 +296,7 @@ impl Automerge {
         }
     }
 
-    // set(obj, prop, value) - value can be scalar or objtype
-    // del(obj, prop)
-    // inc(obj, prop, value)
-    // insert(obj, index, value)
-
-    /// Set the value of property `P` to value `V` in object `obj`.
-    ///
-    /// # Returns
-    ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document or create a new object.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<Value>>(
-        &mut self,
-        obj: &ExId,
-        prop: P,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        let value = value.into();
-        if let Some(id) = self.local_op(obj, prop.into(), value.into())? {
-            Ok(Some(self.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
+    pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
         match id {
             ExId::Root => Ok(ObjId::root()),
             ExId::Id(ctr, actor, idx) => {
@@ -318,114 +318,8 @@ impl Automerge {
         }
     }
 
-    fn id_to_exid(&self, id: OpId) -> ExId {
+    pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
         ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
-    }
-
-    pub fn insert<V: Into<Value>>(
-        &mut self,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        let value = value.into();
-        if let Some(id) = self.do_insert(obj, index, value.into())? {
-            Ok(Some(self.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn do_insert(
-        &mut self,
-        obj: ObjId,
-        index: usize,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
-        let id = self.next_id();
-
-        let query = self.ops.search(obj, query::InsertNth::new(index));
-
-        let key = query.key()?;
-        let is_make = matches!(&action, OpType::Make(_));
-
-        let op = Op {
-            change: self.history.len(),
-            id,
-            action,
-            obj,
-            key,
-            succ: Default::default(),
-            pred: Default::default(),
-            insert: true,
-        };
-
-        self.ops.insert(query.pos(), op.clone());
-        self.tx().operations.push(op);
-
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn inc<P: Into<Prop>>(
-        &mut self,
-        obj: &ExId,
-        prop: P,
-        value: i64,
-    ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        self.local_op(obj, prop.into(), OpType::Inc(value))?;
-        Ok(())
-    }
-
-    pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        self.local_op(obj, prop.into(), OpType::Del)?;
-        Ok(())
-    }
-
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
-    pub fn splice(
-        &mut self,
-        obj: &ExId,
-        mut pos: usize,
-        del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
-        for _ in 0..del {
-            // del()
-            self.local_op(obj, pos.into(), OpType::Del)?;
-        }
-        let mut results = Vec::new();
-        for v in vals {
-            // insert()
-            let id = self.do_insert(obj, pos, v.into())?;
-            if let Some(id) = id {
-                results.push(self.id_to_exid(id));
-            }
-            pos += 1;
-        }
-        Ok(results)
-    }
-
-    pub fn splice_text(
-        &mut self,
-        obj: &ExId,
-        pos: usize,
-        del: usize,
-        text: &str,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        let mut vals = vec![];
-        for c in text.to_owned().graphemes(true) {
-            vals.push(c.into());
-        }
-        self.splice(obj, pos, del, vals)
     }
 
     pub fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
@@ -564,7 +458,6 @@ impl Automerge {
     }
 
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
-        self.ensure_transaction_closed();
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
                 if self.duplicate_seq(c) {
@@ -587,103 +480,10 @@ impl Automerge {
     }
 
     pub fn apply_change(&mut self, change: Change) {
-        self.ensure_transaction_closed();
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {
             self.insert_op(op);
-        }
-    }
-
-    fn local_op(
-        &mut self,
-        obj: ObjId,
-        prop: Prop,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
-        match prop {
-            Prop::Map(s) => self.local_map_op(obj, s, action),
-            Prop::Seq(n) => self.local_list_op(obj, n, action),
-        }
-    }
-
-    fn local_map_op(
-        &mut self,
-        obj: ObjId,
-        prop: String,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
-        if prop.is_empty() {
-            return Err(AutomergeError::EmptyStringKey);
-        }
-
-        let id = self.next_id();
-        let prop = self.ops.m.props.cache(prop);
-        let query = self.ops.search(obj, query::Prop::new(prop));
-
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
-        }
-
-        let is_make = matches!(&action, OpType::Make(_));
-
-        let pred = query.ops.iter().map(|op| op.id).collect();
-
-        let op = Op {
-            change: self.history.len(),
-            id,
-            action,
-            obj,
-            key: Key::Map(prop),
-            succ: Default::default(),
-            pred,
-            insert: false,
-        };
-
-        self.insert_local_op(op, query.pos, &query.ops_pos);
-
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn local_list_op(
-        &mut self,
-        obj: ObjId,
-        index: usize,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
-        let query = self.ops.search(obj, query::Nth::new(index));
-
-        let id = self.next_id();
-        let pred = query.ops.iter().map(|op| op.id).collect();
-        let key = query.key()?;
-
-        if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
-        }
-
-        let is_make = matches!(&action, OpType::Make(_));
-
-        let op = Op {
-            change: self.history.len(),
-            id,
-            action,
-            obj,
-            key,
-            succ: Default::default(),
-            pred,
-            insert: false,
-        };
-
-        self.insert_local_op(op, query.pos, &query.ops_pos);
-
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
         }
     }
 
@@ -755,7 +555,6 @@ impl Automerge {
     }
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
-        self.ensure_transaction_closed();
         // TODO - would be nice if I could pass an iterator instead of a collection here
         let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
         let ops: Vec<_> = self.ops.iter().cloned().collect();
@@ -774,7 +573,6 @@ impl Automerge {
 
     // should this return an empty vec instead of None?
     pub fn save_incremental(&mut self) -> Vec<u8> {
-        self.ensure_transaction_closed();
         let changes = self._get_changes(self.saved.as_slice());
         let mut bytes = vec![];
         for c in changes {
@@ -847,8 +645,7 @@ impl Automerge {
         }
     }
 
-    pub fn get_missing_deps(&mut self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
-        self.ensure_transaction_closed();
+    pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         self._get_missing_deps(heads)
     }
 
@@ -932,8 +729,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_last_local_change(&mut self) -> Option<&Change> {
-        self.ensure_transaction_closed();
+    pub fn get_last_local_change(&self) -> Option<&Change> {
         if let Some(actor) = &self.actor {
             let actor = &self.ops.m.actors[*actor];
             return self.history.iter().rev().find(|c| c.actor_id() == actor);
@@ -941,8 +737,7 @@ impl Automerge {
         None
     }
 
-    pub fn get_changes(&mut self, have_deps: &[ChangeHash]) -> Vec<&Change> {
-        self.ensure_transaction_closed();
+    pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
         self._get_changes(have_deps)
     }
 
@@ -974,8 +769,7 @@ impl Automerge {
         clock
     }
 
-    pub fn get_change_by_hash(&mut self, hash: &ChangeHash) -> Option<&Change> {
-        self.ensure_transaction_closed();
+    pub fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self._get_change_by_hash(hash)
     }
 
@@ -985,9 +779,7 @@ impl Automerge {
             .and_then(|index| self.history.get(*index))
     }
 
-    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<&'a Change> {
-        self.ensure_transaction_closed();
-        other.ensure_transaction_closed();
+    pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         self._get_changes_added(other)
     }
 
@@ -1015,8 +807,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
-        self.ensure_transaction_closed();
+    pub fn get_heads(&self) -> Vec<ChangeHash> {
         self._get_heads()
     }
 
@@ -1026,7 +817,7 @@ impl Automerge {
         deps
     }
 
-    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
+    fn get_hash(&self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
         self.states
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
@@ -1035,7 +826,7 @@ impl Automerge {
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
-    fn update_history(&mut self, change: Change) -> usize {
+    pub(crate) fn update_history(&mut self, change: Change) -> usize {
         self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
 
         self.update_deps(&change);
@@ -1136,19 +927,6 @@ impl Automerge {
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Transaction {
-    pub actor: usize,
-    pub seq: u64,
-    pub start_op: u64,
-    pub time: i64,
-    pub message: Option<String>,
-    pub extra_bytes: Vec<u8>,
-    pub hash: Option<ChangeHash>,
-    pub deps: Vec<ChangeHash>,
-    pub operations: Vec<Op>,
-}
-
 impl Default for Automerge {
     fn default() -> Self {
         Self::new()
@@ -1177,7 +955,6 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         doc.set(&ROOT, "hello", "world")?;
-        assert!(doc.pending_ops() == 1);
         doc.value(&ROOT, "hello")?;
         Ok(())
     }
@@ -1280,11 +1057,11 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let text = doc.set(&ROOT, "text", Value::text())?.unwrap();
-        let heads1 = doc.commit(None, None);
+        let heads1 = doc.get_heads();
         doc.splice_text(&text, 0, 0, "hello world")?;
-        let heads2 = doc.commit(None, None);
+        let heads2 = doc.get_heads();
         doc.splice_text(&text, 6, 0, "big bad ")?;
-        let heads3 = doc.commit(None, None);
+        let heads3 = doc.get_heads();
 
         assert!(&doc.text(&text)? == "hello big bad world");
         assert!(&doc.text_at(&text, &heads1)?.is_empty());
@@ -1299,19 +1076,19 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor("aaaa".try_into().unwrap());
         doc.set(&ROOT, "prop1", "val1")?;
-        doc.commit(None, None);
+        doc.get_heads();
         let heads1 = doc.get_heads();
         doc.set(&ROOT, "prop1", "val2")?;
-        doc.commit(None, None);
+        doc.get_heads();
         let heads2 = doc.get_heads();
         doc.set(&ROOT, "prop2", "val3")?;
-        doc.commit(None, None);
+        doc.get_heads();
         let heads3 = doc.get_heads();
         doc.del(&ROOT, "prop1")?;
-        doc.commit(None, None);
+        doc.get_heads();
         let heads4 = doc.get_heads();
         doc.set(&ROOT, "prop3", "val4")?;
-        doc.commit(None, None);
+        doc.get_heads();
         let heads5 = doc.get_heads();
         assert!(doc.keys_at(&ROOT, &heads1) == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads1), 1);
@@ -1358,24 +1135,24 @@ mod tests {
         doc.set_actor("aaaa".try_into().unwrap());
 
         let list = doc.set(&ROOT, "list", Value::list())?.unwrap();
-        let heads1 = doc.commit(None, None);
+        let heads1 = doc.get_heads();
 
         doc.insert(&list, 0, Value::int(10))?;
-        let heads2 = doc.commit(None, None);
+        let heads2 = doc.get_heads();
 
         doc.set(&list, 0, Value::int(20))?;
         doc.insert(&list, 0, Value::int(30))?;
-        let heads3 = doc.commit(None, None);
+        let heads3 = doc.get_heads();
 
         doc.set(&list, 1, Value::int(40))?;
         doc.insert(&list, 1, Value::int(50))?;
-        let heads4 = doc.commit(None, None);
+        let heads4 = doc.get_heads();
 
         doc.del(&list, 2)?;
-        let heads5 = doc.commit(None, None);
+        let heads5 = doc.get_heads();
 
         doc.del(&list, 0)?;
-        let heads6 = doc.commit(None, None);
+        let heads6 = doc.get_heads();
 
         assert!(doc.length_at(&list, &heads1) == 0);
         assert!(doc.value_at(&list, 0, &heads1)?.is_none());
