@@ -10,8 +10,9 @@ state = Automerge.change(state, doc => {
     if (i % 1000 === 0) {
       console.log(`Processed ${i} edits in ${new Date() - start} ms`)
     }
-    if (edits[i][1] > 0) doc.text.deleteAt(edits[i][0], edits[i][1])
-    if (edits[i].length > 2) doc.text.insertAt(edits[i][0], ...edits[i].slice(2))
+    let edit = edits[i]
+    if (edit[1] > 0) doc.text.deleteAt(edit[0], edit[1])
+    if (edit.length > 2) doc.text.insertAt(edit[0], ...edit.slice(2))
   }
 })
 

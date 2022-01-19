@@ -99,18 +99,22 @@ function import_value(value) {
 
 const MapHandler = {
   get (target, key) {
-    const { context, objectId, path, readonly, frozen, heads } = target
+    const { context, objectId, path, readonly, frozen, heads, cache } = target
     if (key === Symbol.toStringTag) { return target[Symbol.toStringTag] }
     if (key === OBJECT_ID) return objectId
     if (key === READ_ONLY) return readonly
     if (key === FROZEN) return frozen
     if (key === HEADS) return heads
     if (key === STATE) return context;
-    return valueAt(target, key)
+    if (!cache[key]) {
+      cache[key] = valueAt(target, key)
+    }
+    return cache[key]
   },
 
   set (target, key, val) {
     let { context, objectId, path, readonly, frozen} = target
+    target.cache = {} // reset cache on set
     if (val && val[OBJECT_ID]) {
           throw new RangeError('Cannot create a reference to an existing document object')
     }
@@ -159,6 +163,7 @@ const MapHandler = {
 
   deleteProperty (target, key) {
     const { context, objectId, path, readonly, frozen } = target
+    target.cache = {} // reset cache on delete
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
@@ -365,18 +370,18 @@ const TextHandler = Object.assign({}, ListHandler, {
 })
 
 function mapProxy(context, objectId, path, readonly, heads) {
-  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads}, MapHandler)
+  return new Proxy({context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}}, MapHandler)
 }
 
 function listProxy(context, objectId, path, readonly, heads) {
   let target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads})
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, ListHandler)
 }
 
 function textProxy(context, objectId, path, readonly, heads) {
   let target = []
-  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads})
+  Object.assign(target, {context, objectId, path, readonly: !!readonly, frozen: false, heads, cache: {}})
   return new Proxy(target, TextHandler)
 }
 
@@ -388,10 +393,6 @@ function listMethods(target) {
   const {context, objectId, path, readonly, frozen, heads} = target
   const methods = {
     deleteAt(index, numDelete) {
-      // FIXME - what about many deletes?
-      if (context.value(objectId, index)[0] == "counter") {
-        throw new TypeError('Unsupported operation: deleting a counter from a list')
-      }
       if (typeof numDelete === 'number') {
         context.splice(objectId, index, numDelete)
       } else {
