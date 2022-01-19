@@ -289,7 +289,7 @@ pub(crate) fn get_heads(heads: JsValue) -> Option<Vec<ChangeHash>> {
     JS(heads).into()
 }
 
-pub(crate) fn map_to_js(doc: &mut am::Automerge, obj: &ObjId) -> JsValue {
+pub(crate) fn map_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
     let keys = doc.keys(obj);
     let map = Object::new();
     for k in keys {
@@ -312,7 +312,7 @@ pub(crate) fn map_to_js(doc: &mut am::Automerge, obj: &ObjId) -> JsValue {
     map.into()
 }
 
-fn list_to_js(doc: &mut am::Automerge, obj: &ObjId) -> JsValue {
+fn list_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {
