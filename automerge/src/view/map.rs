@@ -27,7 +27,7 @@ impl<'a, 'h> PartialEq for MapView<'a, 'h> {
 
 impl<'a, 'h> MapView<'a, 'h> {
     pub fn len(&self) -> usize {
-        self.doc.length_at(&self.obj, &self.heads)
+        self.doc.keys_at(&self.obj, &self.heads).len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -105,7 +105,7 @@ impl<'a> MutableMapView<'a> {
     }
 
     pub fn len(&self) -> usize {
-        self.doc.length(&self.obj)
+        self.doc.keys(&self.obj).len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -223,11 +223,14 @@ mod tests {
 
         assert_eq!(root.keys().collect::<Vec<String>>(), vec!["a", "b"]);
 
-        assert_eq!(root.values().collect::<Vec<_>>(), vec![1.into(), 2.into()]);
+        assert_eq!(
+            root.values().collect::<Vec<_>>(),
+            vec![1u64.into(), 2u64.into()]
+        );
 
         assert_eq!(
             root.iter().collect::<Vec<_>>(),
-            vec![("a".to_owned(), 1.into()), ("b".to_owned(), 2.into())]
+            vec![("a".to_owned(), 1u64.into()), ("b".to_owned(), 2u64.into())]
         );
     }
 
@@ -261,11 +264,14 @@ mod tests {
 
         assert_eq!(root.keys().collect::<Vec<String>>(), vec!["a", "b"]);
 
-        assert_eq!(root.values().collect::<Vec<_>>(), vec![1.into(), 2.into()]);
+        assert_eq!(
+            root.values().collect::<Vec<_>>(),
+            vec![1u64.into(), 2u64.into()]
+        );
 
         assert_eq!(
             root.iter().collect::<Vec<_>>(),
-            vec![("a".to_owned(), 1.into()), ("b".to_owned(), 2.into())]
+            vec![("a".to_owned(), 1u64.into()), ("b".to_owned(), 2u64.into())]
         );
 
         root.insert("c", 5);
