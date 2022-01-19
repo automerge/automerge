@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::collections::{HashMap, HashSet, VecDeque};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -439,10 +439,20 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn root(&self) -> MapRef {
+    pub fn root(&mut self) -> MapRef {
+        let heads = self.get_heads();
         MapRef {
             obj: ROOT,
             doc: self,
+            heads: Cow::Owned(heads),
+        }
+    }
+
+    pub fn root_at<'a, 'h>(&'a self, heads: &'h [ChangeHash]) -> MapRef<'a, 'h> {
+        MapRef {
+            obj: ROOT,
+            doc: self,
+            heads: Cow::Borrowed(heads),
         }
     }
 
@@ -998,7 +1008,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
+    pub fn get_heads(&self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
         self._get_heads()
     }

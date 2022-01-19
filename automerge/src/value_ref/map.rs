@@ -1,16 +1,19 @@
+use std::borrow::Cow;
+
 use itertools::Itertools;
 
-use crate::{Automerge, ObjId, ObjType, Prop, Value};
+use crate::{Automerge, ChangeHash, ObjId, ObjType, Prop, Value};
 
 use super::{list::ListRefMut, ListRef, ValueRef, ValueRefMut};
 
 #[derive(Debug)]
-pub struct MapRef<'a> {
+pub struct MapRef<'a, 'h> {
     pub(crate) obj: ObjId,
     pub(crate) doc: &'a Automerge,
+    pub(crate) heads: Cow<'h, [ChangeHash]>,
 }
 
-impl<'a> PartialEq for MapRef<'a> {
+impl<'a, 'h> PartialEq for MapRef<'a, 'h> {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
             && self.len() == other.len()
@@ -22,26 +25,28 @@ impl<'a> PartialEq for MapRef<'a> {
     }
 }
 
-impl<'a> MapRef<'a> {
+impl<'a, 'h> MapRef<'a, 'h> {
     pub fn len(&self) -> usize {
-        self.doc.length(&self.obj)
+        self.doc.length_at(&self.obj, &self.heads)
     }
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef<'a>> {
-        match self.doc.value(&self.obj, key) {
+    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef<'a, 'h>> {
+        match self.doc.value_at(&self.obj, key, &self.heads) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
                     obj: id,
                     doc: self.doc,
+                    heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
                 Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
                     obj: id,
                     doc: self.doc,
+                    heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
                 Value::Scalar(s) => Some(ValueRef::Scalar(s)),
@@ -55,7 +60,7 @@ impl<'a> MapRef<'a> {
     }
 
     pub fn keys(&self) -> impl Iterator<Item = String> {
-        self.doc.keys(&self.obj).into_iter()
+        self.doc.keys_at(&self.obj, &self.heads).into_iter()
     }
 
     pub fn values(&self) -> impl Iterator<Item = ValueRef> {
@@ -70,6 +75,7 @@ impl<'a> MapRef<'a> {
     }
 }
 
+// MapRefMut isn't allowed to travel to the past as it can't be mutated.
 #[derive(Debug)]
 pub struct MapRefMut<'a> {
     pub(crate) obj: ObjId,
@@ -89,6 +95,15 @@ impl<'a> PartialEq for MapRefMut<'a> {
 }
 
 impl<'a> MapRefMut<'a> {
+    pub fn into_immutable(self) -> MapRef<'a, 'static> {
+        let heads = self.doc.get_heads();
+        MapRef {
+            obj: self.obj,
+            doc: self.doc,
+            heads: Cow::Owned(heads),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.doc.length(&self.obj)
     }
@@ -103,11 +118,13 @@ impl<'a> MapRefMut<'a> {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
                     obj: id,
                     doc: self.doc,
+                    heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
                 Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
                     obj: id,
                     doc: self.doc,
+                    heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
                 Value::Scalar(s) => Some(ValueRef::Scalar(s)),
@@ -178,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_map() {
-        let doc = Automerge::try_from(json!({
+        let mut doc = Automerge::try_from(json!({
             "a": 1,
             "b": 2,
         }))
@@ -259,6 +276,9 @@ mod tests {
         assert_eq!(root.remove("a"), true);
         assert_eq!(root.remove("a"), false);
         assert_eq!(root.len(), 2);
+
+        let imm = root.into_immutable();
+        assert_eq!(imm.contains_key("c"), true);
     }
 
     #[test]

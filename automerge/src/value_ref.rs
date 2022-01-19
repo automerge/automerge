@@ -1,5 +1,6 @@
 #[cfg(test)]
 use crate::{Automerge, ObjId, ROOT};
+use std::borrow::Cow;
 #[cfg(test)]
 use std::convert::TryFrom;
 
@@ -15,14 +16,14 @@ pub use map::MapRef;
 pub use map::MapRefMut;
 
 #[derive(Debug, PartialEq)]
-pub enum ValueRef<'a> {
-    Map(MapRef<'a>),
-    List(ListRef<'a>),
+pub enum ValueRef<'a, 'h> {
+    Map(MapRef<'a, 'h>),
+    List(ListRef<'a, 'h>),
     Scalar(ScalarValue),
 }
 
-impl<'a> ValueRef<'a> {
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a>> {
+impl<'a, 'h> ValueRef<'a, 'h> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a, 'h>> {
         match self {
             ValueRef::Map(map) => map.get(prop),
             ValueRef::List(l) => l.get(prop),
@@ -42,7 +43,7 @@ impl<'a> ValueRef<'a> {
         self.len() == 0
     }
 
-    pub fn map(&mut self) -> Option<&mut MapRef<'a>> {
+    pub fn map(&mut self) -> Option<&mut MapRef<'a, 'h>> {
         if let ValueRef::Map(map) = self {
             Some(map)
         } else {
@@ -50,7 +51,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn list(&self) -> Option<ListRef<'a>> {
+    pub fn list(&self) -> Option<ListRef<'a, 'h>> {
         if let ValueRef::List(list) = self {
             Some(list.clone())
         } else {
@@ -124,6 +125,7 @@ impl<'a> ValueRefMut<'a> {
             Some(MapRef {
                 obj: map.obj.clone(),
                 doc: map.doc,
+                heads: Cow::Borrowed(&[]),
             })
         } else {
             None
@@ -143,6 +145,7 @@ impl<'a> ValueRefMut<'a> {
             Some(ListRef {
                 obj: list.obj.clone(),
                 doc: list.doc,
+                heads: Cow::Borrowed(&[]),
             })
         } else {
             None
@@ -230,13 +233,13 @@ impl TryFrom<serde_json::Value> for Automerge {
     }
 }
 
-impl From<u64> for ValueRef<'static> {
+impl From<u64> for ValueRef<'static, 'static> {
     fn from(u: u64) -> Self {
         ValueRef::Scalar(ScalarValue::Uint(u))
     }
 }
 
-impl From<i32> for ValueRef<'static> {
+impl From<i32> for ValueRef<'static, 'static> {
     fn from(i: i32) -> Self {
         ValueRef::Scalar(ScalarValue::Int(i as i64))
     }
@@ -252,7 +255,7 @@ mod tests {
 
     #[test]
     fn get_map_key() {
-        let doc = Automerge::try_from(json!({"a": 1})).unwrap();
+        let mut doc = Automerge::try_from(json!({"a": 1})).unwrap();
 
         let a_val = doc.root().get("a");
         assert!(matches!(
@@ -263,7 +266,7 @@ mod tests {
 
     #[test]
     fn get_nested_map() {
-        let doc = Automerge::try_from(json!({"a": {"b": 1}})).unwrap();
+        let mut doc = Automerge::try_from(json!({"a": {"b": 1}})).unwrap();
 
         let b_val = doc.root().get("a").unwrap().get("b");
 

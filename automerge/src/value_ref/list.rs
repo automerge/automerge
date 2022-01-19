@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+
+use crate::ChangeHash;
 use crate::{Automerge, ObjId, ObjType, Prop, Value};
 
 use super::MapRef;
@@ -6,12 +9,13 @@ use super::ValueRef;
 use super::ValueRefMut;
 
 #[derive(Debug, Clone)]
-pub struct ListRef<'a> {
+pub struct ListRef<'a, 'h> {
     pub(crate) obj: ObjId,
     pub(crate) doc: &'a Automerge,
+    pub(crate) heads: Cow<'h, [ChangeHash]>,
 }
 
-impl<'a> PartialEq for ListRef<'a> {
+impl<'a, 'h> PartialEq for ListRef<'a, 'h> {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
             && self.len() == other.len()
@@ -19,7 +23,7 @@ impl<'a> PartialEq for ListRef<'a> {
     }
 }
 
-impl<'a> ListRef<'a> {
+impl<'a, 'h> ListRef<'a, 'h> {
     pub fn len(&self) -> usize {
         self.doc.length(&self.obj)
     }
@@ -28,17 +32,19 @@ impl<'a> ListRef<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a>> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a, 'h>> {
         match self.doc.value(&self.obj, prop) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
                     obj: id,
                     doc: self.doc,
+                    heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
                 Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
                     obj: id,
                     doc: self.doc,
+                    heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
                 Value::Scalar(s) => Some(ValueRef::Scalar(s)),
@@ -81,11 +87,13 @@ impl<'a> ListRefMut<'a> {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
                     obj: id,
                     doc: self.doc,
+                    heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
                 Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
                     obj: id,
                     doc: self.doc,
+                    heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
                 Value::Scalar(s) => Some(ValueRef::Scalar(s)),
@@ -141,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_list() {
-        let doc = Automerge::try_from(json!({
+        let mut doc = Automerge::try_from(json!({
             "a": [1, 2],
         }))
         .unwrap();
