@@ -4,16 +4,16 @@ use itertools::Itertools;
 
 use crate::{Automerge, ChangeHash, ObjId, ObjType, Prop, Value};
 
-use super::{list::ListRefMut, ListRef, ValueRef, ValueRefMut};
+use super::{list::MutableListView, ListView, MutableView, View};
 
 #[derive(Debug)]
-pub struct MapRef<'a, 'h> {
+pub struct MapView<'a, 'h> {
     pub(crate) obj: ObjId,
     pub(crate) doc: &'a Automerge,
     pub(crate) heads: Cow<'h, [ChangeHash]>,
 }
 
-impl<'a, 'h> PartialEq for MapRef<'a, 'h> {
+impl<'a, 'h> PartialEq for MapView<'a, 'h> {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
             && self.len() == other.len()
@@ -25,7 +25,7 @@ impl<'a, 'h> PartialEq for MapRef<'a, 'h> {
     }
 }
 
-impl<'a, 'h> MapRef<'a, 'h> {
+impl<'a, 'h> MapView<'a, 'h> {
     pub fn len(&self) -> usize {
         self.doc.length_at(&self.obj, &self.heads)
     }
@@ -34,22 +34,22 @@ impl<'a, 'h> MapRef<'a, 'h> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef<'a, 'h>> {
+    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<View<'a, 'h>> {
         match self.doc.value_at(&self.obj, key, &self.heads) {
             Ok(Some((value, id))) => match value {
-                Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
+                Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
                     doc: self.doc,
                     heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
-                Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
+                Value::Object(ObjType::List) => Some(View::List(ListView {
                     obj: id,
                     doc: self.doc,
                     heads: self.heads.clone(),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
-                Value::Scalar(s) => Some(ValueRef::Scalar(s)),
+                Value::Scalar(s) => Some(View::Scalar(s)),
             },
             Ok(None) | Err(_) => None,
         }
@@ -63,11 +63,11 @@ impl<'a, 'h> MapRef<'a, 'h> {
         self.doc.keys_at(&self.obj, &self.heads).into_iter()
     }
 
-    pub fn values(&self) -> impl Iterator<Item = ValueRef> {
+    pub fn values(&self) -> impl Iterator<Item = View> {
         self.keys().map(move |key| self.get(key).unwrap())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (String, ValueRef)> {
+    pub fn iter(&self) -> impl Iterator<Item = (String, View)> {
         self.keys().map(move |key| {
             let v = self.get(&key).unwrap();
             (key, v)
@@ -77,12 +77,12 @@ impl<'a, 'h> MapRef<'a, 'h> {
 
 // MapRefMut isn't allowed to travel to the past as it can't be mutated.
 #[derive(Debug)]
-pub struct MapRefMut<'a> {
+pub struct MutableMapView<'a> {
     pub(crate) obj: ObjId,
     pub(crate) doc: &'a mut Automerge,
 }
 
-impl<'a> PartialEq for MapRefMut<'a> {
+impl<'a> PartialEq for MutableMapView<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.obj == other.obj
             && self.len() == other.len()
@@ -94,10 +94,10 @@ impl<'a> PartialEq for MapRefMut<'a> {
     }
 }
 
-impl<'a> MapRefMut<'a> {
-    pub fn into_immutable(self) -> MapRef<'a, 'static> {
+impl<'a> MutableMapView<'a> {
+    pub fn into_immutable(self) -> MapView<'a, 'static> {
         let heads = self.doc.get_heads();
-        MapRef {
+        MapView {
             obj: self.obj,
             doc: self.doc,
             heads: Cow::Owned(heads),
@@ -112,41 +112,41 @@ impl<'a> MapRefMut<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef> {
+    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<View> {
         match self.doc.value(&self.obj, key) {
             Ok(Some((value, id))) => match value {
-                Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
+                Value::Object(ObjType::Map) => Some(View::Map(MapView {
                     obj: id,
                     doc: self.doc,
                     heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Table) => todo!(),
-                Value::Object(ObjType::List) => Some(ValueRef::List(ListRef {
+                Value::Object(ObjType::List) => Some(View::List(ListView {
                     obj: id,
                     doc: self.doc,
                     heads: Cow::Borrowed(&[]),
                 })),
                 Value::Object(ObjType::Text) => todo!(),
-                Value::Scalar(s) => Some(ValueRef::Scalar(s)),
+                Value::Scalar(s) => Some(View::Scalar(s)),
             },
             Ok(None) | Err(_) => None,
         }
     }
 
-    pub fn get_mut<P: Into<Prop>>(&mut self, key: P) -> Option<ValueRefMut> {
+    pub fn get_mut<P: Into<Prop>>(&mut self, key: P) -> Option<MutableView> {
         match self.doc.value(&self.obj, key) {
             Ok(Some((value, id))) => match value {
-                Value::Object(ObjType::Map) => Some(ValueRefMut::Map(MapRefMut {
+                Value::Object(ObjType::Map) => Some(MutableView::Map(MutableMapView {
                     obj: id,
                     doc: self.doc,
                 })),
                 Value::Object(ObjType::Table) => todo!(),
-                Value::Object(ObjType::List) => Some(ValueRefMut::List(ListRefMut {
+                Value::Object(ObjType::List) => Some(MutableView::List(MutableListView {
                     obj: id,
                     doc: self.doc,
                 })),
                 Value::Object(ObjType::Text) => todo!(),
-                Value::Scalar(s) => Some(ValueRefMut::Scalar(s)),
+                Value::Scalar(s) => Some(MutableView::Scalar(s)),
             },
             Ok(None) | Err(_) => None,
         }
@@ -173,11 +173,11 @@ impl<'a> MapRefMut<'a> {
         self.doc.keys(&self.obj).into_iter()
     }
 
-    pub fn values(&self) -> impl Iterator<Item = ValueRef> {
+    pub fn values(&self) -> impl Iterator<Item = View> {
         self.keys().map(move |key| self.get(key).unwrap())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (String, ValueRef)> {
+    pub fn iter(&self) -> impl Iterator<Item = (String, View)> {
         self.keys().map(move |key| {
             let v = self.get(&key).unwrap();
             (key, v)
@@ -205,12 +205,12 @@ mod tests {
 
         assert!(matches!(
             root.get("a"),
-            Some(ValueRef::Scalar(ScalarValue::Uint(1)))
+            Some(View::Scalar(ScalarValue::Uint(1)))
         ));
 
         assert!(matches!(
             root.get("b"),
-            Some(ValueRef::Scalar(ScalarValue::Uint(2)))
+            Some(View::Scalar(ScalarValue::Uint(2)))
         ));
 
         assert_eq!(root.len(), 2);
@@ -243,12 +243,12 @@ mod tests {
 
         assert!(matches!(
             root.get("a"),
-            Some(ValueRef::Scalar(ScalarValue::Uint(1)))
+            Some(View::Scalar(ScalarValue::Uint(1)))
         ));
 
         assert!(matches!(
             root.get("b"),
-            Some(ValueRef::Scalar(ScalarValue::Uint(2)))
+            Some(View::Scalar(ScalarValue::Uint(2)))
         ));
 
         assert_eq!(root.len(), 2);

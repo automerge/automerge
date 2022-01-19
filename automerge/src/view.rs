@@ -10,32 +10,32 @@ use crate::{Prop, ScalarValue};
 mod list;
 mod map;
 
-pub use list::ListRef;
-pub use list::ListRefMut;
-pub use map::MapRef;
-pub use map::MapRefMut;
+pub use list::ListView;
+pub use list::MutableListView;
+pub use map::MapView;
+pub use map::MutableMapView;
 
 #[derive(Debug, PartialEq)]
-pub enum ValueRef<'a, 'h> {
-    Map(MapRef<'a, 'h>),
-    List(ListRef<'a, 'h>),
+pub enum View<'a, 'h> {
+    Map(MapView<'a, 'h>),
+    List(ListView<'a, 'h>),
     Scalar(ScalarValue),
 }
 
-impl<'a, 'h> ValueRef<'a, 'h> {
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a, 'h>> {
+impl<'a, 'h> View<'a, 'h> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View<'a, 'h>> {
         match self {
-            ValueRef::Map(map) => map.get(prop),
-            ValueRef::List(l) => l.get(prop),
-            ValueRef::Scalar(_) => None,
+            View::Map(map) => map.get(prop),
+            View::List(l) => l.get(prop),
+            View::Scalar(_) => None,
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            ValueRef::Map(map) => map.len(),
-            ValueRef::List(list) => list.len(),
-            ValueRef::Scalar(_) => 0,
+            View::Map(map) => map.len(),
+            View::List(list) => list.len(),
+            View::Scalar(_) => 0,
         }
     }
 
@@ -43,16 +43,16 @@ impl<'a, 'h> ValueRef<'a, 'h> {
         self.len() == 0
     }
 
-    pub fn map(&mut self) -> Option<&mut MapRef<'a, 'h>> {
-        if let ValueRef::Map(map) = self {
+    pub fn map(&mut self) -> Option<&mut MapView<'a, 'h>> {
+        if let View::Map(map) = self {
             Some(map)
         } else {
             None
         }
     }
 
-    pub fn list(&self) -> Option<ListRef<'a, 'h>> {
-        if let ValueRef::List(list) = self {
+    pub fn list(&self) -> Option<ListView<'a, 'h>> {
+        if let View::List(list) = self {
             Some(list.clone())
         } else {
             None
@@ -60,7 +60,7 @@ impl<'a, 'h> ValueRef<'a, 'h> {
     }
 
     pub fn scalar(&self) -> Option<ScalarValue> {
-        if let ValueRef::Scalar(scalar) = self {
+        if let View::Scalar(scalar) = self {
             Some(scalar.clone())
         } else {
             None
@@ -69,50 +69,50 @@ impl<'a, 'h> ValueRef<'a, 'h> {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ValueRefMut<'a> {
-    Map(MapRefMut<'a>),
-    List(ListRefMut<'a>),
+pub enum MutableView<'a> {
+    Map(MutableMapView<'a>),
+    List(MutableListView<'a>),
     Scalar(ScalarValue),
 }
 
-impl<'a> ValueRefMut<'a> {
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef> {
+impl<'a> MutableView<'a> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<View> {
         match self {
-            ValueRefMut::Map(map) => map.get(prop),
-            ValueRefMut::List(l) => l.get(prop),
-            ValueRefMut::Scalar(_) => None,
+            MutableView::Map(map) => map.get(prop),
+            MutableView::List(l) => l.get(prop),
+            MutableView::Scalar(_) => None,
         }
     }
 
-    pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<ValueRefMut> {
+    pub fn get_mut<P: Into<Prop>>(&mut self, prop: P) -> Option<MutableView> {
         match self {
-            ValueRefMut::Map(map) => map.get_mut(prop),
-            ValueRefMut::List(l) => l.get_mut(prop),
-            ValueRefMut::Scalar(_) => None,
+            MutableView::Map(map) => map.get_mut(prop),
+            MutableView::List(l) => l.get_mut(prop),
+            MutableView::Scalar(_) => None,
         }
     }
 
     pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
         match self {
-            ValueRefMut::Map(map) => map.insert(prop, value),
-            ValueRefMut::List(list) => list.insert(prop, value),
-            ValueRefMut::Scalar(_) => {}
+            MutableView::Map(map) => map.insert(prop, value),
+            MutableView::List(list) => list.insert(prop, value),
+            MutableView::Scalar(_) => {}
         }
     }
 
     pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
         match self {
-            ValueRefMut::Map(map) => map.remove(prop),
-            ValueRefMut::List(list) => list.remove(prop),
-            ValueRefMut::Scalar(_) => false,
+            MutableView::Map(map) => map.remove(prop),
+            MutableView::List(list) => list.remove(prop),
+            MutableView::Scalar(_) => false,
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            ValueRefMut::Map(map) => map.len(),
-            ValueRefMut::List(list) => list.len(),
-            ValueRefMut::Scalar(_) => 0,
+            MutableView::Map(map) => map.len(),
+            MutableView::List(list) => list.len(),
+            MutableView::Scalar(_) => 0,
         }
     }
 
@@ -120,9 +120,9 @@ impl<'a> ValueRefMut<'a> {
         self.len() == 0
     }
 
-    pub fn map(&self) -> Option<MapRef> {
-        if let ValueRefMut::Map(map) = self {
-            Some(MapRef {
+    pub fn map(&self) -> Option<MapView> {
+        if let MutableView::Map(map) = self {
+            Some(MapView {
                 obj: map.obj.clone(),
                 doc: map.doc,
                 heads: Cow::Borrowed(&[]),
@@ -132,17 +132,17 @@ impl<'a> ValueRefMut<'a> {
         }
     }
 
-    pub fn map_mut(&mut self) -> Option<&mut MapRefMut<'a>> {
-        if let ValueRefMut::Map(map) = self {
+    pub fn map_mut(&mut self) -> Option<&mut MutableMapView<'a>> {
+        if let MutableView::Map(map) = self {
             Some(map)
         } else {
             None
         }
     }
 
-    pub fn list(&self) -> Option<ListRef> {
-        if let ValueRefMut::List(list) = self {
-            Some(ListRef {
+    pub fn list(&self) -> Option<ListView> {
+        if let MutableView::List(list) = self {
+            Some(ListView {
                 obj: list.obj.clone(),
                 doc: list.doc,
                 heads: Cow::Borrowed(&[]),
@@ -153,7 +153,7 @@ impl<'a> ValueRefMut<'a> {
     }
 
     pub fn scalar(&self) -> Option<ScalarValue> {
-        if let ValueRefMut::Scalar(scalar) = self {
+        if let MutableView::Scalar(scalar) = self {
             Some(scalar.clone())
         } else {
             None
@@ -233,15 +233,15 @@ impl TryFrom<serde_json::Value> for Automerge {
     }
 }
 
-impl From<u64> for ValueRef<'static, 'static> {
+impl From<u64> for View<'static, 'static> {
     fn from(u: u64) -> Self {
-        ValueRef::Scalar(ScalarValue::Uint(u))
+        View::Scalar(ScalarValue::Uint(u))
     }
 }
 
-impl From<i32> for ValueRef<'static, 'static> {
+impl From<i32> for View<'static, 'static> {
     fn from(i: i32) -> Self {
-        ValueRef::Scalar(ScalarValue::Int(i as i64))
+        View::Scalar(ScalarValue::Int(i as i64))
     }
 }
 
@@ -258,10 +258,7 @@ mod tests {
         let mut doc = Automerge::try_from(json!({"a": 1})).unwrap();
 
         let a_val = doc.root().get("a");
-        assert!(matches!(
-            a_val,
-            Some(ValueRef::Scalar(ScalarValue::Uint(1)))
-        ));
+        assert!(matches!(a_val, Some(View::Scalar(ScalarValue::Uint(1)))));
     }
 
     #[test]
@@ -270,10 +267,7 @@ mod tests {
 
         let b_val = doc.root().get("a").unwrap().get("b");
 
-        assert!(matches!(
-            b_val,
-            Some(ValueRef::Scalar(ScalarValue::Uint(1)))
-        ));
+        assert!(matches!(b_val, Some(View::Scalar(ScalarValue::Uint(1)))));
     }
 
     #[test]

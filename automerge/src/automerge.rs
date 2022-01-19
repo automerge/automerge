@@ -9,8 +9,8 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
 };
-use crate::value_ref::MapRef;
-use crate::value_ref::MapRefMut;
+use crate::view::MapView;
+use crate::view::MutableMapView;
 use crate::{legacy, query, types, ROOT};
 use crate::{AutomergeError, Change, Prop};
 
@@ -439,25 +439,25 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn root(&mut self) -> MapRef {
+    pub fn root(&mut self) -> MapView {
         let heads = self.get_heads();
-        MapRef {
+        MapView {
             obj: ROOT,
             doc: self,
             heads: Cow::Owned(heads),
         }
     }
 
-    pub fn root_at<'a, 'h>(&'a self, heads: &'h [ChangeHash]) -> MapRef<'a, 'h> {
-        MapRef {
+    pub fn root_at<'a, 'h>(&'a self, heads: &'h [ChangeHash]) -> MapView<'a, 'h> {
+        MapView {
             obj: ROOT,
             doc: self,
             heads: Cow::Borrowed(heads),
         }
     }
 
-    pub fn root_mut(&mut self) -> MapRefMut {
-        MapRefMut {
+    pub fn root_mut(&mut self) -> MutableMapView {
+        MutableMapView {
             obj: ROOT,
             doc: self,
         }
@@ -1008,7 +1008,7 @@ impl Automerge {
             .collect()
     }
 
-    pub fn get_heads(&self) -> Vec<ChangeHash> {
+    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
         self.ensure_transaction_closed();
         self._get_heads()
     }
