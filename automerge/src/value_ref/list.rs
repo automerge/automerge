@@ -113,6 +113,19 @@ impl<'a> ListRefMut<'a> {
         }
     }
 
+    pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
+        self.doc.set(&self.obj, prop, value).unwrap();
+    }
+
+    // TODO: change this to return the valueref that was removed, using the old heads, once
+    // valueref can work in the past
+    pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
+        let prop = prop.into();
+        let exists = self.get(prop.clone()).is_some();
+        self.doc.del(&self.obj, prop).unwrap();
+        exists
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = ValueRef> {
         (0..self.len()).map(move |i| self.get(i).unwrap())
     }
@@ -141,6 +154,9 @@ mod tests {
 
         assert_eq!(list.is_empty(), false);
 
-        assert_eq!(list.iter().collect::<Vec<_>>(), vec![1.into(), 2.into()]);
+        assert_eq!(
+            list.iter().collect::<Vec<_>>(),
+            vec![1u64.into(), 2u64.into()]
+        );
     }
 }

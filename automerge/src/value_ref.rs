@@ -94,8 +94,16 @@ impl<'a> ValueRefMut<'a> {
     pub fn insert<P: Into<Prop>, V: Into<Value>>(&mut self, prop: P, value: V) {
         match self {
             ValueRefMut::Map(map) => map.insert(prop, value),
-            ValueRefMut::List(l) => todo!(),
+            ValueRefMut::List(list) => list.insert(prop, value),
             ValueRefMut::Scalar(_) => {}
+        }
+    }
+
+    pub fn remove<P: Into<Prop>>(&mut self, prop: P) -> bool {
+        match self {
+            ValueRefMut::Map(map) => map.remove(prop),
+            ValueRefMut::List(list) => list.remove(prop),
+            ValueRefMut::Scalar(_) => false,
         }
     }
 
@@ -228,6 +236,12 @@ impl From<u64> for ValueRef<'static> {
     }
 }
 
+impl From<i32> for ValueRef<'static> {
+    fn from(i: i32) -> Self {
+        ValueRef::Scalar(ScalarValue::Int(i as i64))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -257,5 +271,16 @@ mod tests {
             b_val,
             Some(ValueRef::Scalar(ScalarValue::Uint(1)))
         ));
+    }
+
+    #[test]
+    fn set_nested_map() {
+        let mut doc = Automerge::new();
+        let mut root = doc.root_mut();
+        root.insert("a", Value::map());
+        let mut a = root.get_mut("a").unwrap();
+        a.insert("b", 1);
+
+        assert_eq!(a.get("b"), Some(1.into()));
     }
 }
