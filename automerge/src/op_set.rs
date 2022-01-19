@@ -1,7 +1,7 @@
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTreeInternal;
 use crate::query::TreeQuery;
-use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
+use crate::types::{ActorId, Key, ObjId, ObjType, Op, OpId, OpType};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -12,15 +12,19 @@ pub(crate) type OpSet = OpSetInternal<16>;
 pub(crate) struct OpSetInternal<const B: usize> {
     trees: HashMap<ObjId, OpTreeInternal<B>, FxBuildHasher>,
     length: usize,
+    pub types: HashMap<ObjId, ObjType, FxBuildHasher>,
     pub m: OpSetMetadata,
 }
 
 impl<const B: usize> OpSetInternal<B> {
     pub fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
+        let mut types: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), Default::default());
+        types.insert(ObjId::root(), ObjType::Map);
         OpSetInternal {
             trees,
+            types,
             length: 0,
             m: OpSetMetadata {
                 actors: IndexedCache::new(),
@@ -63,11 +67,13 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn remove(&mut self, obj: ObjId, index: usize) -> Op {
+        // this happens on rollback - be sure to go back to the old state
         let tree = self.trees.get_mut(&obj).unwrap();
         self.length -= 1;
         let op = tree.remove(index);
-        if tree.is_empty() {
-            self.trees.remove(&obj);
+        if let OpType::Make(_) = &op.action {
+            self.trees.remove(&op.id.into());
+            self.types.remove(&op.id.into());
         }
         op
     }
@@ -77,12 +83,12 @@ impl<const B: usize> OpSetInternal<B> {
     }
 
     pub fn insert(&mut self, index: usize, element: Op) {
-        if let OpType::Make(_) = element.action {
+        if let OpType::Make(obj_type) = element.action {
             self.trees.insert(element.id.into(), Default::default());
+            self.types.insert(element.id.into(), obj_type);
         }
 
         if let Some(tree) = self.trees.get_mut(&element.obj) {
-            //let tree = self.trees.get_mut(&element.obj).unwrap();
             tree.insert(index, element);
             self.length += 1;
         }

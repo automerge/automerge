@@ -153,7 +153,8 @@ impl Automerge {
     pub fn rollback(&mut self) -> usize {
         if let Some(tx) = self.transaction.take() {
             let num = tx.operations.len();
-            for op in &tx.operations {
+            // remove in reverse order so sets are removed before makes etc...
+            for op in tx.operations.iter().rev() {
                 for pred_id in &op.pred {
                     // FIXME - use query to make this fast
                     if let Some(p) = self.ops.iter().position(|o| o.id == *pred_id) {
