@@ -398,8 +398,8 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = toJS)]
-    pub fn to_js(&mut self) -> JsValue {
-        map_to_js(&mut self.0, &ROOT)
+    pub fn to_js(&self) -> JsValue {
+        map_to_js(&self.0, &ROOT)
     }
 
     fn export(&self, val: ObjId) -> JsValue {
