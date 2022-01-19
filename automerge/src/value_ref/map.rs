@@ -31,7 +31,7 @@ impl<'a> MapRef<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef> {
+    pub fn get<P: Into<Prop>>(&self, key: P) -> Option<ValueRef<'a>> {
         match self.doc.value(&self.obj, key) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {

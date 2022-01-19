@@ -19,7 +19,7 @@ pub enum ValueRef<'a> {
 }
 
 impl<'a> ValueRef<'a> {
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a>> {
         match self {
             ValueRef::Map(map) => map.get(prop),
             ValueRef::List(l) => l.get(prop),
@@ -39,7 +39,7 @@ impl<'a> ValueRef<'a> {
         self.len() == 0
     }
 
-    pub fn map(&self) -> Option<MapRef> {
+    pub fn map(&self) -> Option<MapRef<'a>> {
         if let ValueRef::Map(map) = self {
             Some(map.clone())
         } else {
@@ -47,7 +47,7 @@ impl<'a> ValueRef<'a> {
         }
     }
 
-    pub fn list(&self) -> Option<ListRef> {
+    pub fn list(&self) -> Option<ListRef<'a>> {
         if let ValueRef::List(list) = self {
             Some(list.clone())
         } else {
@@ -146,7 +146,7 @@ impl From<u64> for ValueRef<'static> {
 mod tests {
     use serde_json::json;
 
-    use crate::{Automerge, ROOT};
+    use crate::Automerge;
 
     use super::*;
 
@@ -154,10 +154,7 @@ mod tests {
     fn get_map_key() {
         let doc = Automerge::try_from(json!({"a": 1})).unwrap();
 
-        let root_map = doc.root();
-        assert_eq!(root_map.obj, ROOT);
-
-        let a_val = root_map.get("a");
+        let a_val = doc.root().get("a");
         assert!(matches!(
             a_val,
             Some(ValueRef::Scalar(ScalarValue::Uint(1)))
@@ -167,11 +164,9 @@ mod tests {
     #[test]
     fn get_nested_map() {
         let doc = Automerge::try_from(json!({"a": {"b": 1}})).unwrap();
-        let root = doc.root();
 
-        let a_val = root.get("a").unwrap();
+        let b_val = doc.root().get("a").unwrap().get("b");
 
-        let b_val = a_val.get("b");
         assert!(matches!(
             b_val,
             Some(ValueRef::Scalar(ScalarValue::Uint(1)))

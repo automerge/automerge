@@ -26,7 +26,7 @@ impl<'a> ListRef<'a> {
         self.len() == 0
     }
 
-    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef> {
+    pub fn get<P: Into<Prop>>(&self, prop: P) -> Option<ValueRef<'a>> {
         match self.doc.value(&self.obj, prop) {
             Ok(Some((value, id))) => match value {
                 Value::Object(ObjType::Map) => Some(ValueRef::Map(MapRef {
@@ -65,9 +65,7 @@ mod tests {
         }))
         .unwrap();
 
-        let root = doc.root();
-        let a = root.get("a").unwrap();
-        let list = a.list().unwrap();
+        let list = doc.root().get("a").unwrap().list().unwrap();
 
         assert_eq!(list.get(0), Some(ValueRef::Scalar(ScalarValue::Uint(1))));
 
