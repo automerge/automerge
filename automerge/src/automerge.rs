@@ -745,7 +745,7 @@ impl Automerge {
             &self.ops.m.props.cache,
         );
         if bytes.is_ok() {
-            self.saved = self.get_heads().iter().copied().collect();
+            self.saved = self.get_heads().to_vec();
         }
         bytes
     }
@@ -759,7 +759,7 @@ impl Automerge {
             bytes.extend(c.raw_bytes());
         }
         if !bytes.is_empty() {
-            self.saved = self._get_heads().iter().copied().collect();
+            self.saved = self._get_heads().to_vec()
         }
         bytes
     }
