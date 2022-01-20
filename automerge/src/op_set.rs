@@ -173,8 +173,7 @@ impl OpSetMetadata {
             (OpId(0, _), OpId(0, _)) => Ordering::Equal,
             (OpId(0, _), OpId(_, _)) => Ordering::Less,
             (OpId(_, _), OpId(0, _)) => Ordering::Greater,
-            // FIXME - this one seems backwards to me - why - is values() returning in the wrong order?
-            (OpId(a, x), OpId(b, y)) if a == b => self.actors[y].cmp(&self.actors[x]),
+            (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
     }

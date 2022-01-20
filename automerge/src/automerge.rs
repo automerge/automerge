@@ -455,7 +455,7 @@ impl Automerge {
         obj: &ExId,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.values(obj, prop.into())?.first().cloned())
+        Ok(self.values(obj, prop.into())?.last().cloned())
     }
 
     pub fn value_at<P: Into<Prop>>(
@@ -464,7 +464,7 @@ impl Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.values_at(obj, prop, heads)?.first().cloned())
+        Ok(self.values_at(obj, prop, heads)?.last().cloned())
     }
 
     pub fn values<P: Into<Prop>>(

@@ -613,6 +613,29 @@ describe('Automerge', () => {
         assert.strictEqual(s1.japaneseFood.length, 3)
       })
 
+      it('concurrent edits insert in reverse actorid order if counters equal', () => {
+        s1 = Automerge.init('aaaa')
+        s2 = Automerge.init('bbbb')
+        s1 = Automerge.change(s1, doc => doc.list = [])
+        s2 = Automerge.merge(s2, s1)
+        s1 = Automerge.change(s1, doc => doc.list.splice(0, 0, "2@aaaa"))
+        s2 = Automerge.change(s2, doc => doc.list.splice(0, 0, "2@bbbb"))
+        s2 = Automerge.merge(s2, s1)
+        assert.deepStrictEqual(Automerge.toJS(s2).list, ["2@bbbb", "2@aaaa"])
+      })
+
+      it('concurrent edits insert in reverse counter order if different', () => {
+        s1 = Automerge.init('aaaa')
+        s2 = Automerge.init('bbbb')
+        s1 = Automerge.change(s1, doc => doc.list = [])
+        s2 = Automerge.merge(s2, s1)
+        s1 = Automerge.change(s1, doc => doc.list.splice(0, 0, "2@aaaa"))
+          s2 = Automerge.change(s2, doc => doc.foo = "2@bbbb")
+          s2 = Automerge.change(s2, doc => doc.list.splice(0, 0, "3@bbbb"))
+          s2 = Automerge.merge(s2, s1)
+          assert.deepStrictEqual(s2.list, ["3@bbbb", "2@aaaa"])
+      })
+
       it('should treat out-by-one assignment as insertion', () => {
         s1 = Automerge.change(s1, doc => doc.japaneseFood = ['udon'])
         s1 = Automerge.change(s1, doc => doc.japaneseFood[1] = 'sushi')

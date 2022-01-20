@@ -440,10 +440,10 @@ fn concurrent_insertions_at_same_list_position() {
                         "parakeet",
                     },
                     {
-                        "starling",
+                        "chaffinch",
                     },
                     {
-                        "chaffinch",
+                        "starling",
                     },
                 ]
             },
@@ -741,15 +741,15 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
         map! {
             "wisdom" => {list![
                 {"to"},
-                {"be"},
-                {"is"},
-                {"to"},
-                {"do"},
-                {"to"},
                 {"do"},
                 {"is"},
                 {"to"},
                 {"be"},
+                {"to"},
+                {"be"},
+                {"is"},
+                {"to"},
+                {"do"},
             ]}
         }
     );
@@ -890,9 +890,9 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut v = vec![ActorId::random(), ActorId::random(), ActorId::random()];
     v.sort();
     println!("{:?}", v);
-    let actor1 = v[2].clone();
+    let actor1 = v[0].clone();
     let actor2 = v[1].clone();
-    let actor3 = v[0].clone();
+    let actor3 = v[2].clone();
 
     let mut doc1 = new_doc_with_actor(actor1);
 
