@@ -1,3 +1,4 @@
+#![allow(clippy::unused_unit)]
 use automerge as am;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
