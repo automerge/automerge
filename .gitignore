@@ -6,3 +6,7 @@ libtest.rmeta
 .direnv/
 result
 result-lib
+.vs/
+CMakeSettings.json
+/build
+/out

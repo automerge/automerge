@@ -1,0 +1,196 @@
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+
+find_program (
+    CARGO_CMD
+    "cargo"
+    PATHS "$ENV{CARGO_HOME}/bin"
+    DOC "The Cargo command"
+)
+
+if(NOT CARGO_CMD)
+    message(FATAL_ERROR "Cargo (Rust package manager) not found! Install it and/or set the CARGO_HOME environment variable.")
+endif()
+
+string(TOLOWER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_LOWER)
+
+if(BUILD_TYPE_LOWER STREQUAL debug)
+    set(CARGO_BUILD_TYPE "debug")
+
+    set(CARGO_FLAG "")
+else()
+    set(CARGO_BUILD_TYPE "release")
+
+    set(CARGO_FLAG "--release")
+endif()
+
+set(CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/Cargo/target")
+
+set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
+
+set(
+    CARGO_OUTPUT
+        # \note cbindgen won't regenerate the header when it's missing so it can't be cleaned.
+        #${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
+        ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
+)
+
+if(WIN32)
+    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    list(APPEND CARGO_OUTPUT ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX})
+endif()
+
+add_custom_command(
+    OUTPUT ${CARGO_OUTPUT}
+    COMMAND
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG}
+    MAIN_DEPENDENCY
+        src/lib.rs
+    DEPENDS
+        build.rs
+        Cargo.toml
+        cbindgen.toml
+    WORKING_DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT
+        "Producing the library artifacts with Cargo..."
+    VERBATIM
+)
+
+if(BUILD_SHARED_LIBS)
+    if(WIN32)
+        set(LIBRARY_DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    else()
+    	set(LIBRARY_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    endif()
+
+    set(LIBRARY_DEFINE_SYMBOL "${SYMBOL_PREFIX}_EXPORTS")
+
+    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    set(LIBRARY_IMPLIB "${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+    set(LIBRARY_LOCATION "${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+
+    set(LIBRARY_NO_SONAME "${WIN32}")
+
+    set(LIBRARY_SONAME "${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_SHARED_LIBRARY_SUFFIX}")
+
+    set(LIBRARY_TYPE "SHARED")
+else()
+    set(LIBRARY_DEFINE_SYMBOL "")
+
+    set(LIBRARY_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+    set(LIBRARY_IMPLIB "")
+
+    set(LIBRARY_LOCATION "${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+    set(LIBRARY_NO_SONAME "TRUE")
+
+    set(LIBRARY_SONAME "")
+
+    set(LIBRARY_TYPE "STATIC")
+endif()
+
+add_library(${LIBRARY_NAME} ${LIBRARY_TYPE} IMPORTED GLOBAL)
+
+target_sources(${LIBRARY_NAME} INTERFACE ${CARGO_OUTPUT})
+
+set_target_properties(
+    ${LIBRARY_NAME}
+    PROPERTIES
+        # \note Cargo writes a debug build into a nested directory instead of decorating its name.
+        DEBUG_POSTFIX ""
+    	DEFINE_SYMBOL "${LIBRARY_DEFINE_SYMBOL}"
+        IMPORTED_IMPLIB "${LIBRARY_IMPLIB}"
+        IMPORTED_LOCATION "${LIBRARY_LOCATION}"
+        IMPORTED_NO_SONAME "${LIBRARY_NO_SONAME}"
+        IMPORTED_SONAME "${LIBRARY_SONAME}"
+        LINKER_LANGUAGE C
+        PUBLIC_HEADER "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
+        SOVERSION "${PROJECT_VERSION_MAJOR}"
+        VERSION "${PROJECT_VERSION}"
+        # \note Cargo exports all of the symbols automatically.
+        WINDOWS_EXPORT_ALL_SYMBOLS "TRUE"
+)
+
+target_compile_definitions(${LIBRARY_NAME} INTERFACE $<TARGET_PROPERTY:${LIBRARY_NAME},DEFINE_SYMBOL>)
+
+target_include_directories(
+    ${LIBRARY_NAME}
+    INTERFACE
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}>"
+)
+
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+
+find_package(Threads REQUIRED)
+
+set(LIBRARY_DEPENDENCIES Threads::Threads ${CMAKE_DL_LIBS})
+
+if(WIN32)
+    list(APPEND LIBRARY_DEPENDENCIES Bcrypt userenv ws2_32)
+else()
+    list(APPEND LIBRARY_DEPENDENCIES m)
+endif()
+
+target_link_libraries(${LIBRARY_NAME} INTERFACE ${LIBRARY_DEPENDENCIES})
+
+install(
+    FILES $<TARGET_PROPERTY:${LIBRARY_NAME},IMPORTED_IMPLIB>
+    TYPE LIB
+    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    RENAME "${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}"
+    OPTIONAL
+)
+
+set(LIBRARY_FILE_NAME "${CMAKE_${LIBRARY_TYPE}_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_${LIBRARY_TYPE}_LIBRARY_SUFFIX}")
+
+install(
+    FILES $<TARGET_PROPERTY:${LIBRARY_NAME},IMPORTED_LOCATION>
+    RENAME "${LIBRARY_FILE_NAME}"
+    DESTINATION ${LIBRARY_DESTINATION}
+)
+
+install(
+    FILES $<TARGET_PROPERTY:${LIBRARY_NAME},PUBLIC_HEADER>
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+    add_executable(test_${LIBRARY_NAME} ${LIBRARY_NAME}.c)
+
+    set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
+
+    # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't contain a non-existent path so its build-time
+    #       include directory must be specified for all of its dependent targets instead.
+    target_include_directories(test_${LIBRARY_NAME} PRIVATE "$<BUILD_INTERFACE:${CARGO_TARGET_DIR}>")
+
+    target_link_libraries(test_${LIBRARY_NAME} PRIVATE ${LIBRARY_NAME})
+
+    add_test(NAME "test_${LIBRARY_NAME}" COMMAND test_${LIBRARY_NAME})
+
+    if(BUILD_SHARED_LIBS AND WIN32)
+        add_custom_command(
+            TARGET test_${LIBRARY_NAME}
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_SHARED_LIBRARY_SUFFIX}
+                    ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Copying the DLL built by Cargo into the test directory..."
+            VERBATIM
+        )
+    endif()
+
+    add_custom_command(
+        TARGET test_${LIBRARY_NAME}
+        POST_BUILD
+        COMMAND
+            ctest -C $<CONFIGURATION> --output-on-failure
+        COMMENT
+            "Running the test(s)..."
+        VERBATIM
+    )
+endif()
