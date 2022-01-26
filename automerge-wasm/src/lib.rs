@@ -296,6 +296,40 @@ impl Automerge {
         Ok(())
     }
 
+    pub fn mark(&mut self, obj: JsValue, start: JsValue, end: JsValue, name: JsValue, value: JsValue, datatype: JsValue) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
+        let start = to_usize(start, "start")?;
+        let end = to_usize(end, "end")?;
+        let name = name
+            .as_string()
+            .ok_or("invalid mark name")
+            .map_err(to_js_err)?;
+        let value = self.import_scalar(&value, datatype.as_string())?;
+        self.0.mark(&obj, start, end, &name, value).map_err(to_js_err)?;
+        Ok(())
+    }
+
+    pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let spans = self.0.spans(&obj).map_err(to_js_err)?;
+        let result = Array::new();
+        for s in spans {
+            let marks = Array::new();
+            for m in s.marks {
+                let mark = Array::new();
+                mark.push(&m.0.into());
+                mark.push(&datatype(&m.1).into());
+                mark.push(&ScalarValue(m.1).into());
+                marks.push(&mark.into());
+            }
+            let obj = Object::new().into();
+            js_set(&obj, "pos", s.pos as i32)?;
+            js_set(&obj, "marks", marks)?;
+            result.push(&obj);
+        }
+        Ok(result.into())
+    }
+
     pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
         self.0
             .save()
@@ -426,7 +460,80 @@ impl Automerge {
         }
     }
 
+    fn import_scalar(&mut self, value: &JsValue, datatype: Option<String>) -> Result<am::ScalarValue, JsValue> {
+        match datatype.as_deref() {
+            Some("boolean") => value
+                .as_bool()
+                .ok_or_else(|| "value must be a bool".into())
+                .map(|v| am::ScalarValue::Boolean(v)),
+            Some("int") => value
+                .as_f64()
+                .ok_or_else(|| "value must be a number".into())
+                .map(|v| am::ScalarValue::Int(v as i64)),
+            Some("uint") => value
+                .as_f64()
+                .ok_or_else(|| "value must be a number".into())
+                .map(|v| am::ScalarValue::Uint(v as u64)),
+            Some("f64") => value
+                .as_f64()
+                .ok_or_else(|| "value must be a number".into())
+                .map(|n| am::ScalarValue::F64(n)),
+            Some("bytes") => {
+                Ok(am::ScalarValue::Bytes(value.clone().dyn_into::<Uint8Array>().unwrap().to_vec()))
+            }
+            Some("counter") => value
+                .as_f64()
+                .ok_or_else(|| "value must be a number".into())
+                .map(|v| am::ScalarValue::counter(v as i64)),
+            Some("timestamp") => value
+                .as_f64()
+                .ok_or_else(|| "value must be a number".into())
+                .map(|v| am::ScalarValue::Timestamp(v as i64)),
+            /*
+            Some("bytes") => unimplemented!(),
+            Some("cursor") => unimplemented!(),
+            */
+            Some("null") => Ok(am::ScalarValue::Null),
+            Some(_) => Err(format!("unknown datatype {:?}", datatype).into()),
+            None => {
+                if value.is_null() {
+                    Ok(am::ScalarValue::Null)
+                } else if let Some(b) = value.as_bool() {
+                    Ok(am::ScalarValue::Boolean(b))
+                } else if let Some(s) = value.as_string() {
+                    // FIXME - we need to detect str vs int vs float vs bool here :/
+                    Ok(am::ScalarValue::Str(s.into()))
+                } else if let Some(n) = value.as_f64() {
+                    if (n.round() - n).abs() < f64::EPSILON {
+                        Ok(am::ScalarValue::Int(n as i64))
+                    } else {
+                        Ok(am::ScalarValue::F64(n))
+                    }
+//                } else if let Some(o) = to_objtype(&value) {
+//                    Ok(o.into())
+                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                    Ok(am::ScalarValue::Timestamp(d.get_time() as i64))
+                } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
+                    Ok(am::ScalarValue::Bytes(o.to_vec()))
+                } else {
+                    Err("value is invalid".into())
+                }
+            }
+        }
+    }
+
     fn import_value(&mut self, value: JsValue, datatype: Option<String>) -> Result<Value, JsValue> {
+        match self.import_scalar(&value,datatype) {
+            Ok(val) => Ok(val.into()),
+            Err(err) => {
+                if let Some(o) = to_objtype(&value) {
+                    Ok(o.into())
+                } else {
+                    Err(err)
+                }
+            }
+        }
+        /*
         match datatype.as_deref() {
             Some("boolean") => value
                 .as_bool()
@@ -455,10 +562,6 @@ impl Automerge {
                 .as_f64()
                 .ok_or_else(|| "value must be a number".into())
                 .map(|v| am::ScalarValue::Timestamp(v as i64).into()),
-            /*
-            Some("bytes") => unimplemented!(),
-            Some("cursor") => unimplemented!(),
-            */
             Some("null") => Ok(am::ScalarValue::Null.into()),
             Some(_) => Err(format!("unknown datatype {:?}", datatype).into()),
             None => {
@@ -486,6 +589,7 @@ impl Automerge {
                 }
             }
         }
+        */
     }
 }
 

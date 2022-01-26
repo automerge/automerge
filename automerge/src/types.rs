@@ -160,6 +160,8 @@ pub enum OpType {
     Del,
     Inc(i64),
     Set(ScalarValue),
+    Mark(String, ScalarValue),
+    Unmark,
 }
 
 #[derive(Debug)]
@@ -181,6 +183,10 @@ impl OpId {
     #[inline]
     pub fn actor(&self) -> usize {
         self.1
+    }
+    #[inline]
+    pub fn prev(&self) -> OpId {
+        OpId(self.0 - 1, self.1)
     }
 }
 
@@ -283,6 +289,18 @@ impl From<ElemId> for Key {
     }
 }
 
+impl From<Option<ElemId>> for ElemId {
+    fn from(e: Option<ElemId>) -> Self {
+        e.unwrap_or(HEAD)
+    }
+}
+
+impl From<Option<ElemId>> for Key {
+    fn from(e: Option<ElemId>) -> Self {
+        Key::Seq(e.into())
+    }
+}
+
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone, Copy, Hash)]
 pub(crate) enum Key {
     Map(usize),
@@ -366,7 +384,7 @@ impl Op {
     }
 
     pub fn visible(&self) -> bool {
-        if self.is_inc() {
+        if self.is_inc()  || self.is_mark() {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
@@ -389,6 +407,10 @@ impl Op {
 
     pub fn is_inc(&self) -> bool {
         matches!(&self.action, OpType::Inc(_))
+    }
+
+    pub fn is_mark(&self) -> bool {
+        matches!(&self.action, OpType::Mark(_,_)) || matches!(&self.action, OpType::Unmark)
     }
 
     pub fn is_counter(&self) -> bool {
@@ -425,6 +447,8 @@ impl Op {
             OpType::Set(value) if self.insert => format!("i:{}", value),
             OpType::Set(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
+            OpType::Mark(s,_) => format!("mark{}", s),
+            OpType::Unmark=> format!("unmark"),
             OpType::Inc(val) => format!("inc:{}", val),
             OpType::Del => "del".to_string(),
         }

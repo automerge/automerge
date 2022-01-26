@@ -65,7 +65,7 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
         if element.insert {
             if self.seen >= self.target {
                 return QueryResult::Finish;
-            };
+            }
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
