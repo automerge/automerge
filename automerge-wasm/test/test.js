@@ -1270,6 +1270,37 @@ describe('Automerge', () => {
         assert.strictEqual(message, null)
       })
 
+      it('should handle marks', () => {
+        let doc = Automerge.init()
+        let list = doc.set("_root", "list", Automerge.TEXT)
+        doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
+	doc.mark(list, 1,15, "bold" , true)
+	doc.mark(list, 5,12, "itallic" , true)
+	doc.mark(list, 9,11, "comment" , "foxes are my favorite animal!")
+	let spans = doc.spans(list);
+        assert.deepStrictEqual(spans, [
+	  { pos: 1, marks: [ [ 'bold', 'boolean', true ] ] },
+	  {
+	    pos: 5,
+	    marks: [ [ 'bold', 'boolean', true ], [ 'itallic', 'boolean', true ] ]
+	  },
+	  {
+	    pos: 9,
+	    marks: [
+	      [ 'bold', 'boolean', true ],
+	      [ 'itallic', 'boolean', true ],
+	      [ 'comment', 'str', 'foxes are my favorite animal!' ]
+	    ]
+	  },
+	  {
+	    pos: 11,
+	    marks: [ [ 'itallic', 'boolean', true ], [ 'bold', 'boolean', true ] ]
+	  },
+	  { pos: 12, marks: [ [ 'bold', 'boolean', true ] ] },
+	  { pos: 15, marks: [] }
+	])
+      })
+
       it('should allow a subset of changes to be sent', () => {
         //       ,-- c1 <-- c2
         // c0 <-+

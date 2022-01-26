@@ -447,6 +447,69 @@ impl Automerge {
         Ok(buffer)
     }
 
+    pub fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>,AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let mut query = self.ops.search(obj, query::Spans::new());
+        query.check_marks();
+        Ok(query.spans)
+    }
+
+    pub fn mark(
+        &mut self,
+        obj: &ExId,
+        start: usize,
+        end: usize,
+        mark: &str,
+        value: ScalarValue,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let query = self.ops.search(obj, query::Mark::new(start, end));
+
+        let (a, b) = query.ops()?;
+        let (pos, key) = a;
+        let id = self.next_id();
+        let op = Op {
+            change: self.history.len(),
+            id,
+            action: OpType::Mark(mark.into(), value),
+            obj,
+            key,
+            succ: Default::default(),
+            pred: Default::default(),
+            insert: false,
+        };
+        self.ops.insert(pos, op.clone());
+        self.tx().operations.push(op);
+
+        let (pos, key) = b;
+        let id = self.next_id();
+        let op = Op {
+            change: self.history.len(),
+            id,
+            action: OpType::Unmark,
+            obj,
+            key,
+            succ: Default::default(),
+            pred: Default::default(),
+            insert: true,
+        };
+        self.ops.insert(pos, op.clone());
+        self.tx().operations.push(op);
+
+        Ok(())
+    }
+
+    pub fn unmark(
+        &self,
+        _obj: &ExId,
+        _start: usize,
+        _end: usize,
+        _inclusive: bool,
+        _mark: &str,
+    ) -> Result<String, AutomergeError> {
+        unimplemented!()
+    }
+
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
@@ -1091,6 +1154,8 @@ impl Automerge {
                 OpType::Set(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make{}", obj),
                 OpType::Inc(obj) => format!("inc{}", obj),
+                OpType::Mark(s,_) => format!("mark{}", s),
+                OpType::Unmark => format!("unmark"),
                 OpType::Del => format!("del{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.to_string(*id)).collect();

@@ -12,11 +12,13 @@ mod len;
 mod len_at;
 mod list_vals;
 mod list_vals_at;
+mod mark;
 mod nth;
 mod nth_at;
 mod prop;
 mod prop_at;
 mod seek_op;
+mod spans;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
@@ -25,11 +27,13 @@ pub(crate) use len::Len;
 pub(crate) use len_at::LenAt;
 pub(crate) use list_vals::ListVals;
 pub(crate) use list_vals_at::ListValsAt;
+pub(crate) use mark::Mark;
 pub(crate) use nth::Nth;
 pub(crate) use nth_at::NthAt;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
 pub(crate) use seek_op::SeekOp;
+pub(crate) use spans::{Span, Spans};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {
