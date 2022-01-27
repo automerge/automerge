@@ -32,6 +32,8 @@ impl<const B: usize> Mark<B> {
     pub fn ops(&self) -> Result<((usize,Key),(usize,Key)),AutomergeError> {
         if self._ops.len() == 2 {
             Ok((self._ops[0], self._ops[1]))
+        } else if self._ops.len() == 1 {
+            Ok((self._ops[0], (self.pos + 1, self.last_insert.into())))
         } else {
             Err(AutomergeError::Fail)
         }

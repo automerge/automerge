@@ -6,7 +6,7 @@ use crate::exid::ExId;
 use crate::op_set::OpSet;
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
-    ScalarValue, Value,
+    ScalarValue, Value, MarkData,
 };
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
@@ -336,11 +336,11 @@ impl Automerge {
         value: V,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
+        let value = value.into();
 
         let query = self.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let value = value.into();
         let action = value.into();
         let is_make = matches!(&action, OpType::Make(_));
 
@@ -355,7 +355,7 @@ impl Automerge {
             insert: true,
         };
 
-        self.ops.insert(query.pos, op.clone());
+        self.ops.insert(query.pos(), op.clone());
         self.tx().operations.push(op);
 
         if is_make {
@@ -458,7 +458,9 @@ impl Automerge {
         &mut self,
         obj: &ExId,
         start: usize,
+        start_sticky: bool,
         end: usize,
+        end_sticky: bool,
         mark: &str,
         value: ScalarValue,
     ) -> Result<(), AutomergeError> {
@@ -471,12 +473,12 @@ impl Automerge {
         let op = Op {
             change: self.history.len(),
             id,
-            action: OpType::Mark(mark.into(), value),
+            action: OpType::Mark(MarkData { name: mark.into(), sticky: start_sticky, value}),
             obj,
             key,
             succ: Default::default(),
             pred: Default::default(),
-            insert: false,
+            insert: true,
         };
         self.ops.insert(pos, op.clone());
         self.tx().operations.push(op);
@@ -486,7 +488,7 @@ impl Automerge {
         let op = Op {
             change: self.history.len(),
             id,
-            action: OpType::Unmark,
+            action: OpType::Unmark(end_sticky),
             obj,
             key,
             succ: Default::default(),
@@ -1152,10 +1154,10 @@ impl Automerge {
             };
             let value: String = match &i.action {
                 OpType::Set(value) => format!("{}", value),
-                OpType::Make(obj) => format!("make{}", obj),
-                OpType::Inc(obj) => format!("inc{}", obj),
-                OpType::Mark(s,_) => format!("mark{}", s),
-                OpType::Unmark => format!("unmark"),
+                OpType::Make(obj) => format!("make({})", obj),
+                OpType::Inc(obj) => format!("inc({})", obj),
+                OpType::Mark(m) => format!("mark({}={})", m.name,m.value),
+                OpType::Unmark(_) => "unmark".into(),
                 OpType::Del => format!("del{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.to_string(*id)).collect();

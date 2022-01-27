@@ -168,8 +168,15 @@ pub enum OpType {
     Del,
     Inc(i64),
     Set(ScalarValue),
-    Mark(String, ScalarValue),
-    Unmark,
+    Mark(MarkData),
+    Unmark(bool),
+}
+
+#[derive(PartialEq, Debug, Clone)]
+pub struct MarkData {
+    pub name: String,
+    pub value: ScalarValue,
+    pub sticky: bool,
 }
 
 #[derive(Debug)]
@@ -417,8 +424,12 @@ impl Op {
         matches!(&self.action, OpType::Inc(_))
     }
 
+    pub fn valid_mark_anchor(&self) -> bool {
+        self.succ.is_empty() && matches!(&self.action, OpType::Mark(MarkData { sticky: true, ..}) | OpType::Unmark(false))
+    }
+
     pub fn is_mark(&self) -> bool {
-        matches!(&self.action, OpType::Mark(_,_)) || matches!(&self.action, OpType::Unmark)
+        matches!(&self.action, OpType::Mark(_) | OpType::Unmark(_))
     }
 
     pub fn is_counter(&self) -> bool {
@@ -455,8 +466,8 @@ impl Op {
             OpType::Set(value) if self.insert => format!("i:{}", value),
             OpType::Set(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
-            OpType::Mark(s,_) => format!("mark{}", s),
-            OpType::Unmark=> format!("unmark"),
+            OpType::Mark(m) => format!("mark{}={}", m.name, m.value),
+            OpType::Unmark(_) => "unmark".into(),
             OpType::Inc(val) => format!("inc:{}", val),
             OpType::Del => "del".to_string(),
         }

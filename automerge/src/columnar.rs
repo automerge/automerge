@@ -1064,8 +1064,8 @@ impl DocOpEncoder {
                     self.val.append_null();
                     Action::Del
                 }
-                amp::OpType::Mark(_,_) => unimplemented!(),
-                amp::OpType::Unmark => unimplemented!(),
+                amp::OpType::Mark(_) => unimplemented!(),
+                amp::OpType::Unmark(_) => unimplemented!(),
                 amp::OpType::Make(kind) => {
                     self.val.append_null();
                     match kind {
@@ -1172,8 +1172,8 @@ impl ColumnEncoder {
                 self.val.append_null();
                 Action::Del
             }
-            OpType::Mark(_,_) => unimplemented!(),
-            OpType::Unmark => unimplemented!(),
+            OpType::Mark(_) => unimplemented!(),
+            OpType::Unmark(_) => unimplemented!(),
             OpType::Make(kind) => {
                 self.val.append_null();
                 match kind {
