@@ -397,6 +397,100 @@ describe('Automerge', () => {
       doc1.free()
       doc2.free()
     })
+
+    it.only('should handle marks [..]', () => {
+      let doc = Automerge.init()
+       let list = doc.set("_root", "list", Automerge.TEXT)
+       doc.splice(list, 0, 0, "aaabbbccc")
+       doc.mark(list, "[3..6]", "bold" , true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
+      doc.insert(list, 6, "A")
+      doc.insert(list, 3, "A")
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaaA', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'Accc' ]);
+    })
+
+    it.only('should handle marks with deleted ends [..]', () => {
+      let doc = Automerge.init()
+      let list = doc.set("_root", "list", Automerge.TEXT)
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[3..6]", "bold" , true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
+      doc.del(list,5);
+      doc.del(list,5);
+      doc.del(list,2);
+      doc.del(list,2);
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'b', [], 'cc' ])
+      doc.insert(list, 3, "A")
+      doc.insert(list, 2, "A")
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaA', [ [ 'bold', 'boolean', true ] ], 'b', [], 'Acc' ])
+    })
+
+    it.only('should handle sticky marks (..)', () => {
+      let doc = Automerge.init()
+      let list = doc.set("_root", "list", Automerge.TEXT)
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "(3..6)", "bold" , true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
+      doc.insert(list, 6, "A")
+      doc.insert(list, 3, "A")
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'AbbbA', [], 'ccc' ]);
+    })
+
+    it.only('should handle sticky marks with deleted ends (..)', () => {
+      let doc = Automerge.init()
+      let list = doc.set("_root", "list", Automerge.TEXT)
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "(3..6)", "bold" , true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
+      doc.del(list,5);
+      doc.del(list,5);
+      doc.del(list,2);
+      doc.del(list,2);
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'b', [], 'cc' ])
+      doc.insert(list, 3, "A")
+      doc.insert(list, 2, "A")
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
+    })
+
+    it.only('should handle overlapping marks', () => {
+      let doc = Automerge.init()
+      let list = doc.set("_root", "list", Automerge.TEXT)
+      doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
+      doc.mark(list, "[0..37]", "bold" , true)
+      doc.mark(list, "[4..19]", "itallic" , true)
+      doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans,
+        [
+          [ [ 'bold', 'boolean', true ] ],
+          'the ',
+          [ [ 'bold', 'boolean', true ], [ 'itallic', 'boolean', true ] ],
+          'quick ',
+          [
+            [ 'bold', 'boolean', true ],
+            [ 'comment', 'str', 'foxes are my favorite animal!' ],
+            [ 'itallic', 'boolean', true ]
+          ],
+          'fox',
+          [ [ 'bold', 'boolean', true ], [ 'itallic', 'boolean', true ] ],
+          ' jumps',
+          [ [ 'bold', 'boolean', true ] ],
+          ' over the lazy dog',
+          [],
+        ]
+      )
+    })
+
   })
   describe('sync', () => {
     it('should send a sync message implying no local data', () => {
@@ -1268,37 +1362,6 @@ describe('Automerge', () => {
         n2.receiveSyncMessage(s2, message)
         message = n2.generateSyncMessage(s2)
         assert.strictEqual(message, null)
-      })
-
-      it('should handle marks', () => {
-        let doc = Automerge.init()
-        let list = doc.set("_root", "list", Automerge.TEXT)
-        doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
-	doc.mark(list, 1,15, "bold" , true)
-	doc.mark(list, 5,12, "itallic" , true)
-	doc.mark(list, 9,11, "comment" , "foxes are my favorite animal!")
-	let spans = doc.spans(list);
-        assert.deepStrictEqual(spans, [
-	  { pos: 1, marks: [ [ 'bold', 'boolean', true ] ] },
-	  {
-	    pos: 5,
-	    marks: [ [ 'bold', 'boolean', true ], [ 'itallic', 'boolean', true ] ]
-	  },
-	  {
-	    pos: 9,
-	    marks: [
-	      [ 'bold', 'boolean', true ],
-	      [ 'itallic', 'boolean', true ],
-	      [ 'comment', 'str', 'foxes are my favorite animal!' ]
-	    ]
-	  },
-	  {
-	    pos: 11,
-	    marks: [ [ 'itallic', 'boolean', true ], [ 'bold', 'boolean', true ] ]
-	  },
-	  { pos: 12, marks: [ [ 'bold', 'boolean', true ] ] },
-	  { pos: 15, marks: [] }
-	])
       })
 
       it('should allow a subset of changes to be sent', () => {

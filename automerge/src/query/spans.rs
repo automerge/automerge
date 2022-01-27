@@ -42,15 +42,15 @@ impl<const B: usize> Spans<B> {
     pub fn check_marks(&mut self) {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
-            if let OpType::Mark(n,v) = &op.action {
-                new_marks.insert(n.clone(),v.clone());
+            if let OpType::Mark(m) = &op.action {
+                new_marks.insert(m.name.clone(),m.value.clone());
             }
         }
         if new_marks != self.marks {
             self.changed = true;
             self.marks = new_marks;
         }
-        if self.changed && self.seen_at_last_mark != self.seen_at_this_mark {
+        if self.changed && (self.seen_at_last_mark != self.seen_at_this_mark  || self.seen_at_last_mark.is_none() && self.seen_at_this_mark.is_none()) {
             self.changed = false;
             self.seen_at_last_mark = self.seen_at_this_mark;
             self.spans.push(Span { 
@@ -72,11 +72,11 @@ impl<const B: usize> TreeQuery<B> for Spans<B> {
         // find location to insert
         // mark or set
         if element.succ.is_empty() {
-            if let OpType::Mark(_,_) = &element.action {
+            if let OpType::Mark(_) = &element.action {
                 let pos = self.ops.binary_search_by(|probe| m.lamport_cmp(probe.id, element.id)).unwrap_err();
                 self.ops.insert(pos, element.clone());
             }
-            if let OpType::Unmark = &element.action {
+            if let OpType::Unmark(_) = &element.action {
                 self.ops.retain(|op| op.id != element.id.prev());
             }
         }
