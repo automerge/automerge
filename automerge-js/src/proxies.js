@@ -386,7 +386,7 @@ function textProxy(context, objectId, path, readonly, heads) {
 }
 
 function rootProxy(context, readonly) {
-  return mapProxy(context, "_root", [], readonly, false)
+  return mapProxy(context, "_root", [], readonly)
 }
 
 function listMethods(target) {

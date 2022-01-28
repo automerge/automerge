@@ -247,13 +247,6 @@ pub(crate) fn js_set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Res
     Reflect::set(obj, &prop.into(), &val.into())
 }
 
-pub(crate) fn to_usize(val: JsValue, name: &str) -> Result<usize, JsValue> {
-    match val.as_f64() {
-        Some(n) => Ok(n as usize),
-        None => Err(format!("{} must be a number", name).into()),
-    }
-}
-
 pub(crate) fn to_prop(p: JsValue) -> Result<Prop, JsValue> {
     if let Some(s) = p.as_string() {
         Ok(Prop::Map(s))
@@ -283,8 +276,10 @@ pub(crate) fn to_objtype(a: &JsValue) -> Option<am::ObjType> {
     }
 }
 
-pub(crate) fn get_heads(heads: JsValue) -> Option<Vec<ChangeHash>> {
-    JS(heads).into()
+pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
+    let heads = heads?;
+    let heads: Result<Vec<ChangeHash>, _> = heads.iter().map(|j| j.into_serde()).collect();
+    heads.ok()
 }
 
 pub(crate) fn map_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
