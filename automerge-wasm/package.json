@@ -19,6 +19,7 @@
   "scripts": {
     "build": "rimraf ./dev && wasm-pack build --target nodejs --dev --out-name index -d dev",
     "release": "rimraf ./dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt",
+    "pkg": "rimraf ./pkg && wasm-pack build --target web --release --out-name index -d pkg && cd pkg && yarn pack && mv automerge-wasm*tgz ..",
     "prof": "rimraf ./dev && wasm-pack build --target nodejs --profiling --out-name index -d dev",
     "opt": "wasm-opt -Oz dev/index_bg.wasm -o tmp.wasm && mv tmp.wasm dev/index_bg.wasm",
     "test": "yarn build && mocha --bail --full-trace"

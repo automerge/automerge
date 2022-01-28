@@ -183,6 +183,23 @@ impl Automerge {
         Ok(opid.map(|id| id.to_string()))
     }
 
+    pub fn make(
+        &mut self,
+        obj: String,
+        prop: JsValue,
+        value: JsValue,
+    ) -> Result<String, JsValue> {
+        let obj = self.import(obj)?;
+        let prop = self.import_prop(prop)?;
+        let value = self.import_value(value, None)?;
+        if value.is_object() {
+          let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
+          Ok(opid.unwrap().to_string())
+        } else {
+          Err("invalid object type".into())
+        }
+    }
+
     pub fn inc(&mut self, obj: String, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
