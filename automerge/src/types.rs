@@ -164,6 +164,12 @@ pub enum OpType {
     Unmark(bool),
 }
 
+impl OpType {
+  pub (crate) fn mark(name: String, sticky: bool, value: ScalarValue) -> Self {
+    OpType::Mark(MarkData { name, sticky, value })
+  }
+}
+
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
     pub name: String,

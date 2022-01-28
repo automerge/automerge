@@ -49,6 +49,12 @@ impl Serialize for Op {
         match &self.action {
             OpType::Inc(n) => op.serialize_field("value", &n)?,
             OpType::Set(value) => op.serialize_field("value", &value)?,
+            OpType::Mark(m) => {
+              op.serialize_field("name", &m.name)?;
+              op.serialize_field("sticky", &m.sticky)?;
+              op.serialize_field("value", &m.value)?;
+            }
+            OpType::Unmark(s) => op.serialize_field("sticky", &s)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -70,6 +76,8 @@ pub(crate) enum RawOpType {
     Del,
     Inc,
     Set,
+    Mark,
+    Unmark,
 }
 
 impl Serialize for RawOpType {
@@ -85,6 +93,8 @@ impl Serialize for RawOpType {
             RawOpType::Del => "del",
             RawOpType::Inc => "inc",
             RawOpType::Set => "set",
+            RawOpType::Mark => "mark",
+            RawOpType::Unmark => "unmark",
         };
         serializer.serialize_str(s)
     }
@@ -103,6 +113,8 @@ impl<'de> Deserialize<'de> for RawOpType {
             "del",
             "inc",
             "set",
+            "mark",
+            "unmark",
         ];
         // TODO: Probably more efficient to deserialize to a `&str`
         let raw_type = String::deserialize(deserializer)?;
@@ -114,6 +126,8 @@ impl<'de> Deserialize<'de> for RawOpType {
             "del" => Ok(RawOpType::Del),
             "inc" => Ok(RawOpType::Inc),
             "set" => Ok(RawOpType::Set),
+            "mark" => Ok(RawOpType::Mark),
+            "unmark" => Ok(RawOpType::Unmark),
             other => Err(Error::unknown_variant(other, VARIANTS)),
         }
     }
@@ -144,6 +158,8 @@ impl<'de> Deserialize<'de> for Op {
                 let mut insert: Option<bool> = None;
                 let mut datatype: Option<DataType> = None;
                 let mut value: Option<Option<ScalarValue>> = None;
+                let mut name: Option<String> = None;
+                let mut sticky: Option<bool> = None;
                 let mut ref_id: Option<OpId> = None;
                 while let Some(field) = map.next_key::<String>()? {
                     match field.as_ref() {
@@ -167,6 +183,8 @@ impl<'de> Deserialize<'de> for Op {
                         "insert" => read_field("insert", &mut insert, &mut map)?,
                         "datatype" => read_field("datatype", &mut datatype, &mut map)?,
                         "value" => read_field("value", &mut value, &mut map)?,
+                        "name" => read_field("name", &mut name, &mut map)?,
+                        "sticky" => read_field("sticky", &mut sticky, &mut map)?,
                         "ref" => read_field("ref", &mut ref_id, &mut map)?,
                         _ => return Err(Error::unknown_field(&field, FIELDS)),
                     }
@@ -182,6 +200,30 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
                     RawOpType::Del => OpType::Del,
+                    RawOpType::Mark => { 
+                        let name = name.ok_or_else(|| Error::missing_field("mark(name)"))?;
+                        let sticky = sticky.unwrap_or(false);
+                        let value = if let Some(datatype) = datatype {
+                            let raw_value = value
+                                .ok_or_else(|| Error::missing_field("value"))?
+                                .unwrap_or(ScalarValue::Null);
+                            raw_value.as_datatype(datatype).map_err(|e| {
+                                Error::invalid_value(
+                                    Unexpected::Other(e.unexpected.as_str()),
+                                    &e.expected.as_str(),
+                                )
+                            })?
+                        } else {
+                            value
+                                .ok_or_else(|| Error::missing_field("value"))?
+                                .unwrap_or(ScalarValue::Null)
+                        };
+                        OpType::mark(name, sticky, value)
+                    }
+                    RawOpType::Unmark => {
+                      let sticky = sticky.unwrap_or(true);
+                      OpType::Unmark(sticky)
+                    }
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             let raw_value = value

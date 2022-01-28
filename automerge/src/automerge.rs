@@ -6,7 +6,7 @@ use crate::exid::ExId;
 use crate::op_set::OpSet;
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
-    ScalarValue, Value, MarkData,
+    ScalarValue, Value,
 };
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
@@ -322,26 +322,25 @@ impl Automerge {
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        if let Some(id) = self.do_insert(obj, index, value)? {
+        let value = value.into();
+        if let Some(id) = self.do_insert(obj, index, value.into())? {
             Ok(Some(self.id_to_exid(id)))
         } else {
             Ok(None)
         }
     }
 
-    fn do_insert<V: Into<Value>>(
+    fn do_insert(
         &mut self,
         obj: ObjId,
         index: usize,
-        value: V,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
-        let value = value.into();
 
         let query = self.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let action = value.into();
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
@@ -399,7 +398,7 @@ impl Automerge {
         let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(obj, pos, v.clone())?;
+            let id = self.do_insert(obj, pos, v.into())?;
             if let Some(id) = id {
                 results.push(self.id_to_exid(id));
             }
@@ -465,8 +464,11 @@ impl Automerge {
         value: ScalarValue,
     ) -> Result<(), AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        let query = self.ops.search(obj, query::Mark::new(start, end));
 
+        self.do_insert(obj, start, OpType::mark(mark.into(), start_sticky, value))?;
+        self.do_insert(obj, end, OpType::Unmark(end_sticky))?;
+
+/*
         let (a, b) = query.ops()?;
         let (pos, key) = a;
         let id = self.next_id();
@@ -497,6 +499,7 @@ impl Automerge {
         };
         self.ops.insert(pos, op.clone());
         self.tx().operations.push(op);
+*/
 
         Ok(())
     }

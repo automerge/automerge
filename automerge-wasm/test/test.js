@@ -3,7 +3,7 @@ const assert = require('assert')
 const util = require('util')
 const { BloomFilter } = require('./helpers/sync')
 const Automerge = require('..')
-const { MAP, LIST, TEXT, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState }= Automerge
+const { MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState }= Automerge
 
 // str to uint8array
 function en(str) {
@@ -460,6 +460,15 @@ describe('Automerge', () => {
       doc.insert(list, 2, "A")
       spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
+
+      // make sure save/load can handle marks
+
+      let doc2 = Automerge.load(doc.save())
+      spans = doc2.spans(list);
+      assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
+
+      assert.deepStrictEqual(doc.getHeads(), doc2.getHeads())
+      assert.deepStrictEqual(doc.save(), doc2.save())
     })
 
     it.only('should handle overlapping marks', () => {
@@ -489,6 +498,17 @@ describe('Automerge', () => {
           [],
         ]
       )
+
+      // mark sure encode decode can handle marks
+
+      let all = doc.getChanges([])
+      let decoded = all.map((c) => decodeChange(c))
+      let encoded = decoded.map((c) => encodeChange(c))
+      let doc2 = Automerge.init();
+      doc2.applyChanges(encoded)
+
+      assert.deepStrictEqual(doc.spans(list) , doc2.spans(list))
+      assert.deepStrictEqual(doc.save(), doc2.save())
     })
 
   })
