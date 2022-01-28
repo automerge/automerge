@@ -53,9 +53,11 @@ impl<const B: usize> Spans<B> {
         if self.changed && (self.seen_at_last_mark != self.seen_at_this_mark  || self.seen_at_last_mark.is_none() && self.seen_at_this_mark.is_none()) {
             self.changed = false;
             self.seen_at_last_mark = self.seen_at_this_mark;
+            let mut marks : Vec<_> = self.marks.iter().map(|(key, val)| (key.clone(), val.clone())).collect();
+            marks.sort_by(|(k1,_),(k2,_)| k1.cmp(k2));
             self.spans.push(Span { 
                 pos: self.seen,
-                marks: self.marks.iter().map(|(key, val)| (key.clone(), val.clone())).collect()
+                marks,
             });
         }
     }
