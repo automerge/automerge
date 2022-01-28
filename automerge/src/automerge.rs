@@ -446,7 +446,7 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>,AutomergeError> {
+    pub fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let mut query = self.ops.search(obj, query::Spans::new());
         query.check_marks();
@@ -457,49 +457,49 @@ impl Automerge {
         &mut self,
         obj: &ExId,
         start: usize,
-        start_sticky: bool,
+        expand_start: bool,
         end: usize,
-        end_sticky: bool,
+        expand_end: bool,
         mark: &str,
         value: ScalarValue,
     ) -> Result<(), AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
 
-        self.do_insert(obj, start, OpType::mark(mark.into(), start_sticky, value))?;
-        self.do_insert(obj, end, OpType::Unmark(end_sticky))?;
+        self.do_insert(obj, start, OpType::mark(mark.into(), expand_start, value))?;
+        self.do_insert(obj, end, OpType::MarkEnd(expand_end))?;
 
-/*
-        let (a, b) = query.ops()?;
-        let (pos, key) = a;
-        let id = self.next_id();
-        let op = Op {
-            change: self.history.len(),
-            id,
-            action: OpType::Mark(MarkData { name: mark.into(), sticky: start_sticky, value}),
-            obj,
-            key,
-            succ: Default::default(),
-            pred: Default::default(),
-            insert: true,
-        };
-        self.ops.insert(pos, op.clone());
-        self.tx().operations.push(op);
+        /*
+                let (a, b) = query.ops()?;
+                let (pos, key) = a;
+                let id = self.next_id();
+                let op = Op {
+                    change: self.history.len(),
+                    id,
+                    action: OpType::Mark(MarkData { name: mark.into(), expand: expand_start, value}),
+                    obj,
+                    key,
+                    succ: Default::default(),
+                    pred: Default::default(),
+                    insert: true,
+                };
+                self.ops.insert(pos, op.clone());
+                self.tx().operations.push(op);
 
-        let (pos, key) = b;
-        let id = self.next_id();
-        let op = Op {
-            change: self.history.len(),
-            id,
-            action: OpType::Unmark(end_sticky),
-            obj,
-            key,
-            succ: Default::default(),
-            pred: Default::default(),
-            insert: true,
-        };
-        self.ops.insert(pos, op.clone());
-        self.tx().operations.push(op);
-*/
+                let (pos, key) = b;
+                let id = self.next_id();
+                let op = Op {
+                    change: self.history.len(),
+                    id,
+                    action: OpType::Unmark(expand_end),
+                    obj,
+                    key,
+                    succ: Default::default(),
+                    pred: Default::default(),
+                    insert: true,
+                };
+                self.ops.insert(pos, op.clone());
+                self.tx().operations.push(op);
+        */
 
         Ok(())
     }
@@ -1159,8 +1159,8 @@ impl Automerge {
                 OpType::Set(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Inc(obj) => format!("inc({})", obj),
-                OpType::Mark(m) => format!("mark({}={})", m.name,m.value),
-                OpType::Unmark(_) => "unmark".into(),
+                OpType::MarkBegin(m) => format!("mark({}={})", m.name, m.value),
+                OpType::MarkEnd(_) => "/mark".into(),
                 OpType::Del => format!("del{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.to_string(*id)).collect();

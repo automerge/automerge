@@ -168,21 +168,25 @@ pub enum OpType {
     Del,
     Inc(i64),
     Set(ScalarValue),
-    Mark(MarkData),
-    Unmark(bool),
+    MarkBegin(MarkData),
+    MarkEnd(bool),
 }
 
 impl OpType {
-  pub (crate) fn mark(name: String, sticky: bool, value: ScalarValue) -> Self {
-    OpType::Mark(MarkData { name, sticky, value })
-  }
+    pub(crate) fn mark(name: String, expand: bool, value: ScalarValue) -> Self {
+        OpType::MarkBegin(MarkData {
+            name,
+            expand,
+            value,
+        })
+    }
 }
 
 #[derive(PartialEq, Debug, Clone)]
 pub struct MarkData {
     pub name: String,
     pub value: ScalarValue,
-    pub sticky: bool,
+    pub expand: bool,
 }
 
 #[derive(Debug)]
@@ -405,7 +409,7 @@ impl Op {
     }
 
     pub fn visible(&self) -> bool {
-        if self.is_inc()  || self.is_mark() {
+        if self.is_inc() || self.is_mark() {
             false
         } else if self.is_counter() {
             self.succ.len() <= self.incs()
@@ -431,11 +435,15 @@ impl Op {
     }
 
     pub fn valid_mark_anchor(&self) -> bool {
-        self.succ.is_empty() && matches!(&self.action, OpType::Mark(MarkData { sticky: true, ..}) | OpType::Unmark(false))
+        self.succ.is_empty()
+            && matches!(
+                &self.action,
+                OpType::MarkBegin(MarkData { expand: true, .. }) | OpType::MarkEnd(false)
+            )
     }
 
     pub fn is_mark(&self) -> bool {
-        matches!(&self.action, OpType::Mark(_) | OpType::Unmark(_))
+        matches!(&self.action, OpType::MarkBegin(_) | OpType::MarkEnd(_))
     }
 
     pub fn is_counter(&self) -> bool {
@@ -472,8 +480,8 @@ impl Op {
             OpType::Set(value) if self.insert => format!("i:{}", value),
             OpType::Set(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
-            OpType::Mark(m) => format!("mark{}={}", m.name, m.value),
-            OpType::Unmark(_) => "unmark".into(),
+            OpType::MarkBegin(m) => format!("mark{}={}", m.name, m.value),
+            OpType::MarkEnd(_) => "unmark".into(),
             OpType::Inc(val) => format!("inc:{}", val),
             OpType::Del => "del".to_string(),
         }
