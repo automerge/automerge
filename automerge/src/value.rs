@@ -70,6 +70,14 @@ impl Value {
     pub fn bytes(b: Vec<u8>) -> Value {
         Value::Scalar(ScalarValue::Bytes(b))
     }
+
+    pub fn is_object(&self) -> bool {
+      matches!(&self, Value::Object(_))
+    }
+
+    pub fn is_scalar(&self) -> bool {
+      matches!(&self, Value::Scalar(_))
+    }
 }
 
 impl From<&str> for Value {
