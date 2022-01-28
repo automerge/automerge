@@ -339,9 +339,9 @@ impl Automerge {
                 mark.push(&ScalarValue(m.1).into());
                 marks.push(&mark.into());
             }
-            let text_span = &text[last_pos..s.pos];//.slice(last_pos, s.pos);
+            let text_span = &text[last_pos..s.pos]; //.slice(last_pos, s.pos);
             if text_span.len() > 0 {
-              result.push(&text_span.into());
+                result.push(&text_span.into());
             }
             result.push(&marks);
             last_pos = s.pos;
@@ -352,7 +352,7 @@ impl Automerge {
         }
         let text_span = &text[last_pos..];
         if text_span.len() > 0 {
-          result.push(&text_span.into());
+            result.push(&text_span.into());
         }
         Ok(result.into())
     }

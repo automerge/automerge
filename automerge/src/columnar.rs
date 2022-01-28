@@ -11,7 +11,7 @@ use std::{
     str,
 };
 
-use crate::types::{ActorId, ElemId, Key, ObjId, ObjType, Op, OpId, OpType, ScalarValue, MarkData };
+use crate::types::{ActorId, ElemId, Key, ObjId, ObjType, Op, OpId, OpType, ScalarValue};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -134,14 +134,14 @@ impl<'a> Iterator for OperationIterator<'a> {
             Action::MakeTable => OpType::Make(ObjType::Table),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
-            Action::Mark => {
-              // mark has 3 things in the val column
-              let name = value.to_string()?;
-              let sticky = self.value.next()?.to_bool()?;
-              let value = self.value.next()?;
-              OpType::Mark(MarkData { name, sticky, value })
+            Action::MarkBegin => {
+                // mark has 3 things in the val column
+                let name = value.to_string()?;
+                let expand = self.value.next()?.to_bool()?;
+                let value = self.value.next()?;
+                OpType::mark(name, expand, value)
             }
-            Action::Unmark => OpType::Unmark(value.to_bool()?),
+            Action::MarkEnd => OpType::MarkEnd(value.to_bool()?),
             Action::Unused => panic!("invalid action"),
         };
         Some(amp::Op {
@@ -184,14 +184,14 @@ impl<'a> Iterator for DocOpIterator<'a> {
             Action::MakeTable => OpType::Make(ObjType::Table),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
-            Action::Mark => {
-              // mark has 3 things in the val column
-              let name = value.to_string()?;
-              let sticky = self.value.next()?.to_bool()?;
-              let value = self.value.next()?;
-              OpType::Mark(MarkData { name, sticky, value })
+            Action::MarkBegin => {
+                // mark has 3 things in the val column
+                let name = value.to_string()?;
+                let expand = self.value.next()?.to_bool()?;
+                let value = self.value.next()?;
+                OpType::mark(name, expand, value)
             }
-            Action::Unmark => OpType::Unmark(value.to_bool()?),
+            Action::MarkEnd => OpType::MarkEnd(value.to_bool()?),
             Action::Unused => panic!("invalid action"),
         };
         Some(DocOp {
@@ -1082,15 +1082,15 @@ impl DocOpEncoder {
                     self.val.append_null();
                     Action::Del
                 }
-                amp::OpType::Mark(m) => {
+                amp::OpType::MarkBegin(m) => {
                     self.val.append_value(&m.name.clone().into(), actors);
-                    self.val.append_value(&m.sticky.into(), actors);
-                    self.val.append_value(&m.value.clone().into(), actors);
-                    Action::Mark
+                    self.val.append_value(&m.expand.into(), actors);
+                    self.val.append_value(&m.value.clone(), actors);
+                    Action::MarkBegin
                 }
-                amp::OpType::Unmark(s) => {
+                amp::OpType::MarkEnd(s) => {
                     self.val.append_value(&(*s).into(), actors);
-                    Action::Unmark
+                    Action::MarkEnd
                 }
                 amp::OpType::Make(kind) => {
                     self.val.append_null();
@@ -1198,15 +1198,15 @@ impl ColumnEncoder {
                 self.val.append_null();
                 Action::Del
             }
-            OpType::Mark(m) => {
+            OpType::MarkBegin(m) => {
                 self.val.append_value2(&m.name.clone().into(), actors);
-                self.val.append_value2(&m.sticky.into(), actors);
-                self.val.append_value2(&m.value.clone().into(), actors);
-                Action::Mark
+                self.val.append_value2(&m.expand.into(), actors);
+                self.val.append_value2(&m.value.clone(), actors);
+                Action::MarkBegin
             }
-            OpType::Unmark(s) => {
+            OpType::MarkEnd(s) => {
                 self.val.append_value2(&(*s).into(), actors);
-                Action::Unmark
+                Action::MarkEnd
             }
             OpType::Make(kind) => {
                 self.val.append_null();
@@ -1313,9 +1313,9 @@ pub(crate) enum Action {
     MakeText,
     Inc,
     MakeTable,
-    Mark,
+    MarkBegin,
     Unused, // final bit is used to mask `Make` actions
-    Unmark,
+    MarkEnd,
 }
 const ACTIONS: [Action; 10] = [
     Action::MakeMap,
@@ -1325,9 +1325,9 @@ const ACTIONS: [Action; 10] = [
     Action::MakeText,
     Action::Inc,
     Action::MakeTable,
-    Action::Mark,
+    Action::MarkBegin,
     Action::Unused,
-    Action::Unmark,
+    Action::MarkEnd,
 ];
 
 impl Decodable for Action {

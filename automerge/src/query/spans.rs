@@ -1,7 +1,7 @@
+use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
+use crate::types::{ElemId, Op, OpType, ScalarValue};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use crate::query::{QueryResult, TreeQuery, OpSetMetadata};
-use crate::types::{ElemId, Op, ScalarValue, OpType};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Spans<const B: usize> {
@@ -12,7 +12,7 @@ pub(crate) struct Spans<const B: usize> {
     seen_at_this_mark: Option<ElemId>,
     seen_at_last_mark: Option<ElemId>,
     ops: Vec<Op>,
-    marks: HashMap<String,ScalarValue>,
+    marks: HashMap<String, ScalarValue>,
     changed: bool,
     pub spans: Vec<Span>,
 }
@@ -24,7 +24,7 @@ pub struct Span {
 }
 
 impl<const B: usize> Spans<B> {
-    pub fn new()  -> Self {
+    pub fn new() -> Self {
         Spans {
             pos: 0,
             seen: 0,
@@ -42,20 +42,27 @@ impl<const B: usize> Spans<B> {
     pub fn check_marks(&mut self) {
         let mut new_marks = HashMap::new();
         for op in &self.ops {
-            if let OpType::Mark(m) = &op.action {
-                new_marks.insert(m.name.clone(),m.value.clone());
+            if let OpType::MarkBegin(m) = &op.action {
+                new_marks.insert(m.name.clone(), m.value.clone());
             }
         }
         if new_marks != self.marks {
             self.changed = true;
             self.marks = new_marks;
         }
-        if self.changed && (self.seen_at_last_mark != self.seen_at_this_mark  || self.seen_at_last_mark.is_none() && self.seen_at_this_mark.is_none()) {
+        if self.changed
+            && (self.seen_at_last_mark != self.seen_at_this_mark
+                || self.seen_at_last_mark.is_none() && self.seen_at_this_mark.is_none())
+        {
             self.changed = false;
             self.seen_at_last_mark = self.seen_at_this_mark;
-            let mut marks : Vec<_> = self.marks.iter().map(|(key, val)| (key.clone(), val.clone())).collect();
-            marks.sort_by(|(k1,_),(k2,_)| k1.cmp(k2));
-            self.spans.push(Span { 
+            let mut marks: Vec<_> = self
+                .marks
+                .iter()
+                .map(|(key, val)| (key.clone(), val.clone()))
+                .collect();
+            marks.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+            self.spans.push(Span {
                 pos: self.seen,
                 marks,
             });
@@ -74,11 +81,14 @@ impl<const B: usize> TreeQuery<B> for Spans<B> {
         // find location to insert
         // mark or set
         if element.succ.is_empty() {
-            if let OpType::Mark(_) = &element.action {
-                let pos = self.ops.binary_search_by(|probe| m.lamport_cmp(probe.id, element.id)).unwrap_err();
+            if let OpType::MarkBegin(_) = &element.action {
+                let pos = self
+                    .ops
+                    .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
+                    .unwrap_err();
                 self.ops.insert(pos, element.clone());
             }
-            if let OpType::Unmark(_) = &element.action {
+            if let OpType::MarkEnd(_) = &element.action {
                 self.ops.retain(|op| op.id != element.id.prev());
             }
         }
