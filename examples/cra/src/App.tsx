@@ -1,40 +1,42 @@
 import React, { useEffect, useState } from 'react';
-import logo from './logo.svg';
 import './App.css';
-import init from "automerge-wasm"
-import { create, loadDoc, encodeChange, decodeChange,
-         initSyncState, encodeSyncState, decodeSyncState,
-         encodeSyncMessage, decodeSyncMessage,
-         LIST, MAP, TEXT } from "automerge-wasm"
+import * as Automerge from "automerge-wasm"
+
 
 function App() {
+  const [ doc, ] = useState(Automerge.create())
+  const [ edits, ] = useState(doc.set("_root", "edits", Automerge.TEXT) || "")
   const [ val, setVal ] = useState("");
   useEffect(() => {
-    init().then(() => {
-      let doc = create()
-      let edits = doc.set("_root", "edits", TEXT) || ""
       doc.splice(edits, 0, 0, "the quick fox jumps over the lazy dog")
-      doc.splice(edits, 10, 3, "sloth")
       let result = doc.text(edits)
-      setVal(JSON.stringify(result))
-    })
+      setVal(result)
   }, [])
+
+  function updateTextarea(e: any) {
+    e.preventDefault()
+    let event: InputEvent = e.nativeEvent
+    console.log(edits, e.target.selectionEnd)
+    switch (event.inputType) {
+      case 'insertText':
+        //@ts-ignore
+        doc.splice(edits, e.target.selectionEnd - 1, 0, e.nativeEvent.data)
+        break;
+      case 'deleteContentBackward':
+        //@ts-ignore
+        doc.splice(edits, e.target.selectionEnd, 1)
+        break;
+      case 'insertLineBreak':
+        //@ts-ignore
+        doc.splice(edits, e.target.selectionEnd - 1, '\n')
+        break;
+    }
+    setVal(doc.text(edits))
+  }
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-        <p> edits = {val}</p>
+        <textarea value={val} onChange={updateTextarea}></textarea>
       </header>
     </div>
   );
