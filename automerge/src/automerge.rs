@@ -453,6 +453,7 @@ impl Automerge {
         Ok(query.spans)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn mark(
         &mut self,
         obj: &ExId,

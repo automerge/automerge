@@ -8,7 +8,7 @@ export type Hash = string;
 export type Heads = Hash[];
 export type ObjectType = string; // opaque ??
 export type Value = string | number | boolean | null | Date | Uint8Array | ObjectType;
-export type OutValue =
+export type FullValue =
   ["str", string] |
   ["int", number] |
   ["uint", number] |
@@ -87,15 +87,15 @@ export class Automerge {
   set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
   push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
-  splice(obj: ObjID, start: number, delete_count: number, text: string | Value[] | OutValue[] ): ObjID[] | undefined;
+  splice(obj: ObjID, start: number, delete_count: number, text: string | Array<Value | FullValue>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
 
   // returns a single value - if there is a conflict return the winner
-  value(obj: ObjID, prop: any, heads?: Heads): OutValue | null;
+  value(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
-  values(obj: ObjID, arg: any, heads?: Heads): OutValue[];
+  values(obj: ObjID, arg: any, heads?: Heads): FullValue[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
