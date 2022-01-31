@@ -18,8 +18,8 @@
   "main": "./dev/index.js",
   "scripts": {
     "build": "rimraf ./dev && wasm-pack build --target nodejs --dev --out-name index -d dev && cp index.d.ts dev",
-    "release": "rimraf ./dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt",
-    "pkg": "rimraf ./pkg && wasm-pack build --target web --release --out-name index -d pkg && cd pkg && yarn pack && mv automerge-wasm*tgz ..",
+    "release": "rimraf ./dev && wasm-pack build --target nodejs --release --out-name index -d dev && yarn opt && cp index.d.ts dev",
+    "pkg": "rimraf ./pkg && wasm-pack build --target web --release --out-name index -d pkg && cp index.d.ts dev && cd pkg && yarn pack && mv automerge-wasm*tgz ..",
     "prof": "rimraf ./dev && wasm-pack build --target nodejs --profiling --out-name index -d dev",
     "opt": "wasm-opt -Oz dev/index_bg.wasm -o tmp.wasm && mv tmp.wasm dev/index_bg.wasm",
     "test": "yarn build && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
