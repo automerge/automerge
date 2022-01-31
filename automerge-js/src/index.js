@@ -177,7 +177,11 @@ function getConflicts(doc, prop) {
 
 function getLastLocalChange(doc) {
   const state = doc[STATE]
-  return state.getLastLocalChange()
+  try {
+    return state.getLastLocalChange()
+  } catch (e) {
+    return
+  }
 }
 
 function getObjectId(doc) {

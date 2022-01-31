@@ -7,16 +7,6 @@ import { create, loadDoc, SyncState, Automerge, MAP, LIST, TEXT, encodeChange, d
 import { DecodedSyncMessage } from '../index';
 import { Hash } from '../dev/index';
 
-// str to uint8array
-function en(str: string) {
-  //@ts-ignore
-  return new TextEncoder('utf8').encode(str)
-}
-// uint8array to str
-function de(bytes: Uint8Array) {
-  return new TextDecoder('utf8').decode(bytes);
-}
-
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
   let aToBmsg = null, bToAmsg = null, i = 0
@@ -56,7 +46,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
       let result = doc.value(root,"hello")
-      assert.deepEqual(result,[])
+      assert.deepEqual(result,undefined)
       doc.free()
     })
 
@@ -219,7 +209,7 @@ describe('Automerge', () => {
       doc.set(root, "xxx", "xxx");
       assert.deepEqual(doc.value(root, "xxx"),["str","xxx"])
       doc.del(root, "xxx");
-      assert.deepEqual(doc.value(root, "xxx"),[])
+      assert.deepEqual(doc.value(root, "xxx"),undefined)
       doc.free()
     })
 

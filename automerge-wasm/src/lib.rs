@@ -184,20 +184,15 @@ impl Automerge {
         Ok(opid.map(|id| id.to_string()))
     }
 
-    pub fn make(
-        &mut self,
-        obj: String,
-        prop: JsValue,
-        value: JsValue,
-    ) -> Result<String, JsValue> {
+    pub fn make(&mut self, obj: String, prop: JsValue, value: JsValue) -> Result<String, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, None)?;
         if value.is_object() {
-          let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
-          Ok(opid.unwrap().to_string())
+            let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
+            Ok(opid.unwrap().to_string())
         } else {
-          Err("invalid object type".into())
+            Err("invalid object type".into())
         }
     }
 
@@ -217,7 +212,7 @@ impl Automerge {
         obj: String,
         prop: JsValue,
         heads: Option<Array>,
-    ) -> Result<Array, JsValue> {
+    ) -> Result<Option<Array>, JsValue> {
         let obj = self.import(obj)?;
         let result = Array::new();
         let prop = to_prop(prop);
@@ -233,23 +228,18 @@ impl Automerge {
                 Some((Value::Object(obj_type), obj_id)) => {
                     result.push(&obj_type.to_string().into());
                     result.push(&obj_id.to_string().into());
+                    Ok(Some(result))
                 }
                 Some((Value::Scalar(value), _)) => {
                     result.push(&datatype(&value).into());
                     result.push(&ScalarValue(value).into());
+                    Ok(Some(result))
                 }
-                None => {}
+                None => Ok(None)
             }
-        }
-
-        Ok(result)
-/* fixme
-        if result.len() == {
-          Ok(JsValue::null()) 
         } else {
-          Ok(result)
+          Ok(None)
         }
-*/
     }
 
     pub fn values(
@@ -348,7 +338,7 @@ impl Automerge {
                 marks.push(&mark.into());
             }
             let text_span = &text[last_pos..s.pos]; //.slice(last_pos, s.pos);
-            if text_span.len() > 0 {
+            if !text_span.is_empty() {
                 result.push(&text_span.into());
             }
             result.push(&marks);
@@ -359,7 +349,7 @@ impl Automerge {
             //result.push(&obj.into());
         }
         let text_span = &text[last_pos..];
-        if text_span.len() > 0 {
+        if !text_span.is_empty() {
             result.push(&text_span.into());
         }
         Ok(result.into())
