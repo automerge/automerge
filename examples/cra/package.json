@@ -10,7 +10,7 @@
     "@types/node": "^16.11.21",
     "@types/react": "^17.0.38",
     "@types/react-dom": "^17.0.11",
-    "automerge-wasm": "file:../automerge-wasm-v0.1.0.tgz",
+    "automerge-wasm": "file:../../automerge-wasm/automerge-wasm-v0.1.0.tgz",
     "react": "^17.0.2",
     "react-dom": "^17.0.2",
     "react-scripts": "5.0.0",

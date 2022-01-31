@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import './App.css';
 import * as Automerge from "automerge-wasm"
 
-
 function App() {
   const [ doc, ] = useState(Automerge.create())
   const [ edits, ] = useState(doc.set("_root", "edits", Automerge.TEXT) || "")
