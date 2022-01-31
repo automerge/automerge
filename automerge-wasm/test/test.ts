@@ -1,20 +1,21 @@
-
-const assert = require('assert')
-const util = require('util')
-const { BloomFilter } = require('./helpers/sync')
-const Automerge = require('..')
-const { MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState }= Automerge
+import { describe, it } from 'mocha';
+//@ts-ignore
+import assert from 'assert'
+//@ts-ignore
+import { BloomFilter } from './helpers/sync'
+import { create, loadDoc, Datatype, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
 
 // str to uint8array
-function en(str) {
+function en(str: string) {
+  //@ts-ignore
   return new TextEncoder('utf8').encode(str)
 }
 // uint8array to str
-function de(bytes) {
+function de(bytes: Uint8Array) {
   return new TextDecoder('utf8').decode(bytes);
 }
 
-function sync(a, b, aSyncState = initSyncState(), bSyncState = initSyncState()) {
+function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
   let aToBmsg = null, bToAmsg = null, i = 0
   do {
@@ -37,20 +38,20 @@ function sync(a, b, aSyncState = initSyncState(), bSyncState = initSyncState()) 
 describe('Automerge', () => {
   describe('basics', () => {
     it('should init clone and free', () => {
-      let doc1 = Automerge.create()
+      let doc1 = create()
       let doc2 = doc1.clone()
       doc1.free()
       doc2.free()
     })
 
     it('should be able to start and commit', () => {
-      let doc = Automerge.create()
+      let doc = create()
       doc.commit()
       doc.free()
     })
 
     it('getting a nonexistant prop does not throw an error', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
       let result = doc.value(root,"hello")
       assert.deepEqual(result,[])
@@ -58,20 +59,20 @@ describe('Automerge', () => {
     })
 
     it('should be able to set and get a simple value', () => {
-      let doc : Automerge = Automerge.create("aabbcc")
+      let doc : Automerge = create("aabbcc")
       let root = "_root"
       let result
 
       doc.set(root, "hello", "world")
-      doc.set(root, "number1", 5, "uint")
+      doc.set(root, "number1", 5, Datatype.uint)
       doc.set(root, "number2", 5)
       doc.set(root, "number3", 5.5)
-      doc.set(root, "number4", 5.5, "f64")
-      doc.set(root, "number5", 5.5, "int")
+      doc.set(root, "number4", 5.5, Datatype.f64)
+      doc.set(root, "number5", 5.5, Datatype.int)
       doc.set(root, "bool", true)
       doc.set(root, "time1", 1000, "timestamp")
       doc.set(root, "time2", new Date(1001))
-      doc.set(root, "list", Automerge.LIST);
+      doc.set(root, "list", LIST);
 
       result = doc.value(root,"hello")
       assert.deepEqual(result,["str","world"])
@@ -80,16 +81,16 @@ describe('Automerge', () => {
       assert.deepEqual(result,["uint",5])
 
       result = doc.value(root,"number2")
-      assert.deepEqual(result,["int",5])
+      assert.deepEqual(result,[Datatype.int,5])
 
       result = doc.value(root,"number3")
-      assert.deepEqual(result,["f64",5.5])
+      assert.deepEqual(result,[Datatype.f64,5.5])
 
       result = doc.value(root,"number4")
-      assert.deepEqual(result,["f64",5.5])
+      assert.deepEqual(result,[Datatype.f64,5.5])
 
       result = doc.value(root,"number5")
-      assert.deepEqual(result,["int",5])
+      assert.deepEqual(result,[Datatype.int,5])
 
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",true])
@@ -112,7 +113,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to use bytes', () => {
-      let doc = Automerge.create()
+      let doc = create()
       doc.set("_root","data1", new Uint8Array([10,11,12]));
       doc.set("_root","data2", new Uint8Array([13,14,15]), "bytes");
       let value1 = doc.value("_root", "data1")
@@ -123,7 +124,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to make sub objects', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
       let result
 
@@ -140,7 +141,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to make lists', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
 
       let submap = doc.set(root, "numbers", LIST)
@@ -163,7 +164,7 @@ describe('Automerge', () => {
     })
 
     it('lists have insert, set, splice, and push ops', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
 
       let submap = doc.set(root, "letters", LIST)
@@ -184,7 +185,7 @@ describe('Automerge', () => {
     })
 
     it('should be able delete non-existant props', () => {
-      let doc = Automerge.create()
+      let doc = create()
 
       doc.set("_root", "foo","bar")
       doc.set("_root", "bip","bap")
@@ -203,7 +204,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to del', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
 
       doc.set(root, "xxx", "xxx");
@@ -214,7 +215,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to use counters', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root"
 
       doc.set(root, "counter", 10, "counter");
@@ -227,10 +228,10 @@ describe('Automerge', () => {
     })
 
     it('should be able to splice text', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let root = "_root";
 
-      let text = doc.set(root, "text", Automerge.TEXT);
+      let text = doc.set(root, "text", TEXT);
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
       doc.splice(text, 11, 0, [["str","!"],["str","?"]])
@@ -244,7 +245,7 @@ describe('Automerge', () => {
     })
 
     it('should be able save all or incrementally', () => {
-      let doc = Automerge.create()
+      let doc = create()
 
       doc.set("_root", "foo", 1)
 
@@ -265,9 +266,9 @@ describe('Automerge', () => {
 
       assert.notDeepEqual(saveA, saveB);
 
-      let docA = Automerge.loadDoc(saveA);
-      let docB = Automerge.loadDoc(saveB);
-      let docC = Automerge.loadDoc(saveMidway)
+      let docA = loadDoc(saveA);
+      let docB = loadDoc(saveB);
+      let docC = loadDoc(saveMidway)
       docC.loadIncremental(save3)
 
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
@@ -280,7 +281,7 @@ describe('Automerge', () => {
     })
 
     it('should be able to splice text', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let text = doc.set("_root", "text", TEXT);
       doc.splice(text, 0, 0, "hello world");
       let heads1 = doc.commit();
@@ -296,10 +297,10 @@ describe('Automerge', () => {
     })
 
     it('local inc increments all visible counters in a map', () => {
-      let doc1 = Automerge.create("aaaa")
+      let doc1 = create("aaaa")
       doc1.set("_root", "hello", "world")
-      let doc2 = Automerge.loadDoc(doc1.save(), "bbbb");
-      let doc3 = Automerge.loadDoc(doc1.save(), "cccc");
+      let doc2 = loadDoc(doc1.save(), "bbbb");
+      let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set("_root", "cnt", 20)
       doc2.set("_root", "cnt", 0, "counter")
       doc3.set("_root", "cnt", 10, "counter")
@@ -319,7 +320,7 @@ describe('Automerge', () => {
       ])
 
       let save1 = doc1.save()
-      let doc4 = Automerge.loadDoc(save1)
+      let doc4 = loadDoc(save1)
       assert.deepEqual(doc4.save(), save1);
       doc1.free()
       doc2.free()
@@ -328,11 +329,11 @@ describe('Automerge', () => {
     })
 
     it('local inc increments all visible counters in a sequence', () => {
-      let doc1 = Automerge.create("aaaa")
+      let doc1 = create("aaaa")
       let seq = doc1.set("_root", "seq", LIST)
       doc1.insert(seq, 0, "hello")
-      let doc2 = Automerge.loadDoc(doc1.save(), "bbbb");
-      let doc3 = Automerge.loadDoc(doc1.save(), "cccc");
+      let doc2 = loadDoc(doc1.save(), "bbbb");
+      let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set(seq, 0, 20)
       doc2.set(seq, 0, 0, "counter")
       doc3.set(seq, 0, 10, "counter")
@@ -352,7 +353,7 @@ describe('Automerge', () => {
       ])
 
       let save = doc1.save()
-      let doc4 = Automerge.loadDoc(save)
+      let doc4 = loadDoc(save)
       assert.deepEqual(doc4.save(), save);
       doc1.free()
       doc2.free()
@@ -361,7 +362,7 @@ describe('Automerge', () => {
     })
 
     it('only returns an object id when objects are created', () => {
-      let doc = Automerge.create("aaaa")
+      let doc = create("aaaa")
       let r1 = doc.set("_root","foo","bar")
       let r2 = doc.set("_root","list",LIST)
       let r3 = doc.set("_root","counter",10, "counter")
@@ -384,13 +385,13 @@ describe('Automerge', () => {
     })
 
     it('objects without properties are preserved', () => {
-      let doc1 = Automerge.create("aaaa")
+      let doc1 = create("aaaa")
       let a = doc1.set("_root","a",MAP);
       let b = doc1.set("_root","b",MAP);
       let c = doc1.set("_root","c",MAP);
       let d = doc1.set(c,"d","dd");
       let saved = doc1.save();
-      let doc2 = Automerge.loadDoc(saved);
+      let doc2 = loadDoc(saved);
       assert.deepEqual(doc2.value("_root","a"),["map",a])
       assert.deepEqual(doc2.keys(a),[])
       assert.deepEqual(doc2.value("_root","b"),["map",b])
@@ -403,8 +404,8 @@ describe('Automerge', () => {
     })
 
     it('should handle marks [..]', () => {
-      let doc = Automerge.create()
-       let list = doc.set("_root", "list", Automerge.TEXT)
+      let doc = create()
+       let list = doc.set("_root", "list", TEXT)
        doc.splice(list, 0, 0, "aaabbbccc")
        doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
@@ -416,8 +417,8 @@ describe('Automerge', () => {
     })
 
     it('should handle marks with deleted ends [..]', () => {
-      let doc = Automerge.create()
-      let list = doc.set("_root", "list", Automerge.TEXT)
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
@@ -435,8 +436,8 @@ describe('Automerge', () => {
     })
 
     it('should handle sticky marks (..)', () => {
-      let doc = Automerge.create()
-      let list = doc.set("_root", "list", Automerge.TEXT)
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -448,8 +449,8 @@ describe('Automerge', () => {
     })
 
     it('should handle sticky marks with deleted ends (..)', () => {
-      let doc = Automerge.create()
-      let list = doc.set("_root", "list", Automerge.TEXT)
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -467,7 +468,7 @@ describe('Automerge', () => {
 
       // make sure save/load can handle marks
 
-      let doc2 = Automerge.loadDoc(doc.save())
+      let doc2 = loadDoc(doc.save())
       spans = doc2.spans(list);
       assert.deepStrictEqual(spans, [ 'aa', [ [ 'bold', 'boolean', true ] ], 'AbA', [], 'cc' ])
 
@@ -476,8 +477,8 @@ describe('Automerge', () => {
     })
 
     it('should handle overlapping marks', () => {
-      let doc : Automerge = Automerge.create()
-      let list = doc.set("_root", "list", Automerge.TEXT)
+      let doc : Automerge = create()
+      let list = doc.set("_root", "list", TEXT)
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
@@ -508,7 +509,7 @@ describe('Automerge', () => {
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
       let encoded = decoded.map((c) => encodeChange(c))
-      let doc2 = Automerge.create();
+      let doc2 = create();
       doc2.applyChanges(encoded)
 
       assert.deepStrictEqual(doc.spans(list) , doc2.spans(list))
@@ -518,7 +519,7 @@ describe('Automerge', () => {
   })
   describe('sync', () => {
     it('should send a sync message implying no local data', () => {
-      let doc = Automerge.create()
+      let doc = create()
       let s1 = initSyncState()
       let m1 = doc.generateSyncMessage(s1)
       const message = decodeSyncMessage(m1)
@@ -531,7 +532,7 @@ describe('Automerge', () => {
     })
 
     it('should not reply if we have no data as well', () => {
-        let n1 = Automerge.create(), n2 = Automerge.create()
+        let n1 = create(), n2 = create()
         let s1 = initSyncState(), s2 = initSyncState()
         let m1 = n1.generateSyncMessage(s1)
         n2.receiveSyncMessage(s2, m1)
@@ -540,7 +541,7 @@ describe('Automerge', () => {
     })
 
     it('repos with equal heads do not need a reply message', () => {
-      let n1 = Automerge.create(), n2 = Automerge.create()
+      let n1 = create(), n2 = create()
       let s1 = initSyncState(), s2 = initSyncState()
 
       // make two nodes with the same changes
@@ -564,7 +565,7 @@ describe('Automerge', () => {
     })
 
     it('n1 should offer all changes to n2 when starting from nothing', () => {
-      let n1 = Automerge.create(), n2 = Automerge.create()
+      let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
       let list = n1.set("_root","n",LIST)
@@ -580,7 +581,7 @@ describe('Automerge', () => {
     })
 
     it('should sync peers where one has commits the other does not', () => {
-      let n1 = Automerge.create(), n2 = Automerge.create()
+      let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
       let list = n1.set("_root","n",LIST)
@@ -597,7 +598,7 @@ describe('Automerge', () => {
 
     it('should work with prior sync state', () => {
       // create & synchronize two nodes
-      let n1 = Automerge.create(), n2 = Automerge.create()
+      let n1 = create(), n2 = create()
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 5; i++) {
@@ -620,7 +621,7 @@ describe('Automerge', () => {
 
     it('should not generate messages once synced', () => {
       // create & synchronize two nodes
-      let n1 = Automerge.create('abc123'), n2 = Automerge.create('def456')
+      let n1 = create('abc123'), n2 = create('def456')
       let s1 = initSyncState(), s2 = initSyncState()
 
       let message, patch
@@ -664,7 +665,7 @@ describe('Automerge', () => {
 
     it('should allow simultaneous messages during synchronization', () => {
       // create & synchronize two nodes
-      let n1 = Automerge.create('abc123'), n2 = Automerge.create('def456')
+      let n1 = create('abc123'), n2 = create('def456')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 5; i++) {
@@ -736,7 +737,7 @@ describe('Automerge', () => {
     })
 
     it('should assume sent changes were recieved until we hear otherwise', () => {
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState(), message = null
 
       let items = n1.set("_root", "items", LIST)
@@ -763,7 +764,7 @@ describe('Automerge', () => {
 
     it('should work regardless of who initiates the exchange', () => {
       // create & synchronize two nodes
-      let n1 = Automerge.create(), n2 = Automerge.create()
+      let n1 = create(), n2 = create()
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 5; i++) {
@@ -791,7 +792,7 @@ describe('Automerge', () => {
       // lastSync is undefined.
 
       // create two peers both with divergent commits
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 10; i++) {
@@ -824,7 +825,7 @@ describe('Automerge', () => {
       // lastSync is c9.
 
       // create two peers both with divergent commits
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 10; i++) {
@@ -853,7 +854,7 @@ describe('Automerge', () => {
     })
 
     it('should ensure non-empty state after sync', () => {
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 3; i++) {
@@ -872,7 +873,7 @@ describe('Automerge', () => {
       // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8
       // n2 has changes {c0, c1, c2}, n1's lastSync is c5, and n2's lastSync is c2.
       // we want to successfully sync (n1) with (r), even though (n1) believes it's talking to (n2)
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       // n1 makes three changes, which we sync to n2
@@ -918,7 +919,7 @@ describe('Automerge', () => {
     })
 
     it('should resync after one node experiences data loss without disconnecting', () => {
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       // n1 makes three changes, which we sync to n2
@@ -932,7 +933,7 @@ describe('Automerge', () => {
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
       assert.deepStrictEqual(n1.toJS(), n2.toJS())
 
-      let n2AfterDataLoss = Automerge.create('89abcdef')
+      let n2AfterDataLoss = create('89abcdef')
 
       // "n2" now has no data, but n1 still thinks it does. Note we don't do
       // decodeSyncState(encodeSyncState(s1)) in order to simulate data loss without disconnecting
@@ -942,7 +943,7 @@ describe('Automerge', () => {
     })
 
     it('should handle changes concurrent to the last sync heads', () => {
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef'), n3 = Automerge.create('fedcba98')
+      let n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')
       let s12 = initSyncState(), s21 = initSyncState(), s23 = initSyncState(), s32 = initSyncState()
 
       // Change 1 is known to all three nodes
@@ -965,6 +966,7 @@ describe('Automerge', () => {
       // Apply n3's latest change to n2. If running in Node, turn the Uint8Array into a Buffer, to
       // simulate transmission over a network (see https://github.com/automerge/automerge/pull/362)
       let change = n3.getLastLocalChange()
+      //@ts-ignore
       if (typeof Buffer === 'function') change = Buffer.from(change)
       n2.applyChanges([change])
 
@@ -975,7 +977,7 @@ describe('Automerge', () => {
     })
 
     it('should handle histories with lots of branching and merging', () => {
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef'), n3 = Automerge.create('fedcba98')
+      let n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('fedcba98')
       n1.set("_root","x",0); n1.commit("",0)
       n2.applyChanges([n1.getLastLocalChange()])
       n3.applyChanges([n1.getLastLocalChange()])
@@ -1015,7 +1017,7 @@ describe('Automerge', () => {
       //                                                                      `-- n2
       // where n2 is a false positive in the Bloom filter containing {n1}.
       // lastSync is c9.
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 10; i++) {
@@ -1051,8 +1053,8 @@ describe('Automerge', () => {
         //                                                                      `-- n2c1 <-- n2c2
         // where n2c1 is a false positive in the Bloom filter containing {n1c1, n1c2}.
         // lastSync is c9.
-        n1 = Automerge.create('01234567')
-        n2 = Automerge.create('89abcdef')
+        n1 = create('01234567')
+        n2 = create('89abcdef')
         s1 = initSyncState()
         s2 = initSyncState()
         for (let i = 0; i < 10; i++) {
@@ -1118,7 +1120,7 @@ describe('Automerge', () => {
         assert.strictEqual(decodeSyncMessage(m2).changes.length, 1) // only n2c2; change n2c1 is not sent
 
         // n3 is a node that doesn't have the missing change. Nevertheless n1 is going to ask n3 for it
-        let n3 = Automerge.create('fedcba98'), s13 = initSyncState(), s31 = initSyncState()
+        let n3 = create('fedcba98'), s13 = initSyncState(), s31 = initSyncState()
         sync(n1, n3, s13, s31)
         assert.deepStrictEqual(n1.getHeads(), [n1hash2])
         assert.deepStrictEqual(n3.getHeads(), [n1hash2])
@@ -1131,7 +1133,7 @@ describe('Automerge', () => {
       //                                   `-- n2c1 <-- n2c2 <-- n2c3
       // where n2c2 is a false positive in the Bloom filter containing {n1c1, n1c2, n1c3}.
       // lastSync is c4.
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
       let n1hash3, n2hash3
 
@@ -1185,7 +1187,7 @@ describe('Automerge', () => {
       //                                   `-- n2c1 <-- n2c2 <-- n2c3
       // where n2c1 and n2c2 are both false positives in the Bloom filter containing {c5}.
       // lastSync is c4.
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
 
       for (let i = 0; i < 5; i++) {
@@ -1225,7 +1227,7 @@ describe('Automerge', () => {
       // c0 <-- c1 <-- c2 <-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8 <-- c9 <-+
       //                                                                      `-- n2
       // where n2 causes a false positive in the Bloom filter containing {n1}.
-      let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+      let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState()
       let message
 
@@ -1281,7 +1283,7 @@ describe('Automerge', () => {
         // n1 has {c0, c1, c2, n1c1, n1c2, n1c3, n2c1, n2c2};
         // n2 has {c0, c1, c2, n1c1, n1c2, n2c1, n2c2, n2c3};
         // n3 has {c0, c1, c2, n3c1, n3c2, n3c3}.
-        let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef'), n3 = Automerge.create('76543210')
+        let n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('76543210')
         let s13 = initSyncState(), s12 = initSyncState(), s21 = initSyncState()
         let s32 = initSyncState(), s31 = initSyncState(), s23 = initSyncState()
         let message1, message2, message3
@@ -1331,7 +1333,7 @@ describe('Automerge', () => {
         const modifiedMessage = decodeSyncMessage(message3)
         modifiedMessage.have.push(decodeSyncMessage(message1).have[0])
         assert.strictEqual(modifiedMessage.changes.length, 0)
-        n2.receiveSyncMessage(s23, Automerge.encodeSyncMessage(modifiedMessage))
+        n2.receiveSyncMessage(s23, encodeSyncMessage(modifiedMessage))
 
         // n2 replies to n3, sending only n2c3 (the one change that n2 has but n1 doesn't)
         message2 = n2.generateSyncMessage(s23)
@@ -1346,7 +1348,7 @@ describe('Automerge', () => {
       })
 
       it('should allow any change to be requested', () => {
-        let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+        let n1 = create('01234567'), n2 = create('89abcdef')
         let s1 = initSyncState(), s2 = initSyncState()
         let message = null
 
@@ -1372,7 +1374,7 @@ describe('Automerge', () => {
       })
 
       it('should ignore requests for a nonexistent change', () => {
-        let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef')
+        let n1 = create('01234567'), n2 = create('89abcdef')
         let s1 = initSyncState(), s2 = initSyncState()
         let message = null
 
@@ -1392,7 +1394,7 @@ describe('Automerge', () => {
         //       ,-- c1 <-- c2
         // c0 <-+
         //       `-- c3 <-- c4 <-- c5 <-- c6 <-- c7 <-- c8
-        let n1 = Automerge.create('01234567'), n2 = Automerge.create('89abcdef'), n3 = Automerge.create('76543210')
+        let n1 = create('01234567'), n2 = create('89abcdef'), n3 = create('76543210')
         let s1 = initSyncState(), s2 = initSyncState()
         let msg, decodedMsg
 
