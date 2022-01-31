@@ -23,8 +23,6 @@ export type OutValue =
   ["text", ObjID] |
   ["table", ObjID]
 
-export type ROOT = "_root";
-
 export const LIST : ObjectType;
 export const MAP : ObjectType;
 export const TABLE : ObjectType;
@@ -80,8 +78,6 @@ export function loadDoc(data: Uint8Array, actor?: Actor): Automerge;
 export function encodeChange(change: DecodedChange): Change;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
-export function importSyncState(state: any): SyncState; // FIXME
-export function exportSyncState(state: SyncState): any;
 export function encodeSyncMessage(message: DecodedSyncMessage): SyncMessage;
 export function decodeSyncMessage(msg: SyncMessage): DecodedSyncMessage;
 export function encodeSyncState(state: SyncState): Uint8Array;
