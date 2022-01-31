@@ -3,8 +3,7 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, SyncState, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
-import { Datatype } from '..'
+import { create, loadDoc, SyncState, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../dev/index'
 import { DecodedSyncMessage } from '../index';
 import { Hash } from '../dev/index';
 
@@ -61,21 +60,22 @@ describe('Automerge', () => {
       doc.free()
     })
 
-    it.skip('should be able to set and get a simple value', () => {
+    it('should be able to set and get a simple value', () => {
       let doc : Automerge = create("aabbcc")
       let root = "_root"
       let result
 
       doc.set(root, "hello", "world")
-      doc.set(root, "number1", 5, Datatype.uint)
+      doc.set(root, "number1", 5, "uint")
       doc.set(root, "number2", 5)
       doc.set(root, "number3", 5.5)
-      doc.set(root, "number4", 5.5, Datatype.f64)
-      doc.set(root, "number5", 5.5, Datatype.int)
+      doc.set(root, "number4", 5.5, "f64")
+      doc.set(root, "number5", 5.5, "int")
       doc.set(root, "bool", true)
-      doc.set(root, "time1", 1000, Datatype.timestamp)
+      doc.set(root, "time1", 1000, "timestamp")
       doc.set(root, "time2", new Date(1001))
       doc.set(root, "list", LIST);
+      doc.set(root, "null", null)
 
       result = doc.value(root,"hello")
       assert.deepEqual(result,["str","world"])
@@ -84,21 +84,21 @@ describe('Automerge', () => {
       assert.deepEqual(result,["uint",5])
 
       result = doc.value(root,"number2")
-      assert.deepEqual(result,[Datatype.int,5])
+      assert.deepEqual(result,["int",5])
 
       result = doc.value(root,"number3")
-      assert.deepEqual(result,[Datatype.f64,5.5])
+      assert.deepEqual(result,["f64",5.5])
 
       result = doc.value(root,"number4")
-      assert.deepEqual(result,[Datatype.f64,5.5])
+      assert.deepEqual(result,["f64",5.5])
 
       result = doc.value(root,"number5")
-      assert.deepEqual(result,[Datatype.int,5])
+      assert.deepEqual(result,["int",5])
 
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",true])
 
-      doc.set(root, "bool", false, Datatype.boolean)
+      doc.set(root, "bool", false, "boolean")
 
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",false])
@@ -112,28 +112,31 @@ describe('Automerge', () => {
       result = doc.value(root,"list")
       assert.deepEqual(result,["list","10@aabbcc"]);
 
+      result = doc.value(root,"null")
+      assert.deepEqual(result,["null",null]);
+
       doc.free()
     })
 
-    it.skip('should be able to use bytes', () => {
+    it('should be able to use bytes', () => {
       let doc = create()
       doc.set("_root","data1", new Uint8Array([10,11,12]));
-      doc.set("_root","data2", new Uint8Array([13,14,15]), Datatype.bytes);
+      doc.set("_root","data2", new Uint8Array([13,14,15]), "bytes");
       let value1 = doc.value("_root", "data1")
-      assert.deepEqual(value1, [Datatype.bytes, new Uint8Array([10,11,12])]);
+      assert.deepEqual(value1, ["bytes", new Uint8Array([10,11,12])]);
       let value2 = doc.value("_root", "data2")
-      assert.deepEqual(value2, [Datatype.bytes, new Uint8Array([13,14,15])]);
+      assert.deepEqual(value2, ["bytes", new Uint8Array([13,14,15])]);
       doc.free()
     })
 
-    it.skip('should be able to make sub objects', () => {
+    it('should be able to make sub objects', () => {
       let doc = create()
       let root = "_root"
       let result
 
       let submap = doc.set(root, "submap", MAP)
       if (!submap) throw new Error('should be not null')
-      doc.set(submap, "number", 6, Datatype.uint)
+      doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pendingOps(),2)
 
       result = doc.value(root,"submap")
@@ -168,7 +171,7 @@ describe('Automerge', () => {
       doc.free()
     })
 
-    it.skip('lists have insert, set, splice, and push ops', () => {
+    it('lists have insert, set, splice, and push ops', () => {
       let doc = create()
       let root = "_root"
 
@@ -179,7 +182,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.toJS(), { letters: ["b", "a" ] })
       doc.push(submap, "c");
       assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c" ] })
-      doc.push(submap, 3, Datatype.timestamp);
+      doc.push(submap, 3, "timestamp");
       assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c", new Date(3) ] })
       doc.splice(submap, 1, 1, ["d","e","f"]);
       assert.deepEqual(doc.toJS(), { letters: ["b", "d", "e", "f", "c", new Date(3) ] })
@@ -220,11 +223,11 @@ describe('Automerge', () => {
       doc.free()
     })
 
-    it.skip('should be able to use counters', () => {
+    it('should be able to use counters', () => {
       let doc = create()
       let root = "_root"
 
-      doc.set(root, "counter", 10, Datatype.counter);
+      doc.set(root, "counter", 10, "counter");
       assert.deepEqual(doc.value(root, "counter"),["counter",10])
       doc.inc(root, "counter", 10);
       assert.deepEqual(doc.value(root, "counter"),["counter",20])
@@ -233,7 +236,7 @@ describe('Automerge', () => {
       doc.free()
     })
 
-    it.skip('should be able to splice text', () => {
+    it('should be able to splice text', () => {
       let doc = create()
       let root = "_root";
 
@@ -241,7 +244,7 @@ describe('Automerge', () => {
       if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
-      doc.splice(text, 11, 0, [[Datatype.str,"!"],[Datatype.str,"?"]])
+      doc.splice(text, 11, 0, [["str","!"],["str","?"]])
       assert.deepEqual(doc.value(text, 0),["str","h"])
       assert.deepEqual(doc.value(text, 1),["str","e"])
       assert.deepEqual(doc.value(text, 9),["str","l"])
@@ -304,14 +307,14 @@ describe('Automerge', () => {
       doc.free()
     })
 
-    it.skip('local inc increments all visible counters in a map', () => {
+    it('local inc increments all visible counters in a map', () => {
       let doc1 = create("aaaa")
       doc1.set("_root", "hello", "world")
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set("_root", "cnt", 20)
-      doc2.set("_root", "cnt", 0, Datatype.counter)
-      doc3.set("_root", "cnt", 10, Datatype.counter)
+      doc2.set("_root", "cnt", 0, "counter")
+      doc3.set("_root", "cnt", 10, "counter")
       doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values("_root", "cnt")
@@ -336,7 +339,7 @@ describe('Automerge', () => {
       doc4.free()
     })
 
-    it.skip('local inc increments all visible counters in a sequence', () => {
+    it('local inc increments all visible counters in a sequence', () => {
       let doc1 = create("aaaa")
       let seq = doc1.set("_root", "seq", LIST)
       if (!seq) throw new Error('Should not be undefined')
@@ -344,8 +347,8 @@ describe('Automerge', () => {
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set(seq, 0, 20)
-      doc2.set(seq, 0, 0, Datatype.counter)
-      doc3.set(seq, 0, 10, Datatype.counter)
+      doc2.set(seq, 0, 0, "counter")
+      doc3.set(seq, 0, 10, "counter")
       doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values(seq, 0)
@@ -370,11 +373,11 @@ describe('Automerge', () => {
       doc4.free()
     })
 
-    it.skip('only returns an object id when objects are created', () => {
+    it('only returns an object id when objects are created', () => {
       let doc = create("aaaa")
       let r1 = doc.set("_root","foo","bar")
       let r2 = doc.set("_root","list",LIST)
-      let r3 = doc.set("_root","counter",10, Datatype.counter)
+      let r3 = doc.set("_root","counter",10, "counter")
       let r4 = doc.inc("_root","counter",1)
       let r5 = doc.del("_root","counter")
       if (!r2) throw new Error('should not be undefined')
