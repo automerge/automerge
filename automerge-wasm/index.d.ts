@@ -1,27 +1,27 @@
 
 export type Actor = string;
-export type ObjID = string; 
+export type ObjID = string;
 export type Change = Uint8Array;
 export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
 export type ObjectType = string; // opaque ??
-export type Value = string | number | boolean | Date | Uint8Array | ObjectType;
-export type OutValue = 
-  [Datatype.str, string] |
-  [Datatype.uint, number] |
-  [Datatype.f64, number] |
-  [Datatype.u64, number] |
-  [Datatype.f64, number] |
-  [Datatype.boolean, boolean] |
-  [Datatype.timestamp, Date] |
-  [Datatype.counter, number] |
-  [Datatype.bytes, Uint8Array] |
-  [ObjTypeName.list, ObjID] |
-  [ObjTypeName.map, ObjID] |
-  [ObjTypeName.text, ObjID] |
-  [ObjTypeName.table, ObjID] 
+export type Value = string | number | boolean | null | Date | Uint8Array | ObjectType;
+export type OutValue =
+  ["str", string] |
+  ["int", number] |
+  ["uint", number] |
+  ["f64", number] |
+  ["boolean", boolean] |
+  ["timestamp", Date] |
+  ["counter", number] |
+  ["bytes", Uint8Array] |
+  ["null", Uint8Array] |
+  ["map", ObjID] |
+  ["list", ObjID] |
+  ["text", ObjID] |
+  ["table", ObjID]
 
 export type ROOT = "_root";
 
@@ -37,18 +37,16 @@ export enum ObjTypeName {
   text = "text",
 }
 
-export enum Datatype {
-  boolean = "boolean",
-  str = "str",
-  i64 = "i64",
-  uint = "uint",
-  u64 = "u64",
-  f64 = "f64",
-  int = "int",
-  timestamp = "timestamp",
-  counter = "counter",
-  bytes = "bytes",
-}
+export type Datatype =
+  "boolean" |
+  "str" |
+  "int" |
+  "uint" |
+  "f64" |
+  "null" |
+  "timestamp" |
+  "counter" |
+  "bytes";
 
 export type DecodedSyncMessage = {
   heads: Heads,
