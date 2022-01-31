@@ -52,11 +52,15 @@ export enum Datatype {
 }
 
 export type DecodedSyncMessage = {
-
+  heads: Heads,
+  need: Heads,
+  have: any[]
+  changes: Change[]
 }
 
 export type DecodedChange = {
   message: string,
+  hash: Hash,
   seq: number,
   ops: Op[]
 }

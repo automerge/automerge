@@ -3,7 +3,9 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, Datatype, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { create, loadDoc, SyncState, Datatype, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { DecodedSyncMessage } from '../index';
+import { Hash } from '../dev/index';
 
 // str to uint8array
 function en(str: string) {
@@ -70,7 +72,7 @@ describe('Automerge', () => {
       doc.set(root, "number4", 5.5, Datatype.f64)
       doc.set(root, "number5", 5.5, Datatype.int)
       doc.set(root, "bool", true)
-      doc.set(root, "time1", 1000, "timestamp")
+      doc.set(root, "time1", 1000, Datatype.timestamp)
       doc.set(root, "time2", new Date(1001))
       doc.set(root, "list", LIST);
 
@@ -95,7 +97,7 @@ describe('Automerge', () => {
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",true])
 
-      doc.set(root, "bool", false, "boolean")
+      doc.set(root, "bool", false, Datatype.boolean)
 
       result = doc.value(root,"bool")
       assert.deepEqual(result,["boolean",false])
@@ -115,11 +117,11 @@ describe('Automerge', () => {
     it('should be able to use bytes', () => {
       let doc = create()
       doc.set("_root","data1", new Uint8Array([10,11,12]));
-      doc.set("_root","data2", new Uint8Array([13,14,15]), "bytes");
+      doc.set("_root","data2", new Uint8Array([13,14,15]), Datatype.bytes);
       let value1 = doc.value("_root", "data1")
-      assert.deepEqual(value1, ["bytes", new Uint8Array([10,11,12])]);
+      assert.deepEqual(value1, [Datatype.bytes, new Uint8Array([10,11,12])]);
       let value2 = doc.value("_root", "data2")
-      assert.deepEqual(value2, ["bytes", new Uint8Array([13,14,15])]);
+      assert.deepEqual(value2, [Datatype.bytes, new Uint8Array([13,14,15])]);
       doc.free()
     })
 
@@ -129,7 +131,8 @@ describe('Automerge', () => {
       let result
 
       let submap = doc.set(root, "submap", MAP)
-      doc.set(submap, "number", 6, "uint")
+      if (!submap) throw new Error('should be not null')
+      doc.set(submap, "number", 6, Datatype.uint)
       assert.strictEqual(doc.pendingOps(),2)
 
       result = doc.value(root,"submap")
@@ -145,6 +148,7 @@ describe('Automerge', () => {
       let root = "_root"
 
       let submap = doc.set(root, "numbers", LIST)
+      if (!submap) throw new Error('should be not null')
       doc.insert(submap, 0, "a");
       doc.insert(submap, 1, "b");
       doc.insert(submap, 2, "c");
@@ -168,12 +172,13 @@ describe('Automerge', () => {
       let root = "_root"
 
       let submap = doc.set(root, "letters", LIST)
+      if (!submap) throw new Error('should be not null')
       doc.insert(submap, 0, "a");
       doc.insert(submap, 0, "b");
       assert.deepEqual(doc.toJS(), { letters: ["b", "a" ] })
       doc.push(submap, "c");
       assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c" ] })
-      doc.push(submap, 3, "timestamp");
+      doc.push(submap, 3, Datatype.timestamp);
       assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c", new Date(3) ] })
       doc.splice(submap, 1, 1, ["d","e","f"]);
       assert.deepEqual(doc.toJS(), { letters: ["b", "d", "e", "f", "c", new Date(3) ] })
@@ -218,7 +223,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
 
-      doc.set(root, "counter", 10, "counter");
+      doc.set(root, "counter", 10, Datatype.counter);
       assert.deepEqual(doc.value(root, "counter"),["counter",10])
       doc.inc(root, "counter", 10);
       assert.deepEqual(doc.value(root, "counter"),["counter",20])
@@ -232,9 +237,10 @@ describe('Automerge', () => {
       let root = "_root";
 
       let text = doc.set(root, "text", TEXT);
+      if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
-      doc.splice(text, 11, 0, [["str","!"],["str","?"]])
+      doc.splice(text, 11, 0, [[Datatype.str,"!"],[Datatype.str,"?"]])
       assert.deepEqual(doc.value(text, 0),["str","h"])
       assert.deepEqual(doc.value(text, 1),["str","e"])
       assert.deepEqual(doc.value(text, 9),["str","l"])
@@ -283,6 +289,7 @@ describe('Automerge', () => {
     it('should be able to splice text', () => {
       let doc = create()
       let text = doc.set("_root", "text", TEXT);
+      if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello world");
       let heads1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
@@ -302,8 +309,8 @@ describe('Automerge', () => {
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set("_root", "cnt", 20)
-      doc2.set("_root", "cnt", 0, "counter")
-      doc3.set("_root", "cnt", 10, "counter")
+      doc2.set("_root", "cnt", 0, Datatype.counter)
+      doc3.set("_root", "cnt", 10, Datatype.counter)
       doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values("_root", "cnt")
@@ -331,12 +338,13 @@ describe('Automerge', () => {
     it('local inc increments all visible counters in a sequence', () => {
       let doc1 = create("aaaa")
       let seq = doc1.set("_root", "seq", LIST)
+      if (!seq) throw new Error('Should not be undefined')
       doc1.insert(seq, 0, "hello")
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
       doc1.set(seq, 0, 20)
-      doc2.set(seq, 0, 0, "counter")
-      doc3.set(seq, 0, 10, "counter")
+      doc2.set(seq, 0, 0, Datatype.counter)
+      doc3.set(seq, 0, 10, Datatype.counter)
       doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values(seq, 0)
@@ -365,9 +373,10 @@ describe('Automerge', () => {
       let doc = create("aaaa")
       let r1 = doc.set("_root","foo","bar")
       let r2 = doc.set("_root","list",LIST)
-      let r3 = doc.set("_root","counter",10, "counter")
+      let r3 = doc.set("_root","counter",10, Datatype.counter)
       let r4 = doc.inc("_root","counter",1)
       let r5 = doc.del("_root","counter")
+      if (!r2) throw new Error('should not be undefined')
       let r6 = doc.insert(r2,0,10);
       let r7 = doc.insert(r2,0,MAP);
       let r8 = doc.splice(r2,1,0,["a","b","c"]);
@@ -387,8 +396,11 @@ describe('Automerge', () => {
     it('objects without properties are preserved', () => {
       let doc1 = create("aaaa")
       let a = doc1.set("_root","a",MAP);
+      if (!a) throw new Error('should not be undefined')
       let b = doc1.set("_root","b",MAP);
+      if (!b) throw new Error('should not be undefined')
       let c = doc1.set("_root","c",MAP);
+      if (!c) throw new Error('should not be undefined')
       let d = doc1.set(c,"d","dd");
       let saved = doc1.save();
       let doc2 = loadDoc(saved);
@@ -406,6 +418,7 @@ describe('Automerge', () => {
     it('should handle marks [..]', () => {
       let doc = create()
        let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
        doc.splice(list, 0, 0, "aaabbbccc")
        doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
@@ -419,6 +432,8 @@ describe('Automerge', () => {
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
       let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
+
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
@@ -438,6 +453,7 @@ describe('Automerge', () => {
     it('should handle sticky marks (..)', () => {
       let doc = create()
       let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -451,6 +467,7 @@ describe('Automerge', () => {
     it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create()
       let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -479,6 +496,7 @@ describe('Automerge', () => {
     it('should handle overlapping marks', () => {
       let doc : Automerge = create()
       let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
@@ -522,7 +540,7 @@ describe('Automerge', () => {
       let doc = create()
       let s1 = initSyncState()
       let m1 = doc.generateSyncMessage(s1)
-      const message = decodeSyncMessage(m1)
+      const message: DecodedSyncMessage = decodeSyncMessage(m1)
       assert.deepStrictEqual(message.heads, [])
       assert.deepStrictEqual(message.need, [])
       assert.deepStrictEqual(message.have.length, 1)
@@ -546,6 +564,7 @@ describe('Automerge', () => {
 
       // make two nodes with the same changes
       let list = n1.set("_root","n", LIST)
+      if (!list) throw new Error('undefined')
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -569,6 +588,7 @@ describe('Automerge', () => {
 
       // make changes for n1 that n2 should request
       let list = n1.set("_root","n",LIST)
+      if (!list) throw new Error('undefined')
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list, i, i)
@@ -585,6 +605,7 @@ describe('Automerge', () => {
 
       // make changes for n1 that n2 should request
       let list = n1.set("_root","n",LIST)
+      if (!list) throw new Error('undefined')
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -741,6 +762,7 @@ describe('Automerge', () => {
       let s1 = initSyncState(), s2 = initSyncState(), message = null
 
       let items = n1.set("_root", "items", LIST)
+      if (!items) throw new Error('undefined')
       n1.commit("",0)
 
       sync(n1, n2, s1, s2)
@@ -1045,7 +1067,7 @@ describe('Automerge', () => {
 
 
     describe('with a false-positive dependency', () => {
-      let n1, n2, s1, s2, n1hash2, n2hash2
+      let n1: Automerge, n2: Automerge, s1: SyncState, s2: SyncState, n1hash2: Hash, n2hash2: Hash
 
       beforeEach(() => {
         // Scenario:                                                            ,-- n1c1 <-- n1c2
@@ -1367,10 +1389,10 @@ describe('Automerge', () => {
         message = n1.generateSyncMessage(s1)
         const modMsg = decodeSyncMessage(message)
         modMsg.need = lastSync // re-request change 2
-        n2.receiveSyncMessage(s2, Automerge.encodeSyncMessage(modMsg))
+        n2.receiveSyncMessage(s2, encodeSyncMessage(modMsg))
         message = n2.generateSyncMessage(s2)
         assert.strictEqual(decodeSyncMessage(message).changes.length, 1)
-        assert.strictEqual(Automerge.decodeChange(decodeSyncMessage(message).changes[0]).hash, lastSync[0])
+        assert.strictEqual(decodeChange(decodeSyncMessage(message).changes[0]).hash, lastSync[0])
       })
 
       it('should ignore requests for a nonexistent change', () => {
@@ -1420,7 +1442,7 @@ describe('Automerge', () => {
         n3.set("_root","x",5); n3.commit("",0)
         const change5 = n3.getLastLocalChange()
         n3.set("_root","x",6); n3.commit("",0)
-        const change6 = n3.getLastLocalChange(n3), c6 = n3.getHeads()[0]
+        const change6 = n3.getLastLocalChange(), c6 = n3.getHeads()[0]
         for (let i = 7; i <= 8; i++) {
           n3.set("_root","x",i); n3.commit("",0)
         }
@@ -1433,10 +1455,10 @@ describe('Automerge', () => {
         msg = n2.generateSyncMessage(s2)
         decodedMsg = decodeSyncMessage(msg)
         decodedMsg.changes = [change5, change6]
-        msg = Automerge.encodeSyncMessage(decodedMsg)
-        const sentHashes = {}
-        sentHashes[Automerge.decodeChange(change5, true).hash] = true
-        sentHashes[Automerge.decodeChange(change6, true).hash] = true
+        msg = encodeSyncMessage(decodedMsg)
+        const sentHashes: any = {}
+        sentHashes[decodeChange(change5).hash] = true
+        sentHashes[decodeChange(change6).hash] = true
         s2.sentHashes = sentHashes
         n1.receiveSyncMessage(s1, msg)
         assert.deepStrictEqual(s1.sharedHeads, [c2, c6].sort())
