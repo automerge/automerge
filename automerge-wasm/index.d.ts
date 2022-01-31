@@ -85,6 +85,7 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
   set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
+  make(obj: ObjID, prop: Prop, value: ObjectType): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
   push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
   splice(obj: ObjID, start: number, delete_count: number, text: string | Array<Value | FullValue>): ObjID[] | undefined;
