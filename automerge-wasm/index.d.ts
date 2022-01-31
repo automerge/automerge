@@ -8,7 +8,6 @@ export type Hash = string;
 export type Heads = Hash[];
 export type ObjectType = string; // opaque ??
 export type Value = string | number | boolean | Date | Uint8Array | ObjectType;
-export type ObjTypeString = "map" | "list" | "text" | "table"
 export type OutValue = 
   [Datatype.str, string] |
   [Datatype.uint, number] |
@@ -59,15 +58,23 @@ export type DecodedSyncMessage = {
 }
 
 export type DecodedChange = {
-  message: string,
+  actor: Actor,
+  seq: number
+  startOp: number,
+  time: number,
+  message: string | null,
+  deps: Heads,
   hash: Hash,
-  seq: number,
   ops: Op[]
 }
 
 export type Op = {
   action: string,
+  obj: ObjID,
+  key: string,
   value?: string | number | boolean,
+  datatype?: string,
+  pred: string[],
 }
 
 export function create(actor?: Actor): Automerge;
@@ -89,6 +96,7 @@ export class Automerge {
   splice(obj: ObjID, start: number, delete_count: number, text: string | Value[] | OutValue[] ): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
+  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
 
   // returns a single value - if there is a conflict return the winner
   value(obj: ObjID, prop: any, heads?: Heads): OutValue | null;
@@ -97,6 +105,7 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
+  spans(obj: ObjID): any;
 
   commit(message?: string, time?: number): Heads;
   getActorId(): Actor;
@@ -117,7 +126,7 @@ export class Automerge {
   getChanges(have_deps: Heads): Change[];
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
-  getLastLocalChange(): Change | undefined;
+  getLastLocalChange(): Change;
   getMissingDeps(heads?: Heads): Heads;
 
   // memory management
