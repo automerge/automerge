@@ -430,11 +430,11 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = getLastLocalChange)]
-    pub fn get_last_local_change(&mut self) -> Result<Option<Uint8Array>, JsValue> {
+    pub fn get_last_local_change(&mut self) -> Result<Uint8Array, JsValue> {
         if let Some(change) = self.0.get_last_local_change() {
-            Ok(Some(Uint8Array::from(change.raw_bytes())))
+            Ok(Uint8Array::from(change.raw_bytes()))
         } else {
-            Ok(None)
+            Err(to_js_err("no local changes"))
         }
     }
 
