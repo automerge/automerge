@@ -11,6 +11,7 @@ export type Value = string | number | boolean | Date | Uint8Array | ObjectType;
 export type ObjTypeString = "map" | "list" | "text" | "table"
 export type OutValue = 
   [Datatype.str, string] |
+  [Datatype.uint, number] |
   [Datatype.f64, number] |
   [Datatype.u64, number] |
   [Datatype.f64, number] |
@@ -21,9 +22,9 @@ export type OutValue =
   [ObjTypeName.list, ObjID] |
   [ObjTypeName.map, ObjID] |
   [ObjTypeName.text, ObjID] |
-  [ObjTypeName.table, ObjID] |
+  [ObjTypeName.table, ObjID] 
 
-export const ROOT: ObjID = "_root";
+export type ROOT = "_root";
 
 export const LIST : ObjectType;
 export const MAP : ObjectType;
@@ -41,11 +42,17 @@ export enum Datatype {
   boolean = "boolean",
   str = "str",
   i64 = "i64",
+  uint = "uint",
   u64 = "u64",
   f64 = "f64",
+  int = "int",
   timestamp = "timestamp",
   counter = "counter",
   bytes = "bytes",
+}
+
+export type DecodedSyncMessage = {
+
 }
 
 export type DecodedChange = {
