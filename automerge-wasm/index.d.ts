@@ -101,6 +101,7 @@ export class Automerge {
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
   spans(obj: ObjID): any;
+  raw_spans(obj: ObjID): any;
 
   commit(message?: string, time?: number): Heads;
   getActorId(): Actor;

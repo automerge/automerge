@@ -453,6 +453,12 @@ impl Automerge {
         Ok(query.spans)
     }
 
+    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::RawSpan>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let query = self.ops.search(obj, query::RawSpans::new());
+        Ok(query.spans)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn mark(
         &mut self,
