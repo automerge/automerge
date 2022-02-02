@@ -1,7 +1,6 @@
 use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
 use crate::types::{ElemId, Op, OpId, OpType, ScalarValue};
 use std::fmt::Debug;
-use serde::{ Serialize };
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RawSpans<const B: usize> {
@@ -13,10 +12,10 @@ pub(crate) struct RawSpans<const B: usize> {
     pub spans: Vec<RawSpan>,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct RawSpan {
-    #[serde(skip)]
-    id: OpId,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RawSpan {
+    pub id: OpId,
+    pub change: usize,
     pub start: usize,
     pub end: usize,
     pub name: String,
@@ -47,7 +46,7 @@ impl<const B: usize> TreeQuery<B> for RawSpans<B> {
                     .spans
                     .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
                     .unwrap_err();
-                self.spans.insert(pos, RawSpan { id: element.id, start: self.seen, end: 0, name: md.name.clone(), value: md.value.clone() });
+                self.spans.insert(pos, RawSpan { id: element.id, change: element.change, start: self.seen, end: 0, name: md.name.clone(), value: md.value.clone() });
             }
             if let OpType::MarkEnd(_) = &element.action {
                 for s in self.spans.iter_mut() {

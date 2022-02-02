@@ -488,13 +488,14 @@ describe('Automerge', () => {
     })
 
     it('should handle overlapping marks', () => {
-      let doc : Automerge = create()
+      let doc : Automerge = create("aabbcc")
       let list = doc.set("_root", "list", TEXT)
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
       doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
+      doc.commit("marks",999);
       let spans = doc.spans(list);
       assert.deepStrictEqual(spans,
         [
@@ -520,9 +521,9 @@ describe('Automerge', () => {
       let raw_spans = doc.raw_spans(list);
       assert.deepStrictEqual(raw_spans,
         [
-          { start: 0, end: 37, name: 'bold', value: true },
-          { start: 4, end: 19, name: 'itallic', value: true },
-          { start: 10, end: 13, name: 'comment', value: 'foxes are my favorite animal!' }
+          { id: "39@aabbcc", time: 999, start: 0, end: 37, name: 'bold', value: true },
+          { id: "41@aabbcc", time: 999, start: 4, end: 19, name: 'itallic', value: true },
+          { id: "43@aabbcc", time: 999, start: 10, end: 13, name: 'comment', value: 'foxes are my favorite animal!' }
         ]);
 
       // mark sure encode decode can handle marks
