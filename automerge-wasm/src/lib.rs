@@ -355,6 +355,16 @@ impl Automerge {
         Ok(result.into())
     }
 
+    pub fn raw_spans(&mut self, obj: String) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let spans = self.0.raw_spans(&obj).map_err(to_js_err)?;
+        let result = Array::new();
+        for s in spans {
+          result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
+        }
+        Ok(result)
+    }
+
     pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
         self.0
             .save()

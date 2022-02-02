@@ -515,6 +515,15 @@ describe('Automerge', () => {
           [],
         ]
       )
+      let text = doc.text(list);
+      assert.deepStrictEqual(text, "the quick fox jumps over the lazy dog");
+      let raw_spans = doc.raw_spans(list);
+      assert.deepStrictEqual(raw_spans,
+        [
+          { start: 0, end: 37, name: 'bold', value: true },
+          { start: 4, end: 19, name: 'itallic', value: true },
+          { start: 10, end: 13, name: 'comment', value: 'foxes are my favorite animal!' }
+        ]);
 
       // mark sure encode decode can handle marks
 
