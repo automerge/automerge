@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use unicode_segmentation::UnicodeSegmentation;
-
+use serde::Serialize;
 use crate::change::{encode_document, export_change};
 use crate::exid::ExId;
 use crate::op_set::OpSet;
@@ -453,10 +453,18 @@ impl Automerge {
         Ok(query.spans)
     }
 
-    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::RawSpan>, AutomergeError> {
+    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let query = self.ops.search(obj, query::RawSpans::new());
-        Ok(query.spans)
+        let result = query.spans.into_iter().map(|s| SpanInfo {
+          id: self.id_to_exid(s.id),
+          time: self.history[s.change].time,
+          start: s.start,
+          end: s.end,
+          name: s.name,
+          value: s.value,
+        }).collect();
+        Ok(result)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1207,6 +1215,16 @@ impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct SpanInfo {
+    pub id: ExId,
+    pub time: i64,
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
+    pub value: ScalarValue,
 }
 
 #[cfg(test)]
