@@ -461,7 +461,7 @@ impl Automerge {
           time: self.history[s.change].time,
           start: s.start,
           end: s.end,
-          name: s.name,
+          span_type: s.name,
           value: s.value,
         }).collect();
         Ok(result)
@@ -1223,7 +1223,8 @@ pub struct SpanInfo {
     pub time: i64,
     pub start: usize,
     pub end: usize,
-    pub name: String,
+    #[serde(rename = "type")]
+    pub span_type: String,
     pub value: ScalarValue,
 }
 
