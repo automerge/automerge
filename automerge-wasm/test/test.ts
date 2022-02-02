@@ -521,9 +521,9 @@ describe('Automerge', () => {
       let raw_spans = doc.raw_spans(list);
       assert.deepStrictEqual(raw_spans,
         [
-          { id: "39@aabbcc", time: 999, start: 0, end: 37, name: 'bold', value: true },
-          { id: "41@aabbcc", time: 999, start: 4, end: 19, name: 'itallic', value: true },
-          { id: "43@aabbcc", time: 999, start: 10, end: 13, name: 'comment', value: 'foxes are my favorite animal!' }
+          { id: "39@aabbcc", time: 999, start: 0, end: 37, type: 'bold', value: true },
+          { id: "41@aabbcc", time: 999, start: 4, end: 19, type: 'itallic', value: true },
+          { id: "43@aabbcc", time: 999, start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
         ]);
 
       // mark sure encode decode can handle marks
