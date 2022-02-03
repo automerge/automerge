@@ -7,7 +7,7 @@ version = "0.1.0"
 authors = ["Alex Good <alex@memoryandthought.me>","Orion Henry <orion@inkandswitch.com>", "Martin Kleppmann"]
 categories = ["wasm"]
 readme = "README.md"
-edition = "2018"
+edition = "2021"
 license = "MIT"
 
 [lib]
