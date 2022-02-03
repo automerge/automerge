@@ -1,5 +1,5 @@
 use core::fmt::Debug;
-use std::{borrow::Cow, convert::TryFrom, io, io::Read, str};
+use std::{borrow::Cow, io, io::Read, str};
 
 use crate::error;
 use crate::legacy as amp;

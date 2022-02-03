@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
     cmp::{Ordering, PartialOrd},
-    convert::TryFrom,
     str::FromStr,
 };
 

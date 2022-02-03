@@ -2,7 +2,6 @@ use crate::error;
 use crate::types::{ObjType, Op, OpId, OpType};
 use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
-use std::convert::TryFrom;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]

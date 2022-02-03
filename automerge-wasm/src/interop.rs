@@ -2,8 +2,6 @@ use automerge as am;
 use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt::Display;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;

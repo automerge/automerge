@@ -2,8 +2,6 @@ use crate::error;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
-use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
