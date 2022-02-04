@@ -34,6 +34,10 @@ impl Value {
         Value::Object(ObjType::Table)
     }
 
+    pub fn null() -> Value {
+        Value::Scalar(ScalarValue::Null)
+    }
+
     pub fn str(s: &str) -> Value {
         Value::Scalar(ScalarValue::Str(s.into()))
     }
@@ -57,6 +61,11 @@ impl Value {
     pub fn f64(n: f64) -> Value {
         Value::Scalar(ScalarValue::F64(n))
     }
+
+    pub fn boolean(n: bool) -> Value {
+        Value::Scalar(ScalarValue::Boolean(n))
+    }
+
 
     pub fn bytes(b: Vec<u8>) -> Value {
         Value::Scalar(ScalarValue::Bytes(b))
@@ -90,6 +99,12 @@ impl From<i32> for Value {
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Value::Scalar(ScalarValue::Uint(n))
+    }
+}
+
+impl From<f64> for Value {
+    fn from(n: f64) -> Self {
+        Value::Scalar(ScalarValue::F64(n))
     }
 }
 
