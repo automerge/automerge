@@ -245,6 +245,10 @@ pub(crate) fn js_get<J: Into<JsValue>>(obj: J, prop: &str) -> Result<JS, JsValue
     Ok(JS(Reflect::get(&obj.into(), &prop.into())?))
 }
 
+pub(crate) fn stringify(val: &JsValue) -> String {
+        js_sys::JSON::stringify(val).map(|j| j.into()).unwrap_or("JSON::stringify_eror".into())
+}
+
 pub(crate) fn js_set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsValue> {
     Reflect::set(obj, &prop.into(), &val.into())
 }
@@ -255,7 +259,7 @@ pub(crate) fn to_prop(p: JsValue) -> Result<Prop, JsValue> {
     } else if let Some(n) = p.as_f64() {
         Ok(Prop::Seq(n as usize))
     } else {
-        Err("prop must me a string or number".into())
+        Err(to_js_err("prop must me a string or number"))
     }
 }
 

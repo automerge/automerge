@@ -11,7 +11,7 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
+use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS, stringify};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -192,7 +192,7 @@ impl Automerge {
             let opid = self.0.set(&obj, prop, value).map_err(to_js_err)?;
             Ok(opid.unwrap().to_string())
         } else {
-            Err("invalid object type".into())
+            Err(to_js_err("invalid object type"))
         }
     }
 
@@ -491,7 +491,7 @@ impl Automerge {
         } else if let Some(n) = prop.as_f64() {
             Ok((n as usize).into())
         } else {
-            Err(format!("invalid prop {:?}", prop).into())
+            Err(to_js_err(format!("invalid prop {:?}", prop)))
         }
     }
 
@@ -533,7 +533,7 @@ impl Automerge {
             Some("cursor") => unimplemented!(),
             */
             Some("null") => Ok(am::ScalarValue::Null),
-            Some(_) => Err(format!("unknown datatype {:?}", datatype).into()),
+            Some(_) => Err(to_js_err(format!("unknown datatype {:?}", datatype))),
             None => {
                 if value.is_null() {
                     Ok(am::ScalarValue::Null)
@@ -555,7 +555,7 @@ impl Automerge {
                 } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
                     Ok(am::ScalarValue::Bytes(o.to_vec()))
                 } else {
-                    Err("value is invalid".into())
+                    Err(to_js_err(format!("value '{}' is invalid", stringify(value) )))
                 }
             }
         }
@@ -572,63 +572,6 @@ impl Automerge {
                 }
             }
         }
-        /*
-        match datatype.as_deref() {
-            Some("boolean") => value
-                .as_bool()
-                .ok_or_else(|| "value must be a bool".into())
-                .map(|v| am::ScalarValue::Boolean(v).into()),
-            Some("int") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Int(v as i64).into()),
-            Some("uint") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Uint(v as u64).into()),
-            Some("f64") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|n| am::ScalarValue::F64(n).into()),
-            Some("bytes") => {
-                Ok(am::ScalarValue::Bytes(value.dyn_into::<Uint8Array>().unwrap().to_vec()).into())
-            }
-            Some("counter") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::counter(v as i64).into()),
-            Some("timestamp") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Timestamp(v as i64).into()),
-            Some("null") => Ok(am::ScalarValue::Null.into()),
-            Some(_) => Err(format!("unknown datatype {:?}", datatype).into()),
-            None => {
-                if value.is_null() {
-                    Ok(am::ScalarValue::Null.into())
-                } else if let Some(b) = value.as_bool() {
-                    Ok(am::ScalarValue::Boolean(b).into())
-                } else if let Some(s) = value.as_string() {
-                    // FIXME - we need to detect str vs int vs float vs bool here :/
-                    Ok(am::ScalarValue::Str(s.into()).into())
-                } else if let Some(n) = value.as_f64() {
-                    if (n.round() - n).abs() < f64::EPSILON {
-                        Ok(am::ScalarValue::Int(n as i64).into())
-                    } else {
-                        Ok(am::ScalarValue::F64(n).into())
-                    }
-                } else if let Some(o) = to_objtype(&value) {
-                    Ok(o.into())
-                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Ok(am::ScalarValue::Timestamp(d.get_time() as i64).into())
-                } else if let Ok(o) = &value.dyn_into::<Uint8Array>() {
-                    Ok(am::ScalarValue::Bytes(o.to_vec()).into())
-                } else {
-                    Err("value is invalid".into())
-                }
-            }
-        }
-        */
     }
 }
 
