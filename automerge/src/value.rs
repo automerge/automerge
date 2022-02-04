@@ -99,6 +99,12 @@ impl From<bool> for Value {
     }
 }
 
+impl From<()> for Value {
+    fn from(_: ()) -> Self {
+        Value::Scalar(ScalarValue::Null)
+    }
+}
+
 impl From<ObjType> for Value {
     fn from(o: ObjType) -> Self {
         Value::Object(o)
