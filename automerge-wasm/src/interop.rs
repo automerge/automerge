@@ -246,7 +246,9 @@ pub(crate) fn js_get<J: Into<JsValue>>(obj: J, prop: &str) -> Result<JS, JsValue
 }
 
 pub(crate) fn stringify(val: &JsValue) -> String {
-        js_sys::JSON::stringify(val).map(|j| j.into()).unwrap_or("JSON::stringify_eror".into())
+    js_sys::JSON::stringify(val)
+        .map(|j| j.into())
+        .unwrap_or_else(|_| "JSON::stringify_eror".into())
 }
 
 pub(crate) fn js_set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsValue> {

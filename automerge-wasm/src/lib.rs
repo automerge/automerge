@@ -11,7 +11,9 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS, stringify};
+use interop::{
+    get_heads, js_get, js_set, map_to_js, stringify, to_js_err, to_objtype, to_prop, AR, JS,
+};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -235,10 +237,10 @@ impl Automerge {
                     result.push(&ScalarValue(value).into());
                     Ok(Some(result))
                 }
-                None => Ok(None)
+                None => Ok(None),
             }
         } else {
-          Ok(None)
+            Ok(None)
         }
     }
 
@@ -315,7 +317,9 @@ impl Automerge {
             .as_string()
             .ok_or("invalid mark name")
             .map_err(to_js_err)?;
-        let value = self.import_scalar(&value, datatype.as_string())?;
+        let value = self
+            .import_scalar(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("invalid value"))?;
         self.0
             .mark(&obj, start, start_sticky, end, end_sticky, &name, value)
             .map_err(to_js_err)?;
@@ -360,7 +364,7 @@ impl Automerge {
         let spans = self.0.raw_spans(&obj).map_err(to_js_err)?;
         let result = Array::new();
         for s in spans {
-          result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
+            result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
         }
         Ok(result)
     }
@@ -498,77 +502,56 @@ impl Automerge {
     fn import_scalar(
         &mut self,
         value: &JsValue,
-        datatype: Option<String>,
-    ) -> Result<am::ScalarValue, JsValue> {
+        datatype: &Option<String>,
+    ) -> Option<am::ScalarValue> {
         match datatype.as_deref() {
-            Some("boolean") => value
-                .as_bool()
-                .ok_or_else(|| "value must be a bool".into())
-                .map(am::ScalarValue::Boolean),
-            Some("int") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Int(v as i64)),
-            Some("uint") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Uint(v as u64)),
-            Some("f64") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(am::ScalarValue::F64),
-            Some("bytes") => Ok(am::ScalarValue::Bytes(
+            Some("boolean") => value.as_bool().map(am::ScalarValue::Boolean),
+            Some("int") => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
+            Some("uint") => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+            Some("f64") => value.as_f64().map(am::ScalarValue::F64),
+            Some("bytes") => Some(am::ScalarValue::Bytes(
                 value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
             )),
-            Some("counter") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::counter(v as i64)),
-            Some("timestamp") => value
-                .as_f64()
-                .ok_or_else(|| "value must be a number".into())
-                .map(|v| am::ScalarValue::Timestamp(v as i64)),
-            /*
-            Some("bytes") => unimplemented!(),
-            Some("cursor") => unimplemented!(),
-            */
-            Some("null") => Ok(am::ScalarValue::Null),
-            Some(_) => Err(to_js_err(format!("unknown datatype {:?}", datatype))),
+            Some("counter") => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
+            Some("timestamp") => value.as_f64().map(|v| am::ScalarValue::Timestamp(v as i64)),
+            Some("null") => Some(am::ScalarValue::Null),
+            Some(_) => None,
             None => {
                 if value.is_null() {
-                    Ok(am::ScalarValue::Null)
+                    Some(am::ScalarValue::Null)
                 } else if let Some(b) = value.as_bool() {
-                    Ok(am::ScalarValue::Boolean(b))
+                    Some(am::ScalarValue::Boolean(b))
                 } else if let Some(s) = value.as_string() {
-                    // FIXME - we need to detect str vs int vs float vs bool here :/
-                    Ok(am::ScalarValue::Str(s.into()))
+                    Some(am::ScalarValue::Str(s.into()))
                 } else if let Some(n) = value.as_f64() {
                     if (n.round() - n).abs() < f64::EPSILON {
-                        Ok(am::ScalarValue::Int(n as i64))
+                        Some(am::ScalarValue::Int(n as i64))
                     } else {
-                        Ok(am::ScalarValue::F64(n))
+                        Some(am::ScalarValue::F64(n))
                     }
-                //                } else if let Some(o) = to_objtype(&value) {
-                //                    Ok(o.into())
                 } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
-                    Ok(am::ScalarValue::Timestamp(d.get_time() as i64))
+                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
                 } else if let Ok(o) = &value.clone().dyn_into::<Uint8Array>() {
-                    Ok(am::ScalarValue::Bytes(o.to_vec()))
+                    Some(am::ScalarValue::Bytes(o.to_vec()))
                 } else {
-                    Err(to_js_err(format!("value '{}' is invalid", stringify(value) )))
+                    None
                 }
             }
         }
     }
 
     fn import_value(&mut self, value: JsValue, datatype: Option<String>) -> Result<Value, JsValue> {
-        match self.import_scalar(&value, datatype) {
-            Ok(val) => Ok(val.into()),
-            Err(err) => {
+        match self.import_scalar(&value, &datatype) {
+            Some(val) => Ok(val.into()),
+            None => {
                 if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
                 } else {
-                    Err(err)
+                    Err(to_js_err(format!(
+                        "invalid value ({},{:?})",
+                        stringify(&value),
+                        datatype
+                    )))
                 }
             }
         }
