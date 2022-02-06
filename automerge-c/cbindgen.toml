@@ -5,4 +5,16 @@ includes = []
 sys_includes = ["stdint.h", "stdbool.h"]
 no_includes = true   
 line_length = 140
+documentation = true
+
+after_includes = "\n#define AM_ROOT NULL"
+
+[enum]
+enum_class = true
+prefix_with_name = true
+derive_const_casts = true
+must_use = "MUST_USE_ENUM"
+
+[export]
+item_types = ["enums", "structs", "opaque", "constants", "functions"]
 
