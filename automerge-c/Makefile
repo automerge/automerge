@@ -7,7 +7,7 @@ LDIR=../target/release
 LIB=../target/release/libautomerge.a
 DEBUG_LIB=../target/debug/libautomerge.a
 
-all: automerge $(LIB)
+all: $(DEBUG_LIB) automerge
 
 debug: LDIR=../target/debug
 debug: automerge $(DEBUG_LIB)
@@ -15,10 +15,10 @@ debug: automerge $(DEBUG_LIB)
 automerge: automerge.o $(LDIR)/libautomerge.a
 	$(CC) -o $@ automerge.o $(LDIR)/libautomerge.a $(LIBS) -L$(LDIR)
 
-$(DEBUG_LIB): src/lib.rs
+$(DEBUG_LIB): src/*.rs
 	cargo build
 
-$(LIB): src/lib.rs
+$(LIB): src/*.rs
 	cargo build --release
 
 %.o: %.c $(DEPS)

@@ -22,4 +22,4 @@ rmp = "0.8.10"
 rmp-serde = "0.15.4"
 
 [build-dependencies]
-cbindgen = "^0.14"
+cbindgen = "^0.20"
