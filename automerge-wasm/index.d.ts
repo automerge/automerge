@@ -84,6 +84,7 @@ export function encodeSyncState(state: SyncState): Uint8Array;
 export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
+  // change state
   set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
   make(obj: ObjID, prop: Prop, value: ObjectType): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
@@ -91,7 +92,6 @@ export class Automerge {
   splice(obj: ObjID, start: number, delete_count: number, text: string | Array<Value | FullValue>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
-  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
 
   // returns a single value - if there is a conflict return the winner
   value(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
@@ -100,9 +100,13 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
+
+  // experimental spans api - unstable!
+  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
   spans(obj: ObjID): any;
   raw_spans(obj: ObjID): any;
 
+  // transactions
   commit(message?: string, time?: number): Heads;
   getActorId(): Actor;
   pendingOps(): number;
