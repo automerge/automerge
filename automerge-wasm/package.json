@@ -15,6 +15,7 @@
     "automerge_wasm_bg.wasm",
     "automerge_wasm.js"
   ],
+  "module": "./pkg/index.js",
   "main": "./dev/index.js",
   "scripts": {
     "build": "rimraf ./dev && wasm-pack build --target nodejs --dev --out-name index -d dev && cp index.d.ts dev",
