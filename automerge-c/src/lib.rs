@@ -1,18 +1,20 @@
 use automerge as am;
 use std::{
+    ffi::{c_void, CStr},
     fmt,
-    ffi::{c_void, CString, CStr},
     os::raw::c_char,
 };
 
+mod doc;
+mod result;
 mod utils;
-mod api_result;
 
-use utils::{ import_value };
-use api_result::{ ApiResult };
+use doc::AMdoc;
+use result::AMresult;
+use utils::import_value;
 
 #[derive(Debug)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum Datatype {
     Str,
     Int,
@@ -29,224 +31,177 @@ pub enum Datatype {
     Text,
 }
 
+#[derive(Debug)]
+#[repr(u8)]
+pub enum ResultType {
+    Ok,
+    ObjId,
+}
+
 impl fmt::Display for Datatype {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-/// Try to turn a `*mut Automerge` into a &mut Automerge,
-/// return an error code if failure
-macro_rules! get_handle_mut {
+macro_rules! to_str {
+    ($s:expr) => {{
+        CStr::from_ptr($s).to_string_lossy().to_string()
+    }};
+}
+
+macro_rules! to_doc {
     ($handle:expr) => {{
         let handle = $handle.as_mut();
         match handle {
             Some(b) => b,
-            // Don't call `record_error` b/c there is no valid handle!
-            None => return CError::NullAutomerge.error_code(),
+            None => return AMresult::Error("Invalid AMdoc pointer".into()).into(),
         }
     }};
 }
 
-pub struct Automerge {
-    handle: am::Automerge,
-    results: Vec<ApiResult>,
-    error: Option<CString>,
+macro_rules! to_value {
+    ($a:expr,$b:expr) => {{
+        match import_value($a, $b) {
+            Ok(v) => v,
+            Err(r) => return r.into(),
+        }
+    }};
+}
+
+macro_rules! to_prop {
+    ($key:expr) => {{
+        // TODO - check null pointer
+        am::Prop::Map(std::ffi::CStr::from_ptr($key).to_string_lossy().to_string())
+    }};
+}
+
+macro_rules! to_obj {
+    ($handle:expr) => {{
+        let handle = $handle.as_ref();
+        match handle {
+            Some(b) => b,
+            None => return AMresult::Error("Invalid ObjID pointer".into()).into(),
+        }
+    }};
+}
+
+macro_rules! to_result {
+    ($val:expr) => {{
+        Box::into_raw(Box::new(($val).into()))
+    }};
 }
 
 #[derive(Clone)]
-pub struct ObjId(am::ObjId);
+pub struct AMobj(am::ObjId);
 
-pub struct Prop(am::Prop);
-
-/// All possible errors that a C caller could face
-#[derive(thiserror::Error, Debug)]
-pub enum CError {
-    #[error("Automerge pointer was null")]
-    NullAutomerge,
-    #[error("argument was null")]
-    InvalidPointer,
-    #[error("actor was invalid")]
-    InvalidActor,
-    #[error("value pointer was null with datatype {0}")]
-    NullValue(Datatype),
-    #[error("Invalid datatype: {0}")]
-    InvalidDatatype(Datatype),
-    #[error("AutomergeError: '{0}'")]
-    AutomergeError(am::AutomergeError),
+#[no_mangle]
+pub extern "C" fn AMcreate() -> *mut AMdoc {
+    AMdoc::create(am::Automerge::new()).into()
 }
 
-impl CError {
-    fn error_code(self) -> isize {
-        // 0 is reserved for "success"
-        const BASE: isize = -1;
-        match self {
-            CError::NullAutomerge => BASE,
-            CError::InvalidPointer => BASE - 1,
-            CError::NullValue(_) => BASE - 2,
-            CError::InvalidDatatype(_) => BASE - 3,
-            CError::InvalidActor => BASE - 4,
-            CError::AutomergeError(_) => BASE - 5,
-        }
+/// # Safety
+/// This must be called with a valid doc pointer
+#[no_mangle]
+pub unsafe extern "C" fn AMfree(doc: *mut AMdoc) {
+    if !doc.is_null() {
+        let doc: AMdoc = *Box::from_raw(doc);
+        drop(doc)
     }
 }
 
-impl Clone for Automerge {
-    fn clone(&self) -> Self {
-        Automerge {
-            handle: self.handle.clone(),
-            results: Vec::new(),
-            error: None,
-        }
-    }
+/// # Safety
+/// This must be called with a valid doc pointer
+#[no_mangle]
+pub unsafe extern "C" fn AMclone(doc: *mut AMdoc) -> *mut AMdoc {
+    let doc = *Box::from_raw(doc);
+    let copy = doc.clone();
+    std::mem::forget(doc);
+    copy.into()
 }
 
-impl Automerge {
-    fn create(handle: am::Automerge) -> Automerge {
-        Automerge {
-            handle,
-            results: Vec::new(),
-            error: None,
-        }
-    }
-
-    unsafe fn map_set(
-        &mut self,
-        obj: *const ObjId,
-        prop: *const c_char,
-        datatype: Datatype,
-        value: *const c_void, // i64, u64, boolean, char*, u8*+len,
-    ) -> Result<Vec<am::ObjId>, CError> {
-        let obj = ObjId::from(obj);
-        let prop = Prop::from(prop);
-        let value = import_value(value, datatype)?;
-        Ok(self.set(&obj, prop, value).map(|id| id.into_iter().collect())?)
-    }
-
-    unsafe fn map_values(
-        &mut self,
-        obj: *const ObjId,
-        prop: *const c_char,
-    ) -> Result<Vec<(am::Value,am::ObjId)>, CError> {
-        let obj = ObjId::from(obj);
-        let prop = Prop::from(prop);
-        Ok(self.values(&obj, prop)?)
-    }
-
-
-    fn resolve<E:Into<CError>,V:Into<ApiResult>>(&mut self, result: Result<Vec<V>, E>) -> isize {
-        match result {
-            Ok(r) => {
-              self.results = r.into_iter().map(|v| v.into()).collect();
-              self.results.len() as isize
-            },
-            Err(err) => {
-                let err = err.into();
-                let c_error = match CString::new(format!("{}", err)) {
-                    Ok(e) => e,
-                    Err(_) => {
-                        return -1;
-                    }
-                };
-                self.error = Some(c_error);
-                err.error_code()
+/// # Safety
+/// This should be called with a valid pointer to a `AMdoc`.
+/// key="actor" value=(actor id in hex format)
+#[no_mangle]
+pub unsafe extern "C" fn AMconfig(
+    doc: *mut AMdoc,
+    key: *const c_char,
+    value: *const c_char,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let key = to_str!(key);
+    match key.as_str() {
+        "actor" => {
+            let actor = to_str!(value);
+            if let Ok(actor) = actor.try_into() {
+                doc.set_actor(actor);
+                AMresult::Ok.into()
+            } else {
+                AMresult::Error(format!("Invalid actor '{}'", to_str!(value))).into()
             }
         }
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn am_create() -> *mut Automerge {
-    Automerge::create(am::Automerge::new()).into()
-}
-
-/// # Safety
-/// This must be called with a valid handle pointer
-#[no_mangle]
-pub unsafe extern "C" fn am_free(handle: *mut Automerge) {
-    let handle: Automerge = *Box::from_raw(handle);
-    drop(handle)
-}
-
-/// # Safety
-/// This must be called with a valid handle pointer
-#[no_mangle]
-pub unsafe extern "C" fn am_clone(handle: *mut Automerge) -> *mut Automerge {
-    let handle: Automerge = *Box::from_raw(handle);
-    handle.clone().into()
-}
-
-/// # Safety
-/// This should be called with a valid pointer to a `Automerge` and `ObjId`. value pointer type and `datatype` must match.
-#[no_mangle]
-pub unsafe extern "C" fn am_set_actor_hex(
-    handle: *mut Automerge,
-    actor: *const c_char,
-) -> isize {
-    let handle = get_handle_mut!(handle);
-    if actor.is_null() {
-        CError::InvalidPointer.error_code()
-    } else {
-        let actor = CStr::from_ptr(actor).to_string_lossy().to_string();
-        if let Ok(actor) = actor.try_into() {
-            handle.set_actor(actor);
-            0
-        } else {
-            CError::InvalidActor.error_code()
-        }
+        k => AMresult::Error(format!("Invalid config key '{}'", k)).into(),
     }
 }
 
 /// # Safety
-/// This should be called with a valid pointer to a `Automerge` and `ObjId`. value pointer type and `datatype` must match.
+/// This should be called with a valid pointer to a `AMdoc`.
+/// key="actor" value=(actor id in hex format)
 #[no_mangle]
-pub unsafe extern "C" fn am_map_set(
-    handle: *mut Automerge,
-    obj: *const ObjId,
-    prop: *const c_char,
+pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
+    //let doc = to_doc!(doc);
+    unimplemented!()
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `AMresult` or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMresultStatus(_result: *const AMresult) -> isize {
+    unimplemented!()
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `AMresult` or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSet(
+    doc: *mut AMdoc,
+    obj: *mut am::ObjId,
+    key: *const c_char,
     datatype: Datatype,
-    value: *const c_void, // i64, u64, boolean, char*, u8*+len,
-) -> isize {
-    let handle = get_handle_mut!(handle);
-    let result = handle.map_set(obj, prop, datatype, value);
-    handle.resolve(result)
+    value: *const c_void,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result!(doc.set(to_obj!(obj), to_prop!(key), to_value!(value, datatype)))
 }
 
 /// # Safety
-/// This should be called with a valid pointer to a `Automerge` and `ObjId`. value pointer type and `datatype` must match.
+/// This should be called with a valid pointer to a `AMresult` or NULL
 #[no_mangle]
-pub unsafe extern "C" fn am_map_values(
-    handle: *mut Automerge,
-    obj: *const ObjId,
-    prop: *const c_char,
-) -> isize {
-    let handle = get_handle_mut!(handle);
-    let result = handle.map_values(obj, prop);
-    handle.resolve(result)
+pub unsafe extern "C" fn AMlistSet(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    datatype: Datatype,
+    value: *const c_void,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result!(doc.set(to_obj!(obj), index, to_value!(value,datatype)))
 }
 
 /// # Safety
-/// This should be called with a valid pointer to a `Automerge` and `ObjId`. value pointer type and `datatype` must match.
+/// This should be called with a valid pointer to a `AMresult` or NULL
 #[no_mangle]
-pub unsafe extern "C" fn am_pop_value(
-    handle: *mut Automerge,
-    datatype: *mut Datatype,
-    value: *mut u8,
-    len: usize
-) -> isize {
-    let handle = get_handle_mut!(handle);
-    let r = handle.results.pop().unwrap(); // handle no results - FIXME
-    if let Some(d) = r.datatype() {
-        *datatype = d;
-        let buff = r.to_bytes();
-        if buff.len() > len {
-            (buff.len() as isize) * - 1
-        } else {
-            value.copy_from(buff.as_ptr(), buff.len());
-            buff.len() as isize
-        }
-    } else {
-        -1 // not a value - FIXME
+pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut am::ObjId {
+    unimplemented!()
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `AMresult` or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
+    if !result.is_null() {
+        let result: AMresult = *Box::from_raw(result);
+        drop(result)
     }
 }
-

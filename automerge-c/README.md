@@ -3,70 +3,64 @@
 
 ### Basic management 
 
-  1. `doc = create()`
-  1. `doc = clone(doc)`
-  1. `free(doc)`
-  1. `set_actor(doc, actor)`
+  1. `AMcreate()`
+  1. `AMclone(doc)`
+  1. `AMfree(doc)`
+  1. `AMconfig(doc, key, val)` // set actor
   1. `actor = get_actor(doc)`
 
 ### Transactions
 
-  1. `pending_ops(doc)`
-  1. `commit(doc, message, time)`
-  1. `rollback(doc)`
+  1. `AMpendingOps(doc)`
+  1. `AMcommit(doc, message, time)`
+  1. `AMrollback(doc)`
 
 ### Write 
 
-  1. `set(doc, obj, prop, value)`
-  1. `insert(doc, obj, index, value)`
-  1. `push(doc, obj, value)`
-  1. `del(doc, obj, prop)`
-  1. `inc(doc, obj, prop, value)`
-  1. `splice_text(doc, obj, start, num_del, text)`
+  1. `AMset{Map|List}(doc, obj, prop, value)`
+  1. `AMinsert(doc, obj, index, value)`
+  1. `AMpush(doc, obj, value)`
+  1. `AMdel{Map|List}(doc, obj, prop)`
+  1. `AMinc{Map|List}(doc, obj, prop, value)`
+  1. `AMspliceText(doc, obj, start, num_del, text)`
 
 ### Read
 
-  1. `keys(doc, obj)`
-  1. `keys_at(doc, obj, heads)`
-  1. `length(doc, obj)`
-  1. `length_at(doc, obj, heads)`
-  1. `// value(doc, obj)`
-  1. `// value_at(doc, obj, heads)`
-  1. `values(doc, obj)`
-  1. `values_at(doc, obj, heads)`
-  1. `text(doc, obj)`
-  1. `text_at(doc, obj, heads)`
+  1. `AMkeys(doc, obj, heads)`
+  1. `AMlength(doc, obj, heads)`
+  1. `AMvalues(doc, obj, heads)`
+  1. `AMtext(doc, obj, heads)`
 
 ### Sync
 
-  1. `message = generate_sync_message(doc, state)`
-  1. `receive_sync_message(doc, state, message)`
-  1. `state = init_sync_state()`
+  1. `AMgenerateSyncMessage(doc, state)`
+  1. `AMreceiveSyncMessage(doc, state, message)`
+  1. `AMinitSyncState()`
 
 ### Save / Load
 
-  1. `data = save(doc)`
-  1. `doc = load(data)`
-  1. `data = save_incremental(doc)`
-  1. `load_incremental(doc, data)`
+  1. `AMload(data)`
+  1. `AMloadIncremental(doc, data)`
+  1. `AMsave(doc)`
+  1. `AMsaveIncremental(doc)`
 
 ### Low Level Access
 
-  1. `apply_changes(doc, changes)`
-  1. `changes = get_changes(doc, deps)`
-  1. `changes = get_changes_added(doc1, doc2)`
-  1. `heads = get_heads(doc)`
-  1. `change = get_last_local_change(doc)`
-  1. `deps = get_missing_deps(doc, heads)`
+  1. `AMapplyChanges(doc, changes)`
+  1. `AMgetChanges(doc, deps)`
+  1. `AMgetChangesAdded(doc1, doc2)`
+  1. `AMgetHeads(doc)`
+  1. `AMgetLastLocalChange(doc)`
+  1. `AMgetMissingDeps(doc, heads)`
 
 ### Encode/Decode
 
-  1. `encode_change(change)`
-  1. `decode_change(change)`
-  1. `encode_sync_message(change)`
-  1. `decode_sync_message(change)`
-  1. `encode_sync_state(change)`
-  1. `decode_sync_state(change)`
+  1. `AMencodeChange(change)`
+  1. `AMdecodeChange(change)`
+  1. `AMencodeSyncMessage(change)`
+  1. `AMdecodeSyncMessage(change)`
+  1. `AMencodeSyncState(change)`
+  1. `AMdecodeSyncState(change)`
 
 ## Open Question - Memory management
 
