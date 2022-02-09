@@ -66,7 +66,7 @@ impl TryFrom<String> for ActorId {
     fn try_from(s: String) -> Result<Self, Self::Error> {
         hex::decode(&s)
             .map(ActorId::from)
-            .map_err(|_| error::InvalidActorId(s.into()))
+            .map_err(|_| error::InvalidActorId(s))
     }
 }
 
