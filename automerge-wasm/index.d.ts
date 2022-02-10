@@ -101,11 +101,6 @@ export class Automerge {
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
 
-  // experimental spans api - unstable!
-  mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
-  spans(obj: ObjID): any;
-  raw_spans(obj: ObjID): any;
-
   // transactions
   commit(message?: string, time?: number): Heads;
   merge(other: Automerge): Heads;

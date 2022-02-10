@@ -134,15 +134,6 @@ impl<'a> Iterator for OperationIterator<'a> {
             Action::MakeTable => OpType::Make(ObjType::Table),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
-            Action::MarkBegin => {
-                // mark has 3 things in the val column
-                let name = value.to_string()?;
-                let expand = self.value.next()?.to_bool()?;
-                let value = self.value.next()?;
-                OpType::mark(name, expand, value)
-            }
-            Action::MarkEnd => OpType::MarkEnd(value.to_bool()?),
-            Action::Unused => panic!("invalid action"),
         };
         Some(amp::Op {
             action,
@@ -184,15 +175,6 @@ impl<'a> Iterator for DocOpIterator<'a> {
             Action::MakeTable => OpType::Make(ObjType::Table),
             Action::Del => OpType::Del,
             Action::Inc => OpType::Inc(value.to_i64()?),
-            Action::MarkBegin => {
-                // mark has 3 things in the val column
-                let name = value.to_string()?;
-                let expand = self.value.next()?.to_bool()?;
-                let value = self.value.next()?;
-                OpType::mark(name, expand, value)
-            }
-            Action::MarkEnd => OpType::MarkEnd(value.to_bool()?),
-            Action::Unused => panic!("invalid action"),
         };
         Some(DocOp {
             actor,
@@ -1082,16 +1064,6 @@ impl DocOpEncoder {
                     self.val.append_null();
                     Action::Del
                 }
-                amp::OpType::MarkBegin(m) => {
-                    self.val.append_value(&m.name.clone().into(), actors);
-                    self.val.append_value(&m.expand.into(), actors);
-                    self.val.append_value(&m.value.clone(), actors);
-                    Action::MarkBegin
-                }
-                amp::OpType::MarkEnd(s) => {
-                    self.val.append_value(&(*s).into(), actors);
-                    Action::MarkEnd
-                }
                 amp::OpType::Make(kind) => {
                     self.val.append_null();
                     match kind {
@@ -1198,16 +1170,6 @@ impl ColumnEncoder {
                 self.val.append_null();
                 Action::Del
             }
-            OpType::MarkBegin(m) => {
-                self.val.append_value2(&m.name.clone().into(), actors);
-                self.val.append_value2(&m.expand.into(), actors);
-                self.val.append_value2(&m.value.clone(), actors);
-                Action::MarkBegin
-            }
-            OpType::MarkEnd(s) => {
-                self.val.append_value2(&(*s).into(), actors);
-                Action::MarkEnd
-            }
             OpType::Make(kind) => {
                 self.val.append_null();
                 match kind {
@@ -1313,11 +1275,8 @@ pub(crate) enum Action {
     MakeText,
     Inc,
     MakeTable,
-    MarkBegin,
-    Unused, // final bit is used to mask `Make` actions
-    MarkEnd,
 }
-const ACTIONS: [Action; 10] = [
+const ACTIONS: [Action; 7] = [
     Action::MakeMap,
     Action::Set,
     Action::MakeList,
@@ -1325,9 +1284,6 @@ const ACTIONS: [Action; 10] = [
     Action::MakeText,
     Action::Inc,
     Action::MakeTable,
-    Action::MarkBegin,
-    Action::Unused,
-    Action::MarkEnd,
 ];
 
 impl Decodable for Action {

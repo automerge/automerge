@@ -15,8 +15,6 @@ impl Serialize for OpType {
             OpType::Make(ObjType::Table) => RawOpType::MakeTable,
             OpType::Make(ObjType::List) => RawOpType::MakeList,
             OpType::Make(ObjType::Text) => RawOpType::MakeText,
-            OpType::MarkBegin(_) => RawOpType::MarkBegin,
-            OpType::MarkEnd(_) => RawOpType::MarkEnd,
             OpType::Del => RawOpType::Del,
             OpType::Inc(_) => RawOpType::Inc,
             OpType::Set(_) => RawOpType::Set,
