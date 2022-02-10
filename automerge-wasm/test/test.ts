@@ -539,28 +539,27 @@ describe('Automerge', () => {
     })
 
     it('should handle merging text conflicts then saving & loading', () => {
-      let A = create()
+      let A = create("aabbcc")
       let At = A.make('_root', 'text', TEXT)
-      A.splice(At, 0, 0, Array.from('hello'))
+      A.splice(At, 0, 0, 'hello')
 
-      let B = A.clone()
-      let Bt = B.value('_root', 'text')
-      if (!Bt || Bt[0] !== 'text') return assert.fail()
-      let obj = Bt[1]
-      B.splice(obj, 4, 1, '')
-      B.splice(obj, 4, 0, '!')
-      B.splice(obj, 5, 0, ' ')
-      B.splice(obj, 6, 0, Array.from('world'))
+      let B = A.fork()
 
-      A.applyChanges(B.getChanges(A.getHeads()))
+      assert.deepEqual(B.value("_root","text"), [ "text", At])
+
+      B.splice(At, 4, 1)
+      B.splice(At, 4, 0, '!')
+      B.splice(At, 5, 0, ' ')
+      B.splice(At, 6, 0, 'world')
+
+      A.merge(B)
 
       let binary = A.save()
 
       let C = loadDoc(binary)
 
-      assert.deepEqual(C.value('_root', 'text'), ['text', 'hello world'])
-
-
+      assert.deepEqual(C.value('_root', 'text'), ['text', '1@aabbcc'])
+      assert.deepEqual(C.text(At), 'hell! world')
     })
 
   })

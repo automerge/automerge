@@ -89,7 +89,7 @@ export class Automerge {
   make(obj: ObjID, prop: Prop, value: ObjectType): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
   push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
-  splice(obj: ObjID, start: number, delete_count: number, text: string | Array<Value | FullValue>): ObjID[] | undefined;
+  splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value | FullValue>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
 
@@ -108,6 +108,7 @@ export class Automerge {
 
   // transactions
   commit(message?: string, time?: number): Heads;
+  merge(other: Automerge): Heads;
   getActorId(): Actor;
   pendingOps(): number;
   rollback(): number;
@@ -132,6 +133,7 @@ export class Automerge {
   // memory management
   free(): void;
   clone(actor?: string): Automerge;
+  fork(actor?: string): Automerge;
 
   // dump internal state to console.log
   dump(): void;
