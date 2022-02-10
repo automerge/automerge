@@ -63,11 +63,11 @@ impl Value {
     }
 
     pub fn is_object(&self) -> bool {
-      matches!(&self, Value::Object(_))
+        matches!(&self, Value::Object(_))
     }
 
     pub fn is_scalar(&self) -> bool {
-      matches!(&self, Value::Scalar(_))
+        matches!(&self, Value::Scalar(_))
     }
 }
 

@@ -23,4 +23,3 @@ impl Serialize for OpId {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
-

@@ -1,6 +1,3 @@
-use std::collections::{HashMap, HashSet, VecDeque};
-use unicode_segmentation::UnicodeSegmentation;
-use serde::Serialize;
 use crate::change::{encode_document, export_change};
 use crate::exid::ExId;
 use crate::op_set::OpSet;
@@ -10,6 +7,9 @@ use crate::types::{
 };
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet, VecDeque};
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -127,10 +127,10 @@ impl Automerge {
     }
 
     pub fn fork(&mut self) -> Self {
-      self.ensure_transaction_closed();
-      let mut f = self.clone();
-      f.actor = None;
-      f
+        self.ensure_transaction_closed();
+        let mut f = self.clone();
+        f.actor = None;
+        f
     }
 
     pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
@@ -554,13 +554,13 @@ impl Automerge {
     }
 
     fn duplicate_seq(&self, change: &Change) -> bool {
-       let mut dup = false;
-       if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
-         if let Some(s) = self.states.get(&actor_index) {
-                    dup = s.len() >= change.seq as usize;
-         }
-       }
-       dup
+        let mut dup = false;
+        if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
+            if let Some(s) = self.states.get(&actor_index) {
+                dup = s.len() >= change.seq as usize;
+            }
+        }
+        dup
     }
 
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
@@ -568,7 +568,10 @@ impl Automerge {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
                 if self.duplicate_seq(c) {
-                      return Err(AutomergeError::DuplicateSeqNumber(c.seq,c.actor_id().clone()))
+                    return Err(AutomergeError::DuplicateSeqNumber(
+                        c.seq,
+                        c.actor_id().clone(),
+                    ));
                 }
                 if self.is_causally_ready(c) {
                     self.apply_change(c.clone());
@@ -740,7 +743,7 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>,AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
             .get_changes_added(other)
