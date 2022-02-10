@@ -49,12 +49,6 @@ impl Serialize for Op {
         match &self.action {
             OpType::Inc(n) => op.serialize_field("value", &n)?,
             OpType::Set(value) => op.serialize_field("value", &value)?,
-            OpType::MarkBegin(m) => {
-                op.serialize_field("name", &m.name)?;
-                op.serialize_field("expand", &m.expand)?;
-                op.serialize_field("value", &m.value)?;
-            }
-            OpType::MarkEnd(s) => op.serialize_field("expand", &s)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -76,8 +70,6 @@ pub(crate) enum RawOpType {
     Del,
     Inc,
     Set,
-    MarkBegin,
-    MarkEnd,
 }
 
 impl Serialize for RawOpType {
@@ -93,8 +85,6 @@ impl Serialize for RawOpType {
             RawOpType::Del => "del",
             RawOpType::Inc => "inc",
             RawOpType::Set => "set",
-            RawOpType::MarkBegin => "mark_begin",
-            RawOpType::MarkEnd => "mark_end",
         };
         serializer.serialize_str(s)
     }
@@ -126,8 +116,6 @@ impl<'de> Deserialize<'de> for RawOpType {
             "del" => Ok(RawOpType::Del),
             "inc" => Ok(RawOpType::Inc),
             "set" => Ok(RawOpType::Set),
-            "mark_begin" => Ok(RawOpType::MarkBegin),
-            "mark_end" => Ok(RawOpType::MarkEnd),
             other => Err(Error::unknown_variant(other, VARIANTS)),
         }
     }
@@ -200,30 +188,6 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
                     RawOpType::Del => OpType::Del,
-                    RawOpType::MarkBegin => {
-                        let name = name.ok_or_else(|| Error::missing_field("mark(name)"))?;
-                        let expand = expand.unwrap_or(false);
-                        let value = if let Some(datatype) = datatype {
-                            let raw_value = value
-                                .ok_or_else(|| Error::missing_field("value"))?
-                                .unwrap_or(ScalarValue::Null);
-                            raw_value.as_datatype(datatype).map_err(|e| {
-                                Error::invalid_value(
-                                    Unexpected::Other(e.unexpected.as_str()),
-                                    &e.expected.as_str(),
-                                )
-                            })?
-                        } else {
-                            value
-                                .ok_or_else(|| Error::missing_field("value"))?
-                                .unwrap_or(ScalarValue::Null)
-                        };
-                        OpType::mark(name, expand, value)
-                    }
-                    RawOpType::MarkEnd => {
-                        let expand = expand.unwrap_or(true);
-                        OpType::MarkEnd(expand)
-                    }
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             let raw_value = value
