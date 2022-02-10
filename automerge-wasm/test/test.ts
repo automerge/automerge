@@ -3,9 +3,9 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, SyncState, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../dev/index'
-import { DecodedSyncMessage } from '../index';
-import { Hash } from '../dev/index';
+import { create, loadDoc, SyncState, Automerge, MAP, LIST, TEXT, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { DecodedSyncMessage } from '..';
+import { Hash } from '..';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10

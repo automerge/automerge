@@ -3,7 +3,7 @@
 name = "automerge-wasm"
 description = "An js/wasm wrapper for the rust implementation of automerge-backend"
 # repository = "https://github.com/automerge/automerge-rs"
-version = "0.1.0"
+version = "0.0.4"
 authors = ["Alex Good <alex@memoryandthought.me>","Orion Henry <orion@inkandswitch.com>", "Martin Kleppmann"]
 categories = ["wasm"]
 readme = "README.md"
@@ -40,10 +40,10 @@ version = "^0.2"
 features = ["serde-serialize", "std"]
 
 [package.metadata.wasm-pack.profile.release]
-# wasm-opt = false
+wasm-opt = true
 
 [package.metadata.wasm-pack.profile.profiling]
-wasm-opt = false
+wasm-opt = true
 
 # The `web-sys` crate allows you to interact with the various browser APIs,
 # like the DOM.

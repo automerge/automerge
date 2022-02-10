@@ -1,5 +1,7 @@
 /node_modules
 /dev
+/node
+/web
 /target
 Cargo.lock
 yarn.lock

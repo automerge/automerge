@@ -2,7 +2,7 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create, loadDoc, Automerge, TEXT, encodeChange, decodeChange } from '../dev/index'
+import { create, loadDoc, Automerge, TEXT, encodeChange, decodeChange } from '..'
 
 describe('Automerge', () => {
   describe('marks', () => {
