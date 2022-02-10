@@ -17,6 +17,8 @@ mod nth_at;
 mod prop;
 mod prop_at;
 mod seek_op;
+mod spans;
+mod raw_spans;
 
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
@@ -30,6 +32,8 @@ pub(crate) use nth_at::NthAt;
 pub(crate) use prop::Prop;
 pub(crate) use prop_at::PropAt;
 pub(crate) use seek_op::SeekOp;
+pub(crate) use spans::{Span, Spans};
+pub(crate) use raw_spans::RawSpans;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {
