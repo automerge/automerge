@@ -126,6 +126,13 @@ impl Automerge {
         self.transaction.as_mut().unwrap()
     }
 
+    pub fn fork(&mut self) -> Self {
+      self.ensure_transaction_closed();
+      let mut f = self.clone();
+      f.actor = None;
+      f
+    }
+
     pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
         let tx = self.tx();
 
@@ -630,10 +637,23 @@ impl Automerge {
         Ok(delta)
     }
 
+    fn duplicate_seq(&self, change: &Change) -> bool {
+       let mut dup = false;
+       if let Some(actor_index) = self.ops.m.actors.lookup(change.actor_id()) {
+         if let Some(s) = self.states.get(&actor_index) {
+                    dup = s.len() >= change.seq as usize;
+         }
+       }
+       dup
+    }
+
     pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
         self.ensure_transaction_closed();
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
+                if self.duplicate_seq(c) {
+                      return Err(AutomergeError::DuplicateSeqNumber(c.seq,c.actor_id().clone()))
+                }
                 if self.is_causally_ready(c) {
                     self.apply_change(c.clone());
                 } else {
@@ -804,15 +824,15 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>,AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
-        other.ensure_transaction_closed();
         let changes = self
             .get_changes_added(other)
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes(&changes).unwrap();
+        self.apply_changes(&changes)?;
+        Ok(self._get_heads())
     }
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
@@ -1046,8 +1066,9 @@ impl Automerge {
             .and_then(|index| self.history.get(*index))
     }
 
-    pub fn get_changes_added<'a>(&mut self, other: &'a Self) -> Vec<&'a Change> {
+    pub fn get_changes_added<'a>(&mut self, other: &'a mut Self) -> Vec<&'a Change> {
         self.ensure_transaction_closed();
+        other.ensure_transaction_closed();
         self._get_changes_added(other)
     }
 

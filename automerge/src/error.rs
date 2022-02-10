@@ -1,5 +1,5 @@
 use crate::decoding;
-use crate::types::ScalarValue;
+use crate::types::{ ActorId, ScalarValue};
 use crate::value::DataType;
 use thiserror::Error;
 
@@ -17,6 +17,8 @@ pub enum AutomergeError {
     InvalidSeq(u64),
     #[error("index {0} is out of bounds")]
     InvalidIndex(usize),
+    #[error("duplicate seq {0} found for actor {1}")]
+    DuplicateSeqNumber(u64,ActorId),
     #[error("generic automerge error")]
     Fail,
 }
@@ -30,6 +32,12 @@ impl From<std::io::Error> for AutomergeError {
 impl From<decoding::Error> for AutomergeError {
     fn from(_: decoding::Error) -> Self {
         AutomergeError::Decoding
+    }
+}
+
+impl From<AutomergeError> for wasm_bindgen::JsValue {
+    fn from(err: AutomergeError) -> Self {
+       js_sys::Error::new(&std::format!("{}", err)).into()
     }
 }
 
