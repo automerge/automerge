@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use unicode_segmentation::UnicodeSegmentation;
-
+use serde::Serialize;
 use crate::change::{encode_document, export_change};
 use crate::exid::ExId;
 use crate::op_set::OpSet;
@@ -322,26 +322,25 @@ impl Automerge {
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
-        if let Some(id) = self.do_insert(obj, index, value)? {
+        let value = value.into();
+        if let Some(id) = self.do_insert(obj, index, value.into())? {
             Ok(Some(self.id_to_exid(id)))
         } else {
             Ok(None)
         }
     }
 
-    fn do_insert<V: Into<Value>>(
+    fn do_insert(
         &mut self,
         obj: ObjId,
         index: usize,
-        value: V,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
         let query = self.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let value = value.into();
-        let action = value.into();
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
@@ -355,7 +354,7 @@ impl Automerge {
             insert: true,
         };
 
-        self.ops.insert(query.pos, op.clone());
+        self.ops.insert(query.pos(), op.clone());
         self.tx().operations.push(op);
 
         if is_make {
@@ -399,7 +398,7 @@ impl Automerge {
         let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(obj, pos, v.clone())?;
+            let id = self.do_insert(obj, pos, v.into())?;
             if let Some(id) = id {
                 results.push(self.id_to_exid(id));
             }
@@ -445,6 +444,90 @@ impl Automerge {
             }
         }
         Ok(buffer)
+    }
+
+    pub fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let mut query = self.ops.search(obj, query::Spans::new());
+        query.check_marks();
+        Ok(query.spans)
+    }
+
+    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<SpanInfo>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let query = self.ops.search(obj, query::RawSpans::new());
+        let result = query.spans.into_iter().map(|s| SpanInfo {
+          id: self.id_to_exid(s.id),
+          time: self.history[s.change].time,
+          start: s.start,
+          end: s.end,
+          span_type: s.name,
+          value: s.value,
+        }).collect();
+        Ok(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn mark(
+        &mut self,
+        obj: &ExId,
+        start: usize,
+        expand_start: bool,
+        end: usize,
+        expand_end: bool,
+        mark: &str,
+        value: ScalarValue,
+    ) -> Result<(), AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+
+        self.do_insert(obj, start, OpType::mark(mark.into(), expand_start, value))?;
+        self.do_insert(obj, end, OpType::MarkEnd(expand_end))?;
+
+        /*
+                let (a, b) = query.ops()?;
+                let (pos, key) = a;
+                let id = self.next_id();
+                let op = Op {
+                    change: self.history.len(),
+                    id,
+                    action: OpType::Mark(MarkData { name: mark.into(), expand: expand_start, value}),
+                    obj,
+                    key,
+                    succ: Default::default(),
+                    pred: Default::default(),
+                    insert: true,
+                };
+                self.ops.insert(pos, op.clone());
+                self.tx().operations.push(op);
+
+                let (pos, key) = b;
+                let id = self.next_id();
+                let op = Op {
+                    change: self.history.len(),
+                    id,
+                    action: OpType::Unmark(expand_end),
+                    obj,
+                    key,
+                    succ: Default::default(),
+                    pred: Default::default(),
+                    insert: true,
+                };
+                self.ops.insert(pos, op.clone());
+                self.tx().operations.push(op);
+        */
+
+        Ok(())
+    }
+
+    pub fn unmark(
+        &self,
+        _obj: &ExId,
+        _start: usize,
+        _end: usize,
+        _inclusive: bool,
+        _mark: &str,
+    ) -> Result<String, AutomergeError> {
+        unimplemented!()
     }
 
     // TODO - I need to return these OpId's here **only** to get
@@ -1089,8 +1172,10 @@ impl Automerge {
             };
             let value: String = match &i.action {
                 OpType::Set(value) => format!("{}", value),
-                OpType::Make(obj) => format!("make{}", obj),
-                OpType::Inc(obj) => format!("inc{}", obj),
+                OpType::Make(obj) => format!("make({})", obj),
+                OpType::Inc(obj) => format!("inc({})", obj),
+                OpType::MarkBegin(m) => format!("mark({}={})", m.name, m.value),
+                OpType::MarkEnd(_) => "/mark".into(),
                 OpType::Del => format!("del{}", 0),
             };
             let pred: Vec<_> = i.pred.iter().map(|id| self.to_string(*id)).collect();
@@ -1130,6 +1215,17 @@ impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct SpanInfo {
+    pub id: ExId,
+    pub time: i64,
+    pub start: usize,
+    pub end: usize,
+    #[serde(rename = "type")]
+    pub span_type: String,
+    pub value: ScalarValue,
 }
 
 #[cfg(test)]

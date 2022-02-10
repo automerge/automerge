@@ -8,7 +8,10 @@ let { Int, Uint, Float64  } = require("./numbers")
 let { STATE, HEADS, OBJECT_ID, READ_ONLY, FROZEN  } = require("./constants")
 
 function init(actor) {
-  const state = AutomergeWASM.init(actor)
+  if (typeof actor != 'string') {
+    actor = null
+  }
+  const state = AutomergeWASM.create(actor)
   return rootProxy(state, true);
 }
 
@@ -43,7 +46,6 @@ function change(doc, options, callback) {
     throw new RangeError("Attempting to use an outdated Automerge document")
   }
   if (!!doc[HEADS] === true) {
-    console.log("HEADS", doc[HEADS])
     throw new RangeError("Attempting to change an out of date document");
   }
   if (doc[READ_ONLY] === false) {
@@ -97,7 +99,7 @@ function emptyChange(doc, options) {
 }
 
 function load(data, actor) {
-  const state = AutomergeWASM.load(data, actor)
+  const state = AutomergeWASM.loadDoc(data, actor)
   return rootProxy(state, true);
 }
 
@@ -135,13 +137,13 @@ function conflictAt(context, objectId, prop) {
         const value = conflict[1]
         switch (datatype) {
           case "map":
-            result[value] = mapProxy(context, value, [ prop ], true, true)
+            result[value] = mapProxy(context, value, [ prop ], true)
             break;
           case "list":
-            result[value] = listProxy(context, value, [ prop ], true, true)
+            result[value] = listProxy(context, value, [ prop ], true)
             break;
           case "text":
-            result[value] = textProxy(context, value, [ prop ], true, true)
+            result[value] = textProxy(context, value, [ prop ], true)
             break;
           //case "table":
           //case "cursor":
@@ -175,7 +177,11 @@ function getConflicts(doc, prop) {
 
 function getLastLocalChange(doc) {
   const state = doc[STATE]
-  return state.getLastLocalChange()
+  try {
+    return state.getLastLocalChange()
+  } catch (e) {
+    return
+  }
 }
 
 function getObjectId(doc) {

@@ -90,7 +90,7 @@ describe('Automerge', () => {
       const change1 = Automerge.getLastLocalChange(s1)
       s2 = Automerge.change(s1, doc => doc.foo = 'bar')
       const change2 = Automerge.getLastLocalChange(s2)
-      assert.strictEqual(change1, null)
+      assert.strictEqual(change1, undefined)
       const change = decodeChange(change2)
       assert.deepStrictEqual(change, {
         actor: change.actor, deps: [], seq: 1, startOp: 1,
