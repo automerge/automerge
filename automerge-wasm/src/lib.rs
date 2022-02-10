@@ -2,6 +2,7 @@
 use automerge as am;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
+use regex::Regex;
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -303,6 +304,78 @@ impl Automerge {
         let prop = to_prop(prop)?;
         self.0.del(&obj, prop).map_err(to_js_err)?;
         Ok(())
+    }
+
+    pub fn mark(
+        &mut self,
+        obj: String,
+        range: JsValue,
+        name: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
+        let re = Regex::new(r"([\[\(])(\d+)\.\.(\d+)([\)\]])").unwrap();
+        let range = range.as_string().ok_or("range must be a string")?;
+        let cap = re.captures_iter(&range).next().ok_or("range must be in the form of (start..end] or [start..end) etc... () for sticky, [] for normal")?;
+        let start: usize = cap[2].parse().map_err(|_| to_js_err("invalid start"))?;
+        let end: usize = cap[3].parse().map_err(|_| to_js_err("invalid end"))?;
+        let start_sticky = &cap[1] == "(";
+        let end_sticky = &cap[4] == ")";
+        let name = name
+            .as_string()
+            .ok_or("invalid mark name")
+            .map_err(to_js_err)?;
+        let value = self
+            .import_scalar(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("invalid value"))?;
+        self.0
+            .mark(&obj, start, start_sticky, end, end_sticky, &name, value)
+            .map_err(to_js_err)?;
+        Ok(())
+    }
+
+    pub fn spans(&mut self, obj: String) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj)?;
+        let text = self.0.text(&obj).map_err(to_js_err)?;
+        let spans = self.0.spans(&obj).map_err(to_js_err)?;
+        let mut last_pos = 0;
+        let result = Array::new();
+        for s in spans {
+            let marks = Array::new();
+            for m in s.marks {
+                let mark = Array::new();
+                mark.push(&m.0.into());
+                mark.push(&datatype(&m.1).into());
+                mark.push(&ScalarValue(m.1).into());
+                marks.push(&mark.into());
+            }
+            let text_span = &text[last_pos..s.pos]; //.slice(last_pos, s.pos);
+            if !text_span.is_empty() {
+                result.push(&text_span.into());
+            }
+            result.push(&marks);
+            last_pos = s.pos;
+            //let obj = Object::new().into();
+            //js_set(&obj, "pos", s.pos as i32)?;
+            //js_set(&obj, "marks", marks)?;
+            //result.push(&obj.into());
+        }
+        let text_span = &text[last_pos..];
+        if !text_span.is_empty() {
+            result.push(&text_span.into());
+        }
+        Ok(result.into())
+    }
+
+    pub fn raw_spans(&mut self, obj: String) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let spans = self.0.raw_spans(&obj).map_err(to_js_err)?;
+        let result = Array::new();
+        for s in spans {
+            result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
+        }
+        Ok(result)
     }
 
     pub fn save(&mut self) -> Result<Uint8Array, JsValue> {

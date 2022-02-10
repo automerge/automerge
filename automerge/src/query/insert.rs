@@ -85,6 +85,10 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
+        if self.valid.is_some() && element.valid_mark_anchor() {
+            self.last_valid_insert = element.elemid();
+            self.valid = None;
+        }
         if self.last_seen.is_none() && element.visible() {
             if self.seen >= self.target {
                 return QueryResult::Finish;
