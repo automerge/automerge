@@ -1,9 +1,9 @@
 use crate::ActorId;
+use serde::Serialize;
+use serde::Serializer;
 use std::cmp::{Ord, Ordering};
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use serde::Serialize;
-use serde::Serializer;
 
 #[derive(Debug, Clone)]
 pub enum ExId {

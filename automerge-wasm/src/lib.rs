@@ -45,7 +45,7 @@ impl Automerge {
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         if self.0.pending_ops() > 0 {
-          self.0.commit(None,None);
+            self.0.commit(None, None);
         }
         let mut automerge = Automerge(self.0.clone());
         if let Some(s) = actor {
@@ -81,7 +81,7 @@ impl Automerge {
         heads
     }
 
-    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array,JsError> {
+    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsError> {
         let heads = self.0.merge(&mut other.0)?;
         let heads: Array = heads
             .iter()
@@ -128,8 +128,7 @@ impl Automerge {
         let delete_count = delete_count as usize;
         let mut vals = vec![];
         if let Some(t) = text.as_string() {
-            self.0
-                .splice_text(&obj, start, delete_count, &t)?;
+            self.0.splice_text(&obj, start, delete_count, &t)?;
             Ok(None)
         } else {
             if let Ok(array) = text.dyn_into::<Array>() {
@@ -145,9 +144,7 @@ impl Automerge {
                     }
                 }
             }
-            let result = self
-                .0
-                .splice(&obj, start, delete_count, vals)?;
+            let result = self.0.splice(&obj, start, delete_count, vals)?;
             if result.is_empty() {
                 Ok(None)
             } else {
@@ -183,9 +180,7 @@ impl Automerge {
         let obj = self.import(obj)?;
         let index = index as f64;
         let value = self.import_value(value, datatype)?;
-        let opid = self
-            .0
-            .insert(&obj, index as usize, value)?;
+        let opid = self.0.insert(&obj, index as usize, value)?;
         Ok(opid.map(|id| id.to_string()))
     }
 
@@ -220,7 +215,7 @@ impl Automerge {
         let prop = self.import_prop(prop)?;
         let value: f64 = value
             .as_f64()
-            .ok_or(to_js_err("inc needs a numberic value"))?;
+            .ok_or_else(|| to_js_err("inc needs a numberic value"))?;
         self.0.inc(&obj, prop, value as i64)?;
         Ok(())
     }
