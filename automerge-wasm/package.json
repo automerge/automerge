@@ -10,14 +10,12 @@
   "license": "MIT",
   "files": [
     "README.md",
-    "LICENSE",
     "package.json",
-    "types.d.ts",
+    "index.d.ts",
     "node/index.js",
     "node/index_bg.wasm",
     "web/index.js",
-    "web/index_bg.wasm",
-    "automerge_wasm.js"
+    "web/index_bg.wasm"
   ],
   "types": "index.d.ts",
   "module": "./web/index.js",
