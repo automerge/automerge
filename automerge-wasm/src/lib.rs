@@ -310,7 +310,7 @@ impl Automerge {
 
     pub fn mark(
         &mut self,
-        obj: String,
+        obj: JsValue,
         range: JsValue,
         name: JsValue,
         value: JsValue,
@@ -337,7 +337,7 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn spans(&mut self, obj: String) -> Result<JsValue, JsValue> {
+    pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let text = self.0.text(&obj).map_err(to_js_err)?;
         let spans = self.0.spans(&obj).map_err(to_js_err)?;
@@ -370,7 +370,7 @@ impl Automerge {
         Ok(result.into())
     }
 
-    pub fn raw_spans(&mut self, obj: String) -> Result<Array, JsValue> {
+    pub fn raw_spans(&mut self, obj: JsValue) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let spans = self.0.raw_spans(&obj).map_err(to_js_err)?;
         let result = Array::new();
