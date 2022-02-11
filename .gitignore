@@ -2,3 +2,4 @@
 /.direnv
 perf.*
 /Cargo.lock
+build/
