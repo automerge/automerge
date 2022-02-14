@@ -1,5 +1,5 @@
 name: ci
-on: 
+on:
   push:
     branches:
     - experiment
@@ -67,6 +67,18 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: run tests
         run: ./scripts/ci/js_tests
+
+  cmake_build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Update CMake
+        uses: jwlawson/actions-setup-cmake@v1.12
+        with:
+          cmake-version: latest
+      - name: Build and test C bindings
+        run: ./scripts/ci/cmake-build Release Static
+        shell: bash
 
   linux:
     runs-on: ubuntu-latest

@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -eoux pipefail
+
+THIS_SCRIPT=$(dirname "$0");
+# \note CMake's default build types are "Debug", "MinSizeRel", "Release" and
+# "RelWithDebInfo" but custom ones can also be defined so we pass it verbatim.
+BUILD_TYPE=$1;
+LIB_TYPE=$2;
+if [ "${LIB_TYPE,,}" == "shared" ]; then
+    SHARED_TOGGLE="ON"
+else
+    SHARED_TOGGLE="OFF"
+fi
+C_PROJECT=$THIS_SCRIPT/../../automerge-c;
+mkdir -p $C_PROJECT/build;
+cd $C_PROJECT/build;
+cmake --log-level=ERROR --verbose -B . -S .. -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DBUILD_SHARED_LIBS=$SHARED_TOGGLE;
+cmake --build .;
