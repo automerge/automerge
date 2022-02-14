@@ -7,3 +7,4 @@ set -eou pipefail
 ./scripts/ci/docs
 ./scripts/ci/advisory
 ./scripts/ci/js_tests
+./scripts/ci/cmake-build Release static
