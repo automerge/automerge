@@ -81,7 +81,7 @@ impl Automerge {
         heads
     }
 
-    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsError> {
+    pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
         let heads = self.0.merge(&mut other.0)?;
         let heads: Array = heads
             .iter()
@@ -94,7 +94,7 @@ impl Automerge {
         self.0.rollback() as f64
     }
 
-    pub fn keys(&mut self, obj: String, heads: Option<Array>) -> Result<Array, JsValue> {
+    pub fn keys(&mut self, obj: JsValue, heads: Option<Array>) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads) {
             self.0.keys_at(&obj, &heads)
@@ -107,7 +107,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn text(&mut self, obj: String, heads: Option<Array>) -> Result<String, JsValue> {
+    pub fn text(&mut self, obj: JsValue, heads: Option<Array>) -> Result<String, JsValue> {
         let obj = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
             Ok(self.0.text_at(&obj, &heads)?)
@@ -118,7 +118,7 @@ impl Automerge {
 
     pub fn splice(
         &mut self,
-        obj: String,
+        obj: JsValue,
         start: f64,
         delete_count: f64,
         text: JsValue,
@@ -136,10 +136,10 @@ impl Automerge {
                     if let Ok(array) = i.clone().dyn_into::<Array>() {
                         let value = array.get(1);
                         let datatype = array.get(2);
-                        let value = self.import_value(value, datatype.as_string())?;
+                        let value = self.import_value(value, datatype)?;
                         vals.push(value);
                     } else {
-                        let value = self.import_value(i, None)?;
+                        let value = self.import_value(i, JsValue::null())?;
                         vals.push(value);
                     }
                 }
@@ -159,9 +159,9 @@ impl Automerge {
 
     pub fn push(
         &mut self,
-        obj: String,
+        obj: JsValue,
         value: JsValue,
-        datatype: Option<String>,
+        datatype: JsValue,
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
         let value = self.import_value(value, datatype)?;
@@ -172,10 +172,10 @@ impl Automerge {
 
     pub fn insert(
         &mut self,
-        obj: String,
+        obj: JsValue,
         index: f64,
         value: JsValue,
-        datatype: Option<String>,
+        datatype: JsValue,
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
         let index = index as f64;
@@ -186,22 +186,22 @@ impl Automerge {
 
     pub fn set(
         &mut self,
-        obj: String,
+        obj: JsValue,
         prop: JsValue,
         value: JsValue,
-        datatype: Option<String>,
-    ) -> Result<Option<String>, JsValue> {
+        datatype: JsValue,
+    ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value = self.import_value(value, datatype)?;
         let opid = self.0.set(&obj, prop, value)?;
-        Ok(opid.map(|id| id.to_string()))
+        Ok(opid.map(|id| id.to_string()).into())
     }
 
-    pub fn make(&mut self, obj: String, prop: JsValue, value: JsValue) -> Result<String, JsValue> {
+    pub fn make(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<String, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value = self.import_value(value, None)?;
+        let value = self.import_value(value, JsValue::null())?;
         if value.is_object() {
             let opid = self.0.set(&obj, prop, value)?;
             Ok(opid.unwrap().to_string())
@@ -210,7 +210,7 @@ impl Automerge {
         }
     }
 
-    pub fn inc(&mut self, obj: String, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
+    pub fn inc(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value: f64 = value
@@ -222,7 +222,7 @@ impl Automerge {
 
     pub fn value(
         &mut self,
-        obj: String,
+        obj: JsValue,
         prop: JsValue,
         heads: Option<Array>,
     ) -> Result<Option<Array>, JsValue> {
@@ -256,7 +256,7 @@ impl Automerge {
 
     pub fn values(
         &mut self,
-        obj: String,
+        obj: JsValue,
         arg: JsValue,
         heads: Option<Array>,
     ) -> Result<Array, JsValue> {
@@ -291,7 +291,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn length(&mut self, obj: String, heads: Option<Array>) -> Result<f64, JsValue> {
+    pub fn length(&mut self, obj: JsValue, heads: Option<Array>) -> Result<f64, JsValue> {
         let obj = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {
             Ok(self.0.length_at(&obj, &heads) as f64)
@@ -300,7 +300,7 @@ impl Automerge {
         }
     }
 
-    pub fn del(&mut self, obj: String, prop: JsValue) -> Result<(), JsValue> {
+    pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
         self.0.del(&obj, prop).map_err(to_js_err)?;
@@ -423,8 +423,12 @@ impl Automerge {
         map_to_js(&self.0, &ROOT)
     }
 
-    fn import(&self, id: String) -> Result<ObjId, JsValue> {
-        self.0.import(&id).map_err(to_js_err)
+    fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
+        if let Some(s) = id.as_string() {
+            Ok(self.0.import(&s)?)
+        } else {
+            Err(to_js_err("invalid objid"))
+        }
     }
 
     fn import_prop(&mut self, prop: JsValue) -> Result<Prop, JsValue> {
@@ -478,7 +482,8 @@ impl Automerge {
         }
     }
 
-    fn import_value(&mut self, value: JsValue, datatype: Option<String>) -> Result<Value, JsValue> {
+    fn import_value(&mut self, value: JsValue, datatype: JsValue) -> Result<Value, JsValue> {
+        let datatype = datatype.as_string();
         match self.import_scalar(&value, &datatype) {
             Some(val) => Ok(val.into()),
             None => {
