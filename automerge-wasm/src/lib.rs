@@ -11,7 +11,9 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
+use interop::{
+    get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS,
+};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
