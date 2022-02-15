@@ -10,9 +10,7 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{
-    get_heads, js_get, js_set, map_to_js, stringify, to_js_err, to_objtype, to_prop, AR, JS,
-};
+use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -483,18 +481,15 @@ impl Automerge {
     }
 
     fn import_value(&mut self, value: JsValue, datatype: JsValue) -> Result<Value, JsValue> {
-        let datatype = datatype.as_string();
-        match self.import_scalar(&value, &datatype) {
+        let d = datatype.as_string();
+        match self.import_scalar(&value, &d) {
             Some(val) => Ok(val.into()),
             None => {
                 if let Some(o) = to_objtype(&value) {
                     Ok(o.into())
                 } else {
-                    Err(to_js_err(format!(
-                        "invalid value ({},{:?})",
-                        stringify(&value),
-                        datatype
-                    )))
+                    web_sys::console::log_3(&"Invalid value".into(), &value, &datatype);
+                    Err(to_js_err("invalid value"))
                 }
             }
         }

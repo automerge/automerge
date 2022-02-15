@@ -243,12 +243,6 @@ pub(crate) fn js_get<J: Into<JsValue>>(obj: J, prop: &str) -> Result<JS, JsValue
     Ok(JS(Reflect::get(&obj.into(), &prop.into())?))
 }
 
-pub(crate) fn stringify(val: &JsValue) -> String {
-    js_sys::JSON::stringify(val)
-        .map(|j| j.into())
-        .unwrap_or_else(|_| "JSON::stringify_eror".into())
-}
-
 pub(crate) fn js_set<V: Into<JsValue>>(obj: &JsValue, prop: &str, val: V) -> Result<bool, JsValue> {
     Reflect::set(obj, &prop.into(), &val.into())
 }
@@ -278,6 +272,7 @@ pub(crate) fn to_objtype(a: &JsValue) -> Option<am::ObjType> {
     } else if f.starts_with("class TABLE", 0) {
         Some(am::ObjType::Table)
     } else {
+        am::log!("to_objtype(function) -> {}", f);
         None
     }
 }
