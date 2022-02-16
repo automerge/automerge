@@ -8,7 +8,6 @@ use wasm_bindgen::JsCast;
 
 mod interop;
 mod sync;
-mod transaction;
 mod value;
 
 use interop::{
@@ -16,8 +15,6 @@ use interop::{
 };
 use sync::SyncState;
 use value::{datatype, ScalarValue};
-
-pub use transaction::Transaction;
 
 #[allow(unused_macros)]
 macro_rules! log {
@@ -32,12 +29,12 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct Automerge(automerge::Automerge);
+pub struct Automerge(automerge::AutoTxn);
 
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, JsValue> {
-        let mut automerge = automerge::Automerge::new();
+        let mut automerge = automerge::AutoTxn::new();
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
             automerge.set_actor(a);
@@ -95,10 +92,6 @@ impl Automerge {
 
     pub fn rollback(&mut self) -> f64 {
         self.0.rollback() as f64
-    }
-
-    pub fn tx(&mut self) -> Transaction {
-        Transaction(self.0.tx())
     }
 
     pub fn keys(&mut self, obj: String, heads: Option<Array>) -> Result<Array, JsValue> {
@@ -512,7 +505,7 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = loadDoc)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let mut automerge = am::Automerge::load(&data).map_err(to_js_err)?;
+    let mut automerge = am::AutoTxn::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         automerge.set_actor(actor)

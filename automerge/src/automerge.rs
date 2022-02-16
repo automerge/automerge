@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::op_set::OpSet;
-use crate::transaction::Transaction;
+use crate::transaction::{Transaction, TransactionInner};
 use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
@@ -12,17 +12,18 @@ use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
+/// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
-    queue: Vec<Change>,
+    pub(crate) queue: Vec<Change>,
     pub(crate) history: Vec<Change>,
-    history_index: HashMap<ChangeHash, usize>,
-    states: HashMap<usize, Vec<usize>>,
-    deps: HashSet<ChangeHash>,
-    saved: Vec<ChangeHash>,
+    pub(crate) history_index: HashMap<ChangeHash, usize>,
+    pub(crate) states: HashMap<usize, Vec<usize>>,
+    pub(crate) deps: HashSet<ChangeHash>,
+    pub(crate) saved: Vec<ChangeHash>,
     pub(crate) ops: OpSet,
-    actor: Option<usize>,
-    max_op: u64,
+    pub(crate) actor: Option<usize>,
+    pub(crate) max_op: u64,
 }
 
 impl Automerge {
@@ -62,7 +63,7 @@ impl Automerge {
         self.actor.map(|i| self.ops.m.actors[i].clone())
     }
 
-    fn get_actor_index(&mut self) -> usize {
+    pub(crate) fn get_actor_index(&mut self) -> usize {
         if let Some(actor) = self.actor {
             actor
         } else {
@@ -99,7 +100,7 @@ impl Automerge {
             }
         }
 
-        Transaction {
+        let tx_inner = TransactionInner {
             actor,
             seq,
             start_op: self.max_op + 1,
@@ -109,6 +110,9 @@ impl Automerge {
             hash: None,
             operations: vec![],
             deps,
+        };
+        Transaction {
+            inner: tx_inner,
             doc: self,
         }
     }
