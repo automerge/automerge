@@ -22,7 +22,7 @@ const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Automerge {
-    pub fn generate_sync_message(&mut self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+    pub fn generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
         self._generate_sync_message(sync_state)
     }
 
