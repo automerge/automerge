@@ -88,6 +88,7 @@ impl Automerge {
         am
     }
 
+    /// Start a transaction.
     pub fn tx(&mut self) -> Transaction {
         let actor = self.get_actor_index();
 
@@ -123,6 +124,10 @@ impl Automerge {
         f
     }
 
+    /// Set a prop to have the given value in an object.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn set<P: Into<Prop>, V: Into<Value>>(
         &mut self,
         obj: &ExId,
@@ -142,6 +147,10 @@ impl Automerge {
         }
     }
 
+    /// Insert a value into an object.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn insert<V: Into<Value>>(
         &mut self,
         obj: &ExId,
@@ -161,6 +170,10 @@ impl Automerge {
         }
     }
 
+    /// Delete a value in an object.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
         let mut tx = self.tx();
         match tx.del(obj, prop) {
@@ -175,6 +188,10 @@ impl Automerge {
         }
     }
 
+    /// Increment a counter in an object.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn inc<P: Into<Prop>>(
         &mut self,
         obj: &ExId,
@@ -194,6 +211,10 @@ impl Automerge {
         }
     }
 
+    /// Splice elements into a list or text.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn splice(
         &mut self,
         obj: &ExId,
@@ -214,6 +235,10 @@ impl Automerge {
         }
     }
 
+    /// Splice elements into text.
+    ///
+    /// This creates a new transaction internally and commits it upon success.
+    /// If you want to have multiple operations grouped together then use [`Self::tx`].
     pub fn splice_text(
         &mut self,
         obj: &ExId,

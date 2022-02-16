@@ -5,6 +5,11 @@ use crate::{Automerge, ChangeHash, Prop, Value};
 mod inner;
 pub(crate) use inner::TransactionInner;
 
+/// A transaction on a document.
+/// Transactions group operations into a single change so that no other operations can happen
+/// in-between.
+///
+/// Created from [`Automerge::tx`].
 #[derive(Debug)]
 pub struct Transaction<'a> {
     pub(crate) inner: TransactionInner,
