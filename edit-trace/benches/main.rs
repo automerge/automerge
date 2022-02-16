@@ -83,7 +83,7 @@ fn bench(c: &mut Criterion) {
     );
 
     group.bench_with_input(
-        BenchmarkId::new("replay", commands_len),
+        BenchmarkId::new("replay autotx", commands_len),
         &commands,
         |b, commands| {
             b.iter_batched(
@@ -96,17 +96,21 @@ fn bench(c: &mut Criterion) {
 
     let commands_len = commands.len();
     let mut doc = replay_trace_autotx(commands);
-    group.bench_with_input(BenchmarkId::new("save", commands_len), &doc, |b, doc| {
-        b.iter_batched(
-            || doc.clone(),
-            save_trace_autotx,
-            criterion::BatchSize::LargeInput,
-        )
-    });
+    group.bench_with_input(
+        BenchmarkId::new("save autotx", commands_len),
+        &doc,
+        |b, doc| {
+            b.iter_batched(
+                || doc.clone(),
+                save_trace_autotx,
+                criterion::BatchSize::LargeInput,
+            )
+        },
+    );
 
     let bytes = doc.save().unwrap();
     group.bench_with_input(
-        BenchmarkId::new("load", commands_len),
+        BenchmarkId::new("load autotx", commands_len),
         &bytes,
         |b, bytes| b.iter(|| load_trace_autotx(bytes)),
     );
