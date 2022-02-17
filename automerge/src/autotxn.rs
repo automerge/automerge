@@ -1,4 +1,5 @@
 use crate::exid::ExId;
+use crate::transaction::CommitOptions;
 use crate::types::Patch;
 use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
@@ -25,6 +26,13 @@ impl AutoTxn {
             doc: Automerge::new(),
             transaction: None,
         }
+    }
+
+    /// Get the inner document.
+    #[doc(hidden)]
+    pub fn document(&mut self) -> &Automerge {
+        self.ensure_transaction_closed();
+        &self.doc
     }
 
     pub fn set_actor(&mut self, actor: ActorId) {
@@ -54,7 +62,7 @@ impl AutoTxn {
             .unwrap_or(0)
     }
 
-    fn tx(&mut self) {
+    fn try_start_transaction(&mut self) {
         if self.transaction.is_none() {
             let actor = self.doc.get_actor_index();
 
@@ -89,12 +97,20 @@ impl AutoTxn {
         }
     }
 
-    pub fn commit(&mut self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
+    pub fn commit(&mut self) -> Vec<ChangeHash> {
         // ensure that even no changes triggers a change
-        self.tx();
+        self.try_start_transaction();
         self.transaction
             .take()
-            .map(|tx| tx.commit(&mut self.doc, message, time))
+            .map(|tx| tx.commit(&mut self.doc, None, None))
+            .unwrap_or_else(|| self.doc.get_heads())
+    }
+
+    pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
+        self.try_start_transaction();
+        self.transaction
+            .take()
+            .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
             .unwrap_or_else(|| self.doc.get_heads())
     }
 
@@ -160,7 +176,7 @@ impl AutoTxn {
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.set(&mut self.doc, obj, prop, value)
     }
@@ -171,7 +187,7 @@ impl AutoTxn {
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.insert(&mut self.doc, obj, index, value)
     }
@@ -182,13 +198,13 @@ impl AutoTxn {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.inc(&mut self.doc, obj, prop, value)
     }
 
     pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.del(&mut self.doc, obj, prop)
     }
@@ -202,7 +218,7 @@ impl AutoTxn {
         del: usize,
         vals: Vec<Value>,
     ) -> Result<Vec<ExId>, AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.splice(&mut self.doc, obj, pos, del, vals)
     }
@@ -214,7 +230,7 @@ impl AutoTxn {
         del: usize,
         text: &str,
     ) -> Result<Vec<ExId>, AutomergeError> {
-        self.tx();
+        self.try_start_transaction();
         let tx = self.transaction.as_mut().unwrap();
         tx.splice_text(&mut self.doc, obj, pos, del, text)
     }

@@ -1,4 +1,5 @@
 #![allow(clippy::unused_unit)]
+use am::transaction::CommitOptions;
 use automerge as am;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
@@ -45,7 +46,7 @@ impl Automerge {
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         if self.0.pending_ops() > 0 {
-            self.0.commit(None, None);
+            self.0.commit();
         }
         let mut automerge = Automerge(self.0.clone());
         if let Some(s) = actor {
@@ -73,7 +74,14 @@ impl Automerge {
     }
 
     pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> Array {
-        let heads = self.0.commit(message, time.map(|n| n as i64));
+        let mut commit_opts = CommitOptions::default();
+        if let Some(message) = message {
+            commit_opts.set_message(message);
+        }
+        if let Some(time) = time {
+            commit_opts.set_time(time as i64);
+        }
+        let heads = self.0.commit_with(commit_opts);
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))

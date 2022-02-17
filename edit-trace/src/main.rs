@@ -19,7 +19,7 @@ fn main() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
 
     let now = Instant::now();
-    let mut tx = doc.tx();
+    let mut tx = doc.transaction();
     let text = tx.set(&ROOT, "text", Value::text()).unwrap().unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
@@ -27,7 +27,7 @@ fn main() -> Result<(), AutomergeError> {
         }
         tx.splice(&text, pos, del, vals)?;
     }
-    tx.commit(None, None);
+    tx.commit();
     let _ = doc.save();
     println!("Done in {} ms", now.elapsed().as_millis());
     Ok(())

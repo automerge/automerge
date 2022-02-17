@@ -39,7 +39,7 @@ mod op_set;
 mod op_tree;
 mod query;
 mod sync;
-mod transaction;
+pub mod transaction;
 mod types;
 mod value;
 #[cfg(feature = "optree-visualisation")]
@@ -52,7 +52,6 @@ pub use error::AutomergeError;
 pub use exid::ExId as ObjId;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
-pub use transaction::Transaction;
 pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
 pub use value::{ScalarValue, Value};
 

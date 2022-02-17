@@ -2,35 +2,53 @@ use crate::exid::ExId;
 use crate::AutomergeError;
 use crate::{Automerge, ChangeHash, Prop, Value};
 
+mod commit;
 mod inner;
+mod result;
 pub(crate) use inner::TransactionInner;
+pub use result::TransactionFailure;
+pub use result::TransactionSuccess;
+
+pub type TransactionResult<O, E> = Result<TransactionSuccess<O>, TransactionFailure<E>>;
+
+pub use self::commit::CommitOptions;
 
 /// A transaction on a document.
 /// Transactions group operations into a single change so that no other operations can happen
 /// in-between.
 ///
-/// Created from [`Automerge::tx`].
+/// Created from [`Automerge::transaction`].
 #[derive(Debug)]
 pub struct Transaction<'a> {
-    pub(crate) inner: TransactionInner,
+    // this is an option so that we can take it during commit and rollback to prevent it being
+    // rolled back during drop.
+    pub(crate) inner: Option<TransactionInner>,
     pub(crate) doc: &'a mut Automerge,
 }
 
 impl<'a> Transaction<'a> {
+    /// Get the number of pending operations in this transaction.
     pub fn pending_ops(&self) -> usize {
-        self.inner.pending_ops()
+        self.inner.as_ref().unwrap().pending_ops()
     }
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(self, message: Option<String>, time: Option<i64>) -> Vec<ChangeHash> {
-        self.inner.commit(self.doc, message, time)
+    pub fn commit(mut self) -> Vec<ChangeHash> {
+        self.inner.take().unwrap().commit(self.doc, None, None)
+    }
+
+    pub fn commit_with(mut self, options: CommitOptions) -> Vec<ChangeHash> {
+        self.inner
+            .take()
+            .unwrap()
+            .commit(self.doc, options.message, options.time)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
-    pub fn rollback(self) -> usize {
-        self.inner.rollback(self.doc)
+    pub fn rollback(mut self) -> usize {
+        self.inner.take().unwrap().rollback(self.doc)
     }
 
     /// Set the value of property `P` to value `V` in object `obj`.
@@ -52,7 +70,7 @@ impl<'a> Transaction<'a> {
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.inner.set(self.doc, obj, prop, value)
+        self.inner.as_mut().unwrap().set(self.doc, obj, prop, value)
     }
 
     pub fn insert<V: Into<Value>>(
@@ -61,7 +79,10 @@ impl<'a> Transaction<'a> {
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.inner.insert(self.doc, obj, index, value)
+        self.inner
+            .as_mut()
+            .unwrap()
+            .insert(self.doc, obj, index, value)
     }
 
     pub fn inc<P: Into<Prop>>(
@@ -70,11 +91,11 @@ impl<'a> Transaction<'a> {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.inner.inc(self.doc, obj, prop, value)
+        self.inner.as_mut().unwrap().inc(self.doc, obj, prop, value)
     }
 
     pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        self.inner.del(self.doc, obj, prop)
+        self.inner.as_mut().unwrap().del(self.doc, obj, prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -86,7 +107,10 @@ impl<'a> Transaction<'a> {
         del: usize,
         vals: Vec<Value>,
     ) -> Result<Vec<ExId>, AutomergeError> {
-        self.inner.splice(self.doc, obj, pos, del, vals)
+        self.inner
+            .as_mut()
+            .unwrap()
+            .splice(self.doc, obj, pos, del, vals)
     }
 
     pub fn splice_text(
@@ -96,7 +120,10 @@ impl<'a> Transaction<'a> {
         del: usize,
         text: &str,
     ) -> Result<Vec<ExId>, AutomergeError> {
-        self.inner.splice_text(self.doc, obj, pos, del, text)
+        self.inner
+            .as_mut()
+            .unwrap()
+            .splice_text(self.doc, obj, pos, del, text)
     }
 
     pub fn keys(&self, obj: &ExId) -> Vec<String> {
@@ -155,5 +182,17 @@ impl<'a> Transaction<'a> {
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.values_at(obj, prop, heads)
+    }
+}
+
+// If a transaction is not commited or rolled back manually then it can leave the document in an
+// intermediate state.
+// This defaults to rolling back the transaction to be compatible with `?` error returning before
+// reaching a call to `commit`.
+impl<'a> Drop for Transaction<'a> {
+    fn drop(&mut self) {
+        if let Some(txn) = self.inner.take() {
+            txn.rollback(self.doc);
+        }
     }
 }
