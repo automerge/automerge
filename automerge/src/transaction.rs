@@ -27,6 +27,11 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
+    /// Get the heads of the document before this transaction was started.
+    pub fn get_heads(&self) -> Vec<ChangeHash> {
+        self.doc.get_heads()
+    }
+
     /// Get the number of pending operations in this transaction.
     pub fn pending_ops(&self) -> usize {
         self.inner.as_ref().unwrap().pending_ops()
