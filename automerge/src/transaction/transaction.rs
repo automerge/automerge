@@ -9,6 +9,13 @@ use super::{CommitOptions, Transactable, TransactionInner};
 /// in-between.
 ///
 /// Created from [`Automerge::transaction`].
+///
+/// ## Drop
+///
+/// This transaction should be manually committed or rolled back. If not done manually then it will
+/// be rolled back when it is dropped. This is to prevent the document being in an unsafe
+/// intermediate state.
+/// This is consistent with `?` error handling.
 #[derive(Debug)]
 pub struct Transaction<'a> {
     // this is an option so that we can take it during commit and rollback to prevent it being
