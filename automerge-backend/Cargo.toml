@@ -17,15 +17,15 @@ js-sys = "^0.3"
 hex = "^0.4.2"
 rand = { version = "^0.8", features=["small_rng"] }
 maplit = "^1.0.2"
-sha2 = "0.9.5"
+sha2 = "~0.10"
 leb128 = "^0.2.4"
 automerge-protocol = { path = "../automerge-protocol" }
 fxhash = "^0.2.1"
 thiserror = "1.0.16"
-itertools = "0.9.0"
+itertools = "~0.10"
 tracing = { version = "0.1.25", features = ["log"] }
 flate2 = "1.0.20"
-nonzero_ext = "^0.2.0"
+nonzero_ext = "^0.3.0"
 smol_str = "0.1.17"
 
 [dependencies.web-sys]
@@ -35,7 +35,7 @@ features = [
 ]
 
 [dev-dependencies]
-test-env-log = "0.2.6"
+test-log = "0.2.6"
 env_logger = "*"
-tracing-subscriber = {version = "0.2", features = ["chrono", "env-filter", "fmt"]}
-pretty_assertions = "0.7.1"
+tracing-subscriber = {version = "~0.3", features = [ "env-filter", "fmt"]}
+pretty_assertions = "~1.1"

@@ -846,7 +846,7 @@ fn test_handle_changes_within_conflicted_objects() {
     assert_eq!(patch, expected_patch)
 }
 
-#[test_env_log::test]
+#[test_log::test]
 fn test_handle_changes_within_conflicted_lists() {
     let actor1: ActorId = "01234567".try_into().unwrap();
     let actor2: ActorId = "89abcdef".try_into().unwrap();

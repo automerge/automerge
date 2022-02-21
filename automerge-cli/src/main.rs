@@ -1,7 +1,7 @@
 use std::{fs::File, path::PathBuf, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use clap::Clap;
+use clap::Parser;
 
 mod change;
 mod examine;
@@ -9,7 +9,7 @@ mod export;
 mod import;
 mod merge;
 
-#[derive(Debug, Clap)]
+#[derive(Parser, Debug)]
 #[clap(about = "Automerge CLI")]
 struct Opts {
     #[clap(subcommand)]
@@ -34,7 +34,7 @@ impl FromStr for ExportFormat {
     }
 }
 
-#[derive(Debug, Clap)]
+#[derive(Debug, Parser)]
 enum Command {
     /// Output current state of an Automerge document in a specified format
     Export {
