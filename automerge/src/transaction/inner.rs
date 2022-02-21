@@ -306,3 +306,20 @@ impl TransactionInner {
         Ok(results)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{transaction::Transactable, ROOT};
+
+    use super::*;
+
+    #[test]
+    fn map_rollback_doesnt_panic() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+
+        let a = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        tx.set(&a, "b", 1).unwrap();
+        assert!(tx.value(&a, "b").unwrap().is_some());
+    }
+}
