@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::query;
+use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
 use crate::{AutomergeError, OpType};
@@ -50,12 +50,11 @@ impl TransactionInner {
         // remove in reverse order so sets are removed before makes etc...
         for op in self.operations.iter().rev() {
             for pred_id in &op.pred {
-                // FIXME - use query to make this fast
-                if let Some(p) = doc.ops.iter().position(|o| o.id == *pred_id) {
+                if let Some(p) = doc.ops.search(op.obj, OpIdSearch::new(*pred_id)).index() {
                     doc.ops.replace(op.obj, p, |o| o.remove_succ(op));
                 }
             }
-            if let Some(pos) = doc.ops.iter().position(|o| o.id == op.id) {
+            if let Some(pos) = doc.ops.search(op.obj, OpIdSearch::new(op.id)).index() {
                 doc.ops.remove(op.obj, pos);
             }
         }
