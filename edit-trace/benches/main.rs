@@ -1,4 +1,4 @@
-use automerge::{AutoTxn, Automerge, Value, ROOT};
+use automerge::{transaction::Transactable, AutoTxn, Automerge, Value, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 

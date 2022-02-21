@@ -1,4 +1,4 @@
-use automerge::{Automerge, AutomergeError, Value, ROOT};
+use automerge::{transaction::Transactable, Automerge, AutomergeError, Value, ROOT};
 use std::fs;
 use std::time::Instant;
 

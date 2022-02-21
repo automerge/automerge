@@ -1,4 +1,5 @@
 use automerge as am;
+use automerge::transaction::Transactable;
 use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;

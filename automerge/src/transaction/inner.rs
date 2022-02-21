@@ -3,7 +3,6 @@ use crate::query;
 use crate::types::{Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
 use crate::{AutomergeError, OpType};
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -305,20 +304,5 @@ impl TransactionInner {
             pos += 1;
         }
         Ok(results)
-    }
-
-    pub fn splice_text(
-        &mut self,
-        doc: &mut Automerge,
-        obj: &ExId,
-        pos: usize,
-        del: usize,
-        text: &str,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        let mut vals = vec![];
-        for c in text.to_owned().graphemes(true) {
-            vals.push(c.into());
-        }
-        self.splice(doc, obj, pos, del, vals)
     }
 }

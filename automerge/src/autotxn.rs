@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::transaction::CommitOptions;
+use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
@@ -55,19 +55,12 @@ impl AutoTxn {
         }
     }
 
-    pub fn pending_ops(&self) -> usize {
-        self.transaction
-            .as_ref()
-            .map(|t| t.pending_ops())
-            .unwrap_or(0)
-    }
-
     fn try_start_transaction(&mut self) {
         if self.transaction.is_none() {
             let actor = self.doc.get_actor_index();
 
             let seq = self.doc.states.entry(actor).or_default().len() as u64 + 1;
-            let mut deps = self.get_heads();
+            let mut deps = self.doc.get_heads();
             if seq > 1 {
                 let last_hash = self.get_hash(actor, seq - 1).unwrap();
                 if !deps.contains(&last_hash) {
@@ -89,29 +82,48 @@ impl AutoTxn {
         }
     }
 
+    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
+        self.doc
+            .states
+            .get(&actor)
+            .and_then(|v| v.get(seq as usize - 1))
+            .and_then(|&i| self.doc.history.get(i))
+            .map(|c| c.hash)
+            .ok_or(AutomergeError::InvalidSeq(seq))
+    }
+
+    fn update_history(&mut self, change: Change) -> usize {
+        self.doc.max_op = std::cmp::max(self.doc.max_op, change.start_op + change.len() as u64 - 1);
+
+        self.update_deps(&change);
+
+        let history_index = self.doc.history.len();
+
+        self.doc
+            .states
+            .entry(self.doc.ops.m.actors.cache(change.actor_id().clone()))
+            .or_default()
+            .push(history_index);
+
+        self.doc.history_index.insert(change.hash, history_index);
+        self.doc.history.push(change);
+
+        history_index
+    }
+
+    fn update_deps(&mut self, change: &Change) {
+        for d in &change.deps {
+            self.doc.deps.remove(d);
+        }
+        self.doc.deps.insert(change.hash);
+    }
+
     pub fn fork(&mut self) -> Self {
         self.ensure_transaction_closed();
         Self {
             doc: self.doc.fork(),
             transaction: self.transaction.clone(),
         }
-    }
-
-    pub fn commit(&mut self) -> Vec<ChangeHash> {
-        // ensure that even no changes triggers a change
-        self.try_start_transaction();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, None, None))
-            .unwrap_or_else(|| self.doc.get_heads())
-    }
-
-    pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
-        self.try_start_transaction();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
-            .unwrap_or_else(|| self.doc.get_heads())
     }
 
     pub fn ensure_transaction_closed(&mut self) {
@@ -122,162 +134,6 @@ impl AutoTxn {
                 &self.doc.ops.m.props,
             ));
         }
-    }
-
-    pub fn rollback(&mut self) -> usize {
-        self.transaction
-            .take()
-            .map(|tx| tx.rollback(&mut self.doc))
-            .unwrap_or(0)
-    }
-
-    // KeysAt::()
-    // LenAt::()
-    // PropAt::()
-    // NthAt::()
-
-    pub fn keys(&self, obj: &ExId) -> Vec<String> {
-        self.doc.keys(obj)
-    }
-
-    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
-        self.doc.keys_at(obj, heads)
-    }
-
-    pub fn length(&self, obj: &ExId) -> usize {
-        self.doc.length(obj)
-    }
-
-    pub fn length_at(&self, obj: &ExId, heads: &[ChangeHash]) -> usize {
-        self.doc.length_at(obj, heads)
-    }
-
-    // set(obj, prop, value) - value can be scalar or objtype
-    // del(obj, prop)
-    // inc(obj, prop, value)
-    // insert(obj, index, value)
-
-    /// Set the value of property `P` to value `V` in object `obj`.
-    ///
-    /// # Returns
-    ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document or create a new object.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<Value>>(
-        &mut self,
-        obj: &ExId,
-        prop: P,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.set(&mut self.doc, obj, prop, value)
-    }
-
-    pub fn insert<V: Into<Value>>(
-        &mut self,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.insert(&mut self.doc, obj, index, value)
-    }
-
-    pub fn inc<P: Into<Prop>>(
-        &mut self,
-        obj: &ExId,
-        prop: P,
-        value: i64,
-    ) -> Result<(), AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.inc(&mut self.doc, obj, prop, value)
-    }
-
-    pub fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.del(&mut self.doc, obj, prop)
-    }
-
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements
-    pub fn splice(
-        &mut self,
-        obj: &ExId,
-        pos: usize,
-        del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.splice(&mut self.doc, obj, pos, del, vals)
-    }
-
-    pub fn splice_text(
-        &mut self,
-        obj: &ExId,
-        pos: usize,
-        del: usize,
-        text: &str,
-    ) -> Result<Vec<ExId>, AutomergeError> {
-        self.try_start_transaction();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.splice_text(&mut self.doc, obj, pos, del, text)
-    }
-
-    pub fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
-        self.doc.text(obj)
-    }
-
-    pub fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
-        self.doc.text_at(obj, heads)
-    }
-
-    // TODO - I need to return these OpId's here **only** to get
-    // the legacy conflicts format of { [opid]: value }
-    // Something better?
-    pub fn value<P: Into<Prop>>(
-        &self,
-        obj: &ExId,
-        prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value(obj, prop)
-    }
-
-    pub fn value_at<P: Into<Prop>>(
-        &self,
-        obj: &ExId,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value_at(obj, prop, heads)
-    }
-
-    pub fn values<P: Into<Prop>>(
-        &self,
-        obj: &ExId,
-        prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values(obj, prop)
-    }
-
-    pub fn values_at<P: Into<Prop>>(
-        &self,
-        obj: &ExId,
-        prop: P,
-        heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values_at(obj, prop, heads)
     }
 
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
@@ -347,47 +203,6 @@ impl AutoTxn {
         self.doc.get_changes_added(&other.doc)
     }
 
-    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
-        self.ensure_transaction_closed();
-        self.doc.get_heads()
-    }
-
-    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
-        self.doc
-            .states
-            .get(&actor)
-            .and_then(|v| v.get(seq as usize - 1))
-            .and_then(|&i| self.doc.history.get(i))
-            .map(|c| c.hash)
-            .ok_or(AutomergeError::InvalidSeq(seq))
-    }
-
-    fn update_history(&mut self, change: Change) -> usize {
-        self.doc.max_op = std::cmp::max(self.doc.max_op, change.start_op + change.len() as u64 - 1);
-
-        self.update_deps(&change);
-
-        let history_index = self.doc.history.len();
-
-        self.doc
-            .states
-            .entry(self.doc.ops.m.actors.cache(change.actor_id().clone()))
-            .or_default()
-            .push(history_index);
-
-        self.doc.history_index.insert(change.hash, history_index);
-        self.doc.history.push(change);
-
-        history_index
-    }
-
-    fn update_deps(&mut self, change: &Change) {
-        for d in &change.deps {
-            self.doc.deps.remove(d);
-        }
-        self.doc.deps.insert(change.hash);
-    }
-
     pub fn import(&self, s: &str) -> Result<ExId, AutomergeError> {
         self.doc.import(s)
     }
@@ -413,5 +228,183 @@ impl AutoTxn {
     #[cfg(feature = "optree-visualisation")]
     pub fn visualise_optree(&self) -> String {
         self.doc.visualise_optree()
+    }
+
+    /// Get the current heads of the document.
+    ///
+    /// This closes the transaction first, if one is in progress.
+    pub fn get_heads(&mut self) -> Vec<ChangeHash> {
+        self.ensure_transaction_closed();
+        self.doc.get_heads()
+    }
+
+    pub fn commit(&mut self) -> Vec<ChangeHash> {
+        // ensure that even no changes triggers a change
+        self.try_start_transaction();
+        self.transaction
+            .take()
+            .map(|tx| tx.commit(&mut self.doc, None, None))
+            .unwrap_or_else(|| self.doc.get_heads())
+    }
+
+    pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
+        self.try_start_transaction();
+        self.transaction
+            .take()
+            .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
+            .unwrap_or_else(|| self.doc.get_heads())
+    }
+
+    pub fn rollback(&mut self) -> usize {
+        self.transaction
+            .take()
+            .map(|tx| tx.rollback(&mut self.doc))
+            .unwrap_or(0)
+    }
+}
+
+impl Transactable for AutoTxn {
+    fn pending_ops(&self) -> usize {
+        self.transaction
+            .as_ref()
+            .map(|t| t.pending_ops())
+            .unwrap_or(0)
+    }
+
+    // KeysAt::()
+    // LenAt::()
+    // PropAt::()
+    // NthAt::()
+
+    fn keys(&self, obj: &ExId) -> Vec<String> {
+        self.doc.keys(obj)
+    }
+
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+        self.doc.keys_at(obj, heads)
+    }
+
+    fn length(&self, obj: &ExId) -> usize {
+        self.doc.length(obj)
+    }
+
+    fn length_at(&self, obj: &ExId, heads: &[ChangeHash]) -> usize {
+        self.doc.length_at(obj, heads)
+    }
+
+    // set(obj, prop, value) - value can be scalar or objtype
+    // del(obj, prop)
+    // inc(obj, prop, value)
+    // insert(obj, index, value)
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document or create a new object.
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    fn set<P: Into<Prop>, V: Into<Value>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<Option<ExId>, AutomergeError> {
+        self.try_start_transaction();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.set(&mut self.doc, obj, prop, value)
+    }
+
+    fn insert<V: Into<Value>>(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<Option<ExId>, AutomergeError> {
+        self.try_start_transaction();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.insert(&mut self.doc, obj, index, value)
+    }
+
+    fn inc<P: Into<Prop>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: i64,
+    ) -> Result<(), AutomergeError> {
+        self.try_start_transaction();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.inc(&mut self.doc, obj, prop, value)
+    }
+
+    fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
+        self.try_start_transaction();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.del(&mut self.doc, obj, prop)
+    }
+
+    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
+    /// the new elements
+    fn splice(
+        &mut self,
+        obj: &ExId,
+        pos: usize,
+        del: usize,
+        vals: Vec<Value>,
+    ) -> Result<Vec<ExId>, AutomergeError> {
+        self.try_start_transaction();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.splice(&mut self.doc, obj, pos, del, vals)
+    }
+
+    fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
+        self.doc.text(obj)
+    }
+
+    fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
+        self.doc.text_at(obj, heads)
+    }
+
+    // TODO - I need to return these OpId's here **only** to get
+    // the legacy conflicts format of { [opid]: value }
+    // Something better?
+    fn value<P: Into<Prop>>(
+        &self,
+        obj: &ExId,
+        prop: P,
+    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+        self.doc.value(obj, prop)
+    }
+
+    fn value_at<P: Into<Prop>>(
+        &self,
+        obj: &ExId,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+        self.doc.value_at(obj, prop, heads)
+    }
+
+    fn values<P: Into<Prop>>(
+        &self,
+        obj: &ExId,
+        prop: P,
+    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        self.doc.values(obj, prop)
+    }
+
+    fn values_at<P: Into<Prop>>(
+        &self,
+        obj: &ExId,
+        prop: P,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        self.doc.values_at(obj, prop, heads)
     }
 }

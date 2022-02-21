@@ -728,6 +728,7 @@ impl Automerge {
             .collect()
     }
 
+    /// Get the heads of this document.
     pub fn get_heads(&self) -> Vec<ChangeHash> {
         let mut deps: Vec<_> = self.deps.iter().copied().collect();
         deps.sort_unstable();
@@ -864,6 +865,7 @@ pub struct SpanInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transaction::Transactable;
     use crate::*;
     use std::convert::TryInto;
 
