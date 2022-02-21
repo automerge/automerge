@@ -375,7 +375,7 @@ impl Decodable for SmolStr {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        str::from_utf8(&buffer).map(|t| t.into()).ok()
+        str::from_utf8(&buffer).map(<&str>::into).ok()
     }
 }
 
@@ -385,7 +385,7 @@ impl Decodable for String {
         R: Read,
     {
         let buffer = Vec::decode(bytes)?;
-        str::from_utf8(&buffer).map(|t| t.into()).ok()
+        str::from_utf8(&buffer).map(<&str>::into).ok()
     }
 }
 
@@ -398,7 +398,7 @@ impl Decodable for Option<String> {
         if buffer.is_empty() {
             return Some(None);
         }
-        Some(str::from_utf8(&buffer).map(|t| t.into()).ok())
+        Some(str::from_utf8(&buffer).map(<&str>::into).ok())
     }
 }
 

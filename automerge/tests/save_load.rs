@@ -3,7 +3,7 @@ use automerge_protocol as amp;
 use automerge_protocol::{
     ActorId, ElementId, Key, ObjType, ObjectId, Op, OpId, OpType, ScalarValue,
 };
-use test_env_log::test;
+use test_log::test;
 
 #[test]
 fn missing_object_error_flaky_null_rle_decoding() {

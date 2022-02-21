@@ -28,11 +28,11 @@ uuid = { version = "0.8.1", features = ["wasm-bindgen", "v4", "serde"] }
 automerge-backend = { path = "../automerge-backend" }
 criterion = "0.3.3"
 rand = "^0.8"
-env_logger = "0.8.3"
+env_logger = "~0.9"
 log = "0.4.14"
 wasm-bindgen-test = "0.3.22"
-pretty_assertions = "0.7.1"
-proptest = { version = "0.10.1", default-features = false, features = ["std"] }
+pretty_assertions = "~1.1"
+proptest = { version = "~1.0", default-features = false, features = ["std"] }
 
 [[bench]]
 name = "statetree_apply_diff"

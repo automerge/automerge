@@ -7,7 +7,7 @@ use automerge_protocol as amp;
 use automerge_protocol::{ActorId, ElementId, Key, ObjectId, Op, OpType};
 use maplit::hashmap;
 use pretty_assertions::assert_eq;
-use test_env_log::test;
+use test_log::test;
 
 #[test]
 fn test_frontend_uses_correct_elem_ids() {

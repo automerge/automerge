@@ -92,9 +92,10 @@ where
         distance: usize,
         is_head: bool,
     ) {
-        if new_level > self.level && !is_head {
-            panic!("Cannot increase the level of a non-head node");
-        }
+        assert!(
+            !(new_level > self.level && !is_head),
+            "Cannot increase the level of a non-head node"
+        );
         self.level = max(self.level, new_level);
 
         for level in from_level..self.level {
@@ -125,9 +126,10 @@ where
         from_level: usize,
         distance: usize,
     ) {
-        if new_level > self.level {
-            panic!("Cannot increase the level on insert_node_before");
-        }
+        assert!(
+            !(new_level > self.level),
+            "Cannot increase the level on insert_node_before"
+        );
         for level in from_level..self.level {
             if level < new_level {
                 self.links[level].prev = Link {
@@ -438,9 +440,7 @@ where
                 if node.level > level {
                     break;
                 }
-                if node.level < level {
-                    panic!("Level lower than expected");
-                }
+                assert!(!(node.level < level), "Level lower than expected");
                 link += node.links[level - 1].prev;
             }
             pre.push(link);
@@ -462,9 +462,7 @@ where
                 if node.level > level {
                     break;
                 }
-                if node.level < level {
-                    panic!("Level lower than expected");
-                }
+                assert!(!(node.level < level), "Level lower than expected");
                 link += node.links[level - 1].next;
             }
             suc.push(link);

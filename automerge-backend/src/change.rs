@@ -1195,7 +1195,7 @@ mod tests {
         assert_eq!(bin1, bin2);
     }
 
-    #[test_env_log::test]
+    #[test_log::test]
     fn test_multiops() {
         let actor1 = amp::ActorId::from_str("deadbeefdeadbeef").unwrap();
         let change1 = amp::Change {
@@ -1225,7 +1225,7 @@ mod tests {
         assert_eq!(bin1, bin2);
     }
 
-    #[test_env_log::test]
+    #[test_log::test]
     fn test_encode_decode_document() {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(loaded_changes[1].max_op(), 8);
     }
 
-    #[test_env_log::test]
+    #[test_log::test]
     fn test_encode_decode_document_large_enough_for_compression() {
         let actor = amp::ActorId::random();
         let mut backend = crate::Backend::new();
@@ -1406,12 +1406,12 @@ mod tests {
             calculated,
         }) = decode_result
         {
-            if calculated != hash {
-                panic!(
-                    "expected invalid checksum error with hash {:?} but found one with hash {:?}",
-                    calculated, hash
-                );
-            }
+            assert!(
+                !(calculated != hash),
+                "expected invalid checksum error with hash {:?} but found one with hash {:?}",
+                calculated,
+                hash
+            );
         } else {
             panic!(
                 "expected invalid checksum error but found {:?}",

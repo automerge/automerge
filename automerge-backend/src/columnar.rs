@@ -348,7 +348,7 @@ impl<'a> Iterator for ExtraIterator<'a> {
         let v = self.len.next()??;
         // if v % 16 == VALUE_TYPE_BYTES => { // this should be bytes
         let len = v >> 4;
-        self.extra.read_bytes(len).ok().map(|s| s.to_vec())
+        self.extra.read_bytes(len).ok().map(<[u8]>::to_vec)
     }
 }
 
