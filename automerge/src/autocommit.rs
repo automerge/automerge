@@ -55,7 +55,7 @@ impl AutoCommit {
         }
     }
 
-    fn try_start_transaction(&mut self) {
+    fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let actor = self.doc.get_actor_index();
 
@@ -240,7 +240,7 @@ impl AutoCommit {
 
     pub fn commit(&mut self) -> Vec<ChangeHash> {
         // ensure that even no changes triggers a change
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         self.transaction
             .take()
             .map(|tx| tx.commit(&mut self.doc, None, None))
@@ -263,7 +263,7 @@ impl AutoCommit {
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
     pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         self.transaction
             .take()
             .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
@@ -331,7 +331,7 @@ impl Transactable for AutoCommit {
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.set(&mut self.doc, obj, prop, value)
     }
@@ -342,7 +342,7 @@ impl Transactable for AutoCommit {
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.insert(&mut self.doc, obj, index, value)
     }
@@ -353,13 +353,13 @@ impl Transactable for AutoCommit {
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.inc(&mut self.doc, obj, prop, value)
     }
 
     fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.del(&mut self.doc, obj, prop)
     }
@@ -373,7 +373,7 @@ impl Transactable for AutoCommit {
         del: usize,
         vals: Vec<Value>,
     ) -> Result<Vec<ExId>, AutomergeError> {
-        self.try_start_transaction();
+        self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.splice(&mut self.doc, obj, pos, del, vals)
     }
