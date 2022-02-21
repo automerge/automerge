@@ -247,6 +247,21 @@ impl AutoTxn {
             .unwrap_or_else(|| self.doc.get_heads())
     }
 
+    /// Commit the current operations with some options.
+    ///
+    /// ```
+    /// # use automerge::transaction::CommitOptions;
+    /// # use automerge::transaction::Transactable;
+    /// # use automerge::Value;
+    /// # use automerge::ROOT;
+    /// # use automerge::AutoTxn;
+    /// # use std::time::SystemTime;
+    /// let mut doc = AutoTxn::new();
+    /// doc.set(&ROOT, "todos", Value::list()).unwrap();
+    /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
+    /// i64;
+    /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// ```
     pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
         self.try_start_transaction();
         self.transaction

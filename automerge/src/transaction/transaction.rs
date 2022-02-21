@@ -36,6 +36,22 @@ impl<'a> Transaction<'a> {
         self.inner.take().unwrap().commit(self.doc, None, None)
     }
 
+    /// Commit the operations in this transaction with some options.
+    ///
+    /// ```
+    /// # use automerge::transaction::CommitOptions;
+    /// # use automerge::transaction::Transactable;
+    /// # use automerge::Value;
+    /// # use automerge::ROOT;
+    /// # use automerge::Automerge;
+    /// # use std::time::SystemTime;
+    /// let mut doc = Automerge::new();
+    /// let mut tx = doc.transaction();
+    /// tx.set(&ROOT, "todos", Value::list()).unwrap();
+    /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
+    /// i64;
+    /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
+    /// ```
     pub fn commit_with(mut self, options: CommitOptions) -> Vec<ChangeHash> {
         self.inner
             .take()

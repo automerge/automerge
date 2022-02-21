@@ -7,14 +7,14 @@ pub struct CommitOptions {
 
 impl CommitOptions {
     /// Add a message to the commit.
-    pub fn with_message(mut self, message: String) -> Self {
-        self.message = Some(message);
+    pub fn with_message<S: Into<String>>(mut self, message: S) -> Self {
+        self.message = Some(message.into());
         self
     }
 
     /// Add a message to the commit.
-    pub fn set_message(&mut self, message: String) -> &mut Self {
-        self.message = Some(message);
+    pub fn set_message<S: Into<String>>(&mut self, message: S) -> &mut Self {
+        self.message = Some(message.into());
         self
     }
 
