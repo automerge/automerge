@@ -1,5 +1,5 @@
 use automerge::transaction::Transactable;
-use automerge::{ActorId, AutoTxn, Automerge, Value, ROOT};
+use automerge::{ActorId, AutoCommit, Automerge, Value, ROOT};
 
 mod helpers;
 #[allow(unused_imports)]
@@ -9,7 +9,7 @@ use helpers::{
 };
 #[test]
 fn no_conflict_on_repeated_assignment() {
-    let mut doc = AutoTxn::new();
+    let mut doc = AutoCommit::new();
     doc.set(&automerge::ROOT, "foo", 1).unwrap();
     doc.set(&automerge::ROOT, "foo", 2).unwrap();
     assert_doc!(
@@ -902,10 +902,10 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc1.insert(&list, 1, "b")?;
     doc1.insert(&list, 2, "c")?;
 
-    let mut doc2 = AutoTxn::load(&doc1.save()?)?;
+    let mut doc2 = AutoCommit::load(&doc1.save()?)?;
     doc2.set_actor(actor2);
 
-    let mut doc3 = AutoTxn::load(&doc1.save()?)?;
+    let mut doc3 = AutoCommit::load(&doc1.save()?)?;
     doc3.set_actor(actor3);
 
     doc1.set(&list, 1, Value::counter(0))?;
@@ -954,7 +954,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 2);
 
-    let doc4 = AutoTxn::load(&doc1.save()?)?;
+    let doc4 = AutoCommit::load(&doc1.save()?)?;
 
     assert_eq!(doc4.length(&list), 2);
 
@@ -962,7 +962,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 1);
 
-    let doc5 = AutoTxn::load(&doc1.save()?)?;
+    let doc5 = AutoCommit::load(&doc1.save()?)?;
 
     assert_eq!(doc5.length(&list), 1);
 

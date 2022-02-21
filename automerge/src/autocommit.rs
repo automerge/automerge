@@ -9,18 +9,18 @@ use crate::{SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
-pub struct AutoTxn {
+pub struct AutoCommit {
     doc: Automerge,
     transaction: Option<TransactionInner>,
 }
 
-impl Default for AutoTxn {
+impl Default for AutoCommit {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl AutoTxn {
+impl AutoCommit {
     pub fn new() -> Self {
         Self {
             doc: Automerge::new(),
@@ -254,9 +254,9 @@ impl AutoTxn {
     /// # use automerge::transaction::Transactable;
     /// # use automerge::Value;
     /// # use automerge::ROOT;
-    /// # use automerge::AutoTxn;
+    /// # use automerge::AutoCommit;
     /// # use std::time::SystemTime;
-    /// let mut doc = AutoTxn::new();
+    /// let mut doc = AutoCommit::new();
     /// doc.set(&ROOT, "todos", Value::list()).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
@@ -278,7 +278,7 @@ impl AutoTxn {
     }
 }
 
-impl Transactable for AutoTxn {
+impl Transactable for AutoCommit {
     fn pending_ops(&self) -> usize {
         self.transaction
             .as_ref()

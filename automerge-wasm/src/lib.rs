@@ -31,12 +31,12 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct Automerge(automerge::AutoTxn);
+pub struct Automerge(automerge::AutoCommit);
 
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, JsValue> {
-        let mut automerge = automerge::AutoTxn::new();
+        let mut automerge = automerge::AutoCommit::new();
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
             automerge.set_actor(a);
@@ -514,7 +514,7 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = loadDoc)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let mut automerge = am::AutoTxn::load(&data).map_err(to_js_err)?;
+    let mut automerge = am::AutoCommit::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         automerge.set_actor(actor)

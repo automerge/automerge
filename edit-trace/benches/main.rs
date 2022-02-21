@@ -1,4 +1,4 @@
-use automerge::{transaction::Transactable, AutoTxn, Automerge, Value, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, Automerge, Value, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 
@@ -13,8 +13,8 @@ fn replay_trace_tx(commands: Vec<(usize, usize, Vec<Value>)>) -> Automerge {
     doc
 }
 
-fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<Value>)>) -> AutoTxn {
-    let mut doc = AutoTxn::new();
+fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<Value>)>) -> AutoCommit {
+    let mut doc = AutoCommit::new();
     let text = doc.set(&ROOT, "text", Value::text()).unwrap().unwrap();
     for (pos, del, vals) in commands {
         doc.splice(&text, pos, del, vals).unwrap();
@@ -27,7 +27,7 @@ fn save_trace(mut doc: Automerge) {
     doc.save().unwrap();
 }
 
-fn save_trace_autotx(mut doc: AutoTxn) {
+fn save_trace_autotx(mut doc: AutoCommit) {
     doc.save().unwrap();
 }
 
@@ -36,7 +36,7 @@ fn load_trace(bytes: &[u8]) {
 }
 
 fn load_trace_autotx(bytes: &[u8]) {
-    AutoTxn::load(bytes).unwrap();
+    AutoCommit::load(bytes).unwrap();
 }
 
 fn bench(c: &mut Criterion) {

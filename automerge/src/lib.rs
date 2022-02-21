@@ -24,8 +24,8 @@ macro_rules! __log {
      }
  }
 
+mod autocommit;
 mod automerge;
-mod autotxn;
 mod change;
 mod clock;
 mod columnar;
@@ -46,7 +46,7 @@ mod value;
 mod visualisation;
 
 pub use crate::automerge::Automerge;
-pub use autotxn::AutoTxn;
+pub use autocommit::AutoCommit;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use exid::ExId as ObjId;
