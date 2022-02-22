@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use automerge as am;
 
 pub enum AMresult {
@@ -5,7 +6,13 @@ pub enum AMresult {
     ObjId(am::ObjId),
     Values(Vec<am::Value>),
     Changes(Vec<am::Change>),
-    Error(String),
+    Error(CString),
+}
+
+impl AMresult {
+  pub (crate) fn err(s: &str) -> Self {
+     AMresult::Error(CString::new(s).unwrap())
+  }
 }
 
 impl From<Result<Option<am::ObjId>, am::AutomergeError>> for AMresult {
@@ -13,7 +20,7 @@ impl From<Result<Option<am::ObjId>, am::AutomergeError>> for AMresult {
         match maybe {
             Ok(None) => AMresult::Ok,
             Ok(Some(obj)) => AMresult::ObjId(obj),
-            Err(e) => AMresult::Error(e.to_string()),
+            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
         }
     }
 }
