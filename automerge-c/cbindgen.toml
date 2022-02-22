@@ -11,6 +11,7 @@ after_includes = "\n#define AM_ROOT NULL"
 usize_is_size_t = true
 
 [enum]
+rename_variants = "ScreamingSnakeCase"
 enum_class = true
 prefix_with_name = true
 derive_const_casts = true
