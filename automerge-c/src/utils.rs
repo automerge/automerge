@@ -1,4 +1,4 @@
-use crate::{AMobj, AMresult, Datatype};
+use crate::{AMobj, AMresult, AmDatatype};
 use automerge as am;
 use libc::{c_double, c_long, c_ulong};
 use std::{
@@ -28,33 +28,33 @@ impl From<AMresult> for *mut AMresult {
     }
 }
 
-impl From<&am::Value> for Datatype {
+impl From<&am::Value> for AmDatatype {
     fn from(v: &am::Value) -> Self {
         match v {
-            am::Value::Scalar(am::ScalarValue::Str(_)) => Datatype::Str,
-            am::Value::Scalar(am::ScalarValue::Int(_)) => Datatype::Int,
-            am::Value::Scalar(am::ScalarValue::Uint(_)) => Datatype::Uint,
-            am::Value::Scalar(am::ScalarValue::F64(_)) => Datatype::F64,
-            am::Value::Scalar(am::ScalarValue::Boolean(_)) => Datatype::Boolean,
-            am::Value::Scalar(am::ScalarValue::Bytes(_)) => Datatype::Bytes,
-            am::Value::Scalar(am::ScalarValue::Counter(_)) => Datatype::Counter,
-            am::Value::Scalar(am::ScalarValue::Timestamp(_)) => Datatype::Timestamp,
-            am::Value::Scalar(am::ScalarValue::Null) => Datatype::Null,
-            am::Value::Object(am::ObjType::Map) => Datatype::Map,
-            am::Value::Object(am::ObjType::List) => Datatype::List,
-            am::Value::Object(am::ObjType::Table) => Datatype::Table,
-            am::Value::Object(am::ObjType::Text) => Datatype::Text,
+            am::Value::Scalar(am::ScalarValue::Str(_)) => AmDatatype::Str,
+            am::Value::Scalar(am::ScalarValue::Int(_)) => AmDatatype::Int,
+            am::Value::Scalar(am::ScalarValue::Uint(_)) => AmDatatype::Uint,
+            am::Value::Scalar(am::ScalarValue::F64(_)) => AmDatatype::F64,
+            am::Value::Scalar(am::ScalarValue::Boolean(_)) => AmDatatype::Boolean,
+            am::Value::Scalar(am::ScalarValue::Bytes(_)) => AmDatatype::Bytes,
+            am::Value::Scalar(am::ScalarValue::Counter(_)) => AmDatatype::Counter,
+            am::Value::Scalar(am::ScalarValue::Timestamp(_)) => AmDatatype::Timestamp,
+            am::Value::Scalar(am::ScalarValue::Null) => AmDatatype::Null,
+            am::Value::Object(am::ObjType::Map) => AmDatatype::Map,
+            am::Value::Object(am::ObjType::List) => AmDatatype::List,
+            am::Value::Object(am::ObjType::Table) => AmDatatype::Table,
+            am::Value::Object(am::ObjType::Text) => AmDatatype::Text,
         }
     }
 }
 
 pub(crate) fn import_value(
     value: *const c_void,
-    datatype: Datatype,
+    datatype: AmDatatype,
 ) -> Result<am::Value, AMresult> {
     unsafe {
         match datatype {
-            Datatype::Str => {
+            AmDatatype::Str => {
                 let value: *const c_char = value.cast();
                 if !value.is_null() {
                     Some(CStr::from_ptr(value).to_string_lossy().to_string().into())
@@ -62,37 +62,37 @@ pub(crate) fn import_value(
                     None
                 }
             }
-            Datatype::Boolean => value
+            AmDatatype::Boolean => value
                 .cast::<*const c_char>()
                 .as_ref()
                 .map(|v| am::Value::boolean(**v != 0)),
-            Datatype::Int => value
+            AmDatatype::Int => value
                 .cast::<*const c_long>()
                 .as_ref()
                 .map(|v| am::Value::int(**v)),
-            Datatype::Uint => value
+            AmDatatype::Uint => value
                 .cast::<*const c_ulong>()
                 .as_ref()
                 .map(|v| am::Value::uint(**v)),
-            Datatype::F64 => value
+            AmDatatype::F64 => value
                 .cast::<*const c_double>()
                 .as_ref()
                 .map(|v| am::Value::f64(**v)),
-            Datatype::Timestamp => value
+            AmDatatype::Timestamp => value
                 .cast::<*const c_long>()
                 .as_ref()
                 .map(|v| am::Value::timestamp(**v)),
-            Datatype::Counter => value
+            AmDatatype::Counter => value
                 .cast::<*const c_long>()
                 .as_ref()
                 .map(|v| am::Value::counter(**v)),
-            Datatype::Null => Some(am::Value::null()),
-            Datatype::Map => Some(am::Value::map()),
-            Datatype::List => Some(am::Value::list()),
-            Datatype::Text => Some(am::Value::text()),
-            Datatype::Table => Some(am::Value::table()),
-            _ => return Err(AMresult::Error("Invalid datatype".into())),
+            AmDatatype::Null => Some(am::Value::null()),
+            AmDatatype::Map => Some(am::Value::map()),
+            AmDatatype::List => Some(am::Value::list()),
+            AmDatatype::Text => Some(am::Value::text()),
+            AmDatatype::Table => Some(am::Value::table()),
+            _ => return Err(AMresult::err("Invalid datatype")),
         }
-        .ok_or_else(|| AMresult::Error("Null value".into()))
+        .ok_or_else(|| AMresult::err("Null value"))
     }
 }

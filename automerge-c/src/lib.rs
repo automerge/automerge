@@ -9,13 +9,14 @@ mod doc;
 mod result;
 mod utils;
 
+
 use doc::AMdoc;
 use result::AMresult;
 use utils::import_value;
 
 #[derive(Debug)]
 #[repr(u8)]
-pub enum Datatype {
+pub enum AmDatatype {
     Str,
     Int,
     Uint,
@@ -33,12 +34,16 @@ pub enum Datatype {
 
 #[derive(Debug)]
 #[repr(u8)]
-pub enum ResultType {
-    Ok,
-    ObjId,
+pub enum AmStatus {
+    CommandOk,
+    ObjOk,
+    ValuesOk,
+    ChangesOk,
+    InvalidResult,
+    Error,
 }
 
-impl fmt::Display for Datatype {
+impl fmt::Display for AmDatatype {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
@@ -55,7 +60,7 @@ macro_rules! to_doc {
         let handle = $handle.as_mut();
         match handle {
             Some(b) => b,
-            None => return AMresult::Error("Invalid AMdoc pointer".into()).into(),
+            None => return AMresult::err("Invalid AMdoc pointer").into(),
         }
     }};
 }
@@ -81,7 +86,7 @@ macro_rules! to_obj {
         let handle = $handle.as_ref();
         match handle {
             Some(b) => b,
-            None => return AMresult::Error("Invalid ObjID pointer".into()).into(),
+            None => &AMobj(am::ObjId::Root),
         }
     }};
 }
@@ -138,10 +143,10 @@ pub unsafe extern "C" fn AMconfig(
                 doc.set_actor(actor);
                 AMresult::Ok.into()
             } else {
-                AMresult::Error(format!("Invalid actor '{}'", to_str!(value))).into()
+                AMresult::err(&format!("Invalid actor '{}'", to_str!(value))).into()
             }
         }
-        k => AMresult::Error(format!("Invalid config key '{}'", k)).into(),
+        k => AMresult::err(&format!("Invalid config key '{}'", k)).into(),
     }
 }
 
@@ -150,15 +155,21 @@ pub unsafe extern "C" fn AMconfig(
 /// key="actor" value=(actor id in hex format)
 #[no_mangle]
 pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
-    //let doc = to_doc!(doc);
     unimplemented!()
 }
 
 /// # Safety
 /// This should be called with a valid pointer to a `AMresult` or NULL
 #[no_mangle]
-pub unsafe extern "C" fn AMresultStatus(_result: *const AMresult) -> isize {
-    unimplemented!()
+pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
+  match result.as_mut() {
+      Some(AMresult::Ok) => AmStatus::CommandOk,
+      Some(AMresult::Error(_)) => AmStatus::Error,
+      Some(AMresult::ObjId(_)) => AmStatus::ObjOk,
+      Some(AMresult::Values(_)) => AmStatus::ValuesOk,
+      Some(AMresult::Changes(_)) => AmStatus::ChangesOk,
+      None => AmStatus::InvalidResult,
+  }
 }
 
 /// # Safety
@@ -166,9 +177,9 @@ pub unsafe extern "C" fn AMresultStatus(_result: *const AMresult) -> isize {
 #[no_mangle]
 pub unsafe extern "C" fn AMmapSet(
     doc: *mut AMdoc,
-    obj: *mut am::ObjId,
+    obj: *mut AMobj,
     key: *const c_char,
-    datatype: Datatype,
+    datatype: AmDatatype,
     value: *const c_void,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
@@ -182,7 +193,7 @@ pub unsafe extern "C" fn AMlistSet(
     doc: *mut AMdoc,
     obj: *mut AMobj,
     index: usize,
-    datatype: Datatype,
+    datatype: AmDatatype,
     value: *const c_void,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
@@ -192,7 +203,7 @@ pub unsafe extern "C" fn AMlistSet(
 /// # Safety
 /// This should be called with a valid pointer to a `AMresult` or NULL
 #[no_mangle]
-pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut am::ObjId {
+pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut AMobj {
     unimplemented!()
 }
 
@@ -204,4 +215,14 @@ pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
         let result: AMresult = *Box::from_raw(result);
         drop(result)
     }
+}
+
+/// # Safety
+/// This should be called with a valid pointer to a `AMresult` or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char {
+  match result.as_mut() {
+      Some(AMresult::Error(s)) => s.as_ptr(),
+      _ => 0 as *const c_char,
+  }
 }
