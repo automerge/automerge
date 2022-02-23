@@ -1,6 +1,8 @@
 use std::ffi::CString;
 use automerge as am;
 
+/// \class AMresult
+/// \brief A container of result codes, messages and values.
 pub enum AMresult {
     Ok,
     ObjId(am::ObjId),
