@@ -32,9 +32,9 @@ if(@BUILD_SHARED_LIBS@)
 
         set(@SYMBOL_PREFIX@_NO_SONAME_RELEASE "FALSE")
 
-	get_filename_component(@SYMBOL_PREFIX@_SONAME_DEBUG "${@SYMBOL_PREFIX@_LOCATION_DEBUG}" NAME)
+        get_filename_component(@SYMBOL_PREFIX@_SONAME_DEBUG "${@SYMBOL_PREFIX@_LOCATION_DEBUG}" NAME)
 
-	get_filename_component(@SYMBOL_PREFIX@_SONAME_RELEASE "${@SYMBOL_PREFIX@_LOCATION_RELEASE}" NAME)
+        get_filename_component(@SYMBOL_PREFIX@_SONAME_RELEASE "${@SYMBOL_PREFIX@_LOCATION_RELEASE}" NAME)
     endif()
 
     set(@SYMBOL_PREFIX@_TYPE "SHARED")
@@ -48,7 +48,7 @@ else()
     set(@SYMBOL_PREFIX@_LOCATION_RELEASE "${@SYMBOL_PREFIX@_IMPLIB_RELEASE}")
 
     set(@SYMBOL_PREFIX@_IMPLIB_RELEASE "")
-    
+
     set(@SYMBOL_PREFIX@_NO_SONAME_DEBUG "TRUE")
 
     set(@SYMBOL_PREFIX@_NO_SONAME_RELEASE "TRUE")
@@ -65,7 +65,8 @@ add_library(@NAMESPACE@@PROJECT_NAME@ ${@SYMBOL_PREFIX@_TYPE} IMPORTED)
 set_target_properties(
     @NAMESPACE@@PROJECT_NAME@
     PROPERTIES
-        # \note Cargo writes a debug build into a nested directory instead of decorating its name.
+        # \note Cargo writes a debug build into a nested directory instead of
+        #       decorating its name.
         DEBUG_POSTFIX ""
         DEFINE_SYMBOL "${@SYMBOL_PREFIX@_DEFINE_SYMBOL}"
         IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
