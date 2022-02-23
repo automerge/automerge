@@ -59,7 +59,7 @@ option(BUILD_TESTING "Enable the choice of testing the build." ON)
 
 include(CMakePackageConfigHelpers)
 
-include(GNUInstallDirs) 
+include(GNUInstallDirs)
 
 if(BUILD_TESTING)
     include(CTest)
@@ -68,7 +68,7 @@ if(BUILD_TESTING)
 endif()
 
 string(MAKE_C_IDENTIFIER ${PROJECT_NAME} SYMBOL_PREFIX)
-       
+
 string(TOUPPER ${SYMBOL_PREFIX} SYMBOL_PREFIX)
 
 add_subdirectory(src)
@@ -116,7 +116,8 @@ string(TOLOWER ${NS_REST} NS_REST)
 
 string(CONCAT NAMESPACE ${NS_FIRST} ${NS_REST} "::")
 
-# \note CMake doesn't automate the exporting of an imported library's targets so the package configuration script must do it.
+# \note CMake doesn't automate the exporting of an imported library's targets
+#       so the package configuration script must do it.
 configure_package_config_file(
     ${CMAKE_MODULE_PATH}/${PROJECT_CONFIG_NAME}.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_CONFIG_NAME}.cmake

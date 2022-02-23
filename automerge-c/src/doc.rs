@@ -1,6 +1,8 @@
 use automerge as am;
 use std::ops::{Deref, DerefMut};
 
+/// \class AMdoc
+/// \brief A JSON-like CRDT.
 #[derive(Clone)]
 pub struct AMdoc(am::Automerge);
 
