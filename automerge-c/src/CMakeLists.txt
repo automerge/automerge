@@ -29,14 +29,15 @@ set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
     CARGO_OUTPUT
-        # \note cbindgen won't regenerate the header when it's missing so it can't be cleaned.
+        # \note cbindgen won't regenerate a missing header so it can't be cleaned.
         #${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
 
 if(WIN32)
-    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    # \note The basename of an import library output by Cargo is the filename
+    #       of its corresponding shared library.
     list(APPEND CARGO_OUTPUT ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX})
 endif()
 
@@ -66,7 +67,8 @@ if(BUILD_SHARED_LIBS)
 
     set(LIBRARY_DEFINE_SYMBOL "${SYMBOL_PREFIX}_EXPORTS")
 
-    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    # \note The basename of an import library output by Cargo is the filename
+    #       of its corresponding shared library.
     set(LIBRARY_IMPLIB "${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
     set(LIBRARY_LOCATION "${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}")
@@ -99,7 +101,8 @@ target_sources(${LIBRARY_NAME} INTERFACE ${CARGO_OUTPUT})
 set_target_properties(
     ${LIBRARY_NAME}
     PROPERTIES
-        # \note Cargo writes a debug build into a nested directory instead of decorating its name.
+        # \note Cargo writes a debug build into a nested directory instead of
+        #       decorating its name.
         DEBUG_POSTFIX ""
     	DEFINE_SYMBOL "${LIBRARY_DEFINE_SYMBOL}"
         IMPORTED_IMPLIB "${LIBRARY_IMPLIB}"
@@ -141,7 +144,8 @@ target_link_libraries(${LIBRARY_NAME} INTERFACE ${LIBRARY_DEPENDENCIES})
 install(
     FILES $<TARGET_PROPERTY:${LIBRARY_NAME},IMPORTED_IMPLIB>
     TYPE LIB
-    # \note The basename of an import library output by Cargo is the filename of its corresponding shared library.
+    # \note The basename of an import library output by Cargo is the filename
+    #       of its corresponding shared library.
     RENAME "${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_STATIC_LIBRARY_SUFFIX}"
     OPTIONAL
 )
@@ -164,8 +168,9 @@ if(BUILD_TESTING)
 
     set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
 
-    # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't contain a non-existent path so its build-time
-    #       include directory must be specified for all of its dependent targets instead.
+    # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
+    #       contain a non-existent path so its build-time include directory
+    #       must be specified for all of its dependent targets instead.
     target_include_directories(test_${LIBRARY_NAME} PRIVATE "$<BUILD_INTERFACE:${CARGO_TARGET_DIR}>")
 
     target_link_libraries(test_${LIBRARY_NAME} PRIVATE ${LIBRARY_NAME})
@@ -193,4 +198,35 @@ if(BUILD_TESTING)
             "Running the test(s)..."
         VERBATIM
     )
+endif()
+
+find_package(Doxygen OPTIONAL_COMPONENTS dot)
+
+if(DOXYGEN_FOUND)
+    set(DOXYGEN_GENERATE_LATEX YES)
+
+    set(DOXYGEN_PDF_HYPERLINKS YES)
+
+    set(DOXYGEN_PROJECT_LOGO "${CMAKE_SOURCE_DIR}/img/brandmark.png")
+
+    set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_SOURCE_DIR}/README.md")
+
+    # \note This target is only necessary because cbindgen won't allow the
+    #       generated header to be listed in the Cargo command's output, being
+    #       Doxygen's input would've been enough otherwise.
+    add_custom_target(
+        ${LIBRARY_NAME}_header
+        DEPENDS ${CARGO_OUTPUT}
+    )
+
+    doxygen_add_docs(
+        ${LIBRARY_NAME}_docs
+        "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
+        "${CMAKE_SOURCE_DIR}/README.md"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Producing documentation with Doxygen..."
+    )
+
+    add_dependencies(${LIBRARY_NAME}_docs ${LIBRARY_NAME}_header)
+
 endif()
