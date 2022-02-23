@@ -55,6 +55,23 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'AbbbA', [], 'ccc' ]);
     })
 
+    it('should handle sticky marks at the beginning of a string (..)', () => {
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[0..3]", "bold", true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
+
+      let doc2 = doc.fork()
+      doc2.insert(list, 0, "A")
+      doc2.insert(list, 4, "B")
+      doc.merge(doc2)
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'A', [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'Bbbbccc' ]);
+    })
+
     it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create()
       let list = doc.set("_root", "list", TEXT)
