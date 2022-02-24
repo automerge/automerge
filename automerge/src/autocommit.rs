@@ -2,8 +2,8 @@ use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
-    change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
-    Change, ChangeHash, Prop, Value,
+    change::export_change, query, transaction::TransactionInner, ActorId, Automerge,
+    AutomergeError, Change, ChangeHash, Prop, ScalarValue, Value,
 };
 use crate::{SyncMessage, SyncState};
 
@@ -347,6 +347,31 @@ impl Transactable for AutoCommit {
         tx.insert(&mut self.doc, obj, index, value)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn mark(
+        &mut self,
+        obj: &ExId,
+        start: usize,
+        expand_start: bool,
+        end: usize,
+        expand_end: bool,
+        mark: &str,
+        value: ScalarValue,
+    ) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.mark(
+            &mut self.doc,
+            obj,
+            start,
+            expand_start,
+            end,
+            expand_end,
+            mark,
+            value,
+        )
+    }
+
     fn inc<P: Into<Prop>>(
         &mut self,
         obj: &ExId,
@@ -384,6 +409,26 @@ impl Transactable for AutoCommit {
 
     fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
+    }
+
+    fn list(&self, obj: &ExId) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        self.doc.list(obj)
+    }
+
+    fn list_at(
+        &self,
+        obj: &ExId,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        self.doc.list_at(obj, heads)
+    }
+
+    fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError> {
+        self.doc.spans(obj)
+    }
+
+    fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError> {
+        self.doc.raw_spans(obj)
     }
 
     // TODO - I need to return these OpId's here **only** to get

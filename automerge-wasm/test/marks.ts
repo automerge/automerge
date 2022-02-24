@@ -2,13 +2,13 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import { create, loadDoc, Automerge, TEXT, encodeChange, decodeChange } from '..'
+import { create, loadDoc, Automerge, encodeChange, decodeChange } from '..'
 
 describe('Automerge', () => {
   describe('marks', () => {
     it('should handle marks [..]', () => {
       let doc = create()
-       let list = doc.set("_root", "list", TEXT)
+       let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
        doc.splice(list, 0, 0, "aaabbbccc")
        doc.mark(list, "[3..6]", "bold" , true)
@@ -22,7 +22,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] at the beginning of a string', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
@@ -39,7 +39,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] with splice', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
@@ -56,7 +56,7 @@ describe('Automerge', () => {
 
     it('should handle marks across multiple forks', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
@@ -79,7 +79,7 @@ describe('Automerge', () => {
 
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
 
       doc.splice(list, 0, 0, "aaabbbccc")
@@ -100,7 +100,7 @@ describe('Automerge', () => {
 
     it('should handle sticky marks (..)', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
@@ -114,7 +114,7 @@ describe('Automerge', () => {
 
     it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create()
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
@@ -143,7 +143,7 @@ describe('Automerge', () => {
 
     it('should handle overlapping marks', () => {
       let doc : Automerge = create("aabbcc")
-      let list = doc.set("_root", "list", TEXT)
+      let list = doc.make("_root", "list", "")
       if (!list) throw new Error('should not be undefined')
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)

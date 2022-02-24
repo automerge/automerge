@@ -1,6 +1,8 @@
+use crate::exid::ExId;
 use crate::op_tree::{OpSetMetadata, OpTreeNode};
 use crate::types::{Clock, Counter, ElemId, Op, OpId, OpType, ScalarValue};
 use fxhash::FxBuildHasher;
+use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -36,6 +38,17 @@ pub(crate) use prop_at::PropAt;
 pub(crate) use raw_spans::RawSpans;
 pub(crate) use seek_op::SeekOp;
 pub(crate) use spans::{Span, Spans};
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct SpanInfo {
+    pub id: ExId,
+    pub time: i64,
+    pub start: usize,
+    pub end: usize,
+    #[serde(rename = "type")]
+    pub span_type: String,
+    pub value: ScalarValue,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct CounterData {

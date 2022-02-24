@@ -1,7 +1,7 @@
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
+use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, ScalarValue, Value};
 use crate::{AutomergeError, OpType};
 
 #[derive(Debug, Clone)]
@@ -116,6 +116,7 @@ impl TransactionInner {
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
+        let value = value.into();
         if let Some(id) = self.do_insert(doc, obj, index, value)? {
             Ok(Some(doc.id_to_exid(id)))
         } else {
@@ -123,20 +124,45 @@ impl TransactionInner {
         }
     }
 
-    fn do_insert<V: Into<Value>>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn mark(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        start: usize,
+        expand_start: bool,
+        end: usize,
+        expand_end: bool,
+        mark: &str,
+        value: ScalarValue,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+
+        self.do_insert(
+            doc,
+            obj,
+            start,
+            OpType::mark(mark.into(), expand_start, value),
+        )?;
+        self.do_insert(doc, obj, end, OpType::MarkEnd(expand_end))?;
+
+        Ok(())
+    }
+
+    fn do_insert<V: Into<OpType>>(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         index: usize,
-        value: V,
+        action: V,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let value = value.into();
-        let action = value.into();
+        //let value = value.into();
+        let action = action.into();
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {

@@ -13,7 +13,6 @@ use crate::types::{
 };
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
-use serde::Serialize;
 
 /// An automerge document.
 #[derive(Debug, Clone)]
@@ -316,13 +315,13 @@ impl Automerge {
         Ok(query.spans)
     }
 
-    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<SpanInfo>, AutomergeError> {
+    pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let query = self.ops.search(obj, query::RawSpans::new());
         let result = query
             .spans
             .into_iter()
-            .map(|s| SpanInfo {
+            .map(|s| query::SpanInfo {
                 id: self.id_to_exid(s.id),
                 time: self.history[s.change].time,
                 start: s.start,
@@ -334,68 +333,37 @@ impl Automerge {
         Ok(result)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn mark(
-        &mut self,
-        obj: &ExId,
-        start: usize,
-        expand_start: bool,
-        end: usize,
-        expand_end: bool,
-        mark: &str,
-        value: ScalarValue,
-    ) -> Result<(), AutomergeError> {
-        let obj = self.exid_to_obj(obj)?;
+    /*
+        #[allow(clippy::too_many_arguments)]
+        pub fn mark(
+            &mut self,
+            obj: &ExId,
+            start: usize,
+            expand_start: bool,
+            end: usize,
+            expand_end: bool,
+            mark: &str,
+            value: ScalarValue,
+        ) -> Result<(), AutomergeError> {
+            let obj = self.exid_to_obj(obj)?;
 
-        self.do_insert(obj, start, OpType::mark(mark.into(), expand_start, value))?;
-        self.do_insert(obj, end, OpType::MarkEnd(expand_end))?;
+            self.do_insert(obj, start, OpType::mark(mark.into(), expand_start, value))?;
+            self.do_insert(obj, end, OpType::MarkEnd(expand_end))?;
 
-        /*
-                let (a, b) = query.ops()?;
-                let (pos, key) = a;
-                let id = self.next_id();
-                let op = Op {
-                    change: self.history.len(),
-                    id,
-                    action: OpType::Mark(MarkData { name: mark.into(), expand: expand_start, value}),
-                    obj,
-                    key,
-                    succ: Default::default(),
-                    pred: Default::default(),
-                    insert: true,
-                };
-                self.ops.insert(pos, op.clone());
-                self.tx().operations.push(op);
+            Ok(())
+        }
 
-                let (pos, key) = b;
-                let id = self.next_id();
-                let op = Op {
-                    change: self.history.len(),
-                    id,
-                    action: OpType::Unmark(expand_end),
-                    obj,
-                    key,
-                    succ: Default::default(),
-                    pred: Default::default(),
-                    insert: true,
-                };
-                self.ops.insert(pos, op.clone());
-                self.tx().operations.push(op);
-        */
-
-        Ok(())
-    }
-
-    pub fn unmark(
-        &self,
-        _obj: &ExId,
-        _start: usize,
-        _end: usize,
-        _inclusive: bool,
-        _mark: &str,
-    ) -> Result<String, AutomergeError> {
-        unimplemented!()
-    }
+        pub fn unmark(
+            &self,
+            _obj: &ExId,
+            _start: usize,
+            _end: usize,
+            _inclusive: bool,
+            _mark: &str,
+        ) -> Result<String, AutomergeError> {
+            unimplemented!()
+        }
+    */
 
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
@@ -964,17 +932,6 @@ impl Default for Automerge {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct SpanInfo {
-    pub id: ExId,
-    pub time: i64,
-    pub start: usize,
-    pub end: usize,
-    #[serde(rename = "type")]
-    pub span_type: String,
-    pub value: ScalarValue,
 }
 
 #[cfg(test)]

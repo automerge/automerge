@@ -1,5 +1,6 @@
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Prop, Value};
+use crate::query;
+use crate::{AutomergeError, ChangeHash, Prop, ScalarValue, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A way of mutating a document within a single change.
@@ -34,6 +35,19 @@ pub trait Transactable {
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError>;
+
+    /// Set a mark within a range on a list
+    #[allow(clippy::too_many_arguments)]
+    fn mark(
+        &mut self,
+        obj: &ExId,
+        start: usize,
+        expand_start: bool,
+        end: usize,
+        expand_end: bool,
+        mark: &str,
+        value: ScalarValue,
+    ) -> Result<(), AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
     fn inc<P: Into<Prop>>(&mut self, obj: &ExId, prop: P, value: i64)
@@ -84,6 +98,22 @@ pub trait Transactable {
 
     /// Get the string that this text object represents at a point in history.
     fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError>;
+
+    /// Get the string that this text object represents.
+    fn list(&self, obj: &ExId) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+
+    /// Get the string that this text object represents at a point in history.
+    fn list_at(
+        &self,
+        obj: &ExId,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+
+    /// test spans api for mark/span experiment
+    fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError>;
+
+    /// test raw_spans api for mark/span experiment
+    fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError>;
 
     /// Get the value at this prop in the object.
     fn value<P: Into<Prop>>(
