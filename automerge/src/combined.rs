@@ -19,18 +19,10 @@ pub enum AutomergeError {
 }
 
 /// A more advanced way of building an [`Automerge`] from constituent parts.
+#[derive(Default)]
 pub struct AutomergeBuilder {
     frontend: Option<Frontend>,
     backend: Option<Backend>,
-}
-
-impl Default for AutomergeBuilder {
-    fn default() -> Self {
-        Self {
-            frontend: Default::default(),
-            backend: Default::default(),
-        }
-    }
 }
 
 impl AutomergeBuilder {

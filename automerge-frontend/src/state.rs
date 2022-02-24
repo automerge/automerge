@@ -103,7 +103,7 @@ impl FrontendState {
                         // unwrap should be fine here as `in_flight_requests` should never have zero length
                         // because we transition to reconciled state when that happens
                         let (_, remaining_requests) = new_in_flight_requests.split_first().unwrap();
-                        new_in_flight_requests = remaining_requests.iter().copied().collect();
+                        new_in_flight_requests = remaining_requests.to_vec();
                     }
                 }
 

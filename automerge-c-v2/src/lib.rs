@@ -564,7 +564,7 @@ pub unsafe extern "C" fn automerge_error(backend: *mut Backend) -> *const c_char
         .error
         .as_ref()
         .map(|e| e.as_ptr())
-        .unwrap_or_else(|| ptr::null_mut())
+        .unwrap_or_else(ptr::null)
 }
 
 #[derive(Debug)]

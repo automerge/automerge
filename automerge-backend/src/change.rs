@@ -1407,7 +1407,7 @@ mod tests {
         }) = decode_result
         {
             assert!(
-                !(calculated != hash),
+                calculated == hash,
                 "expected invalid checksum error with hash {:?} but found one with hash {:?}",
                 calculated,
                 hash

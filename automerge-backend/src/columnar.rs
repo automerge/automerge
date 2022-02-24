@@ -261,7 +261,7 @@ impl<'a> Iterator for ChangeIterator<'a> {
         let max_op = self.max_op.next()??;
         let time = self.time.next()?? as i64;
         let message = self.message.next()?;
-        let extra_bytes = self.extra.next().unwrap_or_else(Vec::new);
+        let extra_bytes = self.extra.next().unwrap_or_default();
         Some(DocChange {
             actor,
             seq,

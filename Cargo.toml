@@ -9,7 +9,6 @@ members = [
     "automerge-frontend",
     "automerge-cli",
     "automerge-protocol",
-    "fuzz",
     "perf",
 ]
 

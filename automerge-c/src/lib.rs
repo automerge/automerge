@@ -40,7 +40,6 @@ impl Deref for Backend {
 
 unsafe fn from_buf_raw<T>(ptr: *const T, elts: usize) -> Vec<T> {
     let mut dst = Vec::with_capacity(elts);
-    dst.set_len(elts);
     ptr::copy(ptr, dst.as_mut_ptr(), elts);
     dst
 }
@@ -449,7 +448,7 @@ pub unsafe extern "C" fn automerge_error(backend: *mut Backend) -> *const c_char
         .error
         .as_ref()
         .map(|e| e.as_ptr())
-        .unwrap_or_else(|| ptr::null_mut())
+        .unwrap_or_else(ptr::null)
 }
 
 /// # Safety
