@@ -132,15 +132,11 @@ impl Automerge {
         } else {
             if let Ok(array) = text.dyn_into::<Array>() {
                 for i in array.iter() {
-                    if let Ok(array) = i.clone().dyn_into::<Array>() {
-                        let value = array.get(1);
-                        let datatype = array.get(2);
-                        let value = self.import_value(value, datatype)?;
-                        vals.push(value);
-                    } else {
-                        let value = self.import_value(i, JsValue::null())?;
-                        vals.push(value);
+                    let (value, subvals) = self.import_value(&i, None)?;
+                    if !subvals.is_empty() {
+                        return Err(to_js_err("splice must be shallow"));
                     }
+                    vals.push(value);
                 }
             }
             let result = self.0.splice(&obj, start, delete_count, vals)?;
@@ -163,9 +159,10 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
-        let value = self.import_value(value, datatype)?;
+        let (value, subvals) = self.import_value(&value, datatype.as_string())?;
         let index = self.0.length(&obj);
         let opid = self.0.insert(&obj, index, value)?;
+        self.subset(&opid, subvals)?;
         Ok(opid.map(|id| id.to_string()))
     }
 
@@ -178,8 +175,9 @@ impl Automerge {
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
         let index = index as f64;
-        let value = self.import_value(value, datatype)?;
+        let (value, subvals) = self.import_value(&value, datatype.as_string())?;
         let opid = self.0.insert(&obj, index as usize, value)?;
+        self.subset(&opid, subvals)?;
         Ok(opid.map(|id| id.to_string()))
     }
 
@@ -192,17 +190,44 @@ impl Automerge {
     ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value = self.import_value(value, datatype)?;
+        let (value, subvals) = self.import_value(&value, datatype.as_string())?;
         let opid = self.0.set(&obj, prop, value)?;
+        self.subset(&opid, subvals)?;
         Ok(opid.map(|id| id.to_string()).into())
     }
 
-    pub fn make(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<String, JsValue> {
+    fn subset(
+        &mut self,
+        obj: &Option<am::ObjId>,
+        vals: Vec<(am::Prop, JsValue)>,
+    ) -> Result<(), JsValue> {
+        if let Some(id) = obj {
+            for (p, v) in vals {
+                let (value, subvals) = self.import_value(&v, None)?;
+                //let opid = self.0.set(id, p, value)?;
+                let opid = match p {
+                    Prop::Map(s) => self.0.set(id, s, value)?,
+                    Prop::Seq(i) => self.0.insert(id, i, value)?,
+                };
+                self.subset(&opid, subvals)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn make(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+        datatype: JsValue,
+    ) -> Result<String, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let value = self.import_value(value, JsValue::null())?;
+        let (value, subvals) = self.import_value(&value, datatype.as_string())?;
         if value.is_object() {
             let opid = self.0.set(&obj, prop, value)?;
+            self.subset(&opid, subvals)?;
             Ok(opid.unwrap().to_string())
         } else {
             Err(to_js_err("invalid object type"))
@@ -561,15 +586,18 @@ impl Automerge {
         }
     }
 
-    fn import_value(&mut self, value: JsValue, datatype: JsValue) -> Result<Value, JsValue> {
-        let d = datatype.as_string();
-        match self.import_scalar(&value, &d) {
-            Some(val) => Ok(val.into()),
+    fn import_value(
+        &mut self,
+        value: &JsValue,
+        datatype: Option<String>,
+    ) -> Result<(Value, Vec<(Prop, JsValue)>), JsValue> {
+        match self.import_scalar(value, &datatype) {
+            Some(val) => Ok((val.into(), vec![])),
             None => {
-                if let Some(o) = to_objtype(&value) {
-                    Ok(o.into())
+                if let Some((o, subvals)) = to_objtype(value, &datatype) {
+                    Ok((o.into(), subvals))
                 } else {
-                    web_sys::console::log_3(&"Invalid value".into(), &value, &datatype);
+                    web_sys::console::log_2(&"Invalid value".into(), value);
                     Err(to_js_err("invalid value"))
                 }
             }
@@ -672,15 +700,3 @@ pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
 pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, JsValue> {
     SyncState::decode(data)
 }
-
-#[wasm_bindgen(js_name = MAP)]
-pub struct Map {}
-
-#[wasm_bindgen(js_name = LIST)]
-pub struct List {}
-
-#[wasm_bindgen(js_name = TEXT)]
-pub struct Text {}
-
-#[wasm_bindgen(js_name = TABLE)]
-pub struct Table {}

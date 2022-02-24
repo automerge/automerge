@@ -3,6 +3,7 @@ use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;
 use std::fmt::Display;
+use unicode_segmentation::UnicodeSegmentation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -257,23 +258,60 @@ pub(crate) fn to_prop(p: JsValue) -> Result<Prop, JsValue> {
     }
 }
 
-pub(crate) fn to_objtype(a: &JsValue) -> Option<am::ObjType> {
-    if !a.is_function() {
-        return None;
-    }
-    let f: js_sys::Function = a.clone().try_into().unwrap();
-    let f = f.to_string();
-    if f.starts_with("class MAP", 0) {
-        Some(am::ObjType::Map)
-    } else if f.starts_with("class LIST", 0) {
-        Some(am::ObjType::List)
-    } else if f.starts_with("class TEXT", 0) {
-        Some(am::ObjType::Text)
-    } else if f.starts_with("class TABLE", 0) {
-        Some(am::ObjType::Table)
-    } else {
-        am::log!("to_objtype(function) -> {}", f);
-        None
+pub(crate) fn to_objtype(
+    value: &JsValue,
+    datatype: &Option<String>,
+) -> Option<(am::ObjType, Vec<(Prop, JsValue)>)> {
+    match datatype.as_deref() {
+        Some("map") => {
+            let map = value.clone().dyn_into::<js_sys::Object>().ok()?;
+            // FIXME unwrap
+            let map = js_sys::Object::keys(&map)
+                .iter()
+                .zip(js_sys::Object::values(&map).iter())
+                .map(|(key, val)| (key.as_string().unwrap().into(), val))
+                .collect();
+            Some((am::ObjType::Map, map))
+        }
+        Some("list") => {
+            let list = value.clone().dyn_into::<js_sys::Array>().ok()?;
+            let list = list
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i.into(), e))
+                .collect();
+            Some((am::ObjType::List, list))
+        }
+        Some("text") => {
+            let text = value.as_string()?;
+            let text = text
+                .graphemes(true)
+                .enumerate()
+                .map(|(i, ch)| (i.into(), ch.into()))
+                .collect();
+            Some((am::ObjType::Text, text))
+        }
+        Some(_) => None,
+        None => {
+            if let Ok(list) = value.clone().dyn_into::<js_sys::Array>() {
+                let list = list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| (i.into(), e))
+                    .collect();
+                Some((am::ObjType::List, list))
+            } else if let Ok(map) = value.clone().dyn_into::<js_sys::Object>() {
+                // FIXME unwrap
+                let map = js_sys::Object::keys(&map)
+                    .iter()
+                    .zip(js_sys::Object::values(&map).iter())
+                    .map(|(key, val)| (key.as_string().unwrap().into(), val))
+                    .collect();
+                Some((am::ObjType::Map, map))
+            } else {
+                None
+            }
+        }
     }
 }
 

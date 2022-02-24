@@ -6,8 +6,7 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
-export type ObjectType = string; // opaque ??
-export type Value = string | number | boolean | null | Date | Uint8Array | ObjectType;
+export type Value = string | number | boolean | null | Date | Uint8Array | Array | Object;
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -22,11 +21,6 @@ export type FullValue =
   ["list", ObjID] |
   ["text", ObjID] |
   ["table", ObjID]
-
-export const LIST : ObjectType;
-export const MAP : ObjectType;
-export const TABLE : ObjectType;
-export const TEXT : ObjectType;
 
 export enum ObjTypeName {
   list = "list",
@@ -44,7 +38,10 @@ export type Datatype =
   "null" |
   "timestamp" |
   "counter" |
-  "bytes";
+  "bytes" |
+  "map" |
+  "text" |
+  "list";
 
 export type DecodedSyncMessage = {
   heads: Heads,
@@ -86,10 +83,10 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 export class Automerge {
   // change state
   set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
-  make(obj: ObjID, prop: Prop, value: ObjectType): ObjID;
+  make(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
   push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
-  splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value | FullValue>): ObjID[] | undefined;
+  splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
 

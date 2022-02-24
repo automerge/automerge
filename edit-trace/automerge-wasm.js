@@ -10,8 +10,8 @@ const Automerge = require('../automerge-wasm')
 
 const start = new Date()
 
-let doc = Automerge.init();
-let text = doc.set("_root", "text", Automerge.TEXT)
+let doc = Automerge.create();
+let text = doc.set("_root", "text", "", "text")
 
 for (let i = 0; i < edits.length; i++) {
   let edit = edits[i]
