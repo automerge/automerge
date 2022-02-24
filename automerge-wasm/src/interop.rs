@@ -1,4 +1,5 @@
 use automerge as am;
+use automerge::transaction::Transactable;
 use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;
@@ -328,7 +329,7 @@ pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
     heads.ok()
 }
 
-pub(crate) fn map_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
+pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let keys = doc.keys(obj);
     let map = Object::new();
     for k in keys {
@@ -351,7 +352,7 @@ pub(crate) fn map_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
     map.into()
 }
 
-fn list_to_js(doc: &am::Automerge, obj: &ObjId) -> JsValue {
+fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {

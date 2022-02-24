@@ -1,4 +1,6 @@
 #![allow(clippy::unused_unit)]
+use am::transaction::CommitOptions;
+use am::transaction::Transactable;
 use automerge as am;
 use automerge::{Change, ObjId, Prop, Value, ROOT};
 use js_sys::{Array, Object, Uint8Array};
@@ -27,12 +29,12 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct Automerge(automerge::Automerge);
+pub struct Automerge(automerge::AutoCommit);
 
 #[wasm_bindgen]
 impl Automerge {
     pub fn new(actor: Option<String>) -> Result<Automerge, JsValue> {
-        let mut automerge = automerge::Automerge::new();
+        let mut automerge = automerge::AutoCommit::new();
         if let Some(a) = actor {
             let a = automerge::ActorId::from(hex::decode(a).map_err(to_js_err)?.to_vec());
             automerge.set_actor(a);
@@ -43,7 +45,7 @@ impl Automerge {
     #[allow(clippy::should_implement_trait)]
     pub fn clone(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         if self.0.pending_ops() > 0 {
-            self.0.commit(None, None);
+            self.0.commit();
         }
         let mut automerge = Automerge(self.0.clone());
         if let Some(s) = actor {
@@ -71,7 +73,14 @@ impl Automerge {
     }
 
     pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> Array {
-        let heads = self.0.commit(message, time.map(|n| n as i64));
+        let mut commit_opts = CommitOptions::default();
+        if let Some(message) = message {
+            commit_opts.set_message(message);
+        }
+        if let Some(time) = time {
+            commit_opts.set_time(time as i64);
+        }
+        let heads = self.0.commit_with(commit_opts);
         let heads: Array = heads
             .iter()
             .map(|h| JsValue::from_str(&hex::encode(&h.0)))
@@ -526,7 +535,7 @@ pub fn init(actor: Option<String>) -> Result<Automerge, JsValue> {
 #[wasm_bindgen(js_name = loadDoc)]
 pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValue> {
     let data = data.to_vec();
-    let mut automerge = am::Automerge::load(&data).map_err(to_js_err)?;
+    let mut automerge = am::AutoCommit::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
         automerge.set_actor(actor)
