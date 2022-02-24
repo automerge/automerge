@@ -214,17 +214,10 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn make(
-        &mut self,
-        obj: JsValue,
-        prop: JsValue,
-        value: JsValue,
-        datatype: JsValue,
-    ) -> Result<String, JsValue> {
+    pub fn make(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<String, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let (value, subvals) = self.import_value(&value, datatype.as_string())?;
-        if value.is_object() {
+        if let Some((value, subvals)) = to_objtype(&value, &None) {
             let opid = self.0.set(&obj, prop, value)?;
             self.subset(&opid, subvals)?;
             Ok(opid.unwrap().to_string())

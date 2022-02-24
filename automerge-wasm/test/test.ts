@@ -367,12 +367,14 @@ describe('Automerge', () => {
       let doc = create("aaaa")
       let l1 = doc.make("_root","list",[{ foo: "bar"}, [1,2,3]])
       let l2 = doc.insert(l1, 0, { zip: ["a", "b"] })
-      let l3 = doc.set("_root","info1","hello world","text")
-      let l4 = doc.set("_root","info2","hello world")
+      let l3 = doc.make("_root","info1","hello world") // 'text'
+      let l4 = doc.set("_root","info2","hello world")  // 'str'
+      let l5 = doc.set("_root","info3","hello world", "text")
       assert.deepEqual(doc.toJS(), {
         "list": [ { zip: ["a", "b"] }, { foo: "bar"}, [ 1,2,3]],
         "info1": "hello world".split(""),
-        "info2": "hello world"
+        "info2": "hello world",
+        "info3": "hello world".split("")
       })
       doc.free()
     })
