@@ -308,6 +308,13 @@ pub(crate) fn to_objtype(
                     .map(|(key, val)| (key.as_string().unwrap().into(), val))
                     .collect();
                 Some((am::ObjType::Map, map))
+            } else if let Some(text) = value.as_string() {
+                let text = text
+                    .graphemes(true)
+                    .enumerate()
+                    .map(|(i, ch)| (i.into(), ch.into()))
+                    .collect();
+                Some((am::ObjType::Text, text))
             } else {
                 None
             }
