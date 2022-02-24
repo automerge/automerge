@@ -11,9 +11,7 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{
-    get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS,
-};
+use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -339,7 +337,7 @@ impl Automerge {
 
     pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
-        let text = self.0.text(&obj).map_err(to_js_err)?;
+        let text = self.0.list(&obj).map_err(to_js_err)?;
         let spans = self.0.spans(&obj).map_err(to_js_err)?;
         let mut last_pos = 0;
         let result = Array::new();
@@ -354,7 +352,11 @@ impl Automerge {
             }
             let text_span = &text[last_pos..s.pos]; //.slice(last_pos, s.pos);
             if !text_span.is_empty() {
-                result.push(&text_span.into());
+                let t: String = text_span
+                    .iter()
+                    .filter_map(|(v, _)| v.as_string())
+                    .collect();
+                result.push(&t.into());
             }
             result.push(&marks);
             last_pos = s.pos;
@@ -365,7 +367,11 @@ impl Automerge {
         }
         let text_span = &text[last_pos..];
         if !text_span.is_empty() {
-            result.push(&text_span.into());
+            let t: String = text_span
+                .iter()
+                .filter_map(|(v, _)| v.as_string())
+                .collect();
+            result.push(&t.into());
         }
         Ok(result.into())
     }

@@ -453,6 +453,31 @@ impl Automerge {
         Ok(buffer)
     }
 
+    pub fn list(&self, obj: &ExId) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let query = self.ops.search(obj, query::ListVals::new());
+        Ok(query
+            .ops
+            .iter()
+            .map(|o| (o.value(), self.id_to_exid(o.id)))
+            .collect())
+    }
+
+    pub fn list_at(
+        &self,
+        obj: &ExId,
+        heads: &[ChangeHash],
+    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let clock = self.clock_at(heads);
+        let query = self.ops.search(obj, query::ListValsAt::new(clock));
+        Ok(query
+            .ops
+            .iter()
+            .map(|o| (o.value(), self.id_to_exid(o.id)))
+            .collect())
+    }
+
     pub fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let mut query = self.ops.search(obj, query::Spans::new());
@@ -463,14 +488,18 @@ impl Automerge {
     pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let query = self.ops.search(obj, query::RawSpans::new());
-        let result = query.spans.into_iter().map(|s| SpanInfo {
-          id: self.id_to_exid(s.id),
-          time: self.history[s.change].time,
-          start: s.start,
-          end: s.end,
-          span_type: s.name,
-          value: s.value,
-        }).collect();
+        let result = query
+            .spans
+            .into_iter()
+            .map(|s| SpanInfo {
+                id: self.id_to_exid(s.id),
+                time: self.history[s.change].time,
+                start: s.start,
+                end: s.end,
+                span_type: s.name,
+                value: s.value,
+            })
+            .collect();
         Ok(result)
     }
 

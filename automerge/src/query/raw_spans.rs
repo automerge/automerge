@@ -36,7 +36,6 @@ impl<const B: usize> RawSpans<B> {
 }
 
 impl<const B: usize> TreeQuery<B> for RawSpans<B> {
-
     fn query_element_with_metadata(&mut self, element: &Op, m: &OpSetMetadata) -> QueryResult {
         // find location to insert
         // mark or set
@@ -46,14 +45,24 @@ impl<const B: usize> TreeQuery<B> for RawSpans<B> {
                     .spans
                     .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
                     .unwrap_err();
-                self.spans.insert(pos, RawSpan { id: element.id, change: element.change, start: self.seen, end: 0, name: md.name.clone(), value: md.value.clone() });
+                self.spans.insert(
+                    pos,
+                    RawSpan {
+                        id: element.id,
+                        change: element.change,
+                        start: self.seen,
+                        end: 0,
+                        name: md.name.clone(),
+                        value: md.value.clone(),
+                    },
+                );
             }
             if let OpType::MarkEnd(_) = &element.action {
                 for s in self.spans.iter_mut() {
-                  if s.id == element.id.prev() {
-                    s.end = self.seen;
-                    break;
-                  }
+                    if s.id == element.id.prev() {
+                        s.end = self.seen;
+                        break;
+                    }
                 }
             }
         }

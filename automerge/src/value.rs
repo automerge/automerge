@@ -18,6 +18,13 @@ impl Value {
         }
     }
 
+    pub fn as_string(&self) -> Option<String> {
+        match self {
+            Value::Scalar(val) => val.as_string(),
+            _ => None,
+        }
+    }
+
     pub fn map() -> Value {
         Value::Object(ObjType::Map)
     }
@@ -388,6 +395,13 @@ impl ScalarValue {
     }
 
     pub fn to_string(self) -> Option<String> {
+        match self {
+            ScalarValue::Str(s) => Some(s.to_string()),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
         match self {
             ScalarValue::Str(s) => Some(s.to_string()),
             _ => None,
