@@ -20,6 +20,63 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'aaaA', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'Accc' ]);
     })
 
+    it('should handle marks [..] at the beginning of a string', () => {
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[0..3]", "bold", true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
+
+      let doc2 = doc.fork()
+      doc2.insert(list, 0, "A")
+      doc2.insert(list, 4, "B")
+      doc.merge(doc2)
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'A', [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'Bbbbccc' ]);
+    })
+
+    it('should handle marks [..] with splice', () => {
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[0..3]", "bold", true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
+
+      let doc2 = doc.fork()
+      doc2.splice(list, 0, 2, "AAA")
+      doc2.splice(list, 4, 0, "BBB")
+      doc.merge(doc2)
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'AAA', [ [ 'bold', 'boolean', true ] ], 'a', [], 'BBBbbbccc' ]);
+    })
+
+    it('should handle marks across multiple forks', () => {
+      let doc = create()
+      let list = doc.set("_root", "list", TEXT)
+      if (!list) throw new Error('should not be undefined')
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[0..3]", "bold", true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
+
+      let doc2 = doc.fork()
+      doc2.splice(list, 1, 1, "Z") // replace 'aaa' with 'aZa' inside mark.
+
+      let doc3 = doc.fork()
+      doc3.insert(list, 0, "AAA") // should not be included in mark.
+
+      doc.merge(doc2)
+      doc.merge(doc3)
+
+      spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ 'AAA', [ [ 'bold', 'boolean', true ] ], 'aZa', [], 'bbbccc' ]);
+    })
+
+
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
       let list = doc.set("_root", "list", TEXT)
@@ -53,23 +110,6 @@ describe('Automerge', () => {
       doc.insert(list, 3, "A")
       spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'AbbbA', [], 'ccc' ]);
-    })
-
-    it('should handle sticky marks at the beginning of a string (..)', () => {
-      let doc = create()
-      let list = doc.set("_root", "list", TEXT)
-      if (!list) throw new Error('should not be undefined')
-      doc.splice(list, 0, 0, "aaabbbccc")
-      doc.mark(list, "[0..3]", "bold", true)
-      let spans = doc.spans(list);
-      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
-
-      let doc2 = doc.fork()
-      doc2.insert(list, 0, "A")
-      doc2.insert(list, 4, "B")
-      doc.merge(doc2)
-      spans = doc.spans(list);
-      assert.deepStrictEqual(spans, [ 'A', [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'Bbbbccc' ]);
     })
 
     it('should handle sticky marks with deleted ends (..)', () => {
