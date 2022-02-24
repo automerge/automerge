@@ -1,4 +1,4 @@
-use automerge::{Automerge, AutomergeError, Value, ROOT};
+use automerge::{transaction::Transactable, Automerge, AutomergeError, Value, ROOT};
 use std::fs;
 use std::time::Instant;
 
@@ -19,13 +19,15 @@ fn main() -> Result<(), AutomergeError> {
     let mut doc = Automerge::new();
 
     let now = Instant::now();
-    let text = doc.set(&ROOT, "text", Value::text()).unwrap().unwrap();
+    let mut tx = doc.transaction();
+    let text = tx.set(&ROOT, "text", Value::text()).unwrap().unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
             println!("Processed {} edits in {} ms", i, now.elapsed().as_millis());
         }
-        doc.splice(&text, pos, del, vals)?;
+        tx.splice(&text, pos, del, vals)?;
     }
+    tx.commit();
     let _ = doc.save();
     println!("Done in {} ms", now.elapsed().as_millis());
     Ok(())

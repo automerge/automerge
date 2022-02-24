@@ -24,6 +24,7 @@ macro_rules! __log {
      }
  }
 
+mod autocommit;
 mod automerge;
 mod change;
 mod clock;
@@ -38,12 +39,14 @@ mod op_set;
 mod op_tree;
 mod query;
 mod sync;
+pub mod transaction;
 mod types;
 mod value;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
 pub use crate::automerge::Automerge;
+pub use autocommit::AutoCommit;
 pub use change::{decode_change, Change};
 pub use error::AutomergeError;
 pub use exid::ExId as ObjId;

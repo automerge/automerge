@@ -6,12 +6,12 @@ use std::{
 
 use serde::ser::{SerializeMap, SerializeSeq};
 
-pub fn new_doc() -> automerge::Automerge {
-    automerge::Automerge::new_with_actor_id(automerge::ActorId::random())
+pub fn new_doc() -> automerge::AutoCommit {
+    automerge::AutoCommit::new_with_actor_id(automerge::ActorId::random())
 }
 
-pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::Automerge {
-    automerge::Automerge::new_with_actor_id(actor)
+pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
+    automerge::AutoCommit::new_with_actor_id(actor)
 }
 
 /// Returns two actor IDs, the first considered to  be ordered before the second

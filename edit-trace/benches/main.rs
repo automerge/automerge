@@ -1,15 +1,25 @@
-use automerge::{Automerge, Value, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, Automerge, Value, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 
-fn replay_trace(commands: Vec<(usize, usize, Vec<Value>)>) -> Automerge {
+fn replay_trace_tx(commands: Vec<(usize, usize, Vec<Value>)>) -> Automerge {
     let mut doc = Automerge::new();
+    let mut tx = doc.transaction();
+    let text = tx.set(&ROOT, "text", Value::text()).unwrap().unwrap();
+    for (pos, del, vals) in commands {
+        tx.splice(&text, pos, del, vals).unwrap();
+    }
+    tx.commit();
+    doc
+}
 
+fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<Value>)>) -> AutoCommit {
+    let mut doc = AutoCommit::new();
     let text = doc.set(&ROOT, "text", Value::text()).unwrap().unwrap();
     for (pos, del, vals) in commands {
         doc.splice(&text, pos, del, vals).unwrap();
     }
-    doc.commit(None, None);
+    doc.commit();
     doc
 }
 
@@ -17,8 +27,16 @@ fn save_trace(mut doc: Automerge) {
     doc.save().unwrap();
 }
 
+fn save_trace_autotx(mut doc: AutoCommit) {
+    doc.save().unwrap();
+}
+
 fn load_trace(bytes: &[u8]) {
     Automerge::load(bytes).unwrap();
+}
+
+fn load_trace_autotx(bytes: &[u8]) {
+    AutoCommit::load(bytes).unwrap();
 }
 
 fn bench(c: &mut Criterion) {
@@ -45,14 +63,14 @@ fn bench(c: &mut Criterion) {
         |b, commands| {
             b.iter_batched(
                 || commands.clone(),
-                replay_trace,
+                replay_trace_tx,
                 criterion::BatchSize::LargeInput,
             )
         },
     );
 
     let commands_len = commands.len();
-    let mut doc = replay_trace(commands);
+    let mut doc = replay_trace_tx(commands.clone());
     group.bench_with_input(BenchmarkId::new("save", commands_len), &doc, |b, doc| {
         b.iter_batched(|| doc.clone(), save_trace, criterion::BatchSize::LargeInput)
     });
@@ -62,6 +80,39 @@ fn bench(c: &mut Criterion) {
         BenchmarkId::new("load", commands_len),
         &bytes,
         |b, bytes| b.iter(|| load_trace(bytes)),
+    );
+
+    group.bench_with_input(
+        BenchmarkId::new("replay autotx", commands_len),
+        &commands,
+        |b, commands| {
+            b.iter_batched(
+                || commands.clone(),
+                replay_trace_autotx,
+                criterion::BatchSize::LargeInput,
+            )
+        },
+    );
+
+    let commands_len = commands.len();
+    let mut doc = replay_trace_autotx(commands);
+    group.bench_with_input(
+        BenchmarkId::new("save autotx", commands_len),
+        &doc,
+        |b, doc| {
+            b.iter_batched(
+                || doc.clone(),
+                save_trace_autotx,
+                criterion::BatchSize::LargeInput,
+            )
+        },
+    );
+
+    let bytes = doc.save().unwrap();
+    group.bench_with_input(
+        BenchmarkId::new("load autotx", commands_len),
+        &bytes,
+        |b, bytes| b.iter(|| load_trace_autotx(bytes)),
     );
 
     group.finish();
