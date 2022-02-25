@@ -4,7 +4,7 @@ use crate::types::{Clock, Key};
 use std::fmt::Debug;
 
 #[derive(Debug)]
-pub(crate) struct IterKeysAt<'a, const B: usize> {
+pub(crate) struct KeysAt<'a, const B: usize> {
     clock: Clock,
     window: VisWindow,
     index: usize,
@@ -14,7 +14,7 @@ pub(crate) struct IterKeysAt<'a, const B: usize> {
     root_child: &'a OpTreeNode<B>,
 }
 
-impl<'a, const B: usize> IterKeysAt<'a, B> {
+impl<'a, const B: usize> KeysAt<'a, B> {
     pub(crate) fn new(root_child: &'a OpTreeNode<B>, clock: Clock) -> Self {
         Self {
             clock,
@@ -28,7 +28,7 @@ impl<'a, const B: usize> IterKeysAt<'a, B> {
     }
 }
 
-impl<'a, const B: usize> Iterator for IterKeysAt<'a, B> {
+impl<'a, const B: usize> Iterator for KeysAt<'a, B> {
     type Item = Key;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -45,7 +45,7 @@ impl<'a, const B: usize> Iterator for IterKeysAt<'a, B> {
     }
 }
 
-impl<'a, const B: usize> DoubleEndedIterator for IterKeysAt<'a, B> {
+impl<'a, const B: usize> DoubleEndedIterator for KeysAt<'a, B> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;

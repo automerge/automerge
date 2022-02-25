@@ -43,7 +43,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn keys(&self, obj: ObjId) -> Option<query::IterKeys<B>> {
+    pub fn keys(&self, obj: ObjId) -> Option<query::Keys<B>> {
         if let Some((_typ, tree)) = self.trees.get(&obj) {
             tree.keys()
         } else {
@@ -51,7 +51,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::IterKeysAt<B>> {
+    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt<B>> {
         if let Some((_typ, tree)) = self.trees.get(&obj) {
             tree.keys_at(clock)
         } else {

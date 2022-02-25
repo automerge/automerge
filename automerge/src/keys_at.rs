@@ -1,13 +1,13 @@
 use crate::op_set::B;
-use crate::{query::IterKeysAt, Automerge};
+use crate::{query, Automerge};
 
 pub struct KeysAt<'a, 'k> {
-    keys: Option<IterKeysAt<'k, B>>,
+    keys: Option<query::KeysAt<'k, B>>,
     doc: &'a Automerge,
 }
 
 impl<'a, 'k> KeysAt<'a, 'k> {
-    pub(crate) fn new(doc: &'a Automerge, keys: Option<IterKeysAt<'k, B>>) -> Self {
+    pub(crate) fn new(doc: &'a Automerge, keys: Option<query::KeysAt<'k, B>>) -> Self {
         Self { keys, doc }
     }
 }

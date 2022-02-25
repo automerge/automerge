@@ -20,8 +20,8 @@ mod prop_at;
 mod seek_op;
 
 pub(crate) use insert::InsertNth;
-pub(crate) use keys::IterKeys;
-pub(crate) use keys_at::IterKeysAt;
+pub(crate) use keys::Keys;
+pub(crate) use keys_at::KeysAt;
 pub(crate) use len::Len;
 pub(crate) use len_at::LenAt;
 pub(crate) use list_vals::ListVals;

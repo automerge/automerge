@@ -39,14 +39,14 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn keys(&self) -> Option<query::IterKeys<B>> {
-        self.root_node.as_ref().map(query::IterKeys::new)
+    pub fn keys(&self) -> Option<query::Keys<B>> {
+        self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::IterKeysAt<B>> {
+    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<B>> {
         self.root_node
             .as_ref()
-            .map(|root| query::IterKeysAt::new(root, clock))
+            .map(|root| query::KeysAt::new(root, clock))
     }
 
     pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
