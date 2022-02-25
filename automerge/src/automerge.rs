@@ -872,6 +872,7 @@ pub struct SpanInfo {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::transaction::Transactable;
@@ -1158,5 +1159,54 @@ mod tests {
         assert!(doc.value_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
 
         Ok(())
+    }
+
+    #[test]
+    fn keys_iter() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 3).unwrap();
+        tx.set(&ROOT, "b", 4).unwrap();
+        tx.set(&ROOT, "c", 5).unwrap();
+        tx.set(&ROOT, "d", 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 8).unwrap();
+        tx.set(&ROOT, "d", 9).unwrap();
+        tx.commit();
+        assert_eq!(doc.keys(&ROOT).count(), 4);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next(), Some("b".into()));
+        assert_eq!(keys.next(), Some("c".into()));
+        assert_eq!(keys.next(), Some("d".into()));
+        assert_eq!(keys.next(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next_back(), Some("c".into()));
+        assert_eq!(keys.next_back(), Some("b".into()));
+        assert_eq!(keys.next_back(), Some("a".into()));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next_back(), Some("c".into()));
+        assert_eq!(keys.next_back(), Some("b".into()));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next(), Some("b".into()));
+        assert_eq!(keys.next(), Some("c".into()));
+        assert_eq!(keys.next(), None);
+        let keys = doc.keys(&ROOT);
+        assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
     }
 }
