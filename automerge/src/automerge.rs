@@ -185,6 +185,10 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
+    /// Get the keys of the object `obj`.
+    ///
+    /// For a map this returns the keys of the map.
+    /// For a list this returns the element ids (opids) encoded as strings.
     pub fn keys(&self, obj: &ExId) -> Vec<String> {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let q = self.ops.search(obj, query::Keys::new());
@@ -194,6 +198,7 @@ impl Automerge {
         }
     }
 
+    /// Historical version of [`keys`](Self::keys).
     pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
