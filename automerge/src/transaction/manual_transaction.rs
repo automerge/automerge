@@ -1,6 +1,6 @@
 use crate::exid::ExId;
-use crate::AutomergeError;
 use crate::{Automerge, ChangeHash, Prop, Value};
+use crate::{AutomergeError, Keys};
 
 use super::{CommitOptions, Transactable, TransactionInner};
 
@@ -134,11 +134,11 @@ impl<'a> Transactable for Transaction<'a> {
             .splice(self.doc, obj, pos, del, vals)
     }
 
-    fn keys(&self, obj: &ExId) -> Vec<String> {
+    fn keys(&self, obj: &ExId) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys {
         self.doc.keys_at(obj, heads)
     }
 

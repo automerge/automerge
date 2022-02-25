@@ -5,7 +5,7 @@ use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{SyncMessage, SyncState};
+use crate::{Keys, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -291,11 +291,11 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys(&self, obj: &ExId) -> Vec<String> {
+    fn keys(&self, obj: &ExId) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys {
         self.doc.keys_at(obj, heads)
     }
 

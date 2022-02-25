@@ -108,8 +108,7 @@ impl Automerge {
         } else {
             self.0.keys(&obj)
         }
-        .iter()
-        .map(|s| JsValue::from_str(s))
+        .map(|s| JsValue::from_str(&s))
         .collect();
         Ok(result)
     }

@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Prop, Value};
+use crate::{AutomergeError, ChangeHash, Keys, Prop, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A way of mutating a document within a single change.
@@ -68,10 +68,10 @@ pub trait Transactable {
     }
 
     /// Get the keys of the given object, it should be a map.
-    fn keys(&self, obj: &ExId) -> Vec<String>;
+    fn keys(&self, obj: &ExId) -> Keys;
 
     /// Get the keys of the given object at a point in history.
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String>;
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys;
 
     /// Get the length of the given object.
     fn length(&self, obj: &ExId) -> usize;

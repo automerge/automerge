@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::change::encode_document;
 use crate::exid::ExId;
+use crate::keys::Keys;
 use crate::op_set::OpSet;
 use crate::transaction::{
     CommitOptions, Transaction, TransactionFailure, TransactionInner, TransactionResult,
@@ -189,23 +190,23 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys(&self, obj: &ExId) -> Vec<String> {
+    pub fn keys(&self, obj: &ExId) -> Keys {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let q = self.ops.search(obj, query::Keys::new());
-            q.keys.iter().map(|k| self.to_string(*k)).collect()
+            Keys::new(self, q.keys)
         } else {
-            vec![]
+            Keys::new(self, vec![])
         }
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
             let q = self.ops.search(obj, query::KeysAt::new(clock));
-            q.keys.iter().map(|k| self.to_string(*k)).collect()
+            Keys::new(self, q.keys)
         } else {
-            vec![]
+            Keys::new(self, vec![])
         }
     }
 
@@ -799,7 +800,7 @@ impl Automerge {
         }
     }
 
-    fn to_string<E: Exportable>(&self, id: E) -> String {
+    pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => format!("{}@{}", id.counter(), self.ops.m.actors[id.actor()]),
             Export::Prop(index) => self.ops.m.props[index].clone(),
@@ -869,6 +870,8 @@ pub struct SpanInfo {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
     use crate::transaction::Transactable;
     use crate::*;
@@ -1046,38 +1049,44 @@ mod tests {
         tx.commit();
         doc.get_heads();
         let heads5 = doc.get_heads();
-        assert!(doc.keys_at(&ROOT, &heads1) == vec!["prop1".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads1), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
         assert!(doc.value_at(&ROOT, "prop2", &heads1)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads1)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads2) == vec!["prop1".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads2).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads2), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads2)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads2)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads3) == vec!["prop1".to_owned(), "prop2".to_owned()]);
+        assert!(
+            doc.keys_at(&ROOT, &heads3).collect_vec()
+                == vec!["prop1".to_owned(), "prop2".to_owned()]
+        );
         assert_eq!(doc.length_at(&ROOT, &heads3), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads3)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads4) == vec!["prop2".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads4).collect_vec() == vec!["prop2".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads4), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads4)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads4)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads5) == vec!["prop2".to_owned(), "prop3".to_owned()]);
+        assert!(
+            doc.keys_at(&ROOT, &heads5).collect_vec()
+                == vec!["prop2".to_owned(), "prop3".to_owned()]
+        );
         assert_eq!(doc.length_at(&ROOT, &heads5), 2);
         assert_eq!(doc.length(&ROOT), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads5)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
-        assert!(doc.keys_at(&ROOT, &[]).is_empty());
+        assert_eq!(doc.keys_at(&ROOT, &[]).len(), 0);
         assert_eq!(doc.length_at(&ROOT, &[]), 0);
         assert!(doc.value_at(&ROOT, "prop1", &[])? == None);
         assert!(doc.value_at(&ROOT, "prop2", &[])? == None);
