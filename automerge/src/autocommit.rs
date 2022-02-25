@@ -1,11 +1,12 @@
 use crate::exid::ExId;
+use crate::op_set::B;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{Keys, SyncMessage, SyncState};
+use crate::{Keys, KeysAt, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -291,11 +292,11 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys(&self, obj: &ExId) -> Keys {
+    fn keys(&self, obj: &ExId) -> Keys<{ B }> {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys {
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt<{ B }> {
         self.doc.keys_at(obj, heads)
     }
 

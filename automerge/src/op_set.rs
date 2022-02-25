@@ -1,13 +1,15 @@
+use crate::clock::Clock;
 use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTreeInternal;
-use crate::query::TreeQuery;
+use crate::query::{self, TreeQuery};
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::ObjType;
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-pub(crate) type OpSet = OpSetInternal<16>;
+pub(crate) const B: usize = 16;
+pub(crate) type OpSet = OpSetInternal<B>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OpSetInternal<const B: usize> {
@@ -38,6 +40,22 @@ impl<const B: usize> OpSetInternal<B> {
             index: 0,
             sub_index: 0,
             objs,
+        }
+    }
+
+    pub fn keys(&self, obj: ObjId) -> Option<query::IterKeys<B>> {
+        if let Some((_typ, tree)) = self.trees.get(&obj) {
+            tree.keys()
+        } else {
+            None
+        }
+    }
+
+    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::IterKeysAt<B>> {
+        if let Some((_typ, tree)) = self.trees.get(&obj) {
+            tree.keys_at(clock)
+        } else {
+            None
         }
     }
 

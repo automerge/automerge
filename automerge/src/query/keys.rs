@@ -1,29 +1,36 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery};
 use crate::types::Key;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Keys<const B: usize> {
-    pub keys: Vec<Key>,
+#[derive(Debug)]
+pub(crate) struct IterKeys<'a, const B: usize> {
+    index: usize,
+    last_key: Option<Key>,
+    root_child: &'a OpTreeNode<B>,
 }
 
-impl<const B: usize> Keys<B> {
-    pub fn new() -> Self {
-        Keys { keys: vec![] }
+impl<'a, const B: usize> IterKeys<'a, B> {
+    pub(crate) fn new(root_child: &'a OpTreeNode<B>) -> Self {
+        Self {
+            index: 0,
+            last_key: None,
+            root_child,
+        }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Keys<B> {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        let mut last = None;
-        for i in 0..child.len() {
-            let op = child.get(i).unwrap();
-            if Some(op.key) != last && op.visible() {
-                self.keys.push(op.key);
-                last = Some(op.key);
+impl<'a, const B: usize> Iterator for IterKeys<'a, B> {
+    type Item = Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for i in self.index..self.root_child.len() {
+            let op = self.root_child.get(i)?;
+            self.index += 1;
+            if Some(op.key) != self.last_key && op.visible() {
+                self.last_key = Some(op.key);
+                return Some(op.key);
             }
         }
-        QueryResult::Finish
+        None
     }
 }

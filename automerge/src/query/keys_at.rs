@@ -1,36 +1,42 @@
-use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::types::{Clock, Key, Op};
+use crate::op_tree::OpTreeNode;
+use crate::query::VisWindow;
+use crate::types::{Clock, Key};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct KeysAt<const B: usize> {
+#[derive(Debug)]
+pub(crate) struct IterKeysAt<'a, const B: usize> {
     clock: Clock,
-    pub keys: Vec<Key>,
-    last: Option<Key>,
     window: VisWindow,
-    pos: usize,
+    index: usize,
+    last_key: Option<Key>,
+    root_child: &'a OpTreeNode<B>,
 }
 
-impl<const B: usize> KeysAt<B> {
-    pub fn new(clock: Clock) -> Self {
-        KeysAt {
+impl<'a, const B: usize> IterKeysAt<'a, B> {
+    pub(crate) fn new(root_child: &'a OpTreeNode<B>, clock: Clock) -> Self {
+        Self {
             clock,
-            pos: 0,
-            last: None,
-            keys: vec![],
-            window: Default::default(),
+            window: VisWindow::default(),
+            index: 0,
+            last_key: None,
+            root_child,
         }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for KeysAt<B> {
-    fn query_element(&mut self, op: &Op) -> QueryResult {
-        let visible = self.window.visible_at(op, self.pos, &self.clock);
-        if Some(op.key) != self.last && visible {
-            self.keys.push(op.key);
-            self.last = Some(op.key);
+impl<'a, const B: usize> Iterator for IterKeysAt<'a, B> {
+    type Item = Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for i in self.index..self.root_child.len() {
+            let op = self.root_child.get(i)?;
+            let visible = self.window.visible_at(op, self.index, &self.clock);
+            self.index += 1;
+            if Some(op.key) != self.last_key && visible {
+                self.last_key = Some(op.key);
+                return Some(op.key);
+            }
         }
-        self.pos += 1;
-        QueryResult::Next
+        None
     }
 }

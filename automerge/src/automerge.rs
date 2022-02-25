@@ -4,6 +4,7 @@ use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
+use crate::op_set::B;
 use crate::transaction::{
     CommitOptions, Transaction, TransactionFailure, TransactionInner, TransactionResult,
     TransactionSuccess,
@@ -12,6 +13,7 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
 };
+use crate::KeysAt;
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
@@ -190,30 +192,29 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys(&self, obj: &ExId) -> Keys {
+    pub fn keys(&self, obj: &ExId) -> Keys<{ B }> {
         if let Ok(obj) = self.exid_to_obj(obj) {
-            let q = self.ops.search(obj, query::Keys::new());
-            Keys::new(self, q.keys)
+            let iter_keys = self.ops.keys(obj);
+            Keys::new(self, iter_keys)
         } else {
-            Keys::new(self, vec![])
+            Keys::new(self, None)
         }
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Keys {
+    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt<{ B }> {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
-            let q = self.ops.search(obj, query::KeysAt::new(clock));
-            Keys::new(self, q.keys)
+            KeysAt::new(self, self.ops.keys_at(obj, clock))
         } else {
-            Keys::new(self, vec![])
+            KeysAt::new(self, None)
         }
     }
 
     pub fn length(&self, obj: &ExId) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj) {
             match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).len(),
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
                     self.ops.search(inner_obj, query::Len::new()).len
                 }
@@ -228,7 +229,7 @@ impl Automerge {
         if let Ok(inner_obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
             match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).len(),
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
                     self.ops.search(inner_obj, query::LenAt::new(clock)).len
                 }
@@ -1086,7 +1087,7 @@ mod tests {
         assert!(doc.value_at(&ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
-        assert_eq!(doc.keys_at(&ROOT, &[]).len(), 0);
+        assert_eq!(doc.keys_at(&ROOT, &[]).count(), 0);
         assert_eq!(doc.length_at(&ROOT, &[]), 0);
         assert!(doc.value_at(&ROOT, "prop1", &[])? == None);
         assert!(doc.value_at(&ROOT, "prop2", &[])? == None);
