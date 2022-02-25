@@ -76,6 +76,33 @@ describe('Automerge', () => {
       assert.deepStrictEqual(spans, [ 'AAA', [ [ 'bold', 'boolean', true ] ], 'aZa', [], 'bbbccc' ]);
     })
 
+    it('should handle marks [..]', () => {
+      let doc = create()
+      let list = doc.make("_root", "list", "")
+      if (!list) throw new Error('should not be undefined')
+        doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[0..3]", "bold", true)
+      let spans = doc.spans(list);
+      assert.deepStrictEqual(spans, [ [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbccc' ]);
+
+      let doc2 = doc.fork()
+      doc2.splice(list, 0, 0, "ZZZ") // replace 'aaa' with 'aZa' inside mark.
+      doc2.mark(list, "[0..3]", "ZZZ", true)
+
+      let doc3 = doc.fork()
+      doc3.splice(list,6, 0, "XXX")
+      doc3.splice(list, 0, 0, "XXX") // should not be included in mark.
+      doc3.splice(list, 12, 3, "")
+
+      doc.merge(doc2)
+
+      let doc4 = doc.fork()
+      doc4.merge(doc3)
+
+      spans = doc4.spans(list);
+      assert.deepStrictEqual(spans, [ 'XXX', [ [ 'ZZZ', 'boolean', true ] ], 'ZZZ', [ [ 'bold', 'boolean', true ] ], 'aaa', [], 'bbbXXX' ]);
+    })
+
 
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
