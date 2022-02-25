@@ -15,7 +15,18 @@ impl<'a, 'k, const B: usize> Iterator for KeysAt<'a, 'k, B> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let key = self.keys.as_mut()?.next()?;
-        Some(self.doc.to_string(key))
+        self.keys
+            .as_mut()?
+            .next()
+            .map(|key| self.doc.to_string(key))
+    }
+}
+
+impl<'a, 'k, const B: usize> DoubleEndedIterator for KeysAt<'a, 'k, B> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.keys
+            .as_mut()?
+            .next()
+            .map(|key| self.doc.to_string(key))
     }
 }
