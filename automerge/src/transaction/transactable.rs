@@ -1,5 +1,4 @@
 use crate::exid::ExId;
-use crate::op_set::B;
 use crate::{AutomergeError, ChangeHash, Keys, KeysAt, Prop, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -69,10 +68,10 @@ pub trait Transactable {
     }
 
     /// Get the keys of the given object, it should be a map.
-    fn keys(&self, obj: &ExId) -> Keys<{ B }>;
+    fn keys(&self, obj: &ExId) -> Keys;
 
     /// Get the keys of the given object at a point in history.
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt<{ B }>;
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt;
 
     /// Get the length of the given object.
     fn length(&self, obj: &ExId) -> usize;

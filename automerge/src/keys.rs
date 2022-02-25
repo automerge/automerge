@@ -1,17 +1,18 @@
+use crate::op_set::B;
 use crate::{query::IterKeys, Automerge};
 
-pub struct Keys<'a, 'k, const B: usize> {
+pub struct Keys<'a, 'k> {
     keys: Option<IterKeys<'k, B>>,
     doc: &'a Automerge,
 }
 
-impl<'a, 'k, const B: usize> Keys<'a, 'k, B> {
+impl<'a, 'k> Keys<'a, 'k> {
     pub(crate) fn new(doc: &'a Automerge, keys: Option<IterKeys<'k, B>>) -> Self {
         Self { keys, doc }
     }
 }
 
-impl<'a, 'k, const B: usize> Iterator for Keys<'a, 'k, B> {
+impl<'a, 'k> Iterator for Keys<'a, 'k> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -22,7 +23,7 @@ impl<'a, 'k, const B: usize> Iterator for Keys<'a, 'k, B> {
     }
 }
 
-impl<'a, 'k, const B: usize> DoubleEndedIterator for Keys<'a, 'k, B> {
+impl<'a, 'k> DoubleEndedIterator for Keys<'a, 'k> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.keys
             .as_mut()?

@@ -1,5 +1,4 @@
 use crate::exid::ExId;
-use crate::op_set::B;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
@@ -292,11 +291,11 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys(&self, obj: &ExId) -> Keys<{ B }> {
+    fn keys(&self, obj: &ExId) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt<{ B }> {
+    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
     }
 

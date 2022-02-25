@@ -4,7 +4,6 @@ use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
-use crate::op_set::B;
 use crate::transaction::{
     CommitOptions, Transaction, TransactionFailure, TransactionInner, TransactionResult,
     TransactionSuccess,
@@ -192,7 +191,7 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys(&self, obj: &ExId) -> Keys<{ B }> {
+    pub fn keys(&self, obj: &ExId) -> Keys {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let iter_keys = self.ops.keys(obj);
             Keys::new(self, iter_keys)
@@ -202,7 +201,7 @@ impl Automerge {
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt<{ B }> {
+    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
             KeysAt::new(self, self.ops.keys_at(obj, clock))
