@@ -142,7 +142,7 @@ impl Automerge {
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C>(&mut self, f: F, c: C) -> TransactionResult<O, E>
+    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> TransactionResult<O, E>
     where
         F: FnOnce(&mut Transaction) -> Result<O, E>,
         C: FnOnce() -> CommitOptions,

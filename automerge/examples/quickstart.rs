@@ -8,6 +8,7 @@ fn main() {
     let mut doc1 = Automerge::new();
     let (cards, card1) = doc1
         .transact_with::<_, _, AutomergeError, _>(
+            || CommitOptions::default().with_message("Add card".to_owned()),
             |tx| {
                 let cards = tx.set(&ROOT, "cards", Value::list()).unwrap().unwrap();
                 let card1 = tx.insert(&cards, 0, Value::map())?.unwrap();
@@ -18,7 +19,6 @@ fn main() {
                 tx.set(&card2, "done", false)?;
                 Ok((cards, card1))
             },
-            || CommitOptions::default().with_message("Add card".to_owned()),
         )
         .unwrap()
         .into_result();
@@ -30,20 +30,20 @@ fn main() {
     let mut doc2 = Automerge::load(&binary).unwrap();
 
     doc1.transact_with::<_, _, AutomergeError, _>(
+        || CommitOptions::default().with_message("Mark card as done".to_owned()),
         |tx| {
             tx.set(&card1, "done", true)?;
             Ok(())
         },
-        || CommitOptions::default().with_message("Mark card as done".to_owned()),
     )
     .unwrap();
 
     doc2.transact_with::<_, _, AutomergeError, _>(
+        || CommitOptions::default().with_message("Delete card".to_owned()),
         |tx| {
             tx.del(&cards, 0)?;
             Ok(())
         },
-        || CommitOptions::default().with_message("Delete card".to_owned()),
     )
     .unwrap();
 
