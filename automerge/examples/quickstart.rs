@@ -1,4 +1,5 @@
 use automerge::transaction::CommitOptions;
+use automerge::transaction::Transactable;
 use automerge::{Automerge, ROOT};
 use automerge::{AutomergeError, Value};
 
