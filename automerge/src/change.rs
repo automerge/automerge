@@ -365,7 +365,7 @@ impl Change {
         self.start_op + (self.len() as u64) - 1
     }
 
-    fn message(&self) -> Option<String> {
+    pub fn message(&self) -> Option<String> {
         let m = &self.bytes.uncompressed()[self.message.clone()];
         if m.is_empty() {
             None
