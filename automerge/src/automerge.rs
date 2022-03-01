@@ -315,6 +315,32 @@ impl Automerge {
         Ok(query.spans)
     }
 
+    pub fn blame(
+        &self,
+        obj: &ExId,
+        base: &[ChangeHash],
+        points: &[Vec<ChangeHash>],
+    ) -> Result<Vec<bool>, AutomergeError> {
+        let obj = self.exid_to_obj(obj)?;
+        let base = self.clock_at(base);
+        let points: Vec<Clock> = points.iter().map(|p| self.clock_at(p)).collect();
+        let points: Vec<Clock> = points
+            .iter()
+            .enumerate()
+            .map(|(j, _)| {
+                points
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| *i != j)
+                    .fold(base.clone(), |acc, (_, c)| acc.union(c))
+            })
+            .collect();
+
+        let query = self.ops.search(obj, query::Blame::new(points));
+        //Ok(query.points)
+        unimplemented!()
+    }
+
     pub fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj)?;
         let query = self.ops.search(obj, query::RawSpans::new());

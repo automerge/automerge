@@ -18,6 +18,13 @@ impl Clock {
             .or_insert(n);
     }
 
+    pub fn union(mut self, other: &Clock) -> Clock {
+        for (key, val) in &other.0 {
+            self.include(*key, *val)
+        }
+        self
+    }
+
     pub fn covers(&self, id: &OpId) -> bool {
         if let Some(val) = self.0.get(&id.1) {
             val >= &id.0

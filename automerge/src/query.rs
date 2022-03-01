@@ -7,6 +7,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+mod blame;
 mod insert;
 mod keys;
 mod keys_at;
@@ -23,6 +24,7 @@ mod raw_spans;
 mod seek_op;
 mod spans;
 
+pub(crate) use blame::Blame;
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
