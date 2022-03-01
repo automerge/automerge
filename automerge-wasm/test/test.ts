@@ -296,6 +296,16 @@ describe('Automerge', () => {
       doc.free()
     })
 
+    it('doesnt clobber values', () => {
+      let doc1 = create()
+      doc1.set('_root', 'hello', 'world')
+      let doc2 = create()
+      doc2.set('_root', 'hello', '')
+
+      assert.equal(doc1.value('_root', 'hello'), 'world')
+      assert.equal(doc2.value('_root', 'hello'), '')
+    })
+
     it('local inc increments all visible counters in a map', () => {
       let doc1 = create("aaaa")
       doc1.set("_root", "hello", "world")
