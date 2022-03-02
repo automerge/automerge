@@ -50,7 +50,7 @@ impl Automerge {
         let mut automerge = Automerge(self.0.clone());
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-            automerge.0.set_actor(actor)
+            automerge.0.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -60,7 +60,7 @@ impl Automerge {
         let mut automerge = Automerge(self.0.fork());
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-            automerge.0.set_actor(actor)
+            automerge.0.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -538,7 +538,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
     let mut automerge = am::AutoCommit::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-        automerge.set_actor(actor)
+        automerge.set_actor(actor);
     }
     Ok(Automerge(automerge))
 }
