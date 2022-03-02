@@ -1,5 +1,5 @@
 use automerge::transaction::Transactable;
-use automerge::{ActorId, AutoCommit, Automerge, Value, ROOT};
+use automerge::{ActorId, AutoCommit, Automerge, ObjType, ScalarValue, Value, ROOT};
 
 mod helpers;
 #[allow(unused_imports)]
@@ -18,36 +18,6 @@ fn no_conflict_on_repeated_assignment() {
             "foo" => { 2 },
         }
     );
-}
-
-#[test]
-fn no_change_on_repeated_map_set() {
-    let mut doc = new_doc();
-    doc.set(&automerge::ROOT, "foo", 1).unwrap();
-    assert!(doc.set(&automerge::ROOT, "foo", 1).unwrap().is_none());
-}
-
-#[test]
-fn no_change_on_repeated_list_set() {
-    let mut doc = new_doc();
-    let list_id = doc
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
-    doc.insert(&list_id, 0, 1).unwrap();
-    doc.set(&list_id, 0, 1).unwrap();
-    assert!(doc.set(&list_id, 0, 1).unwrap().is_none());
-}
-
-#[test]
-fn no_change_on_list_insert_followed_by_set_of_same_value() {
-    let mut doc = new_doc();
-    let list_id = doc
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
-    doc.insert(&list_id, 0, 1).unwrap();
-    assert!(doc.set(&list_id, 0, 1).unwrap().is_none());
 }
 
 #[test]
@@ -74,10 +44,7 @@ fn repeated_map_assignment_which_resolves_conflict_not_ignored() {
 fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, 123).unwrap();
     doc2.merge(&mut doc1).unwrap();
     doc2.set(&list_id, 0, 456).unwrap();
@@ -99,10 +66,7 @@ fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
 #[test]
 fn list_deletion() {
     let mut doc = new_doc();
-    let list_id = doc
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc.insert(&list_id, 0, 123).unwrap();
     doc.insert(&list_id, 1, 456).unwrap();
     doc.insert(&list_id, 2, 789).unwrap();
@@ -219,10 +183,7 @@ fn concurrent_updates_of_same_field() {
 fn concurrent_updates_of_same_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "birds", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, "finch").unwrap();
     doc2.merge(&mut doc1).unwrap();
     doc1.set(&list_id, 0, "greenfinch").unwrap();
@@ -249,10 +210,8 @@ fn assignment_conflicts_of_different_types() {
     let mut doc2 = new_doc();
     let mut doc3 = new_doc();
     doc1.set(&automerge::ROOT, "field", "string").unwrap();
-    doc2.set(&automerge::ROOT, "field", automerge::Value::list())
-        .unwrap();
-    doc3.set(&automerge::ROOT, "field", automerge::Value::map())
-        .unwrap();
+    doc2.make(&automerge::ROOT, "field", ObjType::List).unwrap();
+    doc3.make(&automerge::ROOT, "field", ObjType::Map).unwrap();
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
 
@@ -273,10 +232,7 @@ fn changes_within_conflicting_map_field() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     doc1.set(&automerge::ROOT, "field", "string").unwrap();
-    let map_id = doc2
-        .set(&automerge::ROOT, "field", automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let map_id = doc2.make(&automerge::ROOT, "field", ObjType::Map).unwrap();
     doc2.set(&map_id, "innerKey", 42).unwrap();
     doc1.merge(&mut doc2).unwrap();
 
@@ -300,24 +256,15 @@ fn changes_within_conflicting_list_element() {
     let (actor1, actor2) = sorted_actors();
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
-    let list_id = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, "hello").unwrap();
     doc2.merge(&mut doc1).unwrap();
 
-    let map_in_doc1 = doc1
-        .set(&list_id, 0, automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let map_in_doc1 = doc1.make(&list_id, 0, ObjType::Map).unwrap();
     doc1.set(&map_in_doc1, "map1", true).unwrap();
     doc1.set(&map_in_doc1, "key", 1).unwrap();
 
-    let map_in_doc2 = doc2
-        .set(&list_id, 0, automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let map_in_doc2 = doc2.make(&list_id, 0, ObjType::Map).unwrap();
     doc1.merge(&mut doc2).unwrap();
     doc2.set(&map_in_doc2, "map2", true).unwrap();
     doc2.set(&map_in_doc2, "key", 2).unwrap();
@@ -897,7 +844,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     let mut doc1 = new_doc_with_actor(actor1);
 
-    let list = doc1.set(ROOT, "list", Value::list())?.unwrap();
+    let list = doc1.make(ROOT, "list", ObjType::List)?;
     doc1.insert(&list, 0, "a")?;
     doc1.insert(&list, 1, "b")?;
     doc1.insert(&list, 2, "c")?;
@@ -908,13 +855,13 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut doc3 = AutoCommit::load(&doc1.save()?)?;
     doc3.set_actor(actor3);
 
-    doc1.set(&list, 1, Value::counter(0))?;
-    doc2.set(&list, 1, Value::counter(10))?;
-    doc3.set(&list, 1, Value::counter(100))?;
+    doc1.set(&list, 1, ScalarValue::counter(0))?;
+    doc2.set(&list, 1, ScalarValue::counter(10))?;
+    doc3.set(&list, 1, ScalarValue::counter(100))?;
 
-    doc1.set(&list, 2, Value::counter(0))?;
-    doc2.set(&list, 2, Value::counter(10))?;
-    doc3.set(&list, 2, Value::int(100))?;
+    doc1.set(&list, 2, ScalarValue::counter(0))?;
+    doc2.set(&list, 2, ScalarValue::counter(10))?;
+    doc3.set(&list, 2, 100)?;
 
     doc1.inc(&list, 1, 1)?;
     doc1.inc(&list, 2, 1)?;
