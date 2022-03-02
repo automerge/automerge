@@ -106,16 +106,28 @@ impl<'a> Transactable for Transaction<'a> {
             .make(self.doc, obj, prop, value)
     }
 
-    fn insert<V: Into<Value>>(
+    fn insert<V: Into<ScalarValue>>(
         &mut self,
         obj: &ExId,
         index: usize,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()
             .insert(self.doc, obj, index, value)
+    }
+
+    fn make_insert<V: Into<ObjType>>(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<ExId, AutomergeError> {
+        self.inner
+            .as_mut()
+            .unwrap()
+            .make_insert(self.doc, obj, index, value)
     }
 
     fn inc<P: Into<Prop>>(
