@@ -52,8 +52,14 @@ impl Automerge {
         }
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) {
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.actor = Actor::Unused(actor);
+        self
+    }
+
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.actor = Actor::Unused(actor);
+        self
     }
 
     pub fn get_actor(&self) -> &ActorId {

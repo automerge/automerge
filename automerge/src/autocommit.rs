@@ -35,9 +35,16 @@ impl AutoCommit {
         &self.doc
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) {
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor)
+        self.doc.set_actor(actor);
+        self
+    }
+
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_actor(actor);
+        self
     }
 
     pub fn get_actor(&self) -> &ActorId {
