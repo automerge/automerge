@@ -1188,4 +1188,17 @@ mod tests {
         let keys = doc.keys(&ROOT);
         assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
     }
+
+    #[test]
+    fn rolling_back_transaction_has_no_effect() {
+        let mut doc = Automerge::new();
+        let old_states = doc.states.clone();
+        let bytes = doc.save().unwrap();
+        let tx = doc.transaction();
+        tx.rollback();
+        let new_states = doc.states.clone();
+        assert_eq!(old_states, new_states);
+        let new_bytes = doc.save().unwrap();
+        assert_eq!(bytes, new_bytes);
+    }
 }
