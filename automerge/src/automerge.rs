@@ -498,7 +498,7 @@ impl Automerge {
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
         let heads = self.get_heads();
-        let c = self.history.iter().map(|c| c.decode());
+        let c = self.history.iter();
         let ops = self.ops.iter();
         // TODO - can we make encode_document error free
         let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);

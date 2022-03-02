@@ -36,10 +36,10 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-pub(crate) fn encode_document<'a>(
+pub(crate) fn encode_document<'a, 'b>(
     heads: Vec<amp::ChangeHash>,
-    changes: impl Iterator<Item = amp::Change>,
-    doc_ops: impl Iterator<Item = &'a Op>,
+    changes: impl Iterator<Item = &'a Change>,
+    doc_ops: impl Iterator<Item = &'b Op>,
     actors_index: &IndexedCache<ActorId>,
     props: &'a [String],
 ) -> Result<Vec<u8>, AutomergeError> {
