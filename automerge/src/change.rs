@@ -36,27 +36,14 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
-    changes.iter().fold(HashSet::new(), |mut acc, c| {
-        if let Some(h) = c.hash {
-            acc.insert(h);
-        }
-        for dep in &c.deps {
-            acc.remove(dep);
-        }
-        acc
-    })
-}
-
-pub(crate) fn encode_document(
-    changes: &[amp::Change],
-    doc_ops: &[Op],
+pub(crate) fn encode_document<'a, 'b>(
+    heads: Vec<amp::ChangeHash>,
+    changes: impl Iterator<Item = &'a Change>,
+    doc_ops: impl Iterator<Item = &'b Op>,
     actors_index: &IndexedCache<ActorId>,
-    props: &[String],
+    props: &'a [String],
 ) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
-
-    let heads = get_heads(changes);
 
     let actors_map = actors_index.encode_index();
     let actors = actors_index.sorted();
@@ -79,8 +66,8 @@ pub(crate) fn encode_document(
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &actors_map, props);
 
-    bytes.extend(&MAGIC_BYTES);
-    bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
+    bytes.extend(MAGIC_BYTES);
+    bytes.extend([0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
     bytes.push(BLOCK_TYPE_DOC);
 
     let mut chunk = Vec::new();
@@ -92,7 +79,7 @@ pub(crate) fn encode_document(
     }
 
     heads.len().encode(&mut chunk)?;
-    for head in heads.iter().sorted() {
+    for head in heads.iter() {
         chunk.write_all(&head.0).unwrap();
     }
 
