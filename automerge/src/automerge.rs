@@ -83,7 +83,7 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
         let actor = self.get_actor_index();
-        let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+        let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
         let mut deps = self.get_heads();
         if seq > 1 {
             let last_hash = self.get_hash(actor, seq - 1).unwrap();
@@ -1187,5 +1187,18 @@ mod tests {
         assert_eq!(keys.next(), None);
         let keys = doc.keys(&ROOT);
         assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn rolling_back_transaction_has_no_effect() {
+        let mut doc = Automerge::new();
+        let old_states = doc.states.clone();
+        let bytes = doc.save().unwrap();
+        let tx = doc.transaction();
+        tx.rollback();
+        let new_states = doc.states.clone();
+        assert_eq!(old_states, new_states);
+        let new_bytes = doc.save().unwrap();
+        assert_eq!(bytes, new_bytes);
     }
 }

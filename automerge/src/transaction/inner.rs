@@ -1,3 +1,4 @@
+use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
@@ -46,6 +47,12 @@ impl TransactionInner {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(self, doc: &mut Automerge) -> usize {
+        // remove the actor from the cache so that it doesn't end up in the saved document
+        if doc.states.get(&self.actor).is_none() {
+            let actor = doc.ops.m.actors.remove_last();
+            doc.actor = Actor::Unused(actor);
+        }
+
         let num = self.operations.len();
         // remove in reverse order so sets are removed before makes etc...
         for op in self.operations.iter().rev() {
