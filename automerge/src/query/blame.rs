@@ -87,7 +87,7 @@ impl<const B: usize> Blame<B> {
     fn update_del(&mut self, element: &Op) {
         let baseline = self.baseline.covers(&element.id);
         for cs in &mut self.change_sets {
-            if baseline && element.succ.iter().all(|id| cs.clock.covers(id)) {
+            if baseline && element.succ.iter().any(|id| cs.clock.covers(id)) {
                 // was deleted by change set
                 if let Some(s) = element.as_string() {
                     if let Some((_, span)) = &mut cs.next_del {
@@ -97,9 +97,16 @@ impl<const B: usize> Blame<B> {
                     }
                 }
             } else {
-                cs.cut_del();
+                //cs.cut_del();
             }
+            //cs.cut_add();
+        }
+    }
+
+    pub fn finish(&mut self) {
+        for cs in &mut self.change_sets {
             cs.cut_add();
+            cs.cut_del();
         }
     }
 }

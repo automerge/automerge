@@ -324,9 +324,10 @@ impl Automerge {
         let obj = self.exid_to_obj(obj)?;
         let baseline = self.clock_at(baseline);
         let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
-        let query = self
+        let mut query = self
             .ops
             .search(obj, query::Blame::new(baseline, change_sets));
+        query.finish();
         Ok(query.change_sets)
     }
 

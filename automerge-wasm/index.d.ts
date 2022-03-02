@@ -117,7 +117,7 @@ export class Automerge {
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
   spans(obj: ObjID): any;
   raw_spans(obj: ObjID): any;
-  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet;
+  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
 
   // transactions
   commit(message?: string, time?: number): Heads;
