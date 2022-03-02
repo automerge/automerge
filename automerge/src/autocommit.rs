@@ -44,13 +44,6 @@ impl AutoCommit {
         self.doc.get_actor()
     }
 
-    pub fn new_with_actor_id(actor: ActorId) -> Self {
-        Self {
-            doc: Automerge::new_with_actor_id(actor),
-            transaction: None,
-        }
-    }
-
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
             let actor = self.doc.actor;

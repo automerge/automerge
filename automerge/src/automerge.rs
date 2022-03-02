@@ -61,22 +61,6 @@ impl Automerge {
         &self.ops.m.actors[self.actor]
     }
 
-    pub fn new_with_actor_id(actor: ActorId) -> Self {
-        let mut am = Automerge {
-            queue: vec![],
-            history: vec![],
-            history_index: HashMap::new(),
-            states: HashMap::new(),
-            ops: Default::default(),
-            deps: Default::default(),
-            saved: Default::default(),
-            actor: 0,
-            max_op: 0,
-        };
-        am.actor = am.ops.m.actors.cache(actor);
-        am
-    }
-
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
         let actor = self.actor;
