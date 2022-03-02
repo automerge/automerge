@@ -503,12 +503,11 @@ impl Automerge {
         // TODO - can we make encode_document error free
         let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);
         if bytes.is_ok() {
-            self.saved = self.get_heads().to_vec();
+            self.saved = self.get_heads();
         }
         bytes
     }
 
-    // should this return an empty vec instead of None?
     pub fn save_incremental(&mut self) -> Vec<u8> {
         let changes = self.get_changes(self.saved.as_slice());
         let mut bytes = vec![];
@@ -516,7 +515,7 @@ impl Automerge {
             bytes.extend(c.raw_bytes());
         }
         if !bytes.is_empty() {
-            self.saved = self.get_heads().to_vec()
+            self.saved = self.get_heads()
         }
         bytes
     }
