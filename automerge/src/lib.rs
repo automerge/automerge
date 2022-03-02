@@ -8,7 +8,7 @@ macro_rules! log {
      }
  }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(feature = "wasm", target_family = "wasm"))]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -16,7 +16,7 @@ macro_rules! __log {
      }
  }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(feature = "wasm", target_family = "wasm")))]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {

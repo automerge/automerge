@@ -8,6 +8,7 @@ license = "MIT"
 
 [features]
 optree-visualisation = ["dot"]
+wasm = ["js-sys", "wasm-bindgen"]
 
 [dependencies]
 hex = "^0.4.3"
@@ -26,8 +27,8 @@ tinyvec = { version = "^1.5.1", features = ["alloc"] }
 unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
 dot = { version = "0.1.4", optional = true }
-js-sys = "^0.3"
-wasm-bindgen = "^0.2"
+js-sys = { version = "^0.3", optional = true }
+wasm-bindgen = { version = "^0.2", optional = true }
 
 [dependencies.web-sys]
 version = "^0.3.55"

@@ -35,6 +35,7 @@ impl From<decoding::Error> for AutomergeError {
     }
 }
 
+#[cfg(feature = "wasm")]
 impl From<AutomergeError> for wasm_bindgen::JsValue {
     fn from(err: AutomergeError) -> Self {
         js_sys::Error::new(&std::format!("{}", err)).into()

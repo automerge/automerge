@@ -1119,8 +1119,8 @@ mod tests {
         assert!(doc.value_at(&list, 0, &heads2)?.unwrap().0 == Value::int(10));
 
         assert!(doc.length_at(&list, &heads3) == 2);
-        doc.dump();
-        //log!("{:?}", doc.value_at(&list, 0, &heads3)?.unwrap().0);
+        //doc.dump();
+        log!("{:?}", doc.value_at(&list, 0, &heads3)?.unwrap().0);
         assert!(doc.value_at(&list, 0, &heads3)?.unwrap().0 == Value::int(30));
         assert!(doc.value_at(&list, 1, &heads3)?.unwrap().0 == Value::int(20));
 
