@@ -138,19 +138,30 @@ impl TransactionInner {
         self.operations.push(op);
     }
 
-    pub fn insert<V: Into<Value>>(
+    pub fn insert<V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         index: usize,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        if let Some(id) = self.do_insert(doc, obj, index, value)? {
-            Ok(Some(doc.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
+        self.do_insert(doc, obj, index, Value::Scalar(value.into()))?;
+        Ok(())
+    }
+
+    pub fn make_insert<V: Into<ObjType>>(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        let id = self
+            .do_insert(doc, obj, index, Value::Object(value.into()))?
+            .unwrap();
+        Ok(doc.id_to_exid(id))
     }
 
     fn do_insert<V: Into<Value>>(

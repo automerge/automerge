@@ -48,12 +48,20 @@ pub trait Transactable {
     ) -> Result<ExId, AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn insert<O: AsRef<ExId>, V: Into<Value>>(
+    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError>;
+    ) -> Result<(), AutomergeError>;
+
+    /// Insert a value into a list at the given index.
+    fn make_insert<V: Into<ObjType>>(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<ExId, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(
