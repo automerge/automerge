@@ -83,7 +83,7 @@ impl Automerge {
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
         let actor = self.get_actor_index();
-        let seq = self.states.entry(actor).or_default().len() as u64 + 1;
+        let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
         let mut deps = self.get_heads();
         if seq > 1 {
             let last_hash = self.get_hash(actor, seq - 1).unwrap();

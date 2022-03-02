@@ -43,6 +43,19 @@ where
         &self.cache[index]
     }
 
+    /// Remove the last inserted entry into this cache.
+    /// This is safe to do as it does not require reshuffling other entries.
+    ///
+    /// # Panics
+    ///
+    /// Panics on an empty cache.
+    pub fn remove_last(&mut self) -> T {
+        let last = self.cache.len() - 1;
+        let t = self.cache.remove(last);
+        self.lookup.remove(&t);
+        t
+    }
+
     pub fn sorted(&self) -> IndexedCache<T> {
         let mut sorted = Self::new();
         self.cache.iter().sorted().cloned().for_each(|item| {
