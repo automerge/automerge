@@ -3,7 +3,7 @@ use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
-use crate::{AutomergeError, OpType};
+use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -81,20 +81,43 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<Value>>(
+    pub fn set<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let value = value.into();
-        if let Some(id) = self.local_op(doc, obj, prop.into(), value.into())? {
-            Ok(Some(doc.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
+        let value = Value::Scalar(value.into());
+        self.local_op(doc, obj, prop.into(), value.into())?;
+        Ok(())
+    }
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    pub fn make<P: Into<Prop>, V: Into<ObjType>>(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        let value = Value::Object(value.into());
+        let id = self.local_op(doc, obj, prop.into(), value.into())?.unwrap();
+        Ok(doc.id_to_exid(id))
     }
 
     fn next_id(&mut self) -> OpId {
