@@ -66,8 +66,8 @@ pub(crate) fn encode_document<'a, 'b>(
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &actors_map, props);
 
-    bytes.extend(&MAGIC_BYTES);
-    bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
+    bytes.extend(MAGIC_BYTES);
+    bytes.extend([0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
     bytes.push(BLOCK_TYPE_DOC);
 
     let mut chunk = Vec::new();
@@ -79,7 +79,7 @@ pub(crate) fn encode_document<'a, 'b>(
     }
 
     heads.len().encode(&mut chunk)?;
-    for head in heads.iter().sorted() {
+    for head in heads.iter() {
         chunk.write_all(&head.0).unwrap();
     }
 
