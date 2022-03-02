@@ -24,7 +24,7 @@ const HEAD_STR: &str = "_head";
 // Note that change encoding relies on the Ord implementation for the ActorId being implemented in
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
 // changing the ActorId implementation in ways which might affect the Ord implementation
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(TinyVec<[u8; 16]>);
 

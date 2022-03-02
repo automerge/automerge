@@ -17,6 +17,12 @@ use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
+#[derive(Debug, Clone)]
+pub(crate) enum Actor {
+    Unused(ActorId),
+    Cached(usize),
+}
+
 /// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -27,13 +33,13 @@ pub struct Automerge {
     pub(crate) deps: HashSet<ChangeHash>,
     pub(crate) saved: Vec<ChangeHash>,
     pub(crate) ops: OpSet,
-    pub(crate) actor: usize,
+    pub(crate) actor: Actor,
     pub(crate) max_op: u64,
 }
 
 impl Automerge {
     pub fn new() -> Self {
-        let mut am = Automerge {
+        Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
@@ -41,29 +47,36 @@ impl Automerge {
             ops: Default::default(),
             deps: Default::default(),
             saved: Default::default(),
-            actor: 0,
+            actor: Actor::Unused(ActorId::random()),
             max_op: 0,
-        };
-        am.set_random_actor();
-        am
+        }
     }
 
     pub fn set_actor(&mut self, actor: ActorId) {
-        self.actor = self.ops.m.actors.cache(actor)
-    }
-
-    fn set_random_actor(&mut self) {
-        let actor = ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
-        self.actor = self.ops.m.actors.cache(actor);
+        self.actor = Actor::Unused(actor);
     }
 
     pub fn get_actor(&self) -> &ActorId {
-        &self.ops.m.actors[self.actor]
+        match &self.actor {
+            Actor::Unused(actor) => actor,
+            Actor::Cached(index) => self.ops.m.actors.get(*index),
+        }
+    }
+
+    pub(crate) fn get_actor_index(&mut self) -> usize {
+        match &mut self.actor {
+            Actor::Unused(actor) => {
+                let index = self.ops.m.actors.cache(std::mem::take(actor));
+                self.actor = Actor::Cached(index);
+                index
+            }
+            Actor::Cached(index) => *index,
+        }
     }
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
-        let actor = self.actor;
+        let actor = self.get_actor_index();
         let seq = self.states.entry(actor).or_default().len() as u64 + 1;
         let mut deps = self.get_heads();
         if seq > 1 {
@@ -132,7 +145,7 @@ impl Automerge {
 
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.set_random_actor();
+        f.set_actor(ActorId::random());
         f
     }
 
