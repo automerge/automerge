@@ -905,12 +905,12 @@ pub(crate) struct ChangeEncoder {
 
 impl ChangeEncoder {
     #[instrument(level = "debug", skip(changes, actors))]
-    pub fn encode_changes<'a, 'b, I>(
+    pub fn encode_changes<'a, I>(
         changes: I,
         actors: &'a IndexedCache<ActorId>,
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'b amp::Change>,
+        I: IntoIterator<Item = amp::Change>,
     {
         let mut e = Self::new();
         e.encode(changes, actors);
@@ -931,9 +931,9 @@ impl ChangeEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<ActorId>)
+    fn encode<I>(&mut self, changes: I, actors: &IndexedCache<ActorId>)
     where
-        I: IntoIterator<Item = &'c amp::Change>,
+        I: IntoIterator<Item = amp::Change>,
     {
         let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
         for (index, change) in changes.into_iter().enumerate() {
@@ -1010,17 +1010,15 @@ pub(crate) struct DocOpEncoder {
     succ: SuccEncoder,
 }
 
-// FIXME - actors should not be mut here
-
 impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
-    pub(crate) fn encode_doc_ops<'a, I>(
+    pub(crate) fn encode_doc_ops<'a, 'b, 'c, I>(
         ops: I,
         actors: &'a [usize],
-        props: &'a [String],
+        props: &'b [String],
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'a Op>,
+        I: IntoIterator<Item = &'c Op>,
     {
         let mut e = Self::new();
         e.encode(ops, actors, props);

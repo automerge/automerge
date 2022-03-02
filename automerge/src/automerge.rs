@@ -497,16 +497,11 @@ impl Automerge {
     }
 
     pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
-        // TODO - would be nice if I could pass an iterator instead of a collection here
-        let c: Vec<_> = self.history.iter().map(|c| c.decode()).collect();
-        let ops: Vec<_> = self.ops.iter().cloned().collect();
+        let heads = self.get_heads();
+        let c = self.history.iter().map(|c| c.decode());
+        let ops = self.ops.iter();
         // TODO - can we make encode_document error free
-        let bytes = encode_document(
-            &c,
-            ops.as_slice(),
-            &self.ops.m.actors,
-            &self.ops.m.props.cache,
-        );
+        let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);
         if bytes.is_ok() {
             self.saved = self.get_heads().to_vec();
         }

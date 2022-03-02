@@ -36,27 +36,14 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
-    changes.iter().fold(HashSet::new(), |mut acc, c| {
-        if let Some(h) = c.hash {
-            acc.insert(h);
-        }
-        for dep in &c.deps {
-            acc.remove(dep);
-        }
-        acc
-    })
-}
-
-pub(crate) fn encode_document(
-    changes: &[amp::Change],
-    doc_ops: &[Op],
+pub(crate) fn encode_document<'a>(
+    heads: Vec<amp::ChangeHash>,
+    changes: impl Iterator<Item = amp::Change>,
+    doc_ops: impl Iterator<Item = &'a Op>,
     actors_index: &IndexedCache<ActorId>,
-    props: &[String],
+    props: &'a [String],
 ) -> Result<Vec<u8>, AutomergeError> {
     let mut bytes: Vec<u8> = Vec::new();
-
-    let heads = get_heads(changes);
 
     let actors_map = actors_index.encode_index();
     let actors = actors_index.sorted();
