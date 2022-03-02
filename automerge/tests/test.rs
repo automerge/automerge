@@ -384,7 +384,7 @@ fn concurrent_insertions_at_different_list_positions() {
     let (actor1, actor2) = sorted_actors();
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
-    assert!(doc1.maybe_get_actor().unwrap() < doc2.maybe_get_actor().unwrap());
+    assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
         .set(&automerge::ROOT, "list", automerge::Value::list())
@@ -419,7 +419,7 @@ fn concurrent_insertions_at_same_list_position() {
     let (actor1, actor2) = sorted_actors();
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
-    assert!(doc1.maybe_get_actor().unwrap() < doc2.maybe_get_actor().unwrap());
+    assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
         .set(&automerge::ROOT, "birds", automerge::Value::list())

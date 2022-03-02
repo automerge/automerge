@@ -40,12 +40,8 @@ impl AutoCommit {
         self.doc.set_actor(actor)
     }
 
-    pub fn get_actor(&mut self) -> ActorId {
+    pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
-    }
-
-    pub fn maybe_get_actor(&self) -> Option<ActorId> {
-        self.doc.maybe_get_actor()
     }
 
     pub fn new_with_actor_id(actor: ActorId) -> Self {
@@ -57,7 +53,7 @@ impl AutoCommit {
 
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
-            let actor = self.doc.get_actor_index();
+            let actor = self.doc.actor;
 
             let seq = self.doc.states.entry(actor).or_default().len() as u64 + 1;
             let mut deps = self.doc.get_heads();

@@ -27,13 +27,13 @@ pub struct Automerge {
     pub(crate) deps: HashSet<ChangeHash>,
     pub(crate) saved: Vec<ChangeHash>,
     pub(crate) ops: OpSet,
-    pub(crate) actor: Option<usize>,
+    pub(crate) actor: usize,
     pub(crate) max_op: u64,
 }
 
 impl Automerge {
     pub fn new() -> Self {
-        Automerge {
+        let mut am = Automerge {
             queue: vec![],
             history: vec![],
             history_index: HashMap::new(),
@@ -41,40 +41,24 @@ impl Automerge {
             ops: Default::default(),
             deps: Default::default(),
             saved: Default::default(),
-            actor: None,
+            actor: 0,
             max_op: 0,
-        }
+        };
+        am.set_random_actor();
+        am
     }
 
     pub fn set_actor(&mut self, actor: ActorId) {
-        self.actor = Some(self.ops.m.actors.cache(actor))
+        self.actor = self.ops.m.actors.cache(actor)
     }
 
-    fn random_actor(&mut self) -> ActorId {
+    fn set_random_actor(&mut self) {
         let actor = ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
-        self.actor = Some(self.ops.m.actors.cache(actor.clone()));
-        actor
+        self.actor = self.ops.m.actors.cache(actor);
     }
 
-    pub fn get_actor(&mut self) -> ActorId {
-        if let Some(actor) = self.actor {
-            self.ops.m.actors[actor].clone()
-        } else {
-            self.random_actor()
-        }
-    }
-
-    pub fn maybe_get_actor(&self) -> Option<ActorId> {
-        self.actor.map(|i| self.ops.m.actors[i].clone())
-    }
-
-    pub(crate) fn get_actor_index(&mut self) -> usize {
-        if let Some(actor) = self.actor {
-            actor
-        } else {
-            self.random_actor();
-            self.actor.unwrap() // random_actor always sets actor to is_some()
-        }
+    pub fn get_actor(&self) -> &ActorId {
+        &self.ops.m.actors[self.actor]
     }
 
     pub fn new_with_actor_id(actor: ActorId) -> Self {
@@ -86,17 +70,16 @@ impl Automerge {
             ops: Default::default(),
             deps: Default::default(),
             saved: Default::default(),
-            actor: None,
+            actor: 0,
             max_op: 0,
         };
-        am.actor = Some(am.ops.m.actors.cache(actor));
+        am.actor = am.ops.m.actors.cache(actor);
         am
     }
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
-        let actor = self.get_actor_index();
-
+        let actor = self.actor;
         let seq = self.states.entry(actor).or_default().len() as u64 + 1;
         let mut deps = self.get_heads();
         if seq > 1 {
@@ -165,7 +148,7 @@ impl Automerge {
 
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.actor = None;
+        f.set_random_actor();
         f
     }
 
@@ -663,11 +646,11 @@ impl Automerge {
     }
 
     pub fn get_last_local_change(&self) -> Option<&Change> {
-        if let Some(actor) = &self.actor {
-            let actor = &self.ops.m.actors[*actor];
-            return self.history.iter().rev().find(|c| c.actor_id() == actor);
-        }
-        None
+        return self
+            .history
+            .iter()
+            .rev()
+            .find(|c| c.actor_id() == self.get_actor());
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {
