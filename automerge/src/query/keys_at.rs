@@ -1,36 +1,61 @@
-use crate::query::{QueryResult, TreeQuery, VisWindow};
-use crate::types::{Clock, Key, Op};
+use crate::op_tree::OpTreeNode;
+use crate::query::VisWindow;
+use crate::types::{Clock, Key};
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct KeysAt<const B: usize> {
+#[derive(Debug)]
+pub(crate) struct KeysAt<'a, const B: usize> {
     clock: Clock,
-    pub keys: Vec<Key>,
-    last: Option<Key>,
     window: VisWindow,
-    pos: usize,
+    index: usize,
+    last_key: Option<Key>,
+    index_back: usize,
+    last_key_back: Option<Key>,
+    root_child: &'a OpTreeNode<B>,
 }
 
-impl<const B: usize> KeysAt<B> {
-    pub fn new(clock: Clock) -> Self {
-        KeysAt {
+impl<'a, const B: usize> KeysAt<'a, B> {
+    pub(crate) fn new(root_child: &'a OpTreeNode<B>, clock: Clock) -> Self {
+        Self {
             clock,
-            pos: 0,
-            last: None,
-            keys: vec![],
-            window: Default::default(),
+            window: VisWindow::default(),
+            index: 0,
+            last_key: None,
+            index_back: root_child.len(),
+            last_key_back: None,
+            root_child,
         }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for KeysAt<B> {
-    fn query_element(&mut self, op: &Op) -> QueryResult {
-        let visible = self.window.visible_at(op, self.pos, &self.clock);
-        if Some(op.key) != self.last && visible {
-            self.keys.push(op.key);
-            self.last = Some(op.key);
+impl<'a, const B: usize> Iterator for KeysAt<'a, B> {
+    type Item = Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for i in self.index..self.root_child.len() {
+            let op = self.root_child.get(i)?;
+            let visible = self.window.visible_at(op, i, &self.clock);
+            self.index += 1;
+            if Some(op.key) != self.last_key && visible {
+                self.last_key = Some(op.key);
+                return Some(op.key);
+            }
         }
-        self.pos += 1;
-        QueryResult::Next
+        None
+    }
+}
+
+impl<'a, const B: usize> DoubleEndedIterator for KeysAt<'a, B> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        for i in self.index..self.index_back {
+            let op = self.root_child.get(i)?;
+            let visible = self.window.visible_at(op, i, &self.clock);
+            self.index_back -= 1;
+            if Some(op.key) != self.last_key_back && visible {
+                self.last_key_back = Some(op.key);
+                return Some(op.key);
+            }
+        }
+        None
     }
 }

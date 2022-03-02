@@ -5,8 +5,11 @@ use std::{
 };
 
 pub(crate) use crate::op_set::OpSetMetadata;
-use crate::query::{Index, QueryResult, TreeQuery};
 use crate::types::{Op, OpId};
+use crate::{
+    clock::Clock,
+    query::{self, Index, QueryResult, TreeQuery},
+};
 use std::collections::HashSet;
 
 #[allow(dead_code)]
@@ -34,6 +37,16 @@ impl<const B: usize> OpTreeInternal<B> {
     /// Get the length of the sequence.
     pub fn len(&self) -> usize {
         self.root_node.as_ref().map_or(0, |n| n.len())
+    }
+
+    pub fn keys(&self) -> Option<query::Keys<B>> {
+        self.root_node.as_ref().map(query::Keys::new)
+    }
+
+    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<B>> {
+        self.root_node
+            .as_ref()
+            .map(|root| query::KeysAt::new(root, clock))
     }
 
     pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::change::encode_document;
 use crate::exid::ExId;
+use crate::keys::Keys;
 use crate::op_set::OpSet;
 use crate::transaction::{
     CommitOptions, Transaction, TransactionFailure, TransactionInner, TransactionResult,
@@ -11,6 +12,7 @@ use crate::types::{
     ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
     ScalarValue, Value,
 };
+use crate::KeysAt;
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
@@ -189,30 +191,29 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys(&self, obj: &ExId) -> Vec<String> {
+    pub fn keys(&self, obj: &ExId) -> Keys {
         if let Ok(obj) = self.exid_to_obj(obj) {
-            let q = self.ops.search(obj, query::Keys::new());
-            q.keys.iter().map(|k| self.to_string(*k)).collect()
+            let iter_keys = self.ops.keys(obj);
+            Keys::new(self, iter_keys)
         } else {
-            vec![]
+            Keys::new(self, None)
         }
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+    pub fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt {
         if let Ok(obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
-            let q = self.ops.search(obj, query::KeysAt::new(clock));
-            q.keys.iter().map(|k| self.to_string(*k)).collect()
+            KeysAt::new(self, self.ops.keys_at(obj, clock))
         } else {
-            vec![]
+            KeysAt::new(self, None)
         }
     }
 
     pub fn length(&self, obj: &ExId) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj) {
             match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).len(),
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
                     self.ops.search(inner_obj, query::Len::new()).len
                 }
@@ -227,7 +228,7 @@ impl Automerge {
         if let Ok(inner_obj) = self.exid_to_obj(obj) {
             let clock = self.clock_at(heads);
             match self.ops.object_type(&inner_obj) {
-                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).len(),
+                Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
                     self.ops.search(inner_obj, query::LenAt::new(clock)).len
                 }
@@ -799,7 +800,7 @@ impl Automerge {
         }
     }
 
-    fn to_string<E: Exportable>(&self, id: E) -> String {
+    pub(crate) fn to_string<E: Exportable>(&self, id: E) -> String {
         match id.export() {
             Export::Id(id) => format!("{}@{}", id.counter(), self.ops.m.actors[id.actor()]),
             Export::Prop(index) => self.ops.m.props[index].clone(),
@@ -869,6 +870,9 @@ pub struct SpanInfo {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use pretty_assertions::assert_eq;
+
     use super::*;
     use crate::transaction::Transactable;
     use crate::*;
@@ -1046,38 +1050,44 @@ mod tests {
         tx.commit();
         doc.get_heads();
         let heads5 = doc.get_heads();
-        assert!(doc.keys_at(&ROOT, &heads1) == vec!["prop1".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads1).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads1), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads1)?.unwrap().0 == Value::str("val1"));
         assert!(doc.value_at(&ROOT, "prop2", &heads1)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads1)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads2) == vec!["prop1".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads2).collect_vec() == vec!["prop1".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads2), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads2)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads2)? == None);
         assert!(doc.value_at(&ROOT, "prop3", &heads2)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads3) == vec!["prop1".to_owned(), "prop2".to_owned()]);
+        assert!(
+            doc.keys_at(&ROOT, &heads3).collect_vec()
+                == vec!["prop1".to_owned(), "prop2".to_owned()]
+        );
         assert_eq!(doc.length_at(&ROOT, &heads3), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads3)?.unwrap().0 == Value::str("val2"));
         assert!(doc.value_at(&ROOT, "prop2", &heads3)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads3)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads4) == vec!["prop2".to_owned()]);
+        assert!(doc.keys_at(&ROOT, &heads4).collect_vec() == vec!["prop2".to_owned()]);
         assert_eq!(doc.length_at(&ROOT, &heads4), 1);
         assert!(doc.value_at(&ROOT, "prop1", &heads4)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads4)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads4)? == None);
 
-        assert!(doc.keys_at(&ROOT, &heads5) == vec!["prop2".to_owned(), "prop3".to_owned()]);
+        assert!(
+            doc.keys_at(&ROOT, &heads5).collect_vec()
+                == vec!["prop2".to_owned(), "prop3".to_owned()]
+        );
         assert_eq!(doc.length_at(&ROOT, &heads5), 2);
         assert_eq!(doc.length(&ROOT), 2);
         assert!(doc.value_at(&ROOT, "prop1", &heads5)? == None);
         assert!(doc.value_at(&ROOT, "prop2", &heads5)?.unwrap().0 == Value::str("val3"));
         assert!(doc.value_at(&ROOT, "prop3", &heads5)?.unwrap().0 == Value::str("val4"));
 
-        assert!(doc.keys_at(&ROOT, &[]).is_empty());
+        assert_eq!(doc.keys_at(&ROOT, &[]).count(), 0);
         assert_eq!(doc.length_at(&ROOT, &[]), 0);
         assert!(doc.value_at(&ROOT, "prop1", &[])? == None);
         assert!(doc.value_at(&ROOT, "prop2", &[])? == None);
@@ -1148,5 +1158,54 @@ mod tests {
         assert!(doc.value_at(&list, 0, &heads6)?.unwrap().0 == Value::int(50));
 
         Ok(())
+    }
+
+    #[test]
+    fn keys_iter() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 3).unwrap();
+        tx.set(&ROOT, "b", 4).unwrap();
+        tx.set(&ROOT, "c", 5).unwrap();
+        tx.set(&ROOT, "d", 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&ROOT, "a", 8).unwrap();
+        tx.set(&ROOT, "d", 9).unwrap();
+        tx.commit();
+        assert_eq!(doc.keys(&ROOT).count(), 4);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next(), Some("b".into()));
+        assert_eq!(keys.next(), Some("c".into()));
+        assert_eq!(keys.next(), Some("d".into()));
+        assert_eq!(keys.next(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next_back(), Some("c".into()));
+        assert_eq!(keys.next_back(), Some("b".into()));
+        assert_eq!(keys.next_back(), Some("a".into()));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next_back(), Some("c".into()));
+        assert_eq!(keys.next_back(), Some("b".into()));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&ROOT);
+        assert_eq!(keys.next_back(), Some("d".into()));
+        assert_eq!(keys.next(), Some("a".into()));
+        assert_eq!(keys.next(), Some("b".into()));
+        assert_eq!(keys.next(), Some("c".into()));
+        assert_eq!(keys.next(), None);
+        let keys = doc.keys(&ROOT);
+        assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
     }
 }

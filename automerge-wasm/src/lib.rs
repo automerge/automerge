@@ -104,13 +104,13 @@ impl Automerge {
     pub fn keys(&mut self, obj: JsValue, heads: Option<Array>) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads) {
-            self.0.keys_at(&obj, &heads)
+            self.0
+                .keys_at(&obj, &heads)
+                .map(|s| JsValue::from_str(&s))
+                .collect()
         } else {
-            self.0.keys(&obj)
-        }
-        .iter()
-        .map(|s| JsValue::from_str(s))
-        .collect();
+            self.0.keys(&obj).map(|s| JsValue::from_str(&s)).collect()
+        };
         Ok(result)
     }
 
