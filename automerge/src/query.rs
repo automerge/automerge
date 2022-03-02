@@ -24,7 +24,7 @@ mod raw_spans;
 mod seek_op;
 mod spans;
 
-pub(crate) use blame::Blame;
+pub(crate) use blame::{Blame, ChangeSet};
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;

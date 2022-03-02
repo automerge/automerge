@@ -13,7 +13,9 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
+use interop::{
+    get_heads, get_js_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS,
+};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -410,6 +412,58 @@ impl Automerge {
         for s in spans {
             result.push(&JsValue::from_serde(&s).map_err(to_js_err)?);
         }
+        Ok(result)
+    }
+
+    pub fn blame(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let baseline = get_js_heads(baseline)?;
+        let change_sets = change_sets.dyn_into::<Array>()?;
+        let change_sets = change_sets
+            .iter()
+            .map(get_js_heads)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.0.blame(&obj, &baseline, &change_sets)?;
+        let result = result
+            .into_iter()
+            .map(|cs| {
+                let add = cs
+                    .add
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|range| {
+                        let r = Object::new();
+                        js_set(&r, "start", range.start as f64)?;
+                        js_set(&r, "end", range.end as f64)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let del = cs
+                    .del
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|d| {
+                        let r = Object::new();
+                        js_set(&r, "pos", d.0 as f64)?;
+                        js_set(&r, "val", &d.1)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let obj = Object::new();
+                js_set(&obj, "add", add)?;
+                js_set(&obj, "del", del)?;
+                Ok(obj.into())
+            })
+            .collect::<Result<Vec<JsValue>, JsValue>>()?
+            .iter()
+            .collect::<Array>();
         Ok(result)
     }
 

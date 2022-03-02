@@ -61,6 +61,21 @@ export type DecodedChange = {
   ops: Op[]
 }
 
+export type ChangeSetAddition = {
+    start: number,
+    end: number,
+}
+
+export type ChangeSetDeletion = {
+    pos: number,
+    val: string
+}
+
+export type ChangeSet = {
+  add: ChangeSetAddition[],
+  del: ChangeSetDeletion[]
+}
+
 export type Op = {
   action: string,
   obj: ObjID,
@@ -102,6 +117,7 @@ export class Automerge {
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
   spans(obj: ObjID): any;
   raw_spans(obj: ObjID): any;
+  blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet;
 
   // transactions
   commit(message?: string, time?: number): Heads;

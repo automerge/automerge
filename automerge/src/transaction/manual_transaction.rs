@@ -201,6 +201,15 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.raw_spans(obj)
     }
 
+    fn blame(
+        &self,
+        obj: &ExId,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
+        self.doc.blame(obj, baseline, change_sets)
+    }
+
     fn value<P: Into<Prop>>(
         &self,
         obj: &ExId,

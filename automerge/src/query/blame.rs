@@ -1,8 +1,8 @@
-use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
-use crate::types::{ElemId, Op, OpType, ScalarValue};
 use crate::clock::Clock;
-use std::collections::HashMap;
+use crate::query::{OpSetMetadata, QueryResult, TreeQuery};
+use crate::types::{ElemId, Op};
 use std::fmt::Debug;
+use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Blame<const B: usize> {
@@ -10,60 +10,113 @@ pub(crate) struct Blame<const B: usize> {
     seen: usize,
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
-    seen_at_this_mark: Option<ElemId>,
-    seen_at_last_mark: Option<ElemId>,
-    ops: Vec<Op>,
-    points: Vec<Clock>,
-    changed: bool,
+    baseline: Clock,
+    pub change_sets: Vec<ChangeSet>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeSet {
+    clock: Clock,
+    next_add: Option<Range<usize>>,
+    next_del: Option<(usize, String)>,
+    pub add: Vec<Range<usize>>,
+    pub del: Vec<(usize, String)>,
+}
+
+impl From<Clock> for ChangeSet {
+    fn from(clock: Clock) -> Self {
+        ChangeSet {
+            clock,
+            next_add: None,
+            next_del: None,
+            add: Vec::new(),
+            del: Vec::new(),
+        }
+    }
+}
+
+impl ChangeSet {
+    fn cut_add(&mut self) {
+        if let Some(add) = self.next_add.take() {
+            self.add.push(add)
+        }
+    }
+
+    fn cut_del(&mut self) {
+        if let Some(del) = self.next_del.take() {
+            self.del.push(del)
+        }
+    }
 }
 
 impl<const B: usize> Blame<B> {
-    pub fn new(points: Vec<Clock>) -> Self {
+    pub fn new(baseline: Clock, change_sets: Vec<Clock>) -> Self {
         Blame {
             pos: 0,
             seen: 0,
             last_seen: None,
             last_insert: None,
-            seen_at_last_mark: None,
-            seen_at_this_mark: None,
-            changed: false,
-            points: Vec::new(),
-            ops: Vec::new(),
+            baseline,
+            change_sets: change_sets.into_iter().map(|c| c.into()).collect(),
+        }
+    }
+
+    fn update_add(&mut self, element: &Op) {
+        let baseline = self.baseline.covers(&element.id);
+        for cs in &mut self.change_sets {
+            if !baseline && cs.clock.covers(&element.id) {
+                // is part of the change_set
+                if let Some(range) = &mut cs.next_add {
+                    range.end += 1;
+                } else {
+                    cs.next_add = Some(Range {
+                        start: self.seen,
+                        end: self.seen + 1,
+                    });
+                }
+            } else {
+                cs.cut_add();
+            }
+            cs.cut_del();
+        }
+    }
+
+    // id is in baseline
+    // succ is not in baseline but is in cs
+
+    fn update_del(&mut self, element: &Op) {
+        let baseline = self.baseline.covers(&element.id);
+        for cs in &mut self.change_sets {
+            if baseline && element.succ.iter().all(|id| cs.clock.covers(id)) {
+                // was deleted by change set
+                if let Some(s) = element.as_string() {
+                    if let Some((_, span)) = &mut cs.next_del {
+                        span.push_str(&s);
+                    } else {
+                        cs.next_del = Some((self.seen, s))
+                    }
+                }
+            } else {
+                cs.cut_del();
+            }
+            cs.cut_add();
         }
     }
 }
 
 impl<const B: usize> TreeQuery<B> for Blame<B> {
-    /*
-    fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
-        unimplemented!()
-    }
-    */
-
-    fn query_element_with_metadata(&mut self, element: &Op, m: &OpSetMetadata) -> QueryResult {
-        // find location to insert
-        // mark or set
-        if element.succ.is_empty() {
-            if let OpType::MarkBegin(_) = &element.action {
-                let pos = self
-                    .ops
-                    .binary_search_by(|probe| m.lamport_cmp(probe.id, element.id))
-                    .unwrap_err();
-                self.ops.insert(pos, element.clone());
-            }
-            if let OpType::MarkEnd(_) = &element.action {
-                self.ops.retain(|op| op.id != element.id.prev());
-            }
-        }
+    fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
         if element.insert {
             self.last_seen = None;
             self.last_insert = element.elemid();
         }
         if self.last_seen.is_none() && element.visible() {
-            //self.check_marks();
+            self.update_add(element);
             self.seen += 1;
             self.last_seen = element.elemid();
-            self.seen_at_this_mark = element.elemid();
+        }
+        if !element.succ.is_empty() {
+            self.update_del(element);
         }
         self.pos += 1;
         QueryResult::Next

@@ -456,6 +456,13 @@ impl Op {
         }
     }
 
+    pub fn as_string(&self) -> Option<String> {
+        match &self.action {
+            OpType::Set(scalar) => scalar.as_string(),
+            _ => None,
+        }
+    }
+
     pub fn value(&self) -> Value {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),

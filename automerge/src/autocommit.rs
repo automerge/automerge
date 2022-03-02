@@ -431,6 +431,15 @@ impl Transactable for AutoCommit {
         self.doc.raw_spans(obj)
     }
 
+    fn blame(
+        &self,
+        obj: &ExId,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
+        self.doc.blame(obj, baseline, change_sets)
+    }
+
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?

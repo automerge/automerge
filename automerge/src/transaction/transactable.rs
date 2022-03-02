@@ -115,6 +115,14 @@ pub trait Transactable {
     /// test raw_spans api for mark/span experiment
     fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError>;
 
+    /// test blame api for mark/span experiment
+    fn blame(
+        &self,
+        obj: &ExId,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet>, AutomergeError>;
+
     /// Get the value at this prop in the object.
     fn value<P: Into<Prop>>(
         &self,

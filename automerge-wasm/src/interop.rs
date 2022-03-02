@@ -329,6 +329,15 @@ pub(crate) fn get_heads(heads: Option<Array>) -> Option<Vec<ChangeHash>> {
     heads.ok()
 }
 
+pub(crate) fn get_js_heads(heads: JsValue) -> Result<Vec<ChangeHash>, JsValue> {
+    let heads = heads.dyn_into::<Array>()?;
+    heads
+        .iter()
+        .map(|j| j.into_serde())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(to_js_err)
+}
+
 pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let keys = doc.keys(obj);
     let map = Object::new();
