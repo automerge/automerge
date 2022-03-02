@@ -5,7 +5,7 @@ use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{Keys, KeysAt, SyncMessage, SyncState};
+use crate::{Keys, KeysAt, ObjType, ScalarValue, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -325,15 +325,26 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>>(
+    fn set<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.set(&mut self.doc, obj, prop, value)
+    }
+
+    fn make<P: Into<Prop>, V: Into<ObjType>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.make(&mut self.doc, obj, prop, value)
     }
 
     fn insert<V: Into<Value>>(

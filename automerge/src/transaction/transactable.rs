@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Keys, KeysAt, Prop, Value};
+use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A way of mutating a document within a single change.
@@ -20,12 +20,32 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>>(
+    fn set<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError>;
+    ) -> Result<(), AutomergeError>;
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    fn make<P: Into<Prop>, V: Into<ObjType>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<ExId, AutomergeError>;
 
     /// Insert a value into a list at the given index.
     fn insert<V: Into<Value>>(

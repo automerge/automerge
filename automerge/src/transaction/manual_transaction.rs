@@ -1,5 +1,5 @@
 use crate::exid::ExId;
-use crate::{Automerge, ChangeHash, KeysAt, Prop, Value};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, Prop, ScalarValue, Value};
 use crate::{AutomergeError, Keys};
 
 use super::{CommitOptions, Transactable, TransactionInner};
@@ -85,13 +85,25 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>>(
+    fn set<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.inner.as_mut().unwrap().set(self.doc, obj, prop, value)
+    }
+
+    fn make<P: Into<Prop>, V: Into<ObjType>>(
+        &mut self,
+        obj: &ExId,
+        prop: P,
+        value: V,
+    ) -> Result<ExId, AutomergeError> {
+        self.inner
+            .as_mut()
+            .unwrap()
+            .make(self.doc, obj, prop, value)
     }
 
     fn insert<V: Into<Value>>(
