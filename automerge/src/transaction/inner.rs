@@ -296,7 +296,7 @@ impl TransactionInner {
         let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(doc, obj, pos, v.clone())?;
+            let id = self.do_insert(doc, obj, pos, v)?;
             if let Some(id) = id {
                 results.push(doc.id_to_exid(id));
             }
