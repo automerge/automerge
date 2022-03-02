@@ -17,6 +17,12 @@ use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
+#[derive(Debug, Clone)]
+pub(crate) enum Actor {
+    Unused(ActorId),
+    Cached(usize),
+}
+
 /// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
@@ -27,7 +33,7 @@ pub struct Automerge {
     pub(crate) deps: HashSet<ChangeHash>,
     pub(crate) saved: Vec<ChangeHash>,
     pub(crate) ops: OpSet,
-    pub(crate) actor: Option<usize>,
+    pub(crate) actor: Actor,
     pub(crate) max_op: u64,
 }
 
@@ -41,62 +47,42 @@ impl Automerge {
             ops: Default::default(),
             deps: Default::default(),
             saved: Default::default(),
-            actor: None,
+            actor: Actor::Unused(ActorId::random()),
             max_op: 0,
         }
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) {
-        self.actor = Some(self.ops.m.actors.cache(actor))
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
+        self.actor = Actor::Unused(actor);
+        self
     }
 
-    fn random_actor(&mut self) -> ActorId {
-        let actor = ActorId::from(uuid::Uuid::new_v4().as_bytes().to_vec());
-        self.actor = Some(self.ops.m.actors.cache(actor.clone()));
-        actor
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.actor = Actor::Unused(actor);
+        self
     }
 
-    pub fn get_actor(&mut self) -> ActorId {
-        if let Some(actor) = self.actor {
-            self.ops.m.actors[actor].clone()
-        } else {
-            self.random_actor()
+    pub fn get_actor(&self) -> &ActorId {
+        match &self.actor {
+            Actor::Unused(actor) => actor,
+            Actor::Cached(index) => self.ops.m.actors.get(*index),
         }
-    }
-
-    pub fn maybe_get_actor(&self) -> Option<ActorId> {
-        self.actor.map(|i| self.ops.m.actors[i].clone())
     }
 
     pub(crate) fn get_actor_index(&mut self) -> usize {
-        if let Some(actor) = self.actor {
-            actor
-        } else {
-            self.random_actor();
-            self.actor.unwrap() // random_actor always sets actor to is_some()
+        match &mut self.actor {
+            Actor::Unused(actor) => {
+                let index = self.ops.m.actors.cache(std::mem::take(actor));
+                self.actor = Actor::Cached(index);
+                index
+            }
+            Actor::Cached(index) => *index,
         }
-    }
-
-    pub fn new_with_actor_id(actor: ActorId) -> Self {
-        let mut am = Automerge {
-            queue: vec![],
-            history: vec![],
-            history_index: HashMap::new(),
-            states: HashMap::new(),
-            ops: Default::default(),
-            deps: Default::default(),
-            saved: Default::default(),
-            actor: None,
-            max_op: 0,
-        };
-        am.actor = Some(am.ops.m.actors.cache(actor));
-        am
     }
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
         let actor = self.get_actor_index();
-
         let seq = self.states.entry(actor).or_default().len() as u64 + 1;
         let mut deps = self.get_heads();
         if seq > 1 {
@@ -165,7 +151,7 @@ impl Automerge {
 
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
-        f.actor = None;
+        f.set_actor(ActorId::random());
         f
     }
 
@@ -663,11 +649,11 @@ impl Automerge {
     }
 
     pub fn get_last_local_change(&self) -> Option<&Change> {
-        if let Some(actor) = &self.actor {
-            let actor = &self.ops.m.actors[*actor];
-            return self.history.iter().rev().find(|c| c.actor_id() == actor);
-        }
-        None
+        return self
+            .history
+            .iter()
+            .rev()
+            .find(|c| c.actor_id() == self.get_actor());
     }
 
     pub fn get_changes(&self, have_deps: &[ChangeHash]) -> Vec<&Change> {

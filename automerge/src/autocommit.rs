@@ -35,24 +35,20 @@ impl AutoCommit {
         &self.doc
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) {
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor)
+        self.doc.set_actor(actor);
+        self
     }
 
-    pub fn get_actor(&mut self) -> ActorId {
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_actor(actor);
+        self
+    }
+
+    pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
-    }
-
-    pub fn maybe_get_actor(&self) -> Option<ActorId> {
-        self.doc.maybe_get_actor()
-    }
-
-    pub fn new_with_actor_id(actor: ActorId) -> Self {
-        Self {
-            doc: Automerge::new_with_actor_id(actor),
-            transaction: None,
-        }
     }
 
     fn ensure_transaction_open(&mut self) {
