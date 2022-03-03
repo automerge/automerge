@@ -1203,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn overwrite_map() {
+    fn mutate_old_objects() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // create a map
@@ -1227,11 +1227,9 @@ mod tests {
         assert_eq!(doc.value(&map1, "b").unwrap().unwrap().0, Value::int(1));
         // and even set new things in it!
         let mut tx = doc.transaction();
-
-        // This should panic as we are modifying an old object
         tx.set(&map1, "c", 3).unwrap();
         tx.commit();
 
-        assert_eq!(doc.value(&map1, "c").unwrap(), None);
+        assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
     }
 }
