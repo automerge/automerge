@@ -167,8 +167,8 @@ impl Automerge {
         datatype: JsValue,
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
-        let (value, subvals) =
-            to_objtype(&value, &datatype.as_string()).ok_or(to_js_err("expected object"))?;
+        let (value, subvals) = to_objtype(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("expected object"))?;
         let index = self.0.length(&obj);
         let opid = self.0.insert_object(&obj, index, value)?;
         self.subset(&opid, subvals)?;
@@ -186,7 +186,7 @@ impl Automerge {
         let index = index as f64;
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or(to_js_err("expected scalar value"))?;
+            .ok_or_else(|| to_js_err("expected scalar value"))?;
         self.0.insert(&obj, index as usize, value)?;
         Ok(())
     }
@@ -200,8 +200,8 @@ impl Automerge {
     ) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
         let index = index as f64;
-        let (value, subvals) =
-            to_objtype(&value, &datatype.as_string()).ok_or(to_js_err("expected object"))?;
+        let (value, subvals) = to_objtype(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("expected object"))?;
         let opid = self.0.insert_object(&obj, index as usize, value)?;
         self.subset(&opid, subvals)?;
         Ok(opid.to_string().into())
@@ -218,7 +218,7 @@ impl Automerge {
         let prop = self.import_prop(prop)?;
         let value = self
             .import_scalar(&value, &datatype.as_string())
-            .ok_or(to_js_err("expected scalar value"))?;
+            .ok_or_else(|| to_js_err("expected scalar value"))?;
         self.0.set(&obj, prop, value)?;
         Ok(())
     }
@@ -232,8 +232,8 @@ impl Automerge {
     ) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
-        let (value, subvals) =
-            to_objtype(&value, &datatype.as_string()).ok_or(to_js_err("expected object"))?;
+        let (value, subvals) = to_objtype(&value, &datatype.as_string())
+            .ok_or_else(|| to_js_err("expected object"))?;
         let opid = self.0.set_object(&obj, prop, value)?;
         self.subset(&opid, subvals)?;
         Ok(opid.to_string().into())
