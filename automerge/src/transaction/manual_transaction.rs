@@ -47,7 +47,7 @@ impl<'a> Transaction<'a> {
     /// # use std::time::SystemTime;
     /// let mut doc = Automerge::new();
     /// let mut tx = doc.transaction();
-    /// tx.make(ROOT, "todos", ObjType::List).unwrap();
+    /// tx.set_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -97,7 +97,7 @@ impl<'a> Transactable for Transaction<'a> {
             .set(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn make<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
         &mut self,
         obj: O,
         prop: P,
@@ -106,7 +106,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .make(self.doc, obj.as_ref(), prop, value)
+            .set_object(self.doc, obj.as_ref(), prop, value)
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -121,7 +121,7 @@ impl<'a> Transactable for Transaction<'a> {
             .insert(self.doc, obj.as_ref(), index, value)
     }
 
-    fn make_insert<V: Into<ObjType>>(
+    fn insert_object<V: Into<ObjType>>(
         &mut self,
         obj: &ExId,
         index: usize,
@@ -130,7 +130,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .make_insert(self.doc, obj, index, value)
+            .insert_object(self.doc, obj, index, value)
     }
 
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(

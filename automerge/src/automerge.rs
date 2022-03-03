@@ -885,11 +885,11 @@ mod tests {
 
         assert_eq!(tx.pending_ops(), 1);
 
-        let map = tx.make(ROOT, "b", ObjType::Map)?;
+        let map = tx.set_object(ROOT, "b", ObjType::Map)?;
         // object already exists at b but setting a map again overwrites it so we get an opid.
         tx.set(map, "a", 2)?;
 
-        tx.make(ROOT, "b", ObjType::Map)?;
+        tx.set_object(ROOT, "b", ObjType::Map)?;
 
         assert_eq!(tx.pending_ops(), 4);
         let map = tx.value(ROOT, "b").unwrap().unwrap().1;
@@ -904,7 +904,7 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        let list_id = tx.make(ROOT, "items", ObjType::List)?;
+        let list_id = tx.set_object(ROOT, "items", ObjType::List)?;
         tx.set(ROOT, "zzz", "zzzval")?;
         assert!(tx.value(ROOT, "items")?.unwrap().1 == list_id);
         tx.insert(&list_id, 0, "a")?;
@@ -995,7 +995,7 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let text = tx.make(ROOT, "text", ObjType::Text)?;
+        let text = tx.set_object(ROOT, "text", ObjType::Text)?;
         tx.commit();
         let heads1 = doc.get_heads();
         let mut tx = doc.transaction();
@@ -1095,7 +1095,7 @@ mod tests {
         doc.set_actor("aaaa".try_into().unwrap());
 
         let mut tx = doc.transaction();
-        let list = tx.make(ROOT, "list", ObjType::List)?;
+        let list = tx.set_object(ROOT, "list", ObjType::List)?;
         tx.commit();
         let heads1 = doc.get_heads();
 

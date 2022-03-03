@@ -107,7 +107,7 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn make<P: Into<Prop>, V: Into<ObjType>>(
+    pub fn set_object<P: Into<Prop>, V: Into<ObjType>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -150,7 +150,7 @@ impl TransactionInner {
         Ok(())
     }
 
-    pub fn make_insert<V: Into<ObjType>>(
+    pub fn insert_object<V: Into<ObjType>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -358,7 +358,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
 
-        let a = tx.make(ROOT, "a", ObjType::Map).unwrap();
+        let a = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
         tx.set(&a, "b", 1).unwrap();
         assert!(tx.value(&a, "b").unwrap().is_some());
     }

@@ -40,7 +40,7 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn make<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
         &mut self,
         obj: O,
         prop: P,
@@ -56,7 +56,7 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn make_insert<V: Into<ObjType>>(
+    fn insert_object<V: Into<ObjType>>(
         &mut self,
         obj: &ExId,
         index: usize,
