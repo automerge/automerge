@@ -1201,4 +1201,35 @@ mod tests {
         let new_bytes = doc.save().unwrap();
         assert_eq!(bytes, new_bytes);
     }
+
+    #[test]
+    fn mutate_old_objects() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        // create a map
+        let map1 = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        tx.set(&map1, "b", 1).unwrap();
+        // overwrite the first map with a new one
+        let map2 = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        tx.set(&map2, "c", 2).unwrap();
+        tx.commit();
+
+        // we can get the new map by traversing the tree
+        let map = doc.value(&ROOT, "a").unwrap().unwrap().1;
+        assert_eq!(doc.value(&map, "b").unwrap(), None);
+        // and get values from it
+        assert_eq!(
+            doc.value(&map, "c").unwrap().map(|s| s.0),
+            Some(ScalarValue::Int(2).into())
+        );
+
+        // but we can still access the old one if we know the ID!
+        assert_eq!(doc.value(&map1, "b").unwrap().unwrap().0, Value::int(1));
+        // and even set new things in it!
+        let mut tx = doc.transaction();
+        tx.set(&map1, "c", 3).unwrap();
+        tx.commit();
+
+        assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
+    }
 }
