@@ -41,13 +41,13 @@ impl<'a> Transaction<'a> {
     /// ```
     /// # use automerge::transaction::CommitOptions;
     /// # use automerge::transaction::Transactable;
-    /// # use automerge::Value;
     /// # use automerge::ROOT;
     /// # use automerge::Automerge;
+    /// # use automerge::ObjType;
     /// # use std::time::SystemTime;
     /// let mut doc = Automerge::new();
     /// let mut tx = doc.transaction();
-    /// tx.set(ROOT, "todos", Value::list()).unwrap();
+    /// tx.make(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));

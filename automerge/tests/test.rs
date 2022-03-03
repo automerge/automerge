@@ -297,16 +297,10 @@ fn concurrently_assigned_nested_maps_should_not_merge() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
 
-    let doc1_map_id = doc1
-        .set(&automerge::ROOT, "config", automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let doc1_map_id = doc1.make(&automerge::ROOT, "config", ObjType::Map).unwrap();
     doc1.set(&doc1_map_id, "background", "blue").unwrap();
 
-    let doc2_map_id = doc2
-        .set(&automerge::ROOT, "config", automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let doc2_map_id = doc2.make(&automerge::ROOT, "config", ObjType::Map).unwrap();
     doc2.set(&doc2_map_id, "logo_url", "logo.png").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
@@ -333,10 +327,7 @@ fn concurrent_insertions_at_different_list_positions() {
     let mut doc2 = new_doc_with_actor(actor2);
     assert!(doc1.get_actor() < doc2.get_actor());
 
-    let list_id = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
 
     doc1.insert(&list_id, 0, "one").unwrap();
     doc1.insert(&list_id, 1, "three").unwrap();
@@ -368,10 +359,7 @@ fn concurrent_insertions_at_same_list_position() {
     let mut doc2 = new_doc_with_actor(actor2);
     assert!(doc1.get_actor() < doc2.get_actor());
 
-    let list_id = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "birds", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, "parakeet").unwrap();
 
     doc2.merge(&mut doc1).unwrap();
@@ -424,10 +412,7 @@ fn concurrent_assignment_and_deletion_of_a_map_entry() {
 fn concurrent_assignment_and_deletion_of_list_entry() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "birds", ObjType::List).unwrap();
     doc1.insert(&list_id, 0, "blackbird").unwrap();
     doc1.insert(&list_id, 1, "thrush").unwrap();
     doc1.insert(&list_id, 2, "goldfinch").unwrap();
@@ -474,10 +459,7 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
 fn insertion_after_a_deleted_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "birds", ObjType::List).unwrap();
 
     doc1.insert(&list_id, 0, "blackbird").unwrap();
     doc1.insert(&list_id, 1, "thrush").unwrap();
@@ -518,10 +500,7 @@ fn insertion_after_a_deleted_list_element() {
 fn concurrent_deletion_of_same_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    let list_id = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list_id = doc1.make(&automerge::ROOT, "birds", ObjType::List).unwrap();
 
     doc1.insert(&list_id, 0, "albatross").unwrap();
     doc1.insert(&list_id, 1, "buzzard").unwrap();
@@ -563,20 +542,13 @@ fn concurrent_updates_at_different_levels() {
     let mut doc2 = new_doc();
 
     let animals = doc1
-        .set(&automerge::ROOT, "animals", automerge::Value::map())
-        .unwrap()
+        .make(&automerge::ROOT, "animals", ObjType::Map)
         .unwrap();
-    let birds = doc1
-        .set(&animals, "birds", automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let birds = doc1.make(&animals, "birds", ObjType::Map).unwrap();
     doc1.set(&birds, "pink", "flamingo").unwrap();
     doc1.set(&birds, "black", "starling").unwrap();
 
-    let mammals = doc1
-        .set(&animals, "mammals", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let mammals = doc1.make(&animals, "mammals", ObjType::List).unwrap();
     doc1.insert(&mammals, 0, "badger").unwrap();
 
     doc2.merge(&mut doc1).unwrap();
@@ -614,14 +586,8 @@ fn concurrent_updates_of_concurrently_deleted_objects() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
 
-    let birds = doc1
-        .set(&automerge::ROOT, "birds", automerge::Value::map())
-        .unwrap()
-        .unwrap();
-    let blackbird = doc1
-        .set(&birds, "blackbird", automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let birds = doc1.make(&automerge::ROOT, "birds", ObjType::Map).unwrap();
+    let blackbird = doc1.make(&birds, "blackbird", ObjType::Map).unwrap();
     doc1.set(&blackbird, "feathers", "black").unwrap();
 
     doc2.merge(&mut doc1).unwrap();
@@ -649,8 +615,7 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
     let mut doc2 = new_doc_with_actor(actor2);
 
     let wisdom = doc1
-        .set(&automerge::ROOT, "wisdom", automerge::Value::list())
-        .unwrap()
+        .make(&automerge::ROOT, "wisdom", ObjType::List)
         .unwrap();
     doc2.merge(&mut doc1).unwrap();
 
@@ -710,10 +675,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_greater_actor_id(
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
 
-    let list = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1).unwrap();
 
@@ -736,10 +698,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_lesser_actor_id()
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
 
-    let list = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1).unwrap();
 
@@ -760,10 +719,7 @@ fn insertion_consistent_with_causality() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
 
-    let list = doc1
-        .set(&automerge::ROOT, "list", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let list = doc1.make(&automerge::ROOT, "list", ObjType::List).unwrap();
     doc1.insert(&list, 0, "four").unwrap();
     doc2.merge(&mut doc1).unwrap();
     doc2.insert(&list, 0, "three").unwrap();
@@ -796,15 +752,9 @@ fn save_and_restore_empty() {
 #[test]
 fn save_restore_complex() {
     let mut doc1 = new_doc();
-    let todos = doc1
-        .set(&automerge::ROOT, "todos", automerge::Value::list())
-        .unwrap()
-        .unwrap();
+    let todos = doc1.make(&automerge::ROOT, "todos", ObjType::List).unwrap();
 
-    let first_todo = doc1
-        .insert(&todos, 0, automerge::Value::map())
-        .unwrap()
-        .unwrap();
+    let first_todo = doc1.make_insert(&todos, 0, ObjType::Map).unwrap();
     doc1.set(&first_todo, "title", "water plants").unwrap();
     doc1.set(&first_todo, "done", false).unwrap();
 

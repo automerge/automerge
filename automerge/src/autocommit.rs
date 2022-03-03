@@ -248,12 +248,12 @@ impl AutoCommit {
     /// ```
     /// # use automerge::transaction::CommitOptions;
     /// # use automerge::transaction::Transactable;
-    /// # use automerge::Value;
     /// # use automerge::ROOT;
     /// # use automerge::AutoCommit;
+    /// # use automerge::ObjType;
     /// # use std::time::SystemTime;
     /// let mut doc = AutoCommit::new();
-    /// doc.set(ROOT, "todos", Value::list()).unwrap();
+    /// doc.make(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
