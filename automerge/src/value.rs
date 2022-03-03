@@ -66,7 +66,6 @@ impl Value {
         Value::Scalar(ScalarValue::Boolean(n))
     }
 
-
     pub fn bytes(b: Vec<u8>) -> Value {
         Value::Scalar(ScalarValue::Bytes(b))
     }
@@ -89,12 +88,6 @@ impl From<&str> for Value {
 impl From<String> for Value {
     fn from(s: String) -> Self {
         Value::Scalar(ScalarValue::Str(s.into()))
-    }
-}
-
-impl From<f64> for Value {
-    fn from(n: f64) -> Self {
-        Value::Scalar(ScalarValue::F64(n))
     }
 }
 

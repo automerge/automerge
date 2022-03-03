@@ -1,5 +1,5 @@
-use std::ffi::CString;
 use automerge as am;
+use std::ffi::CString;
 
 /// \class AMresult
 /// \brief A container of result codes, messages and values.
@@ -12,9 +12,9 @@ pub enum AMresult {
 }
 
 impl AMresult {
-  pub (crate) fn err(s: &str) -> Self {
-     AMresult::Error(CString::new(s).unwrap())
-  }
+    pub(crate) fn err(s: &str) -> Self {
+        AMresult::Error(CString::new(s).unwrap())
+    }
 }
 
 impl From<Result<Option<am::ObjId>, am::AutomergeError>> for AMresult {
