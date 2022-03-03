@@ -1,6 +1,6 @@
 use crate::{AMobj, AMresult, AmDataType};
 use automerge as am;
-use libc::{c_double, c_long, c_ulong};
+use libc::{c_double};
 use std::{
     ffi::{c_void, CStr},
     ops::Deref,
@@ -67,11 +67,11 @@ pub(crate) fn import_value(
                 .as_ref()
                 .map(|v| am::Value::boolean(**v != 0)),
             AmDataType::Int => value
-                .cast::<*const c_long>()
+                .cast::<*const i64>()
                 .as_ref()
                 .map(|v| am::Value::int(**v)),
             AmDataType::Uint => value
-                .cast::<*const c_ulong>()
+                .cast::<*const u64>()
                 .as_ref()
                 .map(|v| am::Value::uint(**v)),
             AmDataType::F64 => value
@@ -79,11 +79,11 @@ pub(crate) fn import_value(
                 .as_ref()
                 .map(|v| am::Value::f64(**v)),
             AmDataType::Timestamp => value
-                .cast::<*const c_long>()
+                .cast::<*const i64>()
                 .as_ref()
                 .map(|v| am::Value::timestamp(**v)),
             AmDataType::Counter => value
-                .cast::<*const c_long>()
+                .cast::<*const i64>()
                 .as_ref()
                 .map(|v| am::Value::counter(**v)),
             AmDataType::Null => Some(am::Value::null()),
