@@ -1,0 +1,38 @@
+on:
+  push:
+    branches:
+      - main
+
+name: Documentation
+
+jobs:
+  deploy-docs:
+    concurrency: deploy-docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v1
+
+      - name: Build docs
+        uses: actions-rs/cargo@v1
+        with:
+          command: doc
+          args: --workspace --all-features --no-deps
+
+      - name: Configure root page
+        run: echo '<meta http-equiv="refresh" content="0; url=automerge">' > target/doc/index.html
+
+      - name: Deploy docs
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./target/doc
