@@ -125,6 +125,12 @@ macro_rules! to_result {
 #[derive(Clone)]
 pub struct AMobj(am::ObjId);
 
+impl AsRef<am::ObjId> for AMobj {
+    fn as_ref(&self) -> &am::ObjId {
+        &self.0
+    }
+}
+
 /// \memberof AMdoc
 /// \brief Allocates a new `AMdoc` struct and initializes it with defaults.
 ///
