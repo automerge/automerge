@@ -393,8 +393,8 @@ impl Transactable for AutoCommit {
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.splice(&mut self.doc, obj.as_ref(), pos, del, vals)

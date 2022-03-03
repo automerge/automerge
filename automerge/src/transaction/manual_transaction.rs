@@ -163,8 +163,8 @@ impl<'a> Transactable for Transaction<'a> {
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()

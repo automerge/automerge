@@ -327,23 +327,19 @@ impl TransactionInner {
         obj: &ExId,
         mut pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
             // del()
             self.local_op(doc, obj, pos.into(), OpType::Del)?;
         }
-        let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(doc, obj, pos, v)?;
-            if let Some(id) = id {
-                results.push(doc.id_to_exid(id));
-            }
+            self.do_insert(doc, obj, pos, v)?;
             pos += 1;
         }
-        Ok(results)
+        Ok(())
     }
 }
 

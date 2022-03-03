@@ -9,11 +9,6 @@ pub trait Transactable {
 
     /// Set the value of property `P` to value `V` in object `obj`.
     ///
-    /// # Returns
-    ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
-    ///
     /// # Errors
     ///
     /// This will return an error if
@@ -27,12 +22,11 @@ pub trait Transactable {
         value: V,
     ) -> Result<(), AutomergeError>;
 
-    /// Set the value of property `P` to value `V` in object `obj`.
+    /// Set the value of property `P` to the new object `V` in object `obj`.
     ///
     /// # Returns
     ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
+    /// The id of the object which was created.
     ///
     /// # Errors
     ///
@@ -44,7 +38,7 @@ pub trait Transactable {
         &mut self,
         obj: O,
         prop: P,
-        value: V,
+        object: V,
     ) -> Result<ExId, AutomergeError>;
 
     /// Insert a value into a list at the given index.
@@ -55,7 +49,7 @@ pub trait Transactable {
         value: V,
     ) -> Result<(), AutomergeError>;
 
-    /// Insert a value into a list at the given index.
+    /// Insert an object into a list at the given index.
     fn insert_object<V: Into<ObjType>>(
         &mut self,
         obj: &ExId,
@@ -75,15 +69,13 @@ pub trait Transactable {
     fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
         -> Result<(), AutomergeError>;
 
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements.
     fn splice<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError>;
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError>;
 
     /// Like [`Self::splice`] but for text.
     fn splice_text<O: AsRef<ExId>>(
@@ -92,7 +84,7 @@ pub trait Transactable {
         pos: usize,
         del: usize,
         text: &str,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let mut vals = vec![];
         for c in text.to_owned().graphemes(true) {
             vals.push(c.into());
