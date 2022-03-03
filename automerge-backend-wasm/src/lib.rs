@@ -1,4 +1,5 @@
 //#![feature(set_stdio)]
+#![allow(clippy::unused_unit)]
 
 mod types;
 
