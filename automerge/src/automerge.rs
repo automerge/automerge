@@ -283,7 +283,7 @@ impl Automerge {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    pub fn value<P: Into<Prop>, O: AsRef<ExId>>(
+    pub fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -291,7 +291,7 @@ impl Automerge {
         Ok(self.values(obj, prop.into())?.last().cloned())
     }
 
-    pub fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
+    pub fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -300,7 +300,7 @@ impl Automerge {
         Ok(self.values_at(obj, prop, heads)?.last().cloned())
     }
 
-    pub fn values<P: Into<Prop>, O: AsRef<ExId>>(
+    pub fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -331,7 +331,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
+    pub fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,

@@ -20,7 +20,7 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>, O: AsRef<ExId>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<Value>>(
         &mut self,
         obj: O,
         prop: P,
@@ -28,7 +28,7 @@ pub trait Transactable {
     ) -> Result<Option<ExId>, AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn insert<V: Into<Value>, O: AsRef<ExId>>(
+    fn insert<O: AsRef<ExId>, V: Into<Value>>(
         &mut self,
         obj: O,
         index: usize,
@@ -36,7 +36,7 @@ pub trait Transactable {
     ) -> Result<Option<ExId>, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
-    fn inc<P: Into<Prop>, O: AsRef<ExId>>(
+    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -44,7 +44,7 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Delete the value at prop in the object.
-    fn del<P: Into<Prop>, O: AsRef<ExId>>(&mut self, obj: O, prop: P)
+    fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
         -> Result<(), AutomergeError>;
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
@@ -95,27 +95,27 @@ pub trait Transactable {
     ) -> Result<String, AutomergeError>;
 
     /// Get the value at this prop in the object.
-    fn value<P: Into<Prop>, O: AsRef<ExId>>(
+    fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
-    fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
+    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
-    fn values<P: Into<Prop>, O: AsRef<ExId>>(
+    fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
 
-    fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
+    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,

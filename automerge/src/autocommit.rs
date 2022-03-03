@@ -321,7 +321,7 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>, O: AsRef<ExId>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<Value>>(
         &mut self,
         obj: O,
         prop: P,
@@ -332,7 +332,7 @@ impl Transactable for AutoCommit {
         tx.set(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn insert<V: Into<Value>, O: AsRef<ExId>>(
+    fn insert<O: AsRef<ExId>, V: Into<Value>>(
         &mut self,
         obj: O,
         index: usize,
@@ -343,7 +343,7 @@ impl Transactable for AutoCommit {
         tx.insert(&mut self.doc, obj.as_ref(), index, value)
     }
 
-    fn inc<P: Into<Prop>, O: AsRef<ExId>>(
+    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -354,7 +354,7 @@ impl Transactable for AutoCommit {
         tx.inc(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<P: Into<Prop>, O: AsRef<ExId>>(
+    fn del<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -393,7 +393,7 @@ impl Transactable for AutoCommit {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    fn value<P: Into<Prop>, O: AsRef<ExId>>(
+    fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -401,7 +401,7 @@ impl Transactable for AutoCommit {
         self.doc.value(obj, prop)
     }
 
-    fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
+    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -410,7 +410,7 @@ impl Transactable for AutoCommit {
         self.doc.value_at(obj, prop, heads)
     }
 
-    fn values<P: Into<Prop>, O: AsRef<ExId>>(
+    fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -418,7 +418,7 @@ impl Transactable for AutoCommit {
         self.doc.values(obj, prop)
     }
 
-    fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
+    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
