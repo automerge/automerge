@@ -2,6 +2,7 @@
 members = [
     "automerge",
     "automerge-wasm",
+    "automerge-cli",
     "edit-trace",
 ]
 
