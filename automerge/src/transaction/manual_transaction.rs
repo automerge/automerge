@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use crate::exid::ExId;
 use crate::{Automerge, ChangeHash, KeysAt, Prop, Value};
 use crate::{AutomergeError, Keys};
@@ -87,7 +85,7 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>, O: Borrow<ExId>>(
+    fn set<P: Into<Prop>, V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -96,10 +94,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .set(self.doc, obj.borrow(), prop, value)
+            .set(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn insert<V: Into<Value>, O: Borrow<ExId>>(
+    fn insert<V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         index: usize,
@@ -108,10 +106,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .insert(self.doc, obj.borrow(), index, value)
+            .insert(self.doc, obj.as_ref(), index, value)
     }
 
-    fn inc<P: Into<Prop>, O: Borrow<ExId>>(
+    fn inc<P: Into<Prop>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -120,10 +118,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .inc(self.doc, obj.borrow(), prop, value)
+            .inc(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<P: Into<Prop>, O: Borrow<ExId>>(
+    fn del<P: Into<Prop>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -131,12 +129,12 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .del(self.doc, obj.borrow(), prop)
+            .del(self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice<O: Borrow<ExId>>(
+    fn splice<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
@@ -146,30 +144,30 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .splice(self.doc, obj.borrow(), pos, del, vals)
+            .splice(self.doc, obj.as_ref(), pos, del, vals)
     }
 
-    fn keys<O: Borrow<ExId>>(&self, obj: O) -> Keys {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
     }
 
-    fn length<O: Borrow<ExId>>(&self, obj: O) -> usize {
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
     }
 
-    fn length_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         self.doc.length_at(obj, heads)
     }
 
-    fn text<O: Borrow<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }
 
-    fn text_at<O: Borrow<ExId>>(
+    fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
@@ -177,7 +175,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.text_at(obj, heads)
     }
 
-    fn value<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -185,7 +183,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.value(obj, prop)
     }
 
-    fn value_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -194,7 +192,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.value_at(obj, prop, heads)
     }
 
-    fn values<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -202,7 +200,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.values(obj, prop)
     }
 
-    fn values_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,

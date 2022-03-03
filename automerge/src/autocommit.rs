@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
@@ -289,19 +287,19 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys<O: Borrow<ExId>>(&self, obj: O) -> Keys {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
     }
 
-    fn length<O: Borrow<ExId>>(&self, obj: O) -> usize {
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
     }
 
-    fn length_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         self.doc.length_at(obj, heads)
     }
 
@@ -323,7 +321,7 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>, O: Borrow<ExId>>(
+    fn set<P: Into<Prop>, V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -331,10 +329,10 @@ impl Transactable for AutoCommit {
     ) -> Result<Option<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.set(&mut self.doc, obj.borrow(), prop, value)
+        tx.set(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn insert<V: Into<Value>, O: Borrow<ExId>>(
+    fn insert<V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         index: usize,
@@ -342,10 +340,10 @@ impl Transactable for AutoCommit {
     ) -> Result<Option<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.insert(&mut self.doc, obj.borrow(), index, value)
+        tx.insert(&mut self.doc, obj.as_ref(), index, value)
     }
 
-    fn inc<P: Into<Prop>, O: Borrow<ExId>>(
+    fn inc<P: Into<Prop>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -353,22 +351,22 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.inc(&mut self.doc, obj.borrow(), prop, value)
+        tx.inc(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<P: Into<Prop>, O: Borrow<ExId>>(
+    fn del<P: Into<Prop>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.del(&mut self.doc, obj.borrow(), prop)
+        tx.del(&mut self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice<O: Borrow<ExId>>(
+    fn splice<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
@@ -377,14 +375,14 @@ impl Transactable for AutoCommit {
     ) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.splice(&mut self.doc, obj.borrow(), pos, del, vals)
+        tx.splice(&mut self.doc, obj.as_ref(), pos, del, vals)
     }
 
-    fn text<O: Borrow<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }
 
-    fn text_at<O: Borrow<ExId>>(
+    fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
@@ -395,7 +393,7 @@ impl Transactable for AutoCommit {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    fn value<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -403,7 +401,7 @@ impl Transactable for AutoCommit {
         self.doc.value(obj, prop)
     }
 
-    fn value_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -412,7 +410,7 @@ impl Transactable for AutoCommit {
         self.doc.value_at(obj, prop, heads)
     }
 
-    fn values<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -420,7 +418,7 @@ impl Transactable for AutoCommit {
         self.doc.values(obj, prop)
     }
 
-    fn values_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,

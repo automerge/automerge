@@ -1,5 +1,3 @@
-use std::borrow::Borrow;
-
 use crate::exid::ExId;
 use crate::{AutomergeError, ChangeHash, Keys, KeysAt, Prop, Value};
 use unicode_segmentation::UnicodeSegmentation;
@@ -22,7 +20,7 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>, O: Borrow<ExId>>(
+    fn set<P: Into<Prop>, V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -30,7 +28,7 @@ pub trait Transactable {
     ) -> Result<Option<ExId>, AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn insert<V: Into<Value>, O: Borrow<ExId>>(
+    fn insert<V: Into<Value>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         index: usize,
@@ -38,7 +36,7 @@ pub trait Transactable {
     ) -> Result<Option<ExId>, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
-    fn inc<P: Into<Prop>, O: Borrow<ExId>>(
+    fn inc<P: Into<Prop>, O: AsRef<ExId>>(
         &mut self,
         obj: O,
         prop: P,
@@ -46,15 +44,12 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Delete the value at prop in the object.
-    fn del<P: Into<Prop>, O: Borrow<ExId>>(
-        &mut self,
-        obj: O,
-        prop: P,
-    ) -> Result<(), AutomergeError>;
+    fn del<P: Into<Prop>, O: AsRef<ExId>>(&mut self, obj: O, prop: P)
+        -> Result<(), AutomergeError>;
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements.
-    fn splice<O: Borrow<ExId>>(
+    fn splice<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
@@ -63,7 +58,7 @@ pub trait Transactable {
     ) -> Result<Vec<ExId>, AutomergeError>;
 
     /// Like [`Self::splice`] but for text.
-    fn splice_text<O: Borrow<ExId>>(
+    fn splice_text<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
@@ -78,49 +73,49 @@ pub trait Transactable {
     }
 
     /// Get the keys of the given object, it should be a map.
-    fn keys<O: Borrow<ExId>>(&self, obj: O) -> Keys;
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys;
 
     /// Get the keys of the given object at a point in history.
-    fn keys_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
 
     /// Get the length of the given object.
-    fn length<O: Borrow<ExId>>(&self, obj: O) -> usize;
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
 
     /// Get the length of the given object at a point in history.
-    fn length_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get the string that this text object represents.
-    fn text<O: Borrow<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
 
     /// Get the string that this text object represents at a point in history.
-    fn text_at<O: Borrow<ExId>>(
+    fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError>;
 
     /// Get the value at this prop in the object.
-    fn value<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
-    fn value_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
-    fn values<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
 
-    fn values_at<P: Into<Prop>, O: Borrow<ExId>>(
+    fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,

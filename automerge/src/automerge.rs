@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::change::encode_document;
@@ -178,8 +177,8 @@ impl Automerge {
     ///
     /// For a map this returns the keys of the map.
     /// For a list this returns the element ids (opids) encoded as strings.
-    pub fn keys<O: Borrow<ExId>>(&self, obj: O) -> Keys {
-        if let Ok(obj) = self.exid_to_obj(obj.borrow()) {
+    pub fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let iter_keys = self.ops.keys(obj);
             Keys::new(self, iter_keys)
         } else {
@@ -188,8 +187,8 @@ impl Automerge {
     }
 
     /// Historical version of [`keys`](Self::keys).
-    pub fn keys_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
-        if let Ok(obj) = self.exid_to_obj(obj.borrow()) {
+    pub fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             KeysAt::new(self, self.ops.keys_at(obj, clock))
         } else {
@@ -197,8 +196,8 @@ impl Automerge {
         }
     }
 
-    pub fn length<O: Borrow<ExId>>(&self, obj: O) -> usize {
-        if let Ok(inner_obj) = self.exid_to_obj(obj.borrow()) {
+    pub fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
+        if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
             match self.ops.object_type(&inner_obj) {
                 Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
@@ -211,8 +210,8 @@ impl Automerge {
         }
     }
 
-    pub fn length_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
-        if let Ok(inner_obj) = self.exid_to_obj(obj.borrow()) {
+    pub fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
+        if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
             match self.ops.object_type(&inner_obj) {
                 Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
@@ -252,8 +251,8 @@ impl Automerge {
         ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
     }
 
-    pub fn text<O: Borrow<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.borrow())?;
+    pub fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let query = self.ops.search(obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
@@ -264,12 +263,12 @@ impl Automerge {
         Ok(buffer)
     }
 
-    pub fn text_at<O: Borrow<ExId>>(
+    pub fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
         heads: &[ChangeHash],
     ) -> Result<String, AutomergeError> {
-        let obj = self.exid_to_obj(obj.borrow())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
         let query = self.ops.search(obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
@@ -284,7 +283,7 @@ impl Automerge {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    pub fn value<P: Into<Prop>, O: Borrow<ExId>>(
+    pub fn value<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -292,7 +291,7 @@ impl Automerge {
         Ok(self.values(obj, prop.into())?.last().cloned())
     }
 
-    pub fn value_at<P: Into<Prop>, O: Borrow<ExId>>(
+    pub fn value_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
@@ -301,12 +300,12 @@ impl Automerge {
         Ok(self.values_at(obj, prop, heads)?.last().cloned())
     }
 
-    pub fn values<P: Into<Prop>, O: Borrow<ExId>>(
+    pub fn values<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        let obj = self.exid_to_obj(obj.borrow())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let result = match prop.into() {
             Prop::Map(p) => {
                 let prop = self.ops.m.props.lookup(&p);
@@ -332,14 +331,14 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn values_at<P: Into<Prop>, O: Borrow<ExId>>(
+    pub fn values_at<P: Into<Prop>, O: AsRef<ExId>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         let prop = prop.into();
-        let obj = self.exid_to_obj(obj.borrow())?;
+        let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
         let result = match prop {
             Prop::Map(p) => {
