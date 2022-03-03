@@ -54,7 +54,7 @@ pub trait Transactable {
         &mut self,
         obj: &ExId,
         index: usize,
-        value: V,
+        object: V,
     ) -> Result<ExId, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
