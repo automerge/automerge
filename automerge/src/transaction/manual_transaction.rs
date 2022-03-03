@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::exid::ExId;
 use crate::{Automerge, ChangeHash, KeysAt, Prop, Value};
 use crate::{AutomergeError, Keys};
@@ -47,7 +49,7 @@ impl<'a> Transaction<'a> {
     /// # use std::time::SystemTime;
     /// let mut doc = Automerge::new();
     /// let mut tx = doc.transaction();
-    /// tx.set(&ROOT, "todos", Value::list()).unwrap();
+    /// tx.set(ROOT, "todos", Value::list()).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -85,45 +87,58 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>>(
+    fn set<P: Into<Prop>, V: Into<Value>, O: Borrow<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
-        self.inner.as_mut().unwrap().set(self.doc, obj, prop, value)
+        self.inner
+            .as_mut()
+            .unwrap()
+            .set(self.doc, obj.borrow(), prop, value)
     }
 
-    fn insert<V: Into<Value>>(
+    fn insert<V: Into<Value>, O: Borrow<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()
-            .insert(self.doc, obj, index, value)
+            .insert(self.doc, obj.borrow(), index, value)
     }
 
-    fn inc<P: Into<Prop>>(
+    fn inc<P: Into<Prop>, O: Borrow<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
-        self.inner.as_mut().unwrap().inc(self.doc, obj, prop, value)
+        self.inner
+            .as_mut()
+            .unwrap()
+            .inc(self.doc, obj.borrow(), prop, value)
     }
 
-    fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
-        self.inner.as_mut().unwrap().del(self.doc, obj, prop)
+    fn del<P: Into<Prop>, O: Borrow<ExId>>(
+        &mut self,
+        obj: O,
+        prop: P,
+    ) -> Result<(), AutomergeError> {
+        self.inner
+            .as_mut()
+            .unwrap()
+            .del(self.doc, obj.borrow(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice(
+    fn splice<O: Borrow<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         pos: usize,
         del: usize,
         vals: Vec<Value>,
@@ -131,61 +146,65 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .splice(self.doc, obj, pos, del, vals)
+            .splice(self.doc, obj.borrow(), pos, del, vals)
     }
 
-    fn keys(&self, obj: &ExId) -> Keys {
+    fn keys<O: Borrow<ExId>>(&self, obj: O) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> KeysAt {
+    fn keys_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
     }
 
-    fn length(&self, obj: &ExId) -> usize {
+    fn length<O: Borrow<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
     }
 
-    fn length_at(&self, obj: &ExId, heads: &[ChangeHash]) -> usize {
+    fn length_at<O: Borrow<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         self.doc.length_at(obj, heads)
     }
 
-    fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
+    fn text<O: Borrow<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }
 
-    fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
+    fn text_at<O: Borrow<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
     }
 
-    fn value<P: Into<Prop>>(
+    fn value<P: Into<Prop>, O: Borrow<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
         self.doc.value(obj, prop)
     }
 
-    fn value_at<P: Into<Prop>>(
+    fn value_at<P: Into<Prop>, O: Borrow<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
         self.doc.value_at(obj, prop, heads)
     }
 
-    fn values<P: Into<Prop>>(
+    fn values<P: Into<Prop>, O: Borrow<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.values(obj, prop)
     }
 
-    fn values_at<P: Into<Prop>>(
+    fn values_at<P: Into<Prop>, O: Borrow<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
