@@ -897,7 +897,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     let mut doc1 = new_doc_with_actor(actor1);
 
-    let list = doc1.set(&ROOT, "list", Value::list())?.unwrap();
+    let list = doc1.set(ROOT, "list", Value::list())?.unwrap();
     doc1.insert(&list, 0, "a")?;
     doc1.insert(&list, 1, "b")?;
     doc1.insert(&list, 2, "c")?;

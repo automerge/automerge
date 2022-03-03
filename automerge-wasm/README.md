@@ -1,16 +1,17 @@
 ## Automerge WASM Low Level Interface
 
-This is a low level automerge library written in rust exporting a javascript API via WASM.  This low level api is the underpinning to the `automerge-js` library that reimplements the Automerge API via these low level functions.
+This is a low level automerge library written in rust exporting a javascript API via WASM. This low level api is the underpinning to the `automerge-js` library that reimplements the Automerge API via these low level functions.
 
 ### Static Functions
 
 ### Methods
 
-  `doc.clone(actor?: string)` : Make a complete 
+`doc.clone(actor?: string)` : Make a complete
 
-  `doc.free()` : deallocate WASM memory associated with a document
+`doc.free()` : deallocate WASM memory associated with a document
 
-#[wasm_bindgen]
+```rust
+    #[wasm_bindgen]
     pub fn free(self) {}
 
     #[wasm_bindgen(js_name = pendingOps)]
@@ -430,7 +431,7 @@ This is a low level automerge library written in rust exporting a javascript API
 
     #[wasm_bindgen(js_name = toJS)]
     pub fn to_js(&self) -> JsValue {
-        map_to_js(&self.0, &ROOT)
+        map_to_js(&self.0, ROOT)
     }
 
     fn import(&self, id: String) -> Result<ObjId, JsValue> {
@@ -582,6 +583,7 @@ This is a low level automerge library written in rust exporting a javascript API
         }
         */
     }
+
 }
 
 #[wasm_bindgen(js_name = create)]
@@ -691,3 +693,4 @@ pub struct Text {}
 
 #[wasm_bindgen(js_name = TABLE)]
 pub struct Table {}
+```

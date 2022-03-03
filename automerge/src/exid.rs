@@ -74,3 +74,9 @@ impl Serialize for ExId {
         serializer.serialize_str(self.to_string().as_str())
     }
 }
+
+impl AsRef<ExId> for ExId {
+    fn as_ref(&self) -> &ExId {
+        self
+    }
+}
