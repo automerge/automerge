@@ -77,6 +77,6 @@ impl Serialize for ExId {
 
 impl AsRef<ExId> for ExId {
     fn as_ref(&self) -> &ExId {
-        &self
+        self
     }
 }
