@@ -10,7 +10,7 @@ fn main() {
         .transact_with::<_, _, AutomergeError, _>(
             || CommitOptions::default().with_message("Add card".to_owned()),
             |tx| {
-                let cards = tx.set(&ROOT, "cards", Value::list()).unwrap().unwrap();
+                let cards = tx.set(ROOT, "cards", Value::list()).unwrap().unwrap();
                 let card1 = tx.insert(&cards, 0, Value::map())?.unwrap();
                 tx.set(&card1, "title", "Rewrite everything in Clojure")?;
                 tx.set(&card1, "done", false)?;
