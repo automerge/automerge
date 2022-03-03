@@ -1,1 +1,0 @@
-initSidebarItems({"attr":[["wasm_bindgen",""]]});

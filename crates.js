@@ -1,0 +1,1 @@
+window.ALL_CRATES = ["automerge","automerge_backend","automerge_backend_wasm","automerge_frontend","automerge_protocol","perf"];

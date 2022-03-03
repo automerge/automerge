@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["FnvHasher","An implementation of the Fowler–Noll–Vo hash function."]],"type":[["FnvBuildHasher","A builder for default FNV hashers."],["FnvHashMap","A `HashMap` using a default FNV hasher."],["FnvHashSet","A `HashSet` using a default FNV hasher."]]});

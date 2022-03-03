@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["NonZeroLiteral","A representation of a non-zero literal. Used by the [`nonzero!`] macro."]]});

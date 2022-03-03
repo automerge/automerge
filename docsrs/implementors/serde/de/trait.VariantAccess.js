@@ -1,3 +1,0 @@
-(function() {var implementors = {};
-implementors["serde_wasm_bindgen"] = [{"text":"impl&lt;'de&gt; <a class=\"trait\" href=\"serde/de/trait.VariantAccess.html\" title=\"trait serde::de::VariantAccess\">VariantAccess</a>&lt;'de&gt; for <a class=\"struct\" href=\"serde_wasm_bindgen/struct.Deserializer.html\" title=\"struct serde_wasm_bindgen::Deserializer\">Deserializer</a>","synthetic":false,"types":["serde_wasm_bindgen::de::Deserializer"]}];
-if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

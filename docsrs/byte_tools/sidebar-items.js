@@ -1,1 +1,0 @@
-initSidebarItems({"fn":[["copy","Copy bytes from `src` to `dst`"],["set","Sets all bytes in `dst` equal to `value`"],["zero","Zero all bytes in `dst`"]]});

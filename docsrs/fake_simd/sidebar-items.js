@@ -1,1 +1,0 @@
-initSidebarItems({"struct":[["u32x4",""],["u64x2",""]]});

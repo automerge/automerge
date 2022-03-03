@@ -1,1 +1,0 @@
-initSidebarItems({"fn":[["select_all","Convert a list of streams into a `Stream` of results from the streams."]],"struct":[["IntoIter","Owned iterator over all streams in the unordered set."],["Iter","Immutable iterator over all streams in the unordered set."],["IterMut","Mutable iterator over all streams in the unordered set."],["SelectAll","An unbounded set of streams"]]});

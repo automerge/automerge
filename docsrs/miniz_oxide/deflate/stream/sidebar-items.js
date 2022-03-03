@@ -1,1 +1,0 @@
-initSidebarItems({"fn":[["deflate","Try to compress from input to output with the given Compressor"]]});
