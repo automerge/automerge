@@ -4,16 +4,16 @@ use std::ops::{Deref, DerefMut};
 /// \class AMdoc
 /// \brief A JSON-like CRDT.
 #[derive(Clone)]
-pub struct AMdoc(am::Automerge);
+pub struct AMdoc(am::AutoCommit);
 
 impl AMdoc {
-    pub fn create(handle: am::Automerge) -> AMdoc {
+    pub fn create(handle: am::AutoCommit) -> AMdoc {
         AMdoc(handle)
     }
 }
 
 impl Deref for AMdoc {
-    type Target = am::Automerge;
+    type Target = am::AutoCommit;
 
     fn deref(&self) -> &Self::Target {
         &self.0

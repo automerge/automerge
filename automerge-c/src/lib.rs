@@ -9,6 +9,7 @@ mod doc;
 mod result;
 mod utils;
 
+use automerge::transaction::Transactable;
 use doc::AMdoc;
 use result::AMresult;
 use utils::import_value;
@@ -132,7 +133,7 @@ pub struct AMobj(am::ObjId);
 ///          with `AMdestroy()`.
 #[no_mangle]
 pub extern "C" fn AMcreate() -> *mut AMdoc {
-    AMdoc::create(am::Automerge::new()).into()
+    AMdoc::create(am::AutoCommit::new()).into()
 }
 
 /// \memberof AMdoc
@@ -142,6 +143,9 @@ pub extern "C" fn AMcreate() -> *mut AMdoc {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \pre \p doc must be a valid address.
 #[no_mangle]
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
 pub unsafe extern "C" fn AMdestroy(doc: *mut AMdoc) {
     if !doc.is_null() {
         let doc: AMdoc = *Box::from_raw(doc);
@@ -158,6 +162,9 @@ pub unsafe extern "C" fn AMdestroy(doc: *mut AMdoc) {
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMdestroy()`.
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
 #[no_mangle]
 pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
     let doc = *Box::from_raw(doc);
@@ -177,6 +184,10 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// key and value must be valid c strings
 #[no_mangle]
 pub unsafe extern "C" fn AMconfig(
     doc: *mut AMdoc,
@@ -207,6 +218,9 @@ pub unsafe extern "C" fn AMconfig(
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
 #[no_mangle]
 pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
     unimplemented!()
@@ -217,16 +231,19 @@ pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
 ///
 /// \param[in] result A pointer to an `AMresult` struct or `NULL`.
 /// \return An `AmStatus` enum tag.
+///
+/// # Safety
+/// result must be a pointer to a valid AMresult
 #[no_mangle]
 pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
-  match result.as_mut() {
-      Some(AMresult::Ok) => AmStatus::CommandOk,
-      Some(AMresult::Error(_)) => AmStatus::Error,
-      Some(AMresult::ObjId(_)) => AmStatus::ObjOk,
-      Some(AMresult::Values(_)) => AmStatus::ValuesOk,
-      Some(AMresult::Changes(_)) => AmStatus::ChangesOk,
-      None => AmStatus::InvalidResult,
-  }
+    match result.as_mut() {
+        Some(AMresult::Ok) => AmStatus::CommandOk,
+        Some(AMresult::Error(_)) => AmStatus::Error,
+        Some(AMresult::ObjId(_)) => AmStatus::ObjOk,
+        Some(AMresult::Values(_)) => AmStatus::ValuesOk,
+        Some(AMresult::Changes(_)) => AmStatus::ChangesOk,
+        None => AmStatus::InvalidResult,
+    }
 }
 
 /// \memberof AMdoc
@@ -244,6 +261,12 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+/// value must be a pointer to data of the type specified in data_type
 #[no_mangle]
 pub unsafe extern "C" fn AMmapSet(
     doc: *mut AMdoc,
@@ -270,6 +293,10 @@ pub unsafe extern "C" fn AMmapSet(
 /// \pre \p obj must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// value must be a pointer to data of the type specified in data_type
 #[no_mangle]
 pub unsafe extern "C" fn AMlistSet(
     doc: *mut AMdoc,
@@ -279,7 +306,7 @@ pub unsafe extern "C" fn AMlistSet(
     value: *const c_void,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result!(doc.set(to_obj!(obj), index, to_value!(value,data_type)))
+    to_result!(doc.set(to_obj!(obj), index, to_value!(value, data_type)))
 }
 
 /// \memberof AMresult
@@ -288,6 +315,9 @@ pub unsafe extern "C" fn AMlistSet(
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A pointer to an `AMobj` struct.
 /// \pre \p result must be a valid address.
+///
+/// # Safety
+/// result must be a pointer to a valid AMresult
 #[no_mangle]
 pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut AMobj {
     unimplemented!()
@@ -298,6 +328,9 @@ pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut AMobj {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \pre \p result must be a valid address.
+///
+/// # Safety
+/// result must be a pointer to a valid AMresult
 #[no_mangle]
 pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
     if !result.is_null() {
@@ -312,10 +345,13 @@ pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A string value or `NULL`.
 /// \pre \p result must be a valid address.
+///
+/// # Safety
+/// result must be a pointer to a valid AMresult
 #[no_mangle]
 pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char {
-  match result.as_mut() {
-      Some(AMresult::Error(s)) => s.as_ptr(),
-      _ => 0 as *const c_char,
-  }
+    match result.as_mut() {
+        Some(AMresult::Error(s)) => s.as_ptr(),
+        _ => std::ptr::null::<c_char>(),
+    }
 }
