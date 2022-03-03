@@ -1,6 +1,6 @@
 use crate::{AMobj, AMresult, AmDataType};
 use automerge as am;
-use libc::{c_double};
+use libc::c_double;
 use std::{
     ffi::{c_void, CStr},
     ops::Deref,
