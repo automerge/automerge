@@ -1224,6 +1224,14 @@ mod tests {
         );
 
         // but we can still access the old one if we know the ID!
-        assert_eq!(doc.value(&map1, "b").unwrap(), None);
+        assert_eq!(doc.value(&map1, "b").unwrap().unwrap().0, Value::int(1));
+        // and even set new things in it!
+        let mut tx = doc.transaction();
+
+        // This should panic as we are modifying an old object
+        tx.set(&map1, "c", 3).unwrap();
+        tx.commit();
+
+        assert_eq!(doc.value(&map1, "c").unwrap(), None);
     }
 }
