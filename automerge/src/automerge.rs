@@ -1221,10 +1221,10 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // create a map
-        let map1 = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        let map1 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
         tx.set(&map1, "b", 1).unwrap();
         // overwrite the first map with a new one
-        let map2 = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        let map2 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
         tx.set(&map2, "c", 2).unwrap();
         tx.commit();
 
