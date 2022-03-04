@@ -336,7 +336,7 @@ impl Change {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
-        decode_change(bytes)
+        Change::try_from(bytes)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -499,53 +499,57 @@ pub(crate) fn export_change(
     .into()
 }
 
-pub fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
-    let (chunktype, body) = decode_header_without_hash(&bytes)?;
-    let bytes = if chunktype == BLOCK_TYPE_DEFLATE {
-        decompress_chunk(0..PREAMBLE_BYTES, body, bytes)?
-    } else {
-        ChangeBytes::Uncompressed(bytes)
-    };
+impl TryFrom<Vec<u8>> for Change {
+    type Error = decoding::Error;
 
-    let (chunktype, hash, body) = decode_header(bytes.uncompressed())?;
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let (chunktype, body) = decode_header_without_hash(&bytes)?;
+        let bytes = if chunktype == BLOCK_TYPE_DEFLATE {
+            decompress_chunk(0..PREAMBLE_BYTES, body, bytes)?
+        } else {
+            ChangeBytes::Uncompressed(bytes)
+        };
 
-    if chunktype != BLOCK_TYPE_CHANGE {
-        return Err(decoding::Error::WrongType {
-            expected_one_of: vec![BLOCK_TYPE_CHANGE],
-            found: chunktype,
-        });
+        let (chunktype, hash, body) = decode_header(bytes.uncompressed())?;
+
+        if chunktype != BLOCK_TYPE_CHANGE {
+            return Err(decoding::Error::WrongType {
+                expected_one_of: vec![BLOCK_TYPE_CHANGE],
+                found: chunktype,
+            });
+        }
+
+        let body_start = body.start;
+        let mut cursor = body;
+
+        let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
+
+        let actor =
+            ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
+        let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let time = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let message = slice_bytes(bytes.uncompressed(), &mut cursor)?;
+
+        let actors = decode_actors(bytes.uncompressed(), &mut cursor, Some(actor))?;
+
+        let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
+        let ops = decode_columns(&mut cursor, &ops_info);
+
+        Ok(Change {
+            bytes,
+            body_start,
+            hash,
+            seq,
+            start_op,
+            time,
+            actors,
+            message,
+            deps,
+            ops,
+            extra_bytes: cursor,
+        })
     }
-
-    let body_start = body.start;
-    let mut cursor = body;
-
-    let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
-
-    let actor =
-        ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
-    let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let time = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let message = slice_bytes(bytes.uncompressed(), &mut cursor)?;
-
-    let actors = decode_actors(bytes.uncompressed(), &mut cursor, Some(actor))?;
-
-    let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
-    let ops = decode_columns(&mut cursor, &ops_info);
-
-    Ok(Change {
-        bytes,
-        body_start,
-        hash,
-        seq,
-        start_op,
-        time,
-        actors,
-        message,
-        deps,
-        ops,
-        extra_bytes: cursor,
-    })
 }
 
 fn decompress_chunk(
@@ -740,7 +744,7 @@ fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding:
             Ok(())
         }
         BLOCK_TYPE_CHANGE | BLOCK_TYPE_DEFLATE => {
-            changes.push(decode_change(bytes.to_vec())?);
+            changes.push(Change::try_from(bytes.to_vec())?);
             Ok(())
         }
         found => Err(decoding::Error::WrongType {
