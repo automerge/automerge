@@ -156,6 +156,18 @@ pub enum OpType {
     Set(ScalarValue),
 }
 
+impl From<ObjType> for OpType {
+    fn from(v: ObjType) -> Self {
+        OpType::Make(v)
+    }
+}
+
+impl From<ScalarValue> for OpType {
+    fn from(v: ScalarValue) -> Self {
+        OpType::Set(v)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum Export {
     Id(OpId),

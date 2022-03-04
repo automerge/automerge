@@ -31,7 +31,7 @@ fn import_map(
                 doc.set(obj, key, s.as_ref())?;
             }
             serde_json::Value::Array(vec) => {
-                let id = doc.set(obj, key, am::Value::list())?.unwrap();
+                let id = doc.set_object(obj, key, am::ObjType::List)?;
                 import_list(doc, &id, vec)?;
             }
             serde_json::Value::Number(n) => {
@@ -46,7 +46,7 @@ fn import_map(
                 }
             }
             serde_json::Value::Object(map) => {
-                let id = doc.set(obj, key, am::Value::map())?.unwrap();
+                let id = doc.set_object(obj, key, am::ObjType::Map)?;
                 import_map(doc, &id, map)?;
             }
         }
@@ -71,7 +71,7 @@ fn import_list(
                 doc.insert(obj, i, s.as_ref())?;
             }
             serde_json::Value::Array(vec) => {
-                let id = doc.insert(obj, i, am::Value::list())?.unwrap();
+                let id = doc.insert_object(obj, i, am::ObjType::List)?;
                 import_list(doc, &id, vec)?;
             }
             serde_json::Value::Number(n) => {
@@ -86,7 +86,7 @@ fn import_list(
                 }
             }
             serde_json::Value::Object(map) => {
-                let id = doc.insert(obj, i, am::Value::map())?.unwrap();
+                let id = doc.insert_object(obj, i, am::ObjType::Map)?;
                 import_map(doc, &id, map)?;
             }
         }

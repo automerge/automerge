@@ -1,4 +1,5 @@
-use automerge::{transaction::Transactable, Automerge, AutomergeError, Value, ROOT};
+use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
+use automerge::{ObjType, ScalarValue};
 use std::fs;
 use std::time::Instant;
 
@@ -12,7 +13,7 @@ fn main() -> Result<(), AutomergeError> {
         let mut vals = vec![];
         for j in 2..edits[i].len() {
             let v = edits[i][j].as_str().unwrap();
-            vals.push(Value::str(v));
+            vals.push(ScalarValue::Str(v.into()));
         }
         commands.push((pos, del, vals));
     }
@@ -20,7 +21,7 @@ fn main() -> Result<(), AutomergeError> {
 
     let now = Instant::now();
     let mut tx = doc.transaction();
-    let text = tx.set(ROOT, "text", Value::text()).unwrap().unwrap();
+    let text = tx.set_object(ROOT, "text", ObjType::Text).unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
             println!("Processed {} edits in {} ms", i, now.elapsed().as_millis());
