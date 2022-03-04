@@ -1,6 +1,75 @@
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
+use crate::types::{ObjId, OpId};
+use crate::{
+    Automerge, AutomergeError, ChangeHash, Keys, KeysAt, ObjType, OpType, Prop, ScalarValue, Value,
+};
 use unicode_segmentation::UnicodeSegmentation;
+
+mod private {
+    use crate::{ObjType, ScalarValue};
+
+    pub trait Sealed {}
+
+    impl Sealed for ScalarValue {}
+    impl Sealed for ObjType {}
+    impl Sealed for i64 {}
+    impl Sealed for () {}
+}
+
+pub trait CanSet: private::Sealed {
+    type Source;
+    type Result;
+
+    fn construct_result(doc: &Automerge, opid: OpId) -> Self::Result;
+
+    fn into_optype(self) -> OpType;
+}
+
+impl CanSet for ScalarValue {
+    type Source = Self;
+    type Result = ();
+
+    fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
+
+    fn into_optype(self) -> OpType {
+        OpType::Set(self)
+    }
+}
+
+impl CanSet for ObjType {
+    type Source = Self;
+    type Result = ExId;
+
+    fn construct_result(doc: &Automerge, opid: OpId) -> Self::Result {
+        doc.id_to_exid(opid)
+    }
+
+    fn into_optype(self) -> OpType {
+        OpType::Make(self)
+    }
+}
+
+impl CanSet for i64 {
+    type Source = Self;
+    type Result = ();
+
+    fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
+
+    fn into_optype(self) -> OpType {
+        OpType::Inc(self)
+    }
+}
+
+impl CanSet for () {
+    type Source = Self;
+    type Result = ();
+
+    fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
+
+    fn into_optype(self) -> OpType {
+        OpType::Del
+    }
+}
 
 /// A way of mutating a document within a single change.
 pub trait Transactable {
@@ -15,47 +84,20 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, C: CanSet, V: Into<C>>(
         &mut self,
         obj: O,
         prop: P,
         value: V,
-    ) -> Result<(), AutomergeError>;
-
-    /// Set the value of property `P` to the new object `V` in object `obj`.
-    ///
-    /// # Returns
-    ///
-    /// The id of the object which was created.
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        object: V,
-    ) -> Result<ExId, AutomergeError>;
+    ) -> Result<C::Result, AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
+    fn insert<O: AsRef<ExId>, V: CanSet>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<(), AutomergeError>;
-
-    /// Insert an object into a list at the given index.
-    fn insert_object<V: Into<ObjType>>(
-        &mut self,
-        obj: &ExId,
-        index: usize,
-        object: V,
-    ) -> Result<ExId, AutomergeError>;
+    ) -> Result<V::Result, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(

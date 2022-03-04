@@ -1,7 +1,8 @@
 use crate::exid::ExId;
-use crate::{Automerge, ChangeHash, KeysAt, ObjType, Prop, ScalarValue, Value};
+use crate::{Automerge, ChangeHash, KeysAt, Prop, ScalarValue, Value};
 use crate::{AutomergeError, Keys};
 
+use super::transactable::CanSet;
 use super::{CommitOptions, Transactable, TransactionInner};
 
 /// A transaction on a document.
@@ -85,52 +86,28 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, C: CanSet, V: Into<C>>(
         &mut self,
         obj: O,
         prop: P,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<C::Result, AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()
-            .set(self.doc, obj.as_ref(), prop, value)
+            .set(self.doc, obj.as_ref(), prop, value.into())
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .set_object(self.doc, obj.as_ref(), prop, value)
-    }
-
-    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
+    fn insert<O: AsRef<ExId>, V: CanSet>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<V::Result, AutomergeError> {
         self.inner
             .as_mut()
             .unwrap()
             .insert(self.doc, obj.as_ref(), index, value)
-    }
-
-    fn insert_object<V: Into<ObjType>>(
-        &mut self,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        self.inner
-            .as_mut()
-            .unwrap()
-            .insert_object(self.doc, obj, index, value)
     }
 
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(

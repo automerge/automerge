@@ -10,5 +10,6 @@ pub(crate) use inner::TransactionInner;
 pub use manual_transaction::Transaction;
 pub use result::TransactionFailure;
 pub use result::TransactionSuccess;
+pub use transactable::CanSet;
 
 pub type TransactionResult<O, E> = Result<TransactionSuccess<O>, TransactionFailure<E>>;

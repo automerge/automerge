@@ -1,11 +1,12 @@
 use crate::exid::ExId;
+use crate::transaction::CanSet;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{Keys, KeysAt, ObjType, ScalarValue, SyncMessage, SyncState};
+use crate::{Keys, KeysAt, ScalarValue, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -321,48 +322,26 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, C: CanSet, V: Into<C>>(
         &mut self,
         obj: O,
         prop: P,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<C::Result, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.set(&mut self.doc, obj.as_ref(), prop, value)
+        tx.set(&mut self.doc, obj.as_ref(), prop, value.into())
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
-        &mut self,
-        obj: O,
-        prop: P,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.set_object(&mut self.doc, obj.as_ref(), prop, value)
-    }
-
-    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
+    fn insert<O: AsRef<ExId>, V: CanSet>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<V::Result, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.insert(&mut self.doc, obj.as_ref(), index, value)
-    }
-
-    fn insert_object<V: Into<ObjType>>(
-        &mut self,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        self.ensure_transaction_open();
-        let tx = self.transaction.as_mut().unwrap();
-        tx.insert_object(&mut self.doc, obj, index, value)
     }
 
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(

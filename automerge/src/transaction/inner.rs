@@ -2,8 +2,10 @@ use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
-use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
+use crate::{AutomergeError, ScalarValue};
+
+use super::transactable::CanSet;
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -81,43 +83,16 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<ScalarValue>>(
+    pub fn set<P: Into<Prop>, V: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<V::Result, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let value = Value::Scalar(value.into());
-        self.local_op(doc, obj, prop.into(), value.into())?;
-        Ok(())
-    }
-
-    /// Set the value of property `P` to value `V` in object `obj`.
-    ///
-    /// # Returns
-    ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
-    ///
-    /// # Errors
-    ///
-    /// This will return an error if
-    /// - The object does not exist
-    /// - The key is the wrong type for the object
-    /// - The key does not exist in the object
-    pub fn set_object<P: Into<Prop>, V: Into<ObjType>>(
-        &mut self,
-        doc: &mut Automerge,
-        obj: &ExId,
-        prop: P,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let value = Value::Object(value.into());
-        let id = self.local_op(doc, obj, prop.into(), value.into())?.unwrap();
-        Ok(doc.id_to_exid(id))
+        let res = self.local_op(doc, obj, prop.into(), value)?;
+        Ok(res)
     }
 
     fn next_id(&mut self) -> OpId {
@@ -138,47 +113,31 @@ impl TransactionInner {
         self.operations.push(op);
     }
 
-    pub fn insert<V: Into<ScalarValue>>(
+    pub fn insert<V: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         index: usize,
         value: V,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<V::Result, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.do_insert(doc, obj, index, Value::Scalar(value.into()))?;
-        Ok(())
+        let res = self.do_insert(doc, obj, index, value)?;
+        Ok(res)
     }
 
-    pub fn insert_object<V: Into<ObjType>>(
-        &mut self,
-        doc: &mut Automerge,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<ExId, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let id = self
-            .do_insert(doc, obj, index, Value::Object(value.into()))?
-            .unwrap();
-        Ok(doc.id_to_exid(id))
-    }
-
-    fn do_insert<V: Into<Value>>(
+    fn do_insert<V: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         index: usize,
         value: V,
-    ) -> Result<Option<OpId>, AutomergeError> {
+    ) -> Result<V::Result, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let value = value.into();
-        let action = value.into();
-        let is_make = matches!(&action, OpType::Make(_));
+        let action = value.into_optype();
 
         let op = Op {
             change: doc.history.len(),
@@ -194,33 +153,29 @@ impl TransactionInner {
         doc.ops.insert(query.pos(), op.clone());
         self.operations.push(op);
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(V::construct_result(doc, id))
     }
 
-    pub(crate) fn local_op(
+    pub(crate) fn local_op<A: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         prop: Prop,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
+        action: A,
+    ) -> Result<A::Result, AutomergeError> {
         match prop {
             Prop::Map(s) => self.local_map_op(doc, obj, s, action),
             Prop::Seq(n) => self.local_list_op(doc, obj, n, action),
         }
     }
 
-    fn local_map_op(
+    fn local_map_op<A: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         prop: String,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
+        action: A,
+    ) -> Result<A::Result, AutomergeError> {
         if prop.is_empty() {
             return Err(AutomergeError::EmptyStringKey);
         }
@@ -229,11 +184,11 @@ impl TransactionInner {
         let prop = doc.ops.m.props.cache(prop);
         let query = doc.ops.search(obj, query::Prop::new(prop));
 
+        let action = action.into_optype();
+        // only possible when scalar set so can return unit
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
+            return Ok(A::construct_result(doc, id));
         }
-
-        let is_make = matches!(&action, OpType::Make(_));
 
         let pred = query.ops.iter().map(|op| op.id).collect();
 
@@ -250,31 +205,27 @@ impl TransactionInner {
 
         self.insert_local_op(doc, op, query.pos, &query.ops_pos);
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(A::construct_result(doc, id))
     }
 
-    fn local_list_op(
+    fn local_list_op<A: CanSet>(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         index: usize,
-        action: OpType,
-    ) -> Result<Option<OpId>, AutomergeError> {
+        action: A,
+    ) -> Result<A::Result, AutomergeError> {
         let query = doc.ops.search(obj, query::Nth::new(index));
 
         let id = self.next_id();
         let pred = query.ops.iter().map(|op| op.id).collect();
         let key = query.key()?;
 
+        let action = action.into_optype();
+        // only true when action is a scalar set
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
-            return Ok(None);
+            return Ok(A::construct_result(doc, id));
         }
-
-        let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
             change: doc.history.len(),
@@ -289,11 +240,7 @@ impl TransactionInner {
 
         self.insert_local_op(doc, op, query.pos, &query.ops_pos);
 
-        if is_make {
-            Ok(Some(id))
-        } else {
-            Ok(None)
-        }
+        Ok(A::construct_result(doc, id))
     }
 
     pub fn inc<P: Into<Prop>>(
@@ -304,7 +251,7 @@ impl TransactionInner {
         value: i64,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Inc(value))?;
+        self.local_op(doc, obj, prop.into(), value)?;
         Ok(())
     }
 
@@ -315,7 +262,7 @@ impl TransactionInner {
         prop: P,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Del)?;
+        self.local_op(doc, obj, prop.into(), ())?;
         Ok(())
     }
 
@@ -332,7 +279,7 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
             // del()
-            self.local_op(doc, obj, pos.into(), OpType::Del)?;
+            self.local_op(doc, obj, pos.into(), ())?;
         }
         for v in vals {
             // insert()
@@ -345,7 +292,7 @@ impl TransactionInner {
 
 #[cfg(test)]
 mod tests {
-    use crate::{transaction::Transactable, ROOT};
+    use crate::{transaction::Transactable, ObjType, ROOT};
 
     use super::*;
 
@@ -354,7 +301,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
 
-        let a = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
+        let a = tx.set(ROOT, "a", ObjType::Map).unwrap();
         tx.set(&a, "b", 1).unwrap();
         assert!(tx.value(&a, "b").unwrap().is_some());
     }

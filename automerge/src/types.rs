@@ -318,10 +318,10 @@ impl Key {
 }
 
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
-pub(crate) struct OpId(pub u64, pub usize);
+pub struct OpId(pub u64, pub usize);
 
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
-pub(crate) struct ObjId(pub OpId);
+pub struct ObjId(pub OpId);
 
 impl ObjId {
     pub fn root() -> Self {
