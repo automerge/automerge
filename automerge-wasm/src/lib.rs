@@ -437,7 +437,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
         if let Some(message) = self.0.generate_sync_message(&mut state.0) {
-            Ok(Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into())
+            Ok(Uint8Array::from(message.encode().as_slice()).into())
         } else {
             Ok(JsValue::null())
         }
@@ -588,7 +588,6 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
             changes,
         }
         .encode()
-        .unwrap()
         .as_slice(),
     ))
 }
@@ -612,9 +611,7 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = encodeSyncState)]
 pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
     let state = state.0;
-    Ok(Uint8Array::from(
-        state.encode().map_err(to_js_err)?.as_slice(),
-    ))
+    Ok(Uint8Array::from(state.encode().as_slice()))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]

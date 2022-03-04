@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashSet};
 
 use super::{decode_hashes, encode_hashes};
-use crate::{decoding, decoding::Decoder, encoding, BloomFilter, ChangeHash};
+use crate::{decoding, decoding::Decoder, BloomFilter, ChangeHash};
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
 
@@ -26,10 +26,10 @@ impl SyncState {
         Default::default()
     }
 
-    pub fn encode(&self) -> Result<Vec<u8>, encoding::Error> {
+    pub fn encode(&self) -> Vec<u8> {
         let mut buf = vec![SYNC_STATE_TYPE];
-        encode_hashes(&mut buf, &self.shared_heads)?;
-        Ok(buf)
+        encode_hashes(&mut buf, &self.shared_heads);
+        buf
     }
 
     pub fn decode(bytes: &[u8]) -> Result<Self, decoding::Error> {

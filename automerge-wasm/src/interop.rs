@@ -226,7 +226,7 @@ impl From<&[am::SyncHave]> for AR {
                     .map(|h| JsValue::from_str(&hex::encode(&h.0)))
                     .collect();
                 // FIXME - the clone and the unwrap here shouldnt be needed - look at into_bytes()
-                let bloom = Uint8Array::from(have.bloom.clone().into_bytes().unwrap().as_slice());
+                let bloom = Uint8Array::from(have.bloom.to_bytes().as_slice());
                 let obj: JsValue = Object::new().into();
                 // we can unwrap here b/c we created the object and know its not frozen
                 Reflect::set(&obj, &"lastSync".into(), &last_sync.into()).unwrap();

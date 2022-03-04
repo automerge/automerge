@@ -8,8 +8,7 @@ use std::{
 
 use crate::types::Patch;
 use crate::{
-    decoding, decoding::Decoder, encoding, encoding::Encodable, Automerge, AutomergeError, Change,
-    ChangeHash,
+    decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
 };
 
 mod bloom;
@@ -249,24 +248,24 @@ pub struct SyncMessage {
 }
 
 impl SyncMessage {
-    pub fn encode(self) -> Result<Vec<u8>, encoding::Error> {
+    pub fn encode(self) -> Vec<u8> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
-        encode_hashes(&mut buf, &self.heads)?;
-        encode_hashes(&mut buf, &self.need)?;
-        (self.have.len() as u32).encode(&mut buf)?;
+        encode_hashes(&mut buf, &self.heads);
+        encode_hashes(&mut buf, &self.need);
+        (self.have.len() as u32).encode_vec(&mut buf);
         for have in self.have {
-            encode_hashes(&mut buf, &have.last_sync)?;
-            have.bloom.into_bytes()?.encode(&mut buf)?;
+            encode_hashes(&mut buf, &have.last_sync);
+            have.bloom.to_bytes().encode_vec(&mut buf);
         }
 
-        (self.changes.len() as u32).encode(&mut buf)?;
+        (self.changes.len() as u32).encode_vec(&mut buf);
         for mut change in self.changes {
             change.compress();
-            change.raw_bytes().encode(&mut buf)?;
+            change.raw_bytes().encode_vec(&mut buf);
         }
 
-        Ok(buf)
+        buf
     }
 
     pub fn decode(bytes: &[u8]) -> Result<SyncMessage, decoding::Error> {
@@ -307,13 +306,12 @@ impl SyncMessage {
     }
 }
 
-fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) -> Result<(), encoding::Error> {
+fn encode_hashes(buf: &mut Vec<u8>, hashes: &[ChangeHash]) {
     debug_assert!(
         hashes.windows(2).all(|h| h[0] <= h[1]),
         "hashes were not sorted"
     );
-    hashes.encode(buf)?;
-    Ok(())
+    hashes.encode_vec(buf);
 }
 
 impl Encodable for &[ChangeHash] {
