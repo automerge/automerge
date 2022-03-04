@@ -331,7 +331,10 @@ impl Automerge {
         Ok(query.change_sets)
     }
 
-    pub fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
+    pub fn raw_spans<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+    ) -> Result<Vec<query::SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let query = self.ops.search(obj, query::RawSpans::new());
         let result = query

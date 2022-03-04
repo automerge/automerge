@@ -234,6 +234,8 @@ impl OpTableRow {
             crate::OpType::Set(v) => format!("set {}", v),
             crate::OpType::Make(obj) => format!("make {}", obj),
             crate::OpType::Inc(v) => format!("inc {}", v),
+            crate::OpType::MarkBegin(v) => format!("mark {}={}", v.name, v.value),
+            crate::OpType::MarkEnd(v) => format!("/mark {}", v),
         };
         let prop = match op.key {
             crate::types::Key::Map(k) => metadata.props[k].clone(),

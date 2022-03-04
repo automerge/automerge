@@ -1,6 +1,6 @@
 use crate::exid::ExId;
 use crate::AutomergeError;
-use crate::{query, Automerge, ChangeHash, Prop, ScalarValue, Value, Keys, KeysAt};
+use crate::{query, Automerge, ChangeHash, Keys, KeysAt, Prop, ScalarValue, Value};
 
 use super::{CommitOptions, Transactable, TransactionInner};
 

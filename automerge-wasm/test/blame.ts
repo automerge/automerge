@@ -8,7 +8,7 @@ import { DecodedSyncMessage, Hash } from '..'
 
 describe('Automerge', () => {
   describe('blame', () => {
-    it.only('should be able to blame text segments on change sets', () => {
+    it('should be able to blame text segments on change sets', () => {
       let doc1 = create()
       let text = doc1.make("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
@@ -35,7 +35,7 @@ describe('Automerge', () => {
       ])
     })
 
-    it.only('should be able to hand complex blame change sets', () => {
+    it('should be able to hand complex blame change sets', () => {
       let doc1 = create("aaaa")
       let text = doc1.make("_root", "notes","AAAAAA")
       let h1 = doc1.getHeads();
