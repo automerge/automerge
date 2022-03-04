@@ -8,7 +8,7 @@ macro_rules! log {
      }
  }
 
-#[cfg(target_family = "wasm")]
+#[cfg(all(feature = "wasm", target_family = "wasm"))]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -16,7 +16,7 @@ macro_rules! __log {
      }
  }
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(not(all(feature = "wasm", target_family = "wasm")))]
 #[macro_export]
 macro_rules! __log {
      ( $( $t:tt )* ) => {
@@ -34,6 +34,8 @@ mod encoding;
 mod error;
 mod exid;
 mod indexed_cache;
+mod keys;
+mod keys_at;
 mod legacy;
 mod op_set;
 mod op_tree;
@@ -47,9 +49,11 @@ mod visualisation;
 
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
-pub use change::{decode_change, Change};
+pub use change::Change;
 pub use error::AutomergeError;
 pub use exid::ExId as ObjId;
+pub use keys::Keys;
+pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
 pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};

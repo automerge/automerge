@@ -90,6 +90,12 @@ impl From<String> for Value {
     }
 }
 
+impl From<f64> for Value {
+    fn from(n: f64) -> Self {
+        Value::Scalar(ScalarValue::F64(n))
+    }
+}
+
 impl From<i64> for Value {
     fn from(n: i64) -> Self {
         Value::Scalar(ScalarValue::Int(n))
@@ -428,6 +434,12 @@ impl From<String> for ScalarValue {
 impl From<i64> for ScalarValue {
     fn from(n: i64) -> Self {
         ScalarValue::Int(n)
+    }
+}
+
+impl From<f64> for ScalarValue {
+    fn from(n: f64) -> Self {
+        ScalarValue::F64(n)
     }
 }
 

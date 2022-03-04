@@ -48,10 +48,6 @@ impl ActorId {
     pub fn to_hex_string(&self) -> String {
         hex::encode(&self.0)
     }
-
-    pub fn op_id_at(&self, seq: u64) -> amp::OpId {
-        amp::OpId(seq, self.clone())
-    }
 }
 
 impl TryFrom<&str> for ActorId {

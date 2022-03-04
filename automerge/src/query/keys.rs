@@ -1,29 +1,54 @@
 use crate::op_tree::OpTreeNode;
-use crate::query::{QueryResult, TreeQuery};
 use crate::types::Key;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Keys<const B: usize> {
-    pub keys: Vec<Key>,
+#[derive(Debug)]
+pub(crate) struct Keys<'a, const B: usize> {
+    index: usize,
+    last_key: Option<Key>,
+    index_back: usize,
+    last_key_back: Option<Key>,
+    root_child: &'a OpTreeNode<B>,
 }
 
-impl<const B: usize> Keys<B> {
-    pub fn new() -> Self {
-        Keys { keys: vec![] }
+impl<'a, const B: usize> Keys<'a, B> {
+    pub(crate) fn new(root_child: &'a OpTreeNode<B>) -> Self {
+        Self {
+            index: 0,
+            last_key: None,
+            index_back: root_child.len(),
+            last_key_back: None,
+            root_child,
+        }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Keys<B> {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        let mut last = None;
-        for i in 0..child.len() {
-            let op = child.get(i).unwrap();
-            if Some(op.key) != last && op.visible() {
-                self.keys.push(op.key);
-                last = Some(op.key);
+impl<'a, const B: usize> Iterator for Keys<'a, B> {
+    type Item = Key;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        for i in self.index..self.index_back {
+            let op = self.root_child.get(i)?;
+            self.index += 1;
+            if Some(op.key) != self.last_key && op.visible() {
+                self.last_key = Some(op.key);
+                return Some(op.key);
             }
         }
-        QueryResult::Finish
+        None
+    }
+}
+
+impl<'a, const B: usize> DoubleEndedIterator for Keys<'a, B> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        for i in (self.index..self.index_back).rev() {
+            let op = self.root_child.get(i)?;
+            self.index_back -= 1;
+            if Some(op.key) != self.last_key_back && op.visible() {
+                self.last_key_back = Some(op.key);
+                return Some(op.key);
+            }
+        }
+        None
     }
 }

@@ -53,7 +53,7 @@ impl Automerge {
         let mut automerge = Automerge(self.0.clone());
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-            automerge.0.set_actor(actor)
+            automerge.0.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -63,7 +63,7 @@ impl Automerge {
         let mut automerge = Automerge(self.0.fork());
         if let Some(s) = actor {
             let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-            automerge.0.set_actor(actor)
+            automerge.0.set_actor(actor);
         }
         Ok(automerge)
     }
@@ -107,13 +107,13 @@ impl Automerge {
     pub fn keys(&mut self, obj: JsValue, heads: Option<Array>) -> Result<Array, JsValue> {
         let obj = self.import(obj)?;
         let result = if let Some(heads) = get_heads(heads) {
-            self.0.keys_at(&obj, &heads)
+            self.0
+                .keys_at(&obj, &heads)
+                .map(|s| JsValue::from_str(&s))
+                .collect()
         } else {
-            self.0.keys(&obj)
-        }
-        .iter()
-        .map(|s| JsValue::from_str(s))
-        .collect();
+            self.0.keys(&obj).map(|s| JsValue::from_str(&s)).collect()
+        };
         Ok(result)
     }
 
@@ -467,11 +467,8 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
-        self.0
-            .save()
-            .map(|v| Uint8Array::from(v.as_slice()))
-            .map_err(to_js_err)
+    pub fn save(&mut self) -> Uint8Array {
+        Uint8Array::from(self.0.save().as_slice())
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]
@@ -572,7 +569,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = generateSyncMessage)]
     pub fn generate_sync_message(&mut self, state: &mut SyncState) -> Result<JsValue, JsValue> {
         if let Some(message) = self.0.generate_sync_message(&mut state.0) {
-            Ok(Uint8Array::from(message.encode().map_err(to_js_err)?.as_slice()).into())
+            Ok(Uint8Array::from(message.encode().as_slice()).into())
         } else {
             Ok(JsValue::null())
         }
@@ -673,7 +670,7 @@ pub fn load(data: Uint8Array, actor: Option<String>) -> Result<Automerge, JsValu
     let mut automerge = am::AutoCommit::load(&data).map_err(to_js_err)?;
     if let Some(s) = actor {
         let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
-        automerge.set_actor(actor)
+        automerge.set_actor(actor);
     }
     Ok(Automerge(automerge))
 }
@@ -723,7 +720,6 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
             changes,
         }
         .encode()
-        .unwrap()
         .as_slice(),
     ))
 }
@@ -747,9 +743,7 @@ pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
 #[wasm_bindgen(js_name = encodeSyncState)]
 pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
     let state = state.0;
-    Ok(Uint8Array::from(
-        state.encode().map_err(to_js_err)?.as_slice(),
-    ))
+    Ok(Uint8Array::from(state.encode().as_slice()))
 }
 
 #[wasm_bindgen(js_name = decodeSyncState)]

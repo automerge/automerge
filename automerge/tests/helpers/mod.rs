@@ -7,11 +7,15 @@ use std::{
 use serde::ser::{SerializeMap, SerializeSeq};
 
 pub fn new_doc() -> automerge::AutoCommit {
-    automerge::AutoCommit::new_with_actor_id(automerge::ActorId::random())
+    let mut d = automerge::AutoCommit::new();
+    d.set_actor(automerge::ActorId::random());
+    d
 }
 
 pub fn new_doc_with_actor(actor: automerge::ActorId) -> automerge::AutoCommit {
-    automerge::AutoCommit::new_with_actor_id(actor)
+    let mut d = automerge::AutoCommit::new();
+    d.set_actor(actor);
+    d
 }
 
 /// Returns two actor IDs, the first considered to  be ordered before the second

@@ -100,9 +100,9 @@ confidence-threshold = 0.8
 # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
-    # Each entry is the crate and version constraint, and its specific allow
-    # list
-    #{ allow = ["Zlib"], name = "adler32", version = "*" },
+    # this is a LGPL like license in the CLI
+    # since this is an application not a library people would link to it should be fine
+    { allow = ["EPL-2.0"], name = "colored_json" },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -165,8 +165,10 @@ deny = [
 ]
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
-    # This is a transitive depdendency of criterion, which is only included for benchmarking anyway
+    # These are transitive depdendencies of criterion, which is only included for benchmarking anyway
     { name = "itoa", version = "0.4.8" },
+    { name = "textwrap", version = "0.11.0" },
+    { name = "clap", version = "2.34.0" },
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate 
 # detection. Unlike skip, it also includes the entire tree of transitive 

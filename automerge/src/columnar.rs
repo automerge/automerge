@@ -11,7 +11,10 @@ use std::{
     str,
 };
 
-use crate::types::{ActorId, ElemId, Key, ObjId, ObjType, Op, OpId, OpType, ScalarValue};
+use crate::{
+    types::{ActorId, ElemId, Key, ObjId, ObjType, Op, OpId, OpType, ScalarValue},
+    Change,
+};
 
 use crate::legacy as amp;
 use amp::SortedVec;
@@ -928,7 +931,7 @@ impl ChangeEncoder {
         actors: &'a IndexedCache<ActorId>,
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'b amp::Change>,
+        I: IntoIterator<Item = &'b Change>,
     {
         let mut e = Self::new();
         e.encode(changes, actors);
@@ -949,23 +952,21 @@ impl ChangeEncoder {
         }
     }
 
-    fn encode<'a, 'b, 'c, I>(&'a mut self, changes: I, actors: &'b IndexedCache<ActorId>)
+    fn encode<'a, I>(&mut self, changes: I, actors: &IndexedCache<ActorId>)
     where
-        I: IntoIterator<Item = &'c amp::Change>,
+        I: IntoIterator<Item = &'a Change>,
     {
         let mut index_by_hash: HashMap<amp::ChangeHash, usize> = HashMap::new();
         for (index, change) in changes.into_iter().enumerate() {
-            if let Some(hash) = change.hash {
-                index_by_hash.insert(hash, index);
-            }
+            index_by_hash.insert(change.hash, index);
             self.actor
-                .append_value(actors.lookup(&change.actor_id).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
+                .append_value(actors.lookup(change.actor_id()).unwrap()); //actors.iter().position(|a| a == &change.actor_id).unwrap());
             self.seq.append_value(change.seq);
             // FIXME iterops.count is crazy slow
             self.max_op
-                .append_value(change.start_op + change.operations.len() as u64 - 1);
+                .append_value(change.start_op + change.iter_ops().count() as u64 - 1);
             self.time.append_value(change.time as u64);
-            self.message.append_value(change.message.clone());
+            self.message.append_value(change.message());
             self.deps_num.append_value(change.deps.len());
             for dep in &change.deps {
                 if let Some(dep_index) = index_by_hash.get(dep) {
@@ -979,8 +980,8 @@ impl ChangeEncoder {
                 }
             }
             self.extra_len
-                .append_value(change.extra_bytes.len() << 4 | VALUE_TYPE_BYTES);
-            self.extra_raw.extend(&change.extra_bytes);
+                .append_value(change.extra_bytes().len() << 4 | VALUE_TYPE_BYTES);
+            self.extra_raw.extend(change.extra_bytes());
         }
     }
 
@@ -1028,17 +1029,15 @@ pub(crate) struct DocOpEncoder {
     succ: SuccEncoder,
 }
 
-// FIXME - actors should not be mut here
-
 impl DocOpEncoder {
     #[instrument(level = "debug", skip(ops, actors))]
-    pub(crate) fn encode_doc_ops<'a, I>(
+    pub(crate) fn encode_doc_ops<'a, 'b, 'c, I>(
         ops: I,
         actors: &'a [usize],
-        props: &'a [String],
+        props: &'b [String],
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'a Op>,
+        I: IntoIterator<Item = &'c Op>,
     {
         let mut e = Self::new();
         e.encode(ops, actors, props);

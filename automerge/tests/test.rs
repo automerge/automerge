@@ -384,7 +384,7 @@ fn concurrent_insertions_at_different_list_positions() {
     let (actor1, actor2) = sorted_actors();
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
-    assert!(doc1.maybe_get_actor().unwrap() < doc2.maybe_get_actor().unwrap());
+    assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
         .set(&automerge::ROOT, "list", automerge::Value::list())
@@ -419,7 +419,7 @@ fn concurrent_insertions_at_same_list_position() {
     let (actor1, actor2) = sorted_actors();
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
-    assert!(doc1.maybe_get_actor().unwrap() < doc2.maybe_get_actor().unwrap());
+    assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
         .set(&automerge::ROOT, "birds", automerge::Value::list())
@@ -841,7 +841,7 @@ fn insertion_consistent_with_causality() {
 #[test]
 fn save_and_restore_empty() {
     let mut doc = new_doc();
-    let loaded = Automerge::load(&doc.save().unwrap()).unwrap();
+    let loaded = Automerge::load(&doc.save()).unwrap();
 
     assert_doc!(&loaded, map! {});
 }
@@ -868,7 +868,7 @@ fn save_restore_complex() {
     doc1.set(&first_todo, "title", "kill plants").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
-    let reloaded = Automerge::load(&doc1.save().unwrap()).unwrap();
+    let reloaded = Automerge::load(&doc1.save()).unwrap();
 
     assert_doc!(
         &reloaded,
@@ -897,15 +897,15 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     let mut doc1 = new_doc_with_actor(actor1);
 
-    let list = doc1.set(&ROOT, "list", Value::list())?.unwrap();
+    let list = doc1.set(ROOT, "list", Value::list())?.unwrap();
     doc1.insert(&list, 0, "a")?;
     doc1.insert(&list, 1, "b")?;
     doc1.insert(&list, 2, "c")?;
 
-    let mut doc2 = AutoCommit::load(&doc1.save()?)?;
+    let mut doc2 = AutoCommit::load(&doc1.save())?;
     doc2.set_actor(actor2);
 
-    let mut doc3 = AutoCommit::load(&doc1.save()?)?;
+    let mut doc3 = AutoCommit::load(&doc1.save())?;
     doc3.set_actor(actor3);
 
     doc1.set(&list, 1, Value::counter(0))?;
@@ -954,7 +954,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 2);
 
-    let doc4 = AutoCommit::load(&doc1.save()?)?;
+    let doc4 = AutoCommit::load(&doc1.save())?;
 
     assert_eq!(doc4.length(&list), 2);
 
@@ -962,7 +962,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 1);
 
-    let doc5 = AutoCommit::load(&doc1.save()?)?;
+    let doc5 = AutoCommit::load(&doc1.save())?;
 
     assert_eq!(doc5.length(&list), 1);
 

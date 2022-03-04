@@ -1,3 +1,4 @@
+use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
@@ -46,6 +47,12 @@ impl TransactionInner {
     /// Undo the operations added in this transaction, returning the number of cancelled
     /// operations.
     pub fn rollback(self, doc: &mut Automerge) -> usize {
+        // remove the actor from the cache so that it doesn't end up in the saved document
+        if doc.states.get(&self.actor).is_none() {
+            let actor = doc.ops.m.actors.remove_last();
+            doc.actor = Actor::Unused(actor);
+        }
+
         let num = self.operations.len();
         // remove in reverse order so sets are removed before makes etc...
         for op in self.operations.iter().rev() {
@@ -322,7 +329,7 @@ impl TransactionInner {
         let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(doc, obj, pos, v.clone())?;
+            let id = self.do_insert(doc, obj, pos, v)?;
             if let Some(id) = id {
                 results.push(doc.id_to_exid(id));
             }
@@ -343,7 +350,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
 
-        let a = tx.set(&ROOT, "a", Value::map()).unwrap().unwrap();
+        let a = tx.set(ROOT, "a", Value::map()).unwrap().unwrap();
         tx.set(&a, "b", 1).unwrap();
         assert!(tx.value(&a, "b").unwrap().is_some());
     }

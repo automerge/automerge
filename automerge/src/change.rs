@@ -36,27 +36,14 @@ const BLOCK_TYPE_DEFLATE: u8 = 2;
 const CHUNK_START: usize = 8;
 const HASH_RANGE: Range<usize> = 4..8;
 
-fn get_heads(changes: &[amp::Change]) -> HashSet<amp::ChangeHash> {
-    changes.iter().fold(HashSet::new(), |mut acc, c| {
-        if let Some(h) = c.hash {
-            acc.insert(h);
-        }
-        for dep in &c.deps {
-            acc.remove(dep);
-        }
-        acc
-    })
-}
-
-pub(crate) fn encode_document(
-    changes: &[amp::Change],
-    doc_ops: &[Op],
+pub(crate) fn encode_document<'a, 'b>(
+    heads: Vec<amp::ChangeHash>,
+    changes: impl Iterator<Item = &'a Change>,
+    doc_ops: impl Iterator<Item = &'b Op>,
     actors_index: &IndexedCache<ActorId>,
-    props: &[String],
-) -> Result<Vec<u8>, AutomergeError> {
+    props: &'a [String],
+) -> Vec<u8> {
     let mut bytes: Vec<u8> = Vec::new();
-
-    let heads = get_heads(changes);
 
     let actors_map = actors_index.encode_index();
     let actors = actors_index.sorted();
@@ -79,20 +66,20 @@ pub(crate) fn encode_document(
 
     let (ops_bytes, ops_info) = DocOpEncoder::encode_doc_ops(doc_ops, &actors_map, props);
 
-    bytes.extend(&MAGIC_BYTES);
-    bytes.extend(vec![0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
+    bytes.extend(MAGIC_BYTES);
+    bytes.extend([0, 0, 0, 0]); // we dont know the hash yet so fill in a fake
     bytes.push(BLOCK_TYPE_DOC);
 
     let mut chunk = Vec::new();
 
-    actors.len().encode(&mut chunk)?;
+    actors.len().encode_vec(&mut chunk);
 
     for a in actors.into_iter() {
-        a.to_bytes().encode(&mut chunk)?;
+        a.to_bytes().encode_vec(&mut chunk);
     }
 
-    heads.len().encode(&mut chunk)?;
-    for head in heads.iter().sorted() {
+    heads.len().encode_vec(&mut chunk);
+    for head in heads.iter() {
         chunk.write_all(&head.0).unwrap();
     }
 
@@ -110,7 +97,7 @@ pub(crate) fn encode_document(
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 
-    Ok(bytes)
+    bytes
 }
 
 /// When encoding a change we take all the actor IDs referenced by a change and place them in an
@@ -349,7 +336,7 @@ impl Change {
     }
 
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
-        decode_change(bytes)
+        Change::try_from(bytes)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -365,7 +352,7 @@ impl Change {
         self.start_op + (self.len() as u64) - 1
     }
 
-    fn message(&self) -> Option<String> {
+    pub fn message(&self) -> Option<String> {
         let m = &self.bytes.uncompressed()[self.message.clone()];
         if m.is_empty() {
             None
@@ -512,53 +499,57 @@ pub(crate) fn export_change(
     .into()
 }
 
-pub fn decode_change(bytes: Vec<u8>) -> Result<Change, decoding::Error> {
-    let (chunktype, body) = decode_header_without_hash(&bytes)?;
-    let bytes = if chunktype == BLOCK_TYPE_DEFLATE {
-        decompress_chunk(0..PREAMBLE_BYTES, body, bytes)?
-    } else {
-        ChangeBytes::Uncompressed(bytes)
-    };
+impl TryFrom<Vec<u8>> for Change {
+    type Error = decoding::Error;
 
-    let (chunktype, hash, body) = decode_header(bytes.uncompressed())?;
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        let (chunktype, body) = decode_header_without_hash(&bytes)?;
+        let bytes = if chunktype == BLOCK_TYPE_DEFLATE {
+            decompress_chunk(0..PREAMBLE_BYTES, body, bytes)?
+        } else {
+            ChangeBytes::Uncompressed(bytes)
+        };
 
-    if chunktype != BLOCK_TYPE_CHANGE {
-        return Err(decoding::Error::WrongType {
-            expected_one_of: vec![BLOCK_TYPE_CHANGE],
-            found: chunktype,
-        });
+        let (chunktype, hash, body) = decode_header(bytes.uncompressed())?;
+
+        if chunktype != BLOCK_TYPE_CHANGE {
+            return Err(decoding::Error::WrongType {
+                expected_one_of: vec![BLOCK_TYPE_CHANGE],
+                found: chunktype,
+            });
+        }
+
+        let body_start = body.start;
+        let mut cursor = body;
+
+        let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
+
+        let actor =
+            ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
+        let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let time = read_slice(bytes.uncompressed(), &mut cursor)?;
+        let message = slice_bytes(bytes.uncompressed(), &mut cursor)?;
+
+        let actors = decode_actors(bytes.uncompressed(), &mut cursor, Some(actor))?;
+
+        let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
+        let ops = decode_columns(&mut cursor, &ops_info);
+
+        Ok(Change {
+            bytes,
+            body_start,
+            hash,
+            seq,
+            start_op,
+            time,
+            actors,
+            message,
+            deps,
+            ops,
+            extra_bytes: cursor,
+        })
     }
-
-    let body_start = body.start;
-    let mut cursor = body;
-
-    let deps = decode_hashes(bytes.uncompressed(), &mut cursor)?;
-
-    let actor =
-        ActorId::from(&bytes.uncompressed()[slice_bytes(bytes.uncompressed(), &mut cursor)?]);
-    let seq = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let start_op = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let time = read_slice(bytes.uncompressed(), &mut cursor)?;
-    let message = slice_bytes(bytes.uncompressed(), &mut cursor)?;
-
-    let actors = decode_actors(bytes.uncompressed(), &mut cursor, Some(actor))?;
-
-    let ops_info = decode_column_info(bytes.uncompressed(), &mut cursor, false)?;
-    let ops = decode_columns(&mut cursor, &ops_info);
-
-    Ok(Change {
-        bytes,
-        body_start,
-        hash,
-        seq,
-        start_op,
-        time,
-        actors,
-        message,
-        deps,
-        ops,
-        extra_bytes: cursor,
-    })
 }
 
 fn decompress_chunk(
@@ -753,7 +744,7 @@ fn decode_block(bytes: &[u8], changes: &mut Vec<Change>) -> Result<(), decoding:
             Ok(())
         }
         BLOCK_TYPE_CHANGE | BLOCK_TYPE_DEFLATE => {
-            changes.push(decode_change(bytes.to_vec())?);
+            changes.push(Change::try_from(bytes.to_vec())?);
             Ok(())
         }
         found => Err(decoding::Error::WrongType {

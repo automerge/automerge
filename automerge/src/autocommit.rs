@@ -5,7 +5,7 @@ use crate::{
     change::export_change, query, transaction::TransactionInner, ActorId, Automerge,
     AutomergeError, Change, ChangeHash, Prop, ScalarValue, Value,
 };
-use crate::{SyncMessage, SyncState};
+use crate::{Keys, KeysAt, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -35,24 +35,20 @@ impl AutoCommit {
         &self.doc
     }
 
-    pub fn set_actor(&mut self, actor: ActorId) {
+    pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.ensure_transaction_closed();
-        self.doc.set_actor(actor)
+        self.doc.set_actor(actor);
+        self
     }
 
-    pub fn get_actor(&mut self) -> ActorId {
+    pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
+        self.ensure_transaction_closed();
+        self.doc.set_actor(actor);
+        self
+    }
+
+    pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
-    }
-
-    pub fn maybe_get_actor(&self) -> Option<ActorId> {
-        self.doc.maybe_get_actor()
-    }
-
-    pub fn new_with_actor_id(actor: ActorId) -> Self {
-        Self {
-            doc: Automerge::new_with_actor_id(actor),
-            transaction: None,
-        }
     }
 
     fn ensure_transaction_open(&mut self) {
@@ -126,7 +122,7 @@ impl AutoCommit {
         }
     }
 
-    pub fn ensure_transaction_closed(&mut self) {
+    fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             self.update_history(export_change(
                 &tx,
@@ -166,7 +162,7 @@ impl AutoCommit {
         self.doc.merge(&mut other.doc)
     }
 
-    pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.save()
     }
@@ -257,7 +253,7 @@ impl AutoCommit {
     /// # use automerge::AutoCommit;
     /// # use std::time::SystemTime;
     /// let mut doc = AutoCommit::new();
-    /// doc.set(&ROOT, "todos", Value::list()).unwrap();
+    /// doc.set(ROOT, "todos", Value::list()).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -291,19 +287,19 @@ impl Transactable for AutoCommit {
     // PropAt::()
     // NthAt::()
 
-    fn keys(&self, obj: &ExId) -> Vec<String> {
+    fn keys<O: AsRef<ExId>>(&self, obj: O) -> Keys {
         self.doc.keys(obj)
     }
 
-    fn keys_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Vec<String> {
+    fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt {
         self.doc.keys_at(obj, heads)
     }
 
-    fn length(&self, obj: &ExId) -> usize {
+    fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
     }
 
-    fn length_at(&self, obj: &ExId, heads: &[ChangeHash]) -> usize {
+    fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         self.doc.length_at(obj, heads)
     }
 
@@ -325,32 +321,32 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<P: Into<Prop>, V: Into<Value>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<Value>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.set(&mut self.doc, obj, prop, value)
+        tx.set(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn insert<V: Into<Value>>(
+    fn insert<O: AsRef<ExId>, V: Into<Value>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         value: V,
     ) -> Result<Option<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.insert(&mut self.doc, obj, index, value)
+        tx.insert(&mut self.doc, obj.as_ref(), index, value)
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn mark(
+    fn mark<O: AsRef<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         start: usize,
         expand_start: bool,
         end: usize,
@@ -362,7 +358,7 @@ impl Transactable for AutoCommit {
         let tx = self.transaction.as_mut().unwrap();
         tx.mark(
             &mut self.doc,
-            obj,
+            obj.as_ref(),
             start,
             expand_start,
             end,
@@ -372,68 +368,76 @@ impl Transactable for AutoCommit {
         )
     }
 
-    fn inc<P: Into<Prop>>(
+    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         value: i64,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.inc(&mut self.doc, obj, prop, value)
+        tx.inc(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<P: Into<Prop>>(&mut self, obj: &ExId, prop: P) -> Result<(), AutomergeError> {
+    fn del<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.del(&mut self.doc, obj, prop)
+        tx.del(&mut self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice(
+    fn splice<O: AsRef<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         pos: usize,
         del: usize,
         vals: Vec<Value>,
     ) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.splice(&mut self.doc, obj, pos, del, vals)
+        tx.splice(&mut self.doc, obj.as_ref(), pos, del, vals)
     }
 
-    fn text(&self, obj: &ExId) -> Result<String, AutomergeError> {
+    fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }
 
-    fn text_at(&self, obj: &ExId, heads: &[ChangeHash]) -> Result<String, AutomergeError> {
+    fn text_at<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        heads: &[ChangeHash],
+    ) -> Result<String, AutomergeError> {
         self.doc.text_at(obj, heads)
     }
 
-    fn list(&self, obj: &ExId) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.list(obj)
     }
 
-    fn list_at(
+    fn list_at<O: AsRef<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.list_at(obj, heads)
     }
 
-    fn spans(&self, obj: &ExId) -> Result<Vec<query::Span>, AutomergeError> {
+    fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
         self.doc.spans(obj)
     }
 
-    fn raw_spans(&self, obj: &ExId) -> Result<Vec<query::SpanInfo>, AutomergeError> {
+    fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError> {
         self.doc.raw_spans(obj)
     }
 
-    fn blame(
+    fn blame<O: AsRef<ExId>>(
         &self,
-        obj: &ExId,
+        obj: O,
         baseline: &[ChangeHash],
         change_sets: &[Vec<ChangeHash>],
     ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
@@ -443,34 +447,34 @@ impl Transactable for AutoCommit {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
-    fn value<P: Into<Prop>>(
+    fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
         self.doc.value(obj, prop)
     }
 
-    fn value_at<P: Into<Prop>>(
+    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
         self.doc.value_at(obj, prop, heads)
     }
 
-    fn values<P: Into<Prop>>(
+    fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.values(obj, prop)
     }
 
-    fn values_at<P: Into<Prop>>(
+    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
-        obj: &ExId,
+        obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
