@@ -63,7 +63,7 @@ describe('Automerge', () => {
       doc.set(root, "bool", true)
       doc.set(root, "time1", 1000, "timestamp")
       doc.set(root, "time2", new Date(1001))
-      doc.set(root, "list", []);
+      doc.set_object(root, "list", []);
       doc.set(root, "null", null)
 
       result = doc.value(root,"hello")
@@ -123,7 +123,7 @@ describe('Automerge', () => {
       let root = "_root"
       let result
 
-      let submap = doc.set(root, "submap", {})
+      let submap = doc.set_object(root, "submap", {})
       if (!submap) throw new Error('should be not null')
       doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pendingOps(),2)
@@ -140,8 +140,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
 
-      let submap = doc.set(root, "numbers", [])
-      if (!submap) throw new Error('should be not null')
+      let submap = doc.set_object(root, "numbers", [])
       doc.insert(submap, 0, "a");
       doc.insert(submap, 1, "b");
       doc.insert(submap, 2, "c");
@@ -164,8 +163,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
 
-      let submap = doc.set(root, "letters", [])
-      if (!submap) throw new Error('should be not null')
+      let submap = doc.set_object(root, "letters", [])
       doc.insert(submap, 0, "a");
       doc.insert(submap, 0, "b");
       assert.deepEqual(doc.toJS(), { letters: ["b", "a" ] })
@@ -229,8 +227,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root";
 
-      let text = doc.set(root, "text", "", "text");
-      if (!text) throw new Error('should not be undefined')
+      let text = doc.set_object(root, "text", "");
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
       doc.splice(text, 11, 0, ["!","?"])
@@ -281,8 +278,7 @@ describe('Automerge', () => {
 
     it('should be able to splice text', () => {
       let doc = create()
-      let text = doc.set("_root", "text", "", "text");
-      if (!text) throw new Error('should not be undefined')
+      let text = doc.set_object("_root", "text", "");
       doc.splice(text, 0, 0, "hello world");
       let heads1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
@@ -330,7 +326,7 @@ describe('Automerge', () => {
 
     it('local inc increments all visible counters in a sequence', () => {
       let doc1 = create("aaaa")
-      let seq = doc1.set("_root", "seq", [])
+      let seq = doc1.set_object("_root", "seq", [])
       if (!seq) throw new Error('Should not be undefined')
       doc1.insert(seq, 0, "hello")
       let doc2 = loadDoc(doc1.save(), "bbbb");
@@ -364,11 +360,11 @@ describe('Automerge', () => {
 
     it('recursive sets are possible', () => {
       let doc = create("aaaa")
-      let l1 = doc.make("_root","list",[{ foo: "bar"}, [1,2,3]])
-      let l2 = doc.insert(l1, 0, { zip: ["a", "b"] })
-      let l3 = doc.make("_root","info1","hello world") // 'text'
+      let l1 = doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])
+      let l2 = doc.insert_object(l1, 0, { zip: ["a", "b"] })
+      let l3 = doc.set_object("_root","info1","hello world") // 'text'
       let l4 = doc.set("_root","info2","hello world")  // 'str'
-      let l5 = doc.set("_root","info3","hello world", "text")
+      let l5 = doc.set_object("_root","info3","hello world")
       assert.deepEqual(doc.toJS(), {
         "list": [ { zip: ["a", "b"] }, { foo: "bar"}, [ 1,2,3]],
         "info1": "hello world".split(""),
@@ -381,15 +377,14 @@ describe('Automerge', () => {
     it('only returns an object id when objects are created', () => {
       let doc = create("aaaa")
       let r1 = doc.set("_root","foo","bar")
-      let r2 = doc.set("_root","list",[])
+      let r2 = doc.set_object("_root","list",[])
       let r3 = doc.set("_root","counter",10, "counter")
       let r4 = doc.inc("_root","counter",1)
       let r5 = doc.del("_root","counter")
-      if (!r2) throw new Error('should not be undefined')
       let r6 = doc.insert(r2,0,10);
-      let r7 = doc.insert(r2,0,{});
+      let r7 = doc.insert_object(r2,0,{});
       let r8 = doc.splice(r2,1,0,["a","b","c"]);
-      let r9 = doc.splice(r2,1,0,["a",[],{},"d"]);
+      //let r9 = doc.splice(r2,1,0,["a",[],{},"d"]);
       assert.deepEqual(r1,null);
       assert.deepEqual(r2,"2@aaaa");
       assert.deepEqual(r3,null);
@@ -398,17 +393,17 @@ describe('Automerge', () => {
       assert.deepEqual(r6,null);
       assert.deepEqual(r7,"7@aaaa");
       assert.deepEqual(r8,null);
-      assert.deepEqual(r9,["12@aaaa","13@aaaa"]);
+      //assert.deepEqual(r9,["12@aaaa","13@aaaa"]);
       doc.free()
     })
 
     it('objects without properties are preserved', () => {
       let doc1 = create("aaaa")
-      let a = doc1.set("_root","a",{});
+      let a = doc1.set_object("_root","a",{});
       if (!a) throw new Error('should not be undefined')
-      let b = doc1.set("_root","b",{});
+      let b = doc1.set_object("_root","b",{});
       if (!b) throw new Error('should not be undefined')
-      let c = doc1.set("_root","c",{});
+      let c = doc1.set_object("_root","c",{});
       if (!c) throw new Error('should not be undefined')
       let d = doc1.set(c,"d","dd");
       let saved = doc1.save();
@@ -426,7 +421,7 @@ describe('Automerge', () => {
 
     it('should handle merging text conflicts then saving & loading', () => {
       let A = create("aabbcc")
-      let At = A.make('_root', 'text', "", "text")
+      let At = A.set_object('_root', 'text', "")
       A.splice(At, 0, 0, 'hello')
 
       let B = A.fork()
@@ -477,8 +472,7 @@ describe('Automerge', () => {
       let s1 = initSyncState(), s2 = initSyncState()
 
       // make two nodes with the same changes
-      let list = n1.set("_root","n", [])
-      if (!list) throw new Error('undefined')
+      let list = n1.set_object("_root","n", [])
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -501,7 +495,7 @@ describe('Automerge', () => {
       let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
-      let list = n1.set("_root","n",[])
+      let list = n1.set_object("_root","n",[])
       if (!list) throw new Error('undefined')
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
@@ -518,8 +512,7 @@ describe('Automerge', () => {
       let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
-      let list = n1.set("_root","n",[])
-      if (!list) throw new Error('undefined')
+      let list = n1.set_object("_root","n",[])
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -675,8 +668,7 @@ describe('Automerge', () => {
       let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState(), message = null
 
-      let items = n1.set("_root", "items", [])
-      if (!items) throw new Error('undefined')
+      let items = n1.set_object("_root", "items", [])
       n1.commit("",0)
 
       sync(n1, n2, s1, s2)

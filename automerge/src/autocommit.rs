@@ -3,9 +3,9 @@ use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
 use crate::{
     change::export_change, query, transaction::TransactionInner, ActorId, Automerge,
-    AutomergeError, Change, ChangeHash, Prop, ScalarValue, Value,
+    AutomergeError, Change, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, SyncMessage,
+    SyncState, Value,
 };
-use crate::{Keys, KeysAt, SyncMessage, SyncState};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -248,12 +248,12 @@ impl AutoCommit {
     /// ```
     /// # use automerge::transaction::CommitOptions;
     /// # use automerge::transaction::Transactable;
-    /// # use automerge::Value;
     /// # use automerge::ROOT;
     /// # use automerge::AutoCommit;
+    /// # use automerge::ObjType;
     /// # use std::time::SystemTime;
     /// let mut doc = AutoCommit::new();
-    /// doc.set(ROOT, "todos", Value::list()).unwrap();
+    /// doc.set_object(&ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -321,23 +321,34 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<Value>>(
+    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.set(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn insert<O: AsRef<ExId>, V: Into<Value>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.set_object(&mut self.doc, obj.as_ref(), prop, value)
+    }
+
+    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.insert(&mut self.doc, obj.as_ref(), index, value)
@@ -368,6 +379,17 @@ impl Transactable for AutoCommit {
         )
     }
 
+    fn insert_object(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.insert_object(&mut self.doc, obj, index, value)
+    }
+
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
@@ -396,8 +418,8 @@ impl Transactable for AutoCommit {
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
         tx.splice(&mut self.doc, obj.as_ref(), pos, del, vals)

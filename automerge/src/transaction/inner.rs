@@ -2,8 +2,8 @@ use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, ScalarValue, Value};
-use crate::{AutomergeError, OpType};
+use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
+use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -81,20 +81,42 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set<P: Into<Prop>, V: Into<Value>>(
+    pub fn set<P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
         let value = value.into();
-        if let Some(id) = self.local_op(doc, obj, prop.into(), value.into())? {
-            Ok(Some(doc.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
+        self.local_op(doc, obj, prop.into(), value.into())?;
+        Ok(())
+    }
+
+    /// Set the value of property `P` to value `V` in object `obj`.
+    ///
+    /// # Returns
+    ///
+    /// The opid of the operation which was created, or None if this operation doesn't change the
+    /// document
+    ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    pub fn set_object<P: Into<Prop>>(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        prop: P,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        let id = self.local_op(doc, obj, prop.into(), value.into())?.unwrap();
+        Ok(doc.id_to_exid(id))
     }
 
     fn next_id(&mut self) -> OpId {
@@ -113,22 +135,6 @@ impl TransactionInner {
         }
 
         self.operations.push(op);
-    }
-
-    pub fn insert<V: Into<Value>>(
-        &mut self,
-        doc: &mut Automerge,
-        obj: &ExId,
-        index: usize,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
-        let value = value.into();
-        if let Some(id) = self.do_insert(doc, obj, index, value)? {
-            Ok(Some(doc.id_to_exid(id)))
-        } else {
-            Ok(None)
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -156,20 +162,44 @@ impl TransactionInner {
         Ok(())
     }
 
-    fn do_insert<V: Into<OpType>>(
+    pub fn insert<V: Into<ScalarValue>>(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        index: usize,
+        value: V,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        let value = value.into();
+        self.do_insert(doc, obj, index, value.into())?;
+        Ok(())
+    }
+
+    pub fn insert_object(
+        &mut self,
+        doc: &mut Automerge,
+        obj: &ExId,
+        index: usize,
+        value: ObjType,
+    ) -> Result<ExId, AutomergeError> {
+        let obj = doc.exid_to_obj(obj)?;
+        let id = self.do_insert(doc, obj, index, value.into())?.unwrap();
+        Ok(doc.id_to_exid(id))
+    }
+
+    fn do_insert(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         index: usize,
-        action: V,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        //let value = value.into();
-        let action = action.into();
+
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
@@ -319,23 +349,19 @@ impl TransactionInner {
         obj: &ExId,
         mut pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
             // del()
             self.local_op(doc, obj, pos.into(), OpType::Del)?;
         }
-        let mut results = Vec::new();
         for v in vals {
             // insert()
-            let id = self.do_insert(doc, obj, pos, v)?;
-            if let Some(id) = id {
-                results.push(doc.id_to_exid(id));
-            }
+            self.do_insert(doc, obj, pos, v.into())?;
             pos += 1;
         }
-        Ok(results)
+        Ok(())
     }
 }
 
@@ -350,7 +376,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
 
-        let a = tx.set(ROOT, "a", Value::map()).unwrap().unwrap();
+        let a = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
         tx.set(&a, "b", 1).unwrap();
         assert!(tx.value(&a, "b").unwrap().is_some());
     }

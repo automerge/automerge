@@ -1,6 +1,6 @@
 use crate::exid::ExId;
 use crate::query;
-use crate::{AutomergeError, ChangeHash, Keys, KeysAt, Prop, ScalarValue, Value};
+use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// A way of mutating a document within a single change.
@@ -10,10 +10,24 @@ pub trait Transactable {
 
     /// Set the value of property `P` to value `V` in object `obj`.
     ///
+    /// # Errors
+    ///
+    /// This will return an error if
+    /// - The object does not exist
+    /// - The key is the wrong type for the object
+    /// - The key does not exist in the object
+    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+        &mut self,
+        obj: O,
+        prop: P,
+        value: V,
+    ) -> Result<(), AutomergeError>;
+
+    /// Set the value of property `P` to the new object `V` in object `obj`.
+    ///
     /// # Returns
     ///
-    /// The opid of the operation which was created, or None if this operation doesn't change the
-    /// document
+    /// The id of the object which was created.
     ///
     /// # Errors
     ///
@@ -21,20 +35,28 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<Value>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-        value: V,
-    ) -> Result<Option<ExId>, AutomergeError>;
+        object: ObjType,
+    ) -> Result<ExId, AutomergeError>;
 
     /// Insert a value into a list at the given index.
-    fn insert<O: AsRef<ExId>, V: Into<Value>>(
+    fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         index: usize,
         value: V,
-    ) -> Result<Option<ExId>, AutomergeError>;
+    ) -> Result<(), AutomergeError>;
+
+    /// Insert an object into a list at the given index.
+    fn insert_object(
+        &mut self,
+        obj: &ExId,
+        index: usize,
+        object: ObjType,
+    ) -> Result<ExId, AutomergeError>;
 
     /// Set a mark within a range on a list
     #[allow(clippy::too_many_arguments)]
@@ -61,15 +83,13 @@ pub trait Transactable {
     fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
         -> Result<(), AutomergeError>;
 
-    /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
-    /// the new elements.
     fn splice<O: AsRef<ExId>>(
         &mut self,
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<Value>,
-    ) -> Result<Vec<ExId>, AutomergeError>;
+        vals: Vec<ScalarValue>,
+    ) -> Result<(), AutomergeError>;
 
     /// Like [`Self::splice`] but for text.
     fn splice_text<O: AsRef<ExId>>(
@@ -78,7 +98,7 @@ pub trait Transactable {
         pos: usize,
         del: usize,
         text: &str,
-    ) -> Result<Vec<ExId>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         let mut vals = vec![];
         for c in text.to_owned().graphemes(true) {
             vals.push(c.into());
