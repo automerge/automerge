@@ -72,7 +72,11 @@ impl Automerge {
     pub(crate) fn get_actor_index(&mut self) -> usize {
         match &mut self.actor {
             Actor::Unused(actor) => {
-                let index = self.ops.m.actors.cache(std::mem::take(actor));
+                let index = self
+                    .ops
+                    .m
+                    .actors
+                    .cache(std::mem::replace(actor, ActorId::from(&[][..])));
                 self.actor = Actor::Cached(index);
                 index
             }
