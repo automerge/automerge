@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::{decoding, decoding::Decoder, encoding, encoding::Encodable, ChangeHash};
+use crate::{decoding, decoding::Decoder, encoding::Encodable, ChangeHash};
 
 // These constants correspond to a 1% false positive rate. The values can be changed without
 // breaking compatibility of the network protocol, since the parameters used for a particular
@@ -17,19 +17,15 @@ pub struct BloomFilter {
 }
 
 impl BloomFilter {
-    // FIXME - we can avoid a result here - why do we need to consume the bloom filter?  requires
-    // me to clone in places I shouldn't need to
-    pub fn into_bytes(self) -> Result<Vec<u8>, encoding::Error> {
-        if self.num_entries == 0 {
-            Ok(Vec::new())
-        } else {
-            let mut buf = Vec::new();
-            self.num_entries.encode(&mut buf)?;
-            self.num_bits_per_entry.encode(&mut buf)?;
-            self.num_probes.encode(&mut buf)?;
-            buf.extend(self.bits);
-            Ok(buf)
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        if self.num_entries != 0 {
+            self.num_entries.encode_vec(&mut buf);
+            self.num_bits_per_entry.encode_vec(&mut buf);
+            self.num_probes.encode_vec(&mut buf);
+            buf.extend(&self.bits);
         }
+        buf
     }
 
     fn get_probes(&self, hash: &ChangeHash) -> Vec<u32> {
