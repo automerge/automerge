@@ -1321,4 +1321,28 @@ mod tests {
 
         assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
     }
+
+    #[test]
+    fn delete_nothing_returns_error_map() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        assert!(tx.del(ROOT, "a").is_err());
+        // not an error currently so breaks loading
+        tx.commit();
+
+        let bytes = doc.save().unwrap();
+        assert!(Automerge::load(&bytes).is_err());
+    }
+
+    #[test]
+    fn delete_nothing_returns_error_list() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        assert!(tx.del(ROOT, 0).is_err());
+        // not an error currently so breaks loading
+        tx.commit();
+
+        let bytes = doc.save().unwrap();
+        assert!(Automerge::load(&bytes).is_err());
+    }
 }
