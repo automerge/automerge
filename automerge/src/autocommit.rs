@@ -122,7 +122,7 @@ impl AutoCommit {
         }
     }
 
-    pub fn ensure_transaction_closed(&mut self) {
+    fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             self.update_history(export_change(
                 &tx,
