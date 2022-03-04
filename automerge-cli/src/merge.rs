@@ -47,7 +47,7 @@ pub(super) fn merge<W: std::io::Write>(inputs: Inputs, mut output: W) -> Result<
             }
         }
     }
-    output.write_all(&backend.save().unwrap())?;
+    output.write_all(&backend.save())?;
     Ok(())
 }
 

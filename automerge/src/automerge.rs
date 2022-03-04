@@ -487,15 +487,12 @@ impl Automerge {
         Ok(self.get_heads())
     }
 
-    pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
         let ops = self.ops.iter();
-        // TODO - can we make encode_document error free
         let bytes = encode_document(heads, c, ops, &self.ops.m.actors, &self.ops.m.props.cache);
-        if bytes.is_ok() {
-            self.saved = self.get_heads();
-        }
+        self.saved = self.get_heads();
         bytes
     }
 
@@ -907,7 +904,7 @@ mod tests {
         assert!(tx.value(&list_id, 3)?.unwrap().0 == "c".into());
         assert!(tx.length(&list_id) == 4);
         tx.commit();
-        doc.save()?;
+        doc.save();
         Ok(())
     }
 
@@ -946,7 +943,7 @@ mod tests {
         tx.set(ROOT, "foo", 1)?;
         tx.commit();
 
-        let save1 = doc.save().unwrap();
+        let save1 = doc.save();
 
         let mut tx = doc.transaction();
         tx.set(ROOT, "bar", 2)?;
@@ -967,7 +964,7 @@ mod tests {
 
         assert!(doc.save_incremental().is_empty());
 
-        let save_b = doc.save().unwrap();
+        let save_b = doc.save();
 
         assert!(save_b.len() < save_a.len());
 
@@ -976,7 +973,7 @@ mod tests {
 
         assert!(doc_a.values(ROOT, "baz")? == doc_b.values(ROOT, "baz")?);
 
-        assert!(doc_a.save().unwrap() == doc_b.save().unwrap());
+        assert!(doc_a.save() == doc_b.save());
 
         Ok(())
     }
@@ -1197,12 +1194,12 @@ mod tests {
     fn rolling_back_transaction_has_no_effect() {
         let mut doc = Automerge::new();
         let old_states = doc.states.clone();
-        let bytes = doc.save().unwrap();
+        let bytes = doc.save();
         let tx = doc.transaction();
         tx.rollback();
         let new_states = doc.states.clone();
         assert_eq!(old_states, new_states);
-        let new_bytes = doc.save().unwrap();
+        let new_bytes = doc.save();
         assert_eq!(bytes, new_bytes);
     }
 

@@ -332,11 +332,8 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn save(&mut self) -> Result<Uint8Array, JsValue> {
-        self.0
-            .save()
-            .map(|v| Uint8Array::from(v.as_slice()))
-            .map_err(to_js_err)
+    pub fn save(&mut self) -> Uint8Array {
+        Uint8Array::from(self.0.save().as_slice())
     }
 
     #[wasm_bindgen(js_name = saveIncremental)]

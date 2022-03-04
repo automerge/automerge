@@ -251,6 +251,10 @@ pub(crate) trait Encodable {
     }
 
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize>;
+
+    fn encode_vec(&self, buf: &mut Vec<u8>) -> usize {
+        self.encode(buf).unwrap()
+    }
 }
 
 impl Encodable for SmolStr {

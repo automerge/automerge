@@ -24,11 +24,11 @@ fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<Value>)>) -> AutoCommit 
 }
 
 fn save_trace(mut doc: Automerge) {
-    doc.save().unwrap();
+    doc.save();
 }
 
 fn save_trace_autotx(mut doc: AutoCommit) {
-    doc.save().unwrap();
+    doc.save();
 }
 
 fn load_trace(bytes: &[u8]) {
@@ -75,7 +75,7 @@ fn bench(c: &mut Criterion) {
         b.iter_batched(|| doc.clone(), save_trace, criterion::BatchSize::LargeInput)
     });
 
-    let bytes = doc.save().unwrap();
+    let bytes = doc.save();
     group.bench_with_input(
         BenchmarkId::new("load", commands_len),
         &bytes,
@@ -108,7 +108,7 @@ fn bench(c: &mut Criterion) {
         },
     );
 
-    let bytes = doc.save().unwrap();
+    let bytes = doc.save();
     group.bench_with_input(
         BenchmarkId::new("load autotx", commands_len),
         &bytes,
