@@ -42,7 +42,7 @@ pub(crate) fn encode_document<'a, 'b>(
     doc_ops: impl Iterator<Item = &'b Op>,
     actors_index: &IndexedCache<ActorId>,
     props: &'a [String],
-) -> Result<Vec<u8>, AutomergeError> {
+) -> Vec<u8> {
     let mut bytes: Vec<u8> = Vec::new();
 
     let actors_map = actors_index.encode_index();
@@ -72,13 +72,13 @@ pub(crate) fn encode_document<'a, 'b>(
 
     let mut chunk = Vec::new();
 
-    actors.len().encode(&mut chunk)?;
+    actors.len().encode_vec(&mut chunk);
 
     for a in actors.into_iter() {
-        a.to_bytes().encode(&mut chunk)?;
+        a.to_bytes().encode_vec(&mut chunk);
     }
 
-    heads.len().encode(&mut chunk)?;
+    heads.len().encode_vec(&mut chunk);
     for head in heads.iter() {
         chunk.write_all(&head.0).unwrap();
     }
@@ -97,7 +97,7 @@ pub(crate) fn encode_document<'a, 'b>(
 
     bytes.splice(HASH_RANGE, hash_result[0..4].iter().copied());
 
-    Ok(bytes)
+    bytes
 }
 
 /// When encoding a change we take all the actor IDs referenced by a change and place them in an

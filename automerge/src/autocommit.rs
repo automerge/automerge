@@ -162,7 +162,7 @@ impl AutoCommit {
         self.doc.merge(&mut other.doc)
     }
 
-    pub fn save(&mut self) -> Result<Vec<u8>, AutomergeError> {
+    pub fn save(&mut self) -> Vec<u8> {
         self.ensure_transaction_closed();
         self.doc.save()
     }

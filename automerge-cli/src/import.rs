@@ -103,6 +103,6 @@ pub fn import_json(
 
     let json_value: serde_json::Value = serde_json::from_str(&buffer)?;
     let mut doc = initialize_from_json(&json_value)?;
-    writer.write_all(&doc.save()?)?;
+    writer.write_all(&doc.save())?;
     Ok(())
 }

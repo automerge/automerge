@@ -26,7 +26,7 @@ fn main() {
     let mut doc2 = Automerge::new();
     doc2.merge(&mut doc1).unwrap();
 
-    let binary = doc1.save().unwrap();
+    let binary = doc1.save();
     let mut doc2 = Automerge::load(&binary).unwrap();
 
     doc1.transact_with::<_, _, AutomergeError, _>(
