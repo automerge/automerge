@@ -447,6 +447,12 @@ impl From<bool> for ScalarValue {
     }
 }
 
+impl From<()> for ScalarValue {
+    fn from(_: ()) -> Self {
+        ScalarValue::Null
+    }
+}
+
 impl From<char> for ScalarValue {
     fn from(c: char) -> Self {
         ScalarValue::Str(SmolStr::new(c.to_string()))
