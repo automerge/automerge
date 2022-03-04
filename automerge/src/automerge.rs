@@ -228,27 +228,21 @@ impl Automerge {
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
         match id {
             ExId::Root => Ok(ObjId::root()),
-            ExId::Id(ctr, actor, idx) => {
-                // do a direct get here b/c this could be foriegn and not be within the array
-                // bounds
-                if self.ops.m.actors.cache.get(*idx) == Some(actor) {
-                    Ok(ObjId(OpId(*ctr, *idx)))
-                } else {
-                    // FIXME - make a real error
-                    let idx = self
-                        .ops
-                        .m
-                        .actors
-                        .lookup(actor)
-                        .ok_or(AutomergeError::Fail)?;
-                    Ok(ObjId(OpId(*ctr, idx)))
-                }
+            ExId::Id(ctr, actor) => {
+                // FIXME - make a real error
+                let idx = self
+                    .ops
+                    .m
+                    .actors
+                    .lookup(actor)
+                    .ok_or(AutomergeError::Fail)?;
+                Ok(ObjId(OpId(*ctr, idx)))
             }
         }
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
-        ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone())
     }
 
     pub fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
@@ -776,11 +770,7 @@ impl Automerge {
                 .actors
                 .lookup(&actor)
                 .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
-            Ok(ExId::Id(
-                counter,
-                self.ops.m.actors.cache[actor].clone(),
-                actor,
-            ))
+            Ok(ExId::Id(counter, self.ops.m.actors.cache[actor].clone()))
         }
     }
 
