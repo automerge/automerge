@@ -126,7 +126,7 @@ impl TryFrom<JS> for Vec<Change> {
         let changes = changes?;
         let changes: Result<Vec<Change>, _> = changes
             .iter()
-            .map(|a| am::decode_change(a.to_vec()))
+            .map(|a| Change::try_from(a.to_vec()))
             .collect();
         let changes = changes.map_err(to_js_err)?;
         Ok(changes)
