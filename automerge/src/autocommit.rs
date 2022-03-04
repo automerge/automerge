@@ -332,11 +332,11 @@ impl Transactable for AutoCommit {
         tx.set(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
@@ -354,11 +354,11 @@ impl Transactable for AutoCommit {
         tx.insert(&mut self.doc, obj.as_ref(), index, value)
     }
 
-    fn insert_object<V: Into<ObjType>>(
+    fn insert_object(
         &mut self,
         obj: &ExId,
         index: usize,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();

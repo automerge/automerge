@@ -97,11 +97,11 @@ impl<'a> Transactable for Transaction<'a> {
             .set(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>, V: Into<ObjType>>(
+    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.inner
             .as_mut()
@@ -121,11 +121,11 @@ impl<'a> Transactable for Transaction<'a> {
             .insert(self.doc, obj.as_ref(), index, value)
     }
 
-    fn insert_object<V: Into<ObjType>>(
+    fn insert_object(
         &mut self,
         obj: &ExId,
         index: usize,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         self.inner
             .as_mut()

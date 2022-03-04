@@ -2,7 +2,7 @@ use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop, Value};
+use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
@@ -89,7 +89,7 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let value = Value::Scalar(value.into());
+        let value = value.into();
         self.local_op(doc, obj, prop.into(), value.into())?;
         Ok(())
     }
@@ -107,15 +107,14 @@ impl TransactionInner {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    pub fn set_object<P: Into<Prop>, V: Into<ObjType>>(
+    pub fn set_object<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let value = Value::Object(value.into());
         let id = self.local_op(doc, obj, prop.into(), value.into())?.unwrap();
         Ok(doc.id_to_exid(id))
     }
@@ -146,38 +145,35 @@ impl TransactionInner {
         value: V,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.do_insert(doc, obj, index, Value::Scalar(value.into()))?;
+        let value = value.into();
+        self.do_insert(doc, obj, index, value.into())?;
         Ok(())
     }
 
-    pub fn insert_object<V: Into<ObjType>>(
+    pub fn insert_object(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         index: usize,
-        value: V,
+        value: ObjType,
     ) -> Result<ExId, AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        let id = self
-            .do_insert(doc, obj, index, Value::Object(value.into()))?
-            .unwrap();
+        let id = self.do_insert(doc, obj, index, value.into())?.unwrap();
         Ok(doc.id_to_exid(id))
     }
 
-    fn do_insert<V: Into<Value>>(
+    fn do_insert(
         &mut self,
         doc: &mut Automerge,
         obj: ObjId,
         index: usize,
-        value: V,
+        action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
         let query = doc.ops.search(obj, query::InsertNth::new(index));
 
         let key = query.key()?;
-        let value = value.into();
-        let action = value.into();
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
@@ -336,7 +332,7 @@ impl TransactionInner {
         }
         for v in vals {
             // insert()
-            self.do_insert(doc, obj, pos, v)?;
+            self.do_insert(doc, obj, pos, v.into())?;
             pos += 1;
         }
         Ok(())
