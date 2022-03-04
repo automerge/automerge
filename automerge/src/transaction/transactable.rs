@@ -17,7 +17,6 @@ mod private {
 }
 
 pub trait CanSet: private::Sealed {
-    type Source;
     type Result;
 
     fn construct_result(doc: &Automerge, opid: OpId) -> Self::Result;
@@ -26,7 +25,6 @@ pub trait CanSet: private::Sealed {
 }
 
 impl CanSet for ScalarValue {
-    type Source = Self;
     type Result = ();
 
     fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
@@ -37,7 +35,6 @@ impl CanSet for ScalarValue {
 }
 
 impl CanSet for ObjType {
-    type Source = Self;
     type Result = ExId;
 
     fn construct_result(doc: &Automerge, opid: OpId) -> Self::Result {
@@ -50,7 +47,6 @@ impl CanSet for ObjType {
 }
 
 impl CanSet for i64 {
-    type Source = Self;
     type Result = ();
 
     fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
@@ -61,7 +57,6 @@ impl CanSet for i64 {
 }
 
 impl CanSet for () {
-    type Source = Self;
     type Result = ();
 
     fn construct_result(_: &Automerge, _: OpId) -> Self::Result {}
