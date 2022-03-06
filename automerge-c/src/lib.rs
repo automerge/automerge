@@ -12,9 +12,10 @@ mod utils;
 use automerge::transaction::Transactable;
 use doc::AMdoc;
 use result::AMresult;
-use utils::import_value;
+use utils::import_scalar;
 
 /// \ingroup enumerations
+/// \enum AmDataType
 /// \brief All data types that a value can be set to.
 #[derive(Debug)]
 #[repr(u8)]
@@ -48,6 +49,7 @@ pub enum AmDataType {
 }
 
 /// \ingroup enumerations
+/// \enum AmStatus
 /// \brief The status of an API call.
 #[derive(Debug)]
 #[repr(u8)]
@@ -90,7 +92,7 @@ macro_rules! to_doc {
 
 macro_rules! to_value {
     ($a:expr,$b:expr) => {{
-        match import_value($a, $b) {
+        match import_scalar($a, $b) {
             Ok(v) => v,
             Err(r) => return r.into(),
         }
@@ -120,7 +122,7 @@ macro_rules! to_result {
     }};
 }
 
-/// \class AMobj
+/// \struct AMobj
 /// \brief An object's unique identifier.
 #[derive(Clone)]
 pub struct AMobj(am::ObjId);
@@ -148,10 +150,11 @@ pub extern "C" fn AMcreate() -> *mut AMdoc {
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \pre \p doc must be a valid address.
-#[no_mangle]
+/// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
+#[no_mangle]
 pub unsafe extern "C" fn AMdestroy(doc: *mut AMdoc) {
     if !doc.is_null() {
         let doc: AMdoc = *Box::from_raw(doc);
@@ -168,6 +171,7 @@ pub unsafe extern "C" fn AMdestroy(doc: *mut AMdoc) {
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMdestroy()`.
+/// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
@@ -190,6 +194,7 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+/// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
@@ -224,6 +229,7 @@ pub unsafe extern "C" fn AMconfig(
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+/// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
@@ -235,8 +241,10 @@ pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
 /// \memberof AMresult
 /// \brief Get the status code of an `AMresult` struct.
 ///
-/// \param[in] result A pointer to an `AMresult` struct or `NULL`.
+/// \param[in] result A pointer to an `AMresult` struct.
 /// \return An `AmStatus` enum tag.
+/// \pre \p result must be a valid address.
+/// \internal
 ///
 /// # Safety
 /// result must be a pointer to a valid AMresult
@@ -256,17 +264,17 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 /// \brief Set a map object's value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj A pointer to an `AMobj` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
 /// \param[in] key A map object's key string.
 /// \param[in] data_type An `AmDataType` enum tag matching the actual type that
 ///            \p value points to.
 /// \param[in] value A pointer to the value at \p key or `NULL`.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
-/// \pre \p obj must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+/// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
@@ -289,7 +297,7 @@ pub unsafe extern "C" fn AMmapSet(
 /// \brief Set a list object's value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] obj A pointer to an `AMobj` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
 /// \param[in] index A list object's index number.
 /// \param[in] data_type An `AmDataType` enum tag matching the actual type that
 ///            \p value points to.
@@ -299,6 +307,8 @@ pub unsafe extern "C" fn AMmapSet(
 /// \pre \p obj must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
+/// \internal
+///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj must be a pointer to a valid AMobj or NULL
@@ -321,6 +331,7 @@ pub unsafe extern "C" fn AMlistSet(
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A pointer to an `AMobj` struct.
 /// \pre \p result must be a valid address.
+/// \internal
 ///
 /// # Safety
 /// result must be a pointer to a valid AMresult
@@ -334,6 +345,7 @@ pub unsafe extern "C" fn AMgetObj(_result: *mut AMresult) -> *mut AMobj {
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \pre \p result must be a valid address.
+/// \internal
 ///
 /// # Safety
 /// result must be a pointer to a valid AMresult
@@ -351,6 +363,7 @@ pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
 /// \param[in] result A pointer to an `AMresult` struct.
 /// \return A string value or `NULL`.
 /// \pre \p result must be a valid address.
+/// \internal
 ///
 /// # Safety
 /// result must be a pointer to a valid AMresult

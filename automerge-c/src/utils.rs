@@ -48,6 +48,7 @@ impl From<&am::Value> for AmDataType {
     }
 }
 
+/*
 pub(crate) fn import_value(
     value: *const c_void,
     data_type: AmDataType,
@@ -91,6 +92,52 @@ pub(crate) fn import_value(
             AmDataType::List => Some(am::Value::list()),
             AmDataType::Text => Some(am::Value::text()),
             AmDataType::Table => Some(am::Value::table()),
+            _ => return Err(AMresult::err("Invalid data type")),
+        }
+        .ok_or_else(|| AMresult::err("Null value"))
+    }
+}
+*/
+
+pub(crate) fn import_scalar(
+    value: *const c_void,
+    data_type: AmDataType,
+) -> Result<am::ScalarValue, AMresult> {
+    unsafe {
+        match data_type {
+            AmDataType::Boolean => value
+                .cast::<*const c_char>()
+                .as_ref()
+                .map(|v| am::ScalarValue::Boolean(**v != 0)),
+            AmDataType::Counter => value
+                .cast::<*const i64>()
+                .as_ref()
+                .map(|v| am::ScalarValue::counter(**v)),
+            AmDataType::F64 => value
+                .cast::<*const c_double>()
+                .as_ref()
+                .map(|v| am::ScalarValue::F64(**v)),
+            AmDataType::Int => value
+                .cast::<*const i64>()
+                .as_ref()
+                .map(|v| am::ScalarValue::Int(**v)),
+            AmDataType::Null => Some(am::ScalarValue::Null),
+            AmDataType::Str => {
+                let value: *const c_char = value.cast();
+                if !value.is_null() {
+                    Some(CStr::from_ptr(value).to_string_lossy().to_string().into())
+                } else {
+                    None
+                }
+            }
+            AmDataType::Timestamp => value
+                .cast::<*const i64>()
+                .as_ref()
+                .map(|v| am::ScalarValue::Timestamp(**v)),
+            AmDataType::Uint => value
+                .cast::<*const u64>()
+                .as_ref()
+                .map(|v| am::ScalarValue::Uint(**v)),
             _ => return Err(AMresult::err("Invalid data type")),
         }
         .ok_or_else(|| AMresult::err("Null value"))
