@@ -1,9 +1,5 @@
 use automerge as am;
-use std::{
-    ffi::{c_void, CStr},
-    fmt,
-    os::raw::c_char,
-};
+use std::{ffi::CStr, os::raw::c_char};
 
 mod doc;
 mod result;
@@ -12,43 +8,29 @@ mod utils;
 use automerge::transaction::Transactable;
 use doc::AMdoc;
 use result::AMresult;
-use utils::import_scalar;
 
 /// \ingroup enumerations
-/// \enum AmDataType
-/// \brief All data types that a value can be set to.
-#[derive(Debug)]
+/// \enum AmObjType
 #[repr(u8)]
-pub enum AmDataType {
-    /// A null value.
-    Null,
-    /// A boolean value.
-    Boolean,
-    /// An ordered collection of byte values.
-    Bytes,
-    /// A CRDT counter value.
-    Counter,
-    /// A 64-bit floating-point value.
-    F64,
-    /// A signed integer value.
-    Int,
-    /// An ordered collection of (index, value) pairs.
-    List,
-    /// A unordered collection of (key, value) pairs.
+pub enum AmObjType {
+    /// a key value map
     Map,
-    /// A UTF-8 string value.
-    Str,
-    /// An unordered collection of records like in an RDBMS.
-    Table,
-    /// An ordered collection of (index, value) pairs optimized for characters.
+    /// a list
+    List,
+    /// a list of unicode graphememes
     Text,
-    /// A Lamport timestamp value.
-    Timestamp,
-    /// An unsigned integer value.
-    Uint,
 }
 
-/// \ingroup enumerations
+impl From<AmObjType> for am::ObjType {
+    fn from(o: AmObjType) -> Self {
+        match o {
+            AmObjType::Map => am::ObjType::Map,
+            AmObjType::List => am::ObjType::List,
+            AmObjType::Text => am::ObjType::Text,
+        }
+    }
+}
+
 /// \enum AmStatus
 /// \brief The status of an API call.
 #[derive(Debug)]
@@ -68,16 +50,8 @@ pub enum AmStatus {
     Error,
 }
 
-impl fmt::Display for AmDataType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-macro_rules! to_str {
-    ($s:expr) => {{
-        CStr::from_ptr($s).to_string_lossy().to_string()
-    }};
+unsafe fn to_str(c: *const c_char) -> String {
+    CStr::from_ptr(c).to_string_lossy().to_string()
 }
 
 macro_rules! to_doc {
@@ -90,36 +64,17 @@ macro_rules! to_doc {
     }};
 }
 
-macro_rules! to_value {
-    ($a:expr,$b:expr) => {{
-        match import_scalar($a, $b) {
-            Ok(v) => v,
-            Err(r) => return r.into(),
-        }
-    }};
-}
-
-macro_rules! to_prop {
-    ($key:expr) => {{
-        // TODO - check null pointer
-        am::Prop::Map(std::ffi::CStr::from_ptr($key).to_string_lossy().to_string())
-    }};
-}
-
 macro_rules! to_obj {
     ($handle:expr) => {{
-        let handle = $handle.as_ref();
-        match handle {
+        match $handle.as_ref() {
             Some(b) => b,
             None => &AMobj(am::ObjId::Root),
         }
     }};
 }
 
-macro_rules! to_result {
-    ($val:expr) => {{
-        Box::into_raw(Box::new(($val).into()))
-    }};
+fn to_result<R: Into<AMresult>>(r: R) -> *mut AMresult {
+    (r.into()).into()
 }
 
 /// \struct AMobj
@@ -206,15 +161,15 @@ pub unsafe extern "C" fn AMconfig(
     value: *const c_char,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    let key = to_str!(key);
+    let key = to_str(key);
     match key.as_str() {
         "actor" => {
-            let actor = to_str!(value);
+            let actor = to_str(value);
             if let Ok(actor) = actor.try_into() {
                 doc.set_actor(actor);
                 AMresult::Ok.into()
             } else {
-                AMresult::err(&format!("Invalid actor '{}'", to_str!(value))).into()
+                AMresult::err(&format!("Invalid actor '{}'", to_str(value))).into()
             }
         }
         k => AMresult::err(&format!("Invalid config key '{}'", k)).into(),
@@ -266,9 +221,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
 /// \param[in] key A map object's key string.
-/// \param[in] data_type An `AmDataType` enum tag matching the actual type that
-///            \p value points to.
-/// \param[in] value A pointer to the value at \p key or `NULL`.
+/// \param[in] value A 64 bit int
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -280,17 +233,255 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 /// doc must be a pointer to a valid AMdoc
 /// obj must be a pointer to a valid AMobj or NULL
 /// key must be a c string of the map key to be used
-/// value must be a pointer to data of the type specified in data_type
 #[no_mangle]
-pub unsafe extern "C" fn AMmapSet(
+pub unsafe extern "C" fn AMmapSetInt(
     doc: *mut AMdoc,
     obj: *mut AMobj,
     key: *const c_char,
-    data_type: AmDataType,
-    value: *const c_void,
+    value: i64,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result!(doc.set(to_obj!(obj), to_prop!(key), to_value!(value, data_type)))
+    to_result(doc.set(to_obj!(obj), to_str(key), value))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A 64 bit uint
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetUint(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: u64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(to_obj!(obj), to_str(key), value))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A valid c string
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetStr(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: *const c_char,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(to_obj!(obj), to_str(key), to_str(value)))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A byte array
+/// \param[in] length A size_t length of the byte array
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+/// value must be a byte array of lenth `length`
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetBytes(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: *const u8,
+    length: usize,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let slice = std::slice::from_raw_parts(value, length);
+    let mut vec = Vec::new();
+    vec.extend_from_slice(slice);
+    to_result(doc.set(to_obj!(obj), to_str(key), vec))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A double
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetF64(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: f64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(to_obj!(obj), to_str(key), value))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A 64 bit int
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetCounter(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: i64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(
+        to_obj!(obj),
+        to_str(key),
+        am::ScalarValue::Counter(value.into()),
+    ))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] value A 64 bit int
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetTimestamp(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    value: i64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(to_obj!(obj), to_str(key), am::ScalarValue::Timestamp(value)))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetNull(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set(to_obj!(obj), to_str(key), ()))
+}
+
+/// \memberof AMdoc
+/// \brief Set a map object's value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] key A map object's key string.
+/// \param[in] objtype A valid AmObjType enum
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre \p key must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMmapSetObject(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    key: *const c_char,
+    objtype: AmObjType,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    to_result(doc.set_object(to_obj!(obj), to_str(key), objtype.into()))
 }
 
 /// \memberof AMdoc
@@ -299,9 +490,8 @@ pub unsafe extern "C" fn AMmapSet(
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
 /// \param[in] index A list object's index number.
-/// \param[in] data_type An `AmDataType` enum tag matching the actual type that
-///            \p value points to.
-/// \param[in] value A pointer to the value at \p index or `NULL`.
+/// \param[in] insert A boolean to insert or overrite at the index
+/// \param[in] value An i64 value
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p obj must be a valid address.
@@ -314,15 +504,20 @@ pub unsafe extern "C" fn AMmapSet(
 /// obj must be a pointer to a valid AMobj or NULL
 /// value must be a pointer to data of the type specified in data_type
 #[no_mangle]
-pub unsafe extern "C" fn AMlistSet(
+pub unsafe extern "C" fn AMlistSetInt(
     doc: *mut AMdoc,
     obj: *mut AMobj,
     index: usize,
-    data_type: AmDataType,
-    value: *const c_void,
+    insert: bool,
+    value: i64,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result!(doc.set(to_obj!(obj), index, to_value!(value, data_type)))
+    let obj = to_obj!(obj);
+    if insert {
+        to_result(doc.insert(obj, index, value))
+    } else {
+        to_result(doc.set(obj, index, value))
+    }
 }
 
 /// \memberof AMresult

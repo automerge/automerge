@@ -455,6 +455,12 @@ impl From<bool> for ScalarValue {
     }
 }
 
+impl From<Vec<u8>> for ScalarValue {
+    fn from(b: Vec<u8>) -> Self {
+        ScalarValue::Bytes(b)
+    }
+}
+
 impl From<()> for ScalarValue {
     fn from(_: ()) -> Self {
         ScalarValue::Null

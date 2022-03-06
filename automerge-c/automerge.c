@@ -21,8 +21,8 @@ int main() {
   AMconfig(doc, "actor", "aabbcc");
   printf("pass!\n");
 
-  printf("AMmapSet()...\n");
-  res = AMmapSet(doc, NULL, "string", AM_DATA_TYPE_STR, "hello world");
+  printf("AMmapSetStr()...\n");
+  res = AMmapSetStr(doc, NULL, "string", "hello world");
   if (AMresultStatus(res) != AM_STATUS_COMMAND_OK)
   {
         printf("AMmapSet() failed: %s\n", AMerrorMessage(res));

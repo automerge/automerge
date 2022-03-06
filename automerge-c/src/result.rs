@@ -17,11 +17,10 @@ impl AMresult {
     }
 }
 
-impl From<Result<Option<am::ObjId>, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<Option<am::ObjId>, am::AutomergeError>) -> Self {
+impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::ObjId, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(None) => AMresult::Ok,
-            Ok(Some(obj)) => AMresult::ObjId(obj),
+            Ok(obj) => AMresult::ObjId(obj),
             Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
         }
     }
