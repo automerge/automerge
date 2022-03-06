@@ -24,7 +24,7 @@ const HEAD_STR: &str = "_head";
 // Note that change encoding relies on the Ord implementation for the ActorId being implemented in
 // terms of the lexicographic ordering of the underlying bytes. Be aware of this if you are
 // changing the ActorId implementation in ways which might affect the Ord implementation
-#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Default)]
+#[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord)]
 #[cfg_attr(feature = "derive-arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ActorId(TinyVec<[u8; 16]>);
 
@@ -47,10 +47,6 @@ impl ActorId {
 
     pub fn to_hex_string(&self) -> String {
         hex::encode(&self.0)
-    }
-
-    pub fn op_id_at(&self, seq: u64) -> amp::OpId {
-        amp::OpId(seq, self.clone())
     }
 }
 
@@ -168,6 +164,18 @@ pub enum OpType {
     Del,
     Inc(i64),
     Set(ScalarValue),
+}
+
+impl From<ObjType> for OpType {
+    fn from(v: ObjType) -> Self {
+        OpType::Make(v)
+    }
+}
+
+impl From<ScalarValue> for OpType {
+    fn from(v: ScalarValue) -> Self {
+        OpType::Set(v)
+    }
 }
 
 #[derive(Debug)]

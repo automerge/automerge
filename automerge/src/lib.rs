@@ -49,7 +49,7 @@ mod visualisation;
 
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
-pub use change::{decode_change, Change};
+pub use change::Change;
 pub use error::AutomergeError;
 pub use exid::ExId as ObjId;
 pub use keys::Keys;

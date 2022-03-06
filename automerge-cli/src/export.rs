@@ -113,7 +113,7 @@ mod tests {
         //let mut backend = am::Automerge::new();
         //backend.apply_local_change(initial_change).unwrap();
         let mut backend = initialize_from_json(&initial_state_json).unwrap();
-        let change_bytes = backend.save().unwrap();
+        let change_bytes = backend.save();
         assert_eq!(
             get_state_json(change_bytes).unwrap(),
             serde_json::json!({"sparrows": 15.0})
@@ -140,7 +140,7 @@ mod tests {
                 //backend.apply_local_change(initial_change).unwrap();
 
         */
-        let change_bytes = backend.save().unwrap();
+        let change_bytes = backend.save();
         assert_eq!(
             get_state_json(change_bytes).unwrap(),
             serde_json::json!({
