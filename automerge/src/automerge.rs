@@ -315,7 +315,7 @@ impl Automerge {
         Ok(query.spans)
     }
 
-    pub fn blame<O: AsRef<ExId>>(
+    pub fn attribute<O: AsRef<ExId>>(
         &self,
         obj: O,
         baseline: &[ChangeHash],
@@ -326,7 +326,7 @@ impl Automerge {
         let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
         let mut query = self
             .ops
-            .search(obj, query::Blame::new(baseline, change_sets));
+            .search(obj, query::Attribute::new(baseline, change_sets));
         query.finish();
         Ok(query.change_sets)
     }

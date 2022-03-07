@@ -457,13 +457,13 @@ impl Transactable for AutoCommit {
         self.doc.raw_spans(obj)
     }
 
-    fn blame<O: AsRef<ExId>>(
+    fn attribute<O: AsRef<ExId>>(
         &self,
         obj: O,
         baseline: &[ChangeHash],
         change_sets: &[Vec<ChangeHash>],
     ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
-        self.doc.blame(obj, baseline, change_sets)
+        self.doc.attribute(obj, baseline, change_sets)
     }
 
     // TODO - I need to return these OpId's here **only** to get

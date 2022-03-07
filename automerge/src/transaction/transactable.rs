@@ -144,8 +144,8 @@ pub trait Transactable {
     /// test raw_spans api for mark/span experiment
     fn raw_spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::SpanInfo>, AutomergeError>;
 
-    /// test blame api for mark/span experiment
-    fn blame<O: AsRef<ExId>>(
+    /// test attribute api for mark/span experiment
+    fn attribute<O: AsRef<ExId>>(
         &self,
         obj: O,
         baseline: &[ChangeHash],

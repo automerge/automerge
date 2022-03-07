@@ -5,11 +5,10 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Blame<const B: usize> {
+pub(crate) struct Attribute<const B: usize> {
     pos: usize,
     seen: usize,
     last_seen: Option<ElemId>,
-    last_insert: Option<ElemId>,
     baseline: Clock,
     pub change_sets: Vec<ChangeSet>,
 }
@@ -49,13 +48,12 @@ impl ChangeSet {
     }
 }
 
-impl<const B: usize> Blame<B> {
+impl<const B: usize> Attribute<B> {
     pub fn new(baseline: Clock, change_sets: Vec<Clock>) -> Self {
-        Blame {
+        Attribute {
             pos: 0,
             seen: 0,
             last_seen: None,
-            last_insert: None,
             baseline,
             change_sets: change_sets.into_iter().map(|c| c.into()).collect(),
         }
@@ -111,11 +109,10 @@ impl<const B: usize> Blame<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Blame<B> {
+impl<const B: usize> TreeQuery<B> for Attribute<B> {
     fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
         if element.insert {
             self.last_seen = None;
-            self.last_insert = element.elemid();
         }
         if self.last_seen.is_none() && element.visible() {
             self.update_add(element);

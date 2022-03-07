@@ -226,7 +226,6 @@ impl Automerge {
         Ok(())
     }
 
-    // FIXME remove this later
     pub fn make(
         &mut self,
         obj: JsValue,
@@ -234,6 +233,8 @@ impl Automerge {
         value: JsValue,
         datatype: JsValue,
     ) -> Result<JsValue, JsValue> {
+        // remove this
+        am::log!("doc.make() is depricated - please use doc.set_object() or doc.insert_object()");
         self.set_object(obj, prop, value, datatype)
     }
 
@@ -455,7 +456,7 @@ impl Automerge {
         Ok(result)
     }
 
-    pub fn blame(
+    pub fn attribute(
         &mut self,
         obj: JsValue,
         baseline: JsValue,
@@ -468,7 +469,7 @@ impl Automerge {
             .iter()
             .map(get_js_heads)
             .collect::<Result<Vec<_>, _>>()?;
-        let result = self.0.blame(&obj, &baseline, &change_sets)?;
+        let result = self.0.attribute(&obj, &baseline, &change_sets)?;
         let result = result
             .into_iter()
             .map(|cs| {

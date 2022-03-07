@@ -10,7 +10,7 @@ use helpers::{
 */
 
 #[test]
-fn simple_blame_text() -> Result<(), AutomergeError> {
+fn simple_attribute_text() -> Result<(), AutomergeError> {
     let mut doc = AutoCommit::new();
     let note = doc.set_object(&ROOT, "note", automerge::ObjType::Text)?;
     doc.splice_text(&note, 0, 0, "hello little world")?;
@@ -29,11 +29,11 @@ fn simple_blame_text() -> Result<(), AutomergeError> {
     let text = doc.text(&note)?;
     assert!(text == "Well, hello big world");
     let cs = vec![h2, h3];
-    let blame = doc.blame(&note, &baseline, &cs)?;
-    assert!(&text[blame[0].add[0].clone()] == " big");
-    assert!(blame[0].del[0] == (15, " little".to_owned()));
-    //println!("{:?} == {:?}", blame[0].del[0] , (15, " little".to_owned()));
-    assert!(&text[blame[1].add[0].clone()] == "Well, ");
-    //println!("- ------- blame = {:?}", blame);
+    let attribute = doc.attribute(&note, &baseline, &cs)?;
+    assert!(&text[attribute[0].add[0].clone()] == " big");
+    assert!(attribute[0].del[0] == (15, " little".to_owned()));
+    //println!("{:?} == {:?}", attribute[0].del[0] , (15, " little".to_owned()));
+    assert!(&text[attribute[1].add[0].clone()] == "Well, ");
+    //println!("- ------- attribute = {:?}", attribute);
     Ok(())
 }
