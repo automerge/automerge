@@ -124,7 +124,6 @@ describe('Automerge', () => {
       let result
 
       let submap = doc.set_object(root, "submap", {})
-      if (!submap) throw new Error('should be not null')
       doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pendingOps(),2)
 
@@ -327,7 +326,6 @@ describe('Automerge', () => {
     it('local inc increments all visible counters in a sequence', () => {
       let doc1 = create("aaaa")
       let seq = doc1.set_object("_root", "seq", [])
-      if (!seq) throw new Error('Should not be undefined')
       doc1.insert(seq, 0, "hello")
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
@@ -400,11 +398,8 @@ describe('Automerge', () => {
     it('objects without properties are preserved', () => {
       let doc1 = create("aaaa")
       let a = doc1.set_object("_root","a",{});
-      if (!a) throw new Error('should not be undefined')
       let b = doc1.set_object("_root","b",{});
-      if (!b) throw new Error('should not be undefined')
       let c = doc1.set_object("_root","c",{});
-      if (!c) throw new Error('should not be undefined')
       let d = doc1.set(c,"d","dd");
       let saved = doc1.save();
       let doc2 = loadDoc(saved);
@@ -496,7 +491,6 @@ describe('Automerge', () => {
 
       // make changes for n1 that n2 should request
       let list = n1.set_object("_root","n",[])
-      if (!list) throw new Error('undefined')
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list, i, i)

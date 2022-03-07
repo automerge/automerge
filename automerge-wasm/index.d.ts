@@ -100,12 +100,12 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
   // change state
-  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
+  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
   set_object(obj: ObjID, prop: Prop, value: ObjType): ObjID;
-  make(obj: ObjID, prop: Prop, value: ObjType): ObjID;
-  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
-  insert_object(obj: ObjID, index: number, value: ObjType): ObjID | undefined;
-  push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
+  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): undefined;
+  insert_object(obj: ObjID, index: number, value: ObjType): ObjID;
+  push(obj: ObjID, value: Value, datatype?: Datatype): undefined;
+  push_object(obj: ObjID, value: ObjType): ObjID;
   splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
