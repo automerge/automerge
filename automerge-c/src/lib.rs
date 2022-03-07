@@ -15,9 +15,9 @@ use result::AMresult;
 pub enum AmObjType {
     /// A key/value map.
     Map,
-     /// A list.
+    /// A list.
     List,
-   /// A list of Unicode graphemes.
+    /// A list of Unicode graphemes.
     Text,
 }
 
