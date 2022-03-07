@@ -7,8 +7,8 @@ import { create, loadDoc, SyncState, Automerge, encodeChange, decodeChange, init
 import { DecodedSyncMessage, Hash } from '..'
 
 describe('Automerge', () => {
-  describe('blame', () => {
-    it('should be able to blame text segments on change sets', () => {
+  describe('attribute', () => {
+    it('should be able to attribute text segments on change sets', () => {
       let doc1 = create()
       let text = doc1.make("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
@@ -27,15 +27,15 @@ describe('Automerge', () => {
       doc1.merge(doc2)
       doc1.merge(doc3)
       assert.deepEqual(doc1.text(text), "Well, hello big world")
-      let blame = doc1.blame(text, h1, [h2, h3])
+      let attribute = doc1.attribute(text, h1, [h2, h3])
 
-      assert.deepEqual(blame, [
+      assert.deepEqual(attribute, [
         { add: [ { start: 11, end: 15 } ], del: [ { pos: 15, val: ' little' } ] },
         { add: [ { start: 0,  end: 6  } ], del: [] }
       ])
     })
 
-    it('should be able to hand complex blame change sets', () => {
+    it('should be able to hand complex attribute change sets', () => {
       let doc1 = create("aaaa")
       let text = doc1.make("_root", "notes","AAAAAA")
       let h1 = doc1.getHeads();
@@ -64,7 +64,7 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      assert.deepEqual(doc1.blame(text, h1, [h2]), [
+      assert.deepEqual(doc1.attribute(text, h1, [h2]), [
         { add: [ {start:0, end: 4}, { start: 6, end: 8 } ], del: [ { pos: 4, val: 'AAAA' } ] },
       ])
 
@@ -74,7 +74,7 @@ describe('Automerge', () => {
 
       // with tombstones its 
       // BBBB.C..C.AC.BB
-      assert.deepEqual(doc1.blame(text, h1, [h2,h3]), [  
+      assert.deepEqual(doc1.attribute(text, h1, [h2,h3]), [  
         { add: [ {start:0, end: 4}, { start: 8, end: 10 } ], del: [ { pos: 4, val: 'A' }, { pos: 5, val: 'AA' }, { pos: 6, val: 'A' } ] },
         { add: [ {start:4, end: 6}, { start: 7, end: 8 } ], del: [ { pos: 5, val: 'A' }, { pos: 6, val: 'A' }, { pos: 8, val: 'A' } ] }
       ])

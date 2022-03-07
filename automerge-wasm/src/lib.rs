@@ -456,6 +456,16 @@ impl Automerge {
         Ok(result)
     }
 
+    pub fn blame(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        am::log!("doc.blame() is depricated - please use doc.attribute()");
+        self.attribute(obj, baseline, change_sets)
+    }
+
     pub fn attribute(
         &mut self,
         obj: JsValue,

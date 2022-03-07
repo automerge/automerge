@@ -121,6 +121,7 @@ export class Automerge {
   spans(obj: ObjID): any;
   raw_spans(obj: ObjID): any;
   blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+  attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
 
   // transactions
   commit(message?: string, time?: number): Heads;
