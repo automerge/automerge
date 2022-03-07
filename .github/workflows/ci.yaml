@@ -72,7 +72,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - name: Update CMake
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+      - uses: Swatinem/rust-cache@v1
+      - name: Install CMocka
+        run: sudo apt-get install -y libcmocka-dev
+      - name: Install/update CMake
         uses: jwlawson/actions-setup-cmake@v1.12
         with:
           cmake-version: latest

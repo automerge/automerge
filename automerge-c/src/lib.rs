@@ -13,11 +13,11 @@ use result::AMresult;
 /// \enum AmObjType
 #[repr(u8)]
 pub enum AmObjType {
-    /// a key value map
+    /// A key/value map.
     Map,
-    /// a list
+     /// A list.
     List,
-    /// a list of unicode graphememes
+   /// A list of Unicode graphemes.
     Text,
 }
 

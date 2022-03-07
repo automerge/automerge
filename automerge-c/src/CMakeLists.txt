@@ -23,8 +23,6 @@ else()
     set(CARGO_FLAG "--release")
 endif()
 
-set(CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/Cargo/target")
-
 set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
@@ -56,6 +54,14 @@ add_custom_command(
     COMMENT
         "Producing the library artifacts with Cargo..."
     VERBATIM
+)
+
+# \note This target is only necessary because cbindgen won't allow the
+#       generated header to be listed in the Cargo command's output, being
+#       another target's source file would've been enough otherwise.
+add_custom_target(
+    ${LIBRARY_NAME}_artifacts
+    DEPENDS ${CARGO_OUTPUT}
 )
 
 if(BUILD_SHARED_LIBS)
@@ -96,7 +102,7 @@ endif()
 
 add_library(${LIBRARY_NAME} ${LIBRARY_TYPE} IMPORTED GLOBAL)
 
-target_sources(${LIBRARY_NAME} INTERFACE ${CARGO_OUTPUT})
+add_dependencies(${LIBRARY_NAME} ${LIBRARY_NAME}_artifacts)
 
 set_target_properties(
     ${LIBRARY_NAME}
@@ -163,43 +169,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
 )
 
-if(BUILD_TESTING)
-    add_executable(test_${LIBRARY_NAME} ${CMAKE_SOURCE_DIR}/${LIBRARY_NAME}.c)
-
-    set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
-
-    # \note An imported library's INTERFACE_INCLUDE_DIRECTORIES property can't
-    #       contain a non-existent path so its build-time include directory
-    #       must be specified for all of its dependent targets instead.
-    target_include_directories(test_${LIBRARY_NAME} PRIVATE "$<BUILD_INTERFACE:${CARGO_TARGET_DIR}>")
-
-    target_link_libraries(test_${LIBRARY_NAME} PRIVATE ${LIBRARY_NAME})
-
-    add_test(NAME "test_${LIBRARY_NAME}" COMMAND test_${LIBRARY_NAME})
-
-    if(BUILD_SHARED_LIBS AND WIN32)
-        add_custom_command(
-            TARGET test_${LIBRARY_NAME}
-            POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_${CMAKE_BUILD_TYPE}_POSTFIX}${CMAKE_SHARED_LIBRARY_SUFFIX}
-                    ${CMAKE_CURRENT_BINARY_DIR}
-            COMMENT "Copying the DLL built by Cargo into the test directory..."
-            VERBATIM
-        )
-    endif()
-
-    add_custom_command(
-        TARGET test_${LIBRARY_NAME}
-        POST_BUILD
-        COMMAND
-            ctest -C $<CONFIGURATION> --output-on-failure
-        COMMENT
-            "Running the test(s)..."
-        VERBATIM
-    )
-endif()
-
 find_package(Doxygen OPTIONAL_COMPONENTS dot)
 
 if(DOXYGEN_FOUND)
@@ -211,14 +180,6 @@ if(DOXYGEN_FOUND)
 
     set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_SOURCE_DIR}/README.md")
 
-    # \note This target is only necessary because cbindgen won't allow the
-    #       generated header to be listed in the Cargo command's output, being
-    #       Doxygen's input would've been enough otherwise.
-    add_custom_target(
-        ${LIBRARY_NAME}_header
-        DEPENDS ${CARGO_OUTPUT}
-    )
-
     doxygen_add_docs(
         ${LIBRARY_NAME}_docs
         "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
@@ -227,6 +188,5 @@ if(DOXYGEN_FOUND)
         COMMENT "Producing documentation with Doxygen..."
     )
 
-    add_dependencies(${LIBRARY_NAME}_docs ${LIBRARY_NAME}_header)
-
+    add_dependencies(${LIBRARY_NAME}_docs ${LIBRARY_NAME}_artifacts)
 endif()
