@@ -53,23 +53,19 @@ endforeach()
 
 project(${CARGO_PKG_NAME} VERSION ${CARGO_PKG_VERSION} LANGUAGES C DESCRIPTION "C bindings for the Automerge Rust backend.")
 
-option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
+include(CTest)
 
-option(BUILD_TESTING "Enable the choice of testing the build." ON)
+option(BUILD_SHARED_LIBS "Enable the choice of a shared or static library.")
 
 include(CMakePackageConfigHelpers)
 
 include(GNUInstallDirs)
 
-if(BUILD_TESTING)
-    include(CTest)
-
-    enable_testing()
-endif()
-
 string(MAKE_C_IDENTIFIER ${PROJECT_NAME} SYMBOL_PREFIX)
 
 string(TOUPPER ${SYMBOL_PREFIX} SYMBOL_PREFIX)
+
+set(CARGO_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/Cargo/target")
 
 add_subdirectory(src)
 
@@ -93,6 +89,12 @@ install(
     FILES ${CMAKE_BINARY_DIR}/config.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
 )
+
+if(BUILD_TESTING)
+    add_subdirectory(test)
+
+    enable_testing()
+endif()
 
 # Generate and install .cmake files
 set(PROJECT_CONFIG_NAME "${PROJECT_NAME}-config")
