@@ -6,7 +6,8 @@ export type SyncMessage = Uint8Array;
 export type Prop = string | number;
 export type Hash = string;
 export type Heads = Hash[];
-export type Value = string | number | boolean | null | Date | Uint8Array | Array | Object;
+export type Value = string | number | boolean | null | Date | Uint8Array
+export type ObjType = string | Array | Object
 export type FullValue =
   ["str", string] |
   ["int", number] |
@@ -82,10 +83,12 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
   // change state
-  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID | undefined;
-  make(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): ObjID;
-  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): ObjID | undefined;
-  push(obj: ObjID, value: Value, datatype?: Datatype): ObjID | undefined;
+  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
+  set_object(obj: ObjID, prop: Prop, value: ObjType): ObjID;
+  insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): undefined;
+  insert_object(obj: ObjID, index: number, value: ObjType): ObjID;
+  push(obj: ObjID, value: Value, datatype?: Datatype): undefined;
+  push_object(obj: ObjID, value: ObjType): ObjID;
   splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
   inc(obj: ObjID, prop: Prop, value: number): void;
   del(obj: ObjID, prop: Prop): void;
