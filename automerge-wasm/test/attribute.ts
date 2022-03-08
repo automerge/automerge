@@ -10,7 +10,7 @@ describe('Automerge', () => {
   describe('attribute', () => {
     it('should be able to attribute text segments on change sets', () => {
       let doc1 = create()
-      let text = doc1.make("_root", "notes","hello little world")
+      let text = doc1.set_object("_root", "notes","hello little world")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork();
@@ -37,7 +37,7 @@ describe('Automerge', () => {
 
     it('should be able to hand complex attribute change sets', () => {
       let doc1 = create("aaaa")
-      let text = doc1.make("_root", "notes","AAAAAA")
+      let text = doc1.set_object("_root", "notes","AAAAAA")
       let h1 = doc1.getHeads();
 
       let doc2 = doc1.fork("bbbb");
@@ -77,6 +77,36 @@ describe('Automerge', () => {
       assert.deepEqual(doc1.attribute(text, h1, [h2,h3]), [  
         { add: [ {start:0, end: 4}, { start: 8, end: 10 } ], del: [ { pos: 4, val: 'A' }, { pos: 5, val: 'AA' }, { pos: 6, val: 'A' } ] },
         { add: [ {start:4, end: 6}, { start: 7, end: 8 } ], del: [ { pos: 5, val: 'A' }, { pos: 6, val: 'A' }, { pos: 8, val: 'A' } ] }
+      ])
+    })
+  })
+  describe('attribute2', () => {
+    it('should be able to attribute text segments on change sets', () => {
+      let doc1 = create("aaaa")
+      let text = doc1.set_object("_root", "notes","hello little world")
+      let h1 = doc1.getHeads();
+
+      let doc2 = doc1.fork("bbbb");
+      doc2.splice(text, 5, 7, " big");
+      doc2.text(text)
+      let h2 = doc2.getHeads();
+      assert.deepEqual(doc2.text(text), "hello big world")
+
+      let doc3 = doc1.fork("cccc");
+      doc3.splice(text, 0, 0, "Well, ");
+      let doc4 = doc3.fork("dddd")
+      doc4.splice(text, 0, 0, "Gee, ");
+      let h3 = doc4.getHeads();
+      assert.deepEqual(doc4.text(text), "Gee, Well, hello little world")
+
+      doc1.merge(doc2)
+      doc1.merge(doc4)
+      assert.deepEqual(doc1.text(text), "Gee, Well, hello big world")
+      let attribute = doc1.attribute2(text, h1, [h2, h3])
+
+      assert.deepEqual(attribute, [
+        { add: [ { actor: "bbbb", start: 16, end: 20 } ], del: [ { actor: "bbbb", pos: 20, val: ' little' } ] },
+        { add: [ { actor: "dddd", start:0, end: 5 }, { actor: "cccc", start: 5,  end: 11  } ], del: [] }
       ])
     })
   })

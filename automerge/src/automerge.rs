@@ -331,6 +331,22 @@ impl Automerge {
         Ok(query.change_sets)
     }
 
+    pub fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        let baseline = self.clock_at(baseline);
+        let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
+        let mut query = self
+            .ops
+            .search(obj, query::Attribute2::new(baseline, change_sets));
+        query.finish();
+        Ok(query.change_sets)
+    }
+
     pub fn raw_spans<O: AsRef<ExId>>(
         &self,
         obj: O,

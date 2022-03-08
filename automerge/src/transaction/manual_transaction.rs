@@ -251,6 +251,15 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.attribute(obj, baseline, change_sets)
     }
 
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
+        self.doc.attribute2(obj, baseline, change_sets)
+    }
+
     fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,

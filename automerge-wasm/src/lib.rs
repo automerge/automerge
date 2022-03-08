@@ -518,6 +518,60 @@ impl Automerge {
         Ok(result)
     }
 
+    pub fn attribute2(
+        &mut self,
+        obj: JsValue,
+        baseline: JsValue,
+        change_sets: JsValue,
+    ) -> Result<Array, JsValue> {
+        let obj = self.import(obj)?;
+        let baseline = get_js_heads(baseline)?;
+        let change_sets = change_sets.dyn_into::<Array>()?;
+        let change_sets = change_sets
+            .iter()
+            .map(get_js_heads)
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.0.attribute2(&obj, &baseline, &change_sets)?;
+        let result = result
+            .into_iter()
+            .map(|cs| {
+                let add = cs
+                    .add
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|a| {
+                        let r = Object::new();
+                        js_set(&r, "actor", &self.0.actor_to_str(a.actor))?;
+                        js_set(&r, "start", a.range.start as f64)?;
+                        js_set(&r, "end", a.range.end as f64)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let del = cs
+                    .del
+                    .iter()
+                    .map::<Result<JsValue, JsValue>, _>(|d| {
+                        let r = Object::new();
+                        js_set(&r, "actor", &self.0.actor_to_str(d.actor))?;
+                        js_set(&r, "pos", d.pos as f64)?;
+                        js_set(&r, "val", &d.span)?;
+                        Ok(JsValue::from(&r))
+                    })
+                    .collect::<Result<Vec<JsValue>, JsValue>>()?
+                    .iter()
+                    .collect::<Array>();
+                let obj = Object::new();
+                js_set(&obj, "add", add)?;
+                js_set(&obj, "del", del)?;
+                Ok(obj.into())
+            })
+            .collect::<Result<Vec<JsValue>, JsValue>>()?
+            .iter()
+            .collect::<Array>();
+        Ok(result)
+    }
+
     pub fn save(&mut self) -> Uint8Array {
         Uint8Array::from(self.0.save().as_slice())
     }

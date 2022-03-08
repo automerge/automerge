@@ -152,6 +152,14 @@ pub trait Transactable {
         change_sets: &[Vec<ChangeHash>],
     ) -> Result<Vec<query::ChangeSet>, AutomergeError>;
 
+    /// test attribute api for mark/span experiment
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError>;
+
     /// Get the value at this prop in the object.
     fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,

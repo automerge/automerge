@@ -6,7 +6,7 @@
   ],
   "name": "automerge-wasm-pack",
   "description": "wasm-bindgen bindings to the automerge rust implementation",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "license": "MIT",
   "files": [
     "README.md",

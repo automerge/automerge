@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
 mod attribute;
+mod attribute2;
 mod insert;
 mod keys;
 mod keys_at;
@@ -25,6 +26,7 @@ mod seek_op;
 mod spans;
 
 pub(crate) use attribute::{Attribute, ChangeSet};
+pub(crate) use attribute2::{Attribute2, ChangeSet2};
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;

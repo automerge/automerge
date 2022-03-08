@@ -28,6 +28,11 @@ impl AutoCommit {
         }
     }
 
+    // FIXME : temp
+    pub fn actor_to_str(&self, actor: usize) -> String {
+        self.doc.ops.m.actors.cache[actor].to_hex_string()
+    }
+
     /// Get the inner document.
     #[doc(hidden)]
     pub fn document(&mut self) -> &Automerge {
@@ -464,6 +469,15 @@ impl Transactable for AutoCommit {
         change_sets: &[Vec<ChangeHash>],
     ) -> Result<Vec<query::ChangeSet>, AutomergeError> {
         self.doc.attribute(obj, baseline, change_sets)
+    }
+
+    fn attribute2<O: AsRef<ExId>>(
+        &self,
+        obj: O,
+        baseline: &[ChangeHash],
+        change_sets: &[Vec<ChangeHash>],
+    ) -> Result<Vec<query::ChangeSet2>, AutomergeError> {
+        self.doc.attribute2(obj, baseline, change_sets)
     }
 
     // TODO - I need to return these OpId's here **only** to get

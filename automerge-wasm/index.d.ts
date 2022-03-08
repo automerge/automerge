@@ -63,11 +63,13 @@ export type DecodedChange = {
 }
 
 export type ChangeSetAddition = {
+    actor: string,
     start: number,
     end: number,
 }
 
 export type ChangeSetDeletion = {
+    actor: string,
     pos: number,
     val: string
 }
@@ -122,6 +124,7 @@ export class Automerge {
   raw_spans(obj: ObjID): any;
   blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
   attribute(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
+  attribute2(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];
 
   // transactions
   commit(message?: string, time?: number): Heads;
