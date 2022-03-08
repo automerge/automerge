@@ -13,7 +13,7 @@ use result::AMresult;
 /// \enum AmObjType
 #[repr(u8)]
 pub enum AmObjType {
-    /// A key/value map.
+    /// A key-value map.
     Map,
      /// A list.
     List,
@@ -139,10 +139,10 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 }
 
 /// \memberof AMdoc
-/// \brief Sets a configuration property of an `AMdoc` struct.
+/// \brief Set a configuration property of an `AMdoc` struct.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] key A configuration property's key string.
+/// \param[in] key A configuration property's string key.
 /// \param[in] value A configuration property's string value or `NULL`.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -216,12 +216,12 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a signed integer value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A 64 bit int
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -245,12 +245,12 @@ pub unsafe extern "C" fn AMmapSetInt(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to an unsigned integer value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A 64 bit uint
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -274,12 +274,12 @@ pub unsafe extern "C" fn AMmapSetUint(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a string value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A valid c string
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A string.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -303,13 +303,13 @@ pub unsafe extern "C" fn AMmapSetStr(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a byte array value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A byte array
-/// \param[in] length A size_t length of the byte array
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A pointer to an array of bytes.
+/// \param[in] count The number of bytes to copy from \p value.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -321,29 +321,29 @@ pub unsafe extern "C" fn AMmapSetStr(
 /// doc must be a pointer to a valid AMdoc
 /// obj must be a pointer to a valid AMobj or NULL
 /// key must be a c string of the map key to be used
-/// value must be a byte array of lenth `length`
+/// value must be a byte array of lenth `count`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapSetBytes(
     doc: *mut AMdoc,
     obj: *mut AMobj,
     key: *const c_char,
     value: *const u8,
-    length: usize,
+    count: usize,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    let slice = std::slice::from_raw_parts(value, length);
+    let slice = std::slice::from_raw_parts(value, count);
     let mut vec = Vec::new();
     vec.extend_from_slice(slice);
     to_result(doc.set(to_obj!(obj), to_str(key), vec))
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a float value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A double
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -367,12 +367,12 @@ pub unsafe extern "C" fn AMmapSetF64(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a CRDT counter value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A 64 bit int
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -400,12 +400,12 @@ pub unsafe extern "C" fn AMmapSetCounter(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a Lamport timestamp value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] value A 64 bit int
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -429,11 +429,11 @@ pub unsafe extern "C" fn AMmapSetTimestamp(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to a null value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
+/// \param[in] key A string key for the map object identified by \p obj.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -456,13 +456,13 @@ pub unsafe extern "C" fn AMmapSetNull(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's value.
+/// \brief Set a map object's key to an empty object value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A map object's key string.
-/// \param[in] objtype A valid AmObjType enum
-/// \return A pointer to an `AMresult` struct containing no value.
+/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] objtype An `AmObjType` enum tag.
+/// \return A pointer to an `AMresult` struct containing a pointer to an `AMobj` struct.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
@@ -485,16 +485,17 @@ pub unsafe extern "C" fn AMmapSetObject(
 }
 
 /// \memberof AMdoc
-/// \brief Set a list object's value.
+/// \brief Set a list object's index to a signed integer value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] index A list object's index number.
-/// \param[in] insert A boolean to insert or overrite at the index
-/// \param[in] value An i64 value
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p obj must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object indentified by \p obj.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
 /// \internal
