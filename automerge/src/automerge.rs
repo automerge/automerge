@@ -1326,23 +1326,35 @@ mod tests {
     fn delete_nothing_returns_error_map() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        assert!(tx.del(ROOT, "a").is_err());
+        assert!(tx.del(ROOT, "a").is_ok());
         // not an error currently so breaks loading
         tx.commit();
+        dbg!(doc.get_last_local_change());
 
         let bytes = doc.save().unwrap();
-        assert!(Automerge::load(&bytes).is_err());
+        assert!(Automerge::load(&bytes).is_ok());
+
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 1).unwrap();
+        tx.commit();
+
+        let mut tx = doc.transaction();
+        // a real op
+        tx.del(ROOT, "a").unwrap();
+        // a no-op
+        tx.del(ROOT, "a").unwrap();
+        tx.commit();
     }
 
     #[test]
     fn delete_nothing_returns_error_list() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        assert!(tx.del(ROOT, 0).is_err());
+        tx.del(ROOT, 0).unwrap();
         // not an error currently so breaks loading
         tx.commit();
 
         let bytes = doc.save().unwrap();
-        assert!(Automerge::load(&bytes).is_err());
+        assert!(Automerge::load(&bytes).is_ok());
     }
 }

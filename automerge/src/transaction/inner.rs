@@ -251,6 +251,11 @@ impl TransactionInner {
         let prop = doc.ops.m.props.cache(prop);
         let query = doc.ops.search(obj, query::Prop::new(prop));
 
+        // no key present to delete
+        if query.ops.is_empty() && action == OpType::Del {
+            return Ok(None);
+        }
+
         if query.ops.len() == 1 && query.ops[0].is_noop(&action) {
             return Ok(None);
         }
