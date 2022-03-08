@@ -495,7 +495,7 @@ pub unsafe extern "C" fn AMmapSetObject(
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p obj must be a valid address.
-/// \pre `0 <=` \p index `<=` length of the list object indentified by \p obj.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
 /// \internal
