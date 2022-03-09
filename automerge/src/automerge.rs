@@ -1247,4 +1247,41 @@ mod tests {
 
         assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
     }
+
+    #[test]
+    fn delete_nothing_in_map_is_noop() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        // deleting a missing key in a map should just be a noop
+        assert!(tx.del(ROOT, "a").is_ok());
+        tx.commit();
+        let last_change = doc.get_last_local_change().unwrap();
+        assert_eq!(last_change.len(), 0);
+
+        let bytes = doc.save();
+        assert!(Automerge::load(&bytes).is_ok());
+
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 1).unwrap();
+        tx.commit();
+        let last_change = doc.get_last_local_change().unwrap();
+        assert_eq!(last_change.len(), 1);
+
+        let mut tx = doc.transaction();
+        // a real op
+        tx.del(ROOT, "a").unwrap();
+        // a no-op
+        tx.del(ROOT, "a").unwrap();
+        tx.commit();
+        let last_change = doc.get_last_local_change().unwrap();
+        assert_eq!(last_change.len(), 1);
+    }
+
+    #[test]
+    fn delete_nothing_in_list_returns_error() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        // deleting an element in a list that does not exist is an error
+        assert!(tx.del(ROOT, 0).is_err());
+    }
 }
