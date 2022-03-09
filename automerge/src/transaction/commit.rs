@@ -1,8 +1,8 @@
 /// Optional metadata for a commit.
 #[derive(Debug, Default, Clone)]
 pub struct CommitOptions {
-    pub(crate) message: Option<String>,
-    pub(crate) time: Option<i64>,
+    pub message: Option<String>,
+    pub time: Option<i64>,
 }
 
 impl CommitOptions {
