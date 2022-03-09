@@ -6,9 +6,16 @@ use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::{ObjType, OpObserver};
 use fxhash::FxBuildHasher;
+#[cfg(feature = "storage-v2")]
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
+
+#[cfg(feature = "storage-v2")]
+mod load;
+#[cfg(feature = "storage-v2")]
+pub(crate) use load::{ObservedOpSetBuilder, OpSetBuilder};
 
 pub(crate) type OpSet = OpSetInternal;
 
@@ -23,6 +30,18 @@ pub(crate) struct OpSetInternal {
 }
 
 impl OpSetInternal {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn builder() -> OpSetBuilder {
+        OpSetBuilder::new()
+    }
+
+    /// Create a builder which passes each operation to `observer`. This will be significantly
+    /// slower than `OpSetBuilder`
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn observed_builder<O: OpObserver>(observer: &mut O) -> ObservedOpSetBuilder<'_, O> {
+        ObservedOpSetBuilder::new(observer)
+    }
+
     pub(crate) fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), OpTree::new());
@@ -137,6 +156,7 @@ impl OpSetInternal {
         self.length
     }
 
+    #[tracing::instrument(skip(self, index))]
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees.insert(
@@ -153,6 +173,8 @@ impl OpSetInternal {
             //let tree = self.trees.get_mut(&element.obj).unwrap();
             tree.internal.insert(index, element);
             self.length += 1;
+        } else {
+            tracing::warn!("attempting to insert op for unknown object");
         }
     }
 
@@ -272,6 +294,7 @@ impl<'a> IntoIterator for &'a OpSetInternal {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Iter<'a> {
     inner: &'a OpSetInternal,
     index: usize,
@@ -305,7 +328,24 @@ pub(crate) struct OpSetMetadata {
     pub(crate) props: IndexedCache<String>,
 }
 
+impl Default for OpSetMetadata {
+    fn default() -> Self {
+        Self {
+            actors: IndexedCache::new(),
+            props: IndexedCache::new(),
+        }
+    }
+}
+
 impl OpSetMetadata {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn from_actors(actors: Vec<ActorId>) -> Self {
+        Self {
+            props: IndexedCache::new(),
+            actors: actors.into_iter().collect(),
+        }
+    }
+
     pub(crate) fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
         match (left, right) {
             (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
@@ -321,5 +361,10 @@ impl OpSetMetadata {
             (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
+        self.props.cache(key.borrow().to_string())
     }
 }

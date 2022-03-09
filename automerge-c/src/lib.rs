@@ -330,6 +330,10 @@ pub unsafe extern "C" fn AMresultValue(result: *mut AMresult, index: usize) -> A
                             am::ScalarValue::Uint(uint) => {
                                 value = AMvalue::Uint(*uint);
                             }
+                            // TODO(alex): Correctly represent this in the AMvalue enum
+                            am::ScalarValue::Unknown { bytes, .. } => {
+                                value = AMvalue::Bytes(bytes.into());
+                            }
                         },
                         // \todo Confirm that an object value should be ignored
                         //       when there's no object ID variant.

@@ -4,7 +4,6 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 
 //mod change;
-mod examine;
 mod export;
 mod import;
 mod merge;
@@ -102,9 +101,6 @@ enum Command {
         output_file: Option<PathBuf>,
     },
 
-    /// Read an automerge document and print a JSON representation of the changes in it to stdout
-    Examine { input_file: Option<PathBuf> },
-
     /// Read one or more automerge documents and output a merged, compacted version of them
     Merge {
         /// The file to write to. If omitted assumes stdout
@@ -187,17 +183,6 @@ fn main() -> Result<()> {
                         change::change(in_buffer, &mut out_buffer, script.as_str())
                             .map_err(|e| anyhow::format_err!("Unable to make changes: {:?}", e))
 */
-        }
-        Command::Examine { input_file } => {
-            let in_buffer = open_file_or_stdin(input_file)?;
-            let out_buffer = std::io::stdout();
-            match examine::examine(in_buffer, out_buffer, atty::is(atty::Stream::Stdout)) {
-                Ok(()) => {}
-                Err(e) => {
-                    eprintln!("Error: {:?}", e);
-                }
-            }
-            Ok(())
         }
         Command::Merge { input, output_file } => {
             let out_buffer = create_file_or_stdout(output_file)?;

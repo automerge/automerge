@@ -56,10 +56,25 @@ macro_rules! __log {
 
 mod autocommit;
 mod automerge;
+#[cfg(not(feature = "storage-v2"))]
 mod change;
+#[cfg(feature = "storage-v2")]
+mod change_v2;
 mod clock;
+#[cfg(not(feature = "storage-v2"))]
 mod columnar;
+#[cfg(feature = "storage-v2")]
+mod columnar_2;
+#[cfg(feature = "storage-v2")]
+mod convert;
+#[cfg(feature = "storage-v2")]
+mod storage;
+//#[cfg(feature = "storage-v2")]
+//pub use storage::load;
+mod autoserde;
+#[cfg(not(feature = "storage-v2"))]
 mod decoding;
+#[cfg(not(feature = "storage-v2"))]
 mod encoding;
 mod error;
 mod exid;
@@ -86,9 +101,16 @@ mod visualisation;
 
 pub use crate::automerge::Automerge;
 pub use autocommit::AutoCommit;
+pub use autoserde::AutoSerde;
+#[cfg(not(feature = "storage-v2"))]
 pub use change::Change;
+#[cfg(feature = "storage-v2")]
+pub use change_v2::Change;
+#[cfg(not(feature = "storage-v2"))]
 pub use decoding::Error as DecodingError;
+#[cfg(not(feature = "storage-v2"))]
 pub use decoding::InvalidChangeError;
+#[cfg(not(feature = "storage-v2"))]
 pub use encoding::Error as EncodingError;
 pub use error::AutomergeError;
 pub use exid::ExId as ObjId;

@@ -357,6 +357,16 @@ pub struct Counter {
     pub(crate) increments: usize,
 }
 
+impl Counter {
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn increment<I: Iterator<Item = i64>>(&mut self, increments: I) {
+        for inc in increments {
+            self.current += inc;
+            self.increments += 1;
+        }
+    }
+}
+
 impl Serialize for Counter {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -427,6 +437,7 @@ pub enum ScalarValue {
     Counter(Counter),
     Timestamp(i64),
     Boolean(bool),
+    Unknown { type_code: u8, bytes: Vec<u8> },
     Null,
 }
 
@@ -718,6 +729,7 @@ impl fmt::Display for ScalarValue {
             ScalarValue::Timestamp(i) => write!(f, "Timestamp: {}", i),
             ScalarValue::Boolean(b) => write!(f, "{}", b),
             ScalarValue::Null => write!(f, "null"),
+            ScalarValue::Unknown { type_code, .. } => write!(f, "unknown type {}", type_code),
         }
     }
 }

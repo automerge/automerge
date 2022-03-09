@@ -26,11 +26,13 @@
   "module": "./web/index.js",
   "main": "./nodejs/index.js",
   "scripts": {
-    "build": "cross-env PROFILE=dev TARGET=nodejs yarn target",
+    "build": "cross-env PROFILE=dev TARGET=nodejs FEATURES='' yarn target",
+    "build-storage-v2": "cross-env PROFILE=dev TARGET=nodejs FEATURES='--features=automerge-wasm/storage-v2' yarn target",
     "release": "cross-env PROFILE=release yarn buildall",
     "buildall": "cross-env TARGET=nodejs yarn target && cross-env TARGET=web yarn target",
-    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET && cp $TARGET-index.js $TARGET/index.js",
-    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
+    "target": "rimraf ./$TARGET && wasm-pack build --target $TARGET --$PROFILE --out-name bindgen -d $TARGET -- $FEATURES  && cp $TARGET-index.js $TARGET/index.js",
+    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts",
+    "test-storage-v2": "yarn build-storage-v2 && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "dependencies": {},
   "devDependencies": {

@@ -1,0 +1,116 @@
+= How to split a block
+
+We have a block of column oriented storage. We want to split that block into two
+separate blocks without using any intermediary storage.
+
+A first stab at this algorithm:
+
+[source]
+----
+for column in source_block:
+  if column is simple:
+    for each value up to index:
+      write value to first block
+    for each value after index
+      write value to second block
+  else if column is value:
+    read each metadata value up to index
+      write to first block
+    read each metadata value after index
+      write to second block
+    read each metadata value up to index
+      then read each value up to index
+        write value to first block
+    read each metadata value after index
+      then read each value after index
+        write value to second block
+  else if column is group
+    read each num up to index
+      write to first block
+    read each num after index
+      write to second block
+    read each num up to index
+      for each column in group columns
+         read num values
+            write to column in first block
+    read each num after index
+      for each column in group columns
+        read num values
+          write to column in second block
+----
+
+This logic does need to be implemented so we can handle future columns. However,
+the logic might become much easier when we know the types of the values:
+
+[source]
+----
+for column in source_block:
+  if column is simple:
+    for each value up to index:
+      write value to first block
+    for each value after index
+      write value to second block
+  if column is value: <1>
+    for each value in value:
+     ...
+----
+<1> Here we know the kind of values. Does this mean we can avoid re-reading the
+metadata column?
+
+Turns out we can't avoid double reading the metadata column. And I think the
+same is true for the group column. This means we always need to use the generic
+encoding.
+
+Therefore we can probably do this by definin a `split` operation on generic
+rowblocks.
+
+== Inserting?
+
+What about `insert`? Can we think about this in terms of some abstract column
+layout type?
+
+[source,rust]
+----
+struct RowBlock<'a, C> {
+    layout: C,
+    data: Vec<u8>, 
+}
+
+trait HasColumnLayout: Into<ColumnLayout> + TryFrom<ColumnLayout> {
+    type Item;
+
+    fn value_for_column(item: &Item, column_index: usize) -> Option<CellValue>;
+}
+
+enum BlockError {
+    InvalidValueForIndex,
+}
+
+impl<'a, C: Into<ColumnLayout> + TryFrom<ColumnLayout>> for RowBlock<'a, C> {
+    fn splice<R, I>(&self, range: R, items: I) -> Result<Self, <C as TryFrom<ColumnLayout>>::Error>
+    where
+        R: RangeBounds<usize>,
+        I: Iterator<Item = C::Item>
+    {
+        let generic = self.layout.into();
+        let new_data = Vec::with_capacity(self.data.len() + generic.max_row_size());
+        let new_generic_block = generic.splice(10..12, |row, col| {
+            if let Some(item) = i.next() {
+                Some(C::value_for_column(item, col))
+            } else {
+                None
+            }
+        })?;
+        Ok(new_generic_block.try_into()?)
+    }
+
+    fn split(&self, index: usize) -> Result<(Self, Self), <C as TryFrom<ColumnLayout>::Error> 
+    {
+        let generic = self.layout.into();
+        let first_bock = ..
+        let second_block = ..
+        generic.split_into(index, first_block, second_block);
+        Ok((first_block.try_into()?, second_block.try_into()?)
+    }
+}
+----

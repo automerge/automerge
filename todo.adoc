@@ -1,0 +1,20 @@
+== Doing
+
+* Implement decompressing compressed columns in the doc op format
+
+== Cleanups
+* Make a `ParseInput` which allows parsing logic to access the position in a
+  parse stream and also to parse from a `Cow<'a, [u8]>`
+* Sort out `parse` errors
+* Rename `ColumnMetadata` to `RawColumns`
+* Rename `ColumnLayout` to `Columns`
+* Make all decoders fallible
+* `try_splice` on all encoders
+* Add a "compressed" flag to all the basic ranges which causes their iterator
+  to first decompress the data
+* Make DecodeColumnError easier to work with by adding some kind of "column path"
+* Change `ColumnLayoutParser` to use `RawColumn` rather than two arguments of
+  `ColumnSpec` + `Range<usize>`
+
+* Replace every use of `usize` as a lookup with a newtype wrapper
+* Replace the `Vec<usize>` returned by `IndexedCache::encode_index` with a specific type

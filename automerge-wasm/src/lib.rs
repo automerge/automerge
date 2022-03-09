@@ -852,7 +852,10 @@ pub fn encode_change(change: JsValue) -> Result<Uint8Array, JsValue> {
 #[wasm_bindgen(js_name = decodeChange)]
 pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
     let change = Change::from_bytes(change.to_vec()).map_err(to_js_err)?;
+    #[cfg(not(feature = "storage-v2"))]
     let change: am::ExpandedChange = change.decode();
+    #[cfg(feature = "storage-v2")]
+    let change: am::ExpandedChange = change.into();
     JsValue::from_serde(&change).map_err(to_js_err)
 }
 

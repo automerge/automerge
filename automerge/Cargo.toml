@@ -11,6 +11,7 @@ documentation = "https://automerge.org/automerge-rs/automerge/"
 [features]
 optree-visualisation = ["dot"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys"]
+storage-v2 = []
 
 [dependencies]
 hex = "^0.4.3"
@@ -43,3 +44,5 @@ proptest = { version = "^1.0.0", default-features = false, features = ["std"] }
 serde_json = { version = "^1.0.73", features=["float_roundtrip"], default-features=true }
 maplit = { version = "^1.0" }
 decorum = "0.3.1"
+test-log = { version = "0.2.10", features=["trace"], default-features = false}
+tracing-subscriber = {version = "0.3.9", features = ["fmt", "env-filter"] }

@@ -1,9 +1,35 @@
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::HashSet;
 
-use super::{decode_hashes, encode_hashes, BloomFilter};
-use crate::{decoding, decoding::Decoder, ChangeHash};
+#[cfg(not(feature = "storage-v2"))]
+use super::decode_hashes;
+use super::{encode_hashes, BloomFilter};
+#[cfg(feature = "storage-v2")]
+use crate::storage::parse;
+use crate::ChangeHash;
+#[cfg(not(feature = "storage-v2"))]
+use crate::{decoding, decoding::Decoder};
+#[cfg(not(feature = "storage-v2"))]
+use std::borrow::Cow;
 
 const SYNC_STATE_TYPE: u8 = 0x43; // first byte of an encoded sync state, for identification
+
+#[cfg(feature = "storage-v2")]
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeError {
+    #[error("{0:?}")]
+    Parse(String),
+    #[error("wrong type: expected one of {expected_one_of:?} but found {found}")]
+    WrongType { expected_one_of: Vec<u8>, found: u8 },
+    #[error("not enough input")]
+    NotEnoughInput,
+}
+
+#[cfg(feature = "storage-v2")]
+impl From<parse::ErrorKind> for DecodeError {
+    fn from(k: parse::ErrorKind) -> Self {
+        Self::Parse(k.to_string())
+    }
+}
 
 /// The state of synchronisation with a peer.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +65,7 @@ impl State {
         buf
     }
 
+    #[cfg(not(feature = "storage-v2"))]
     pub fn decode(bytes: &[u8]) -> Result<Self, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
@@ -59,5 +86,38 @@ impl State {
             their_have: Some(Vec::new()),
             sent_hashes: HashSet::new(),
         })
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub fn decode(input: &[u8]) -> Result<Self, DecodeError> {
+        match Self::parse(input) {
+            Ok((_, state)) => Ok(state),
+            Err(parse::ParseError::Incomplete(_)) => Err(DecodeError::NotEnoughInput),
+            Err(parse::ParseError::Error(e)) => Err(e),
+        }
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn parse(input: &[u8]) -> parse::ParseResult<'_, Self, DecodeError> {
+        let (i, record_type) = parse::take1(input)?;
+        if record_type != SYNC_STATE_TYPE {
+            return Err(parse::ParseError::Error(DecodeError::WrongType {
+                expected_one_of: vec![SYNC_STATE_TYPE],
+                found: record_type,
+            }));
+        }
+
+        let (i, shared_heads) = parse::length_prefixed(parse::leb128_u64, parse::change_hash)(i)?;
+        Ok((
+            i,
+            Self {
+                shared_heads,
+                last_sent_heads: Vec::new(),
+                their_heads: None,
+                their_need: None,
+                their_have: Some(Vec::new()),
+                sent_hashes: HashSet::new(),
+            },
+        ))
     }
 }
