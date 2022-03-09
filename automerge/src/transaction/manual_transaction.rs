@@ -187,6 +187,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.length_at(obj, heads)
     }
 
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        self.doc.object_type(obj)
+    }
+
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         self.doc.text(obj)
     }

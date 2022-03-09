@@ -340,8 +340,11 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
             {
                 Reflect::set(&map, &k.into(), &map_to_js(doc, &exid)).unwrap();
             }
-            Ok(Some((Value::Object(_), exid))) => {
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
                 Reflect::set(&map, &k.into(), &list_to_js(doc, &exid)).unwrap();
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
+                Reflect::set(&map, &k.into(), &doc.text(&exid).unwrap().into()).unwrap();
             }
             Ok(Some((Value::Scalar(v), _))) => {
                 Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
@@ -352,7 +355,7 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     map.into()
 }
 
-fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
+pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {

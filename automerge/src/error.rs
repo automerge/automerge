@@ -7,6 +7,8 @@ use thiserror::Error;
 pub enum AutomergeError {
     #[error("invalid opid format `{0}`")]
     InvalidOpId(String),
+    #[error("invalid actor `{0}`")]
+    InvalidActor(String),
     #[error("there was an ecoding problem")]
     Encoding,
     #[error("there was a decoding problem")]
