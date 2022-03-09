@@ -1,8 +1,8 @@
 #include <float.h>
 #include <limits.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <setjmp.h>
 #include <stdint.h>
 
 /* third-party */
@@ -61,8 +61,8 @@ static void test_AMmapSetNull(void **state) {
 static void test_AMmapSetObject(void **state) {
     static AmObjType const OBJ_TYPES[] = {
         AM_OBJ_TYPE_LIST,
-        AM_OBJ_TYPE_TEXT,
         AM_OBJ_TYPE_MAP,
+        AM_OBJ_TYPE_TEXT,
     };
     static AmObjType const* const end = OBJ_TYPES + sizeof(OBJ_TYPES) / sizeof(AmObjType);
 
@@ -82,15 +82,15 @@ static void test_AMmapSetObject(void **state) {
 
 int run_AMmapSet_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_AMmapSet(Int)),
-        cmocka_unit_test(test_AMmapSet(Uint)),
-        cmocka_unit_test(test_AMmapSet(Str)),
-        cmocka_unit_test(test_AMmapSet(F64)),
-        cmocka_unit_test(test_AMmapSet(Counter)),
-        cmocka_unit_test(test_AMmapSet(Timestamp)),
         cmocka_unit_test(test_AMmapSetBytes),
+        cmocka_unit_test(test_AMmapSet(Counter)),
+        cmocka_unit_test(test_AMmapSet(F64)),
+        cmocka_unit_test(test_AMmapSet(Int)),
         cmocka_unit_test(test_AMmapSetNull),
         cmocka_unit_test(test_AMmapSetObject),
+        cmocka_unit_test(test_AMmapSet(Str)),
+        cmocka_unit_test(test_AMmapSet(Timestamp)),
+        cmocka_unit_test(test_AMmapSet(Uint)),
     };
 
     return cmocka_run_group_tests(tests, group_setup, group_teardown);

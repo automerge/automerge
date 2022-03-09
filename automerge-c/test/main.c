@@ -9,6 +9,8 @@
 /* local */
 #include "group_state.h"
 
+extern int run_AMlistSet_tests(void);
+
 extern int run_AMmapSet_tests(void);
 
 static void test_AMconfig(void **state) {
@@ -22,6 +24,7 @@ int main(void) {
     };
 
     return (
+        run_AMlistSet_tests() +
         run_AMmapSet_tests() +
         cmocka_run_group_tests(tests, group_setup, group_teardown)
     );
