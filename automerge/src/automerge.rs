@@ -1258,7 +1258,7 @@ mod tests {
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 0);
 
-        let bytes = doc.save().unwrap();
+        let bytes = doc.save();
         assert!(Automerge::load(&bytes).is_ok());
 
         let mut tx = doc.transaction();
