@@ -60,6 +60,12 @@ impl TryFrom<&str> for ActorId {
     }
 }
 
+impl AsRef<[u8]> for ActorId {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl From<uuid::Uuid> for ActorId {
     fn from(u: uuid::Uuid) -> Self {
         ActorId(TinyVec::from(*u.as_bytes()))
@@ -156,6 +162,40 @@ pub enum OpType {
     Set(ScalarValue),
 }
 
+impl OpType {
+    /// The index into the action array as specified in [1]
+    ///
+    /// [1]: https://alexjg.github.io/automerge-storage-docs/#action-array
+    pub(crate) fn action_index(&self) -> u64 {
+        match self {
+            Self::Make(ObjType::Map) => 0,
+            Self::Set(_) => 1,
+            Self::Make(ObjType::List) => 2,
+            Self::Del => 3,
+            Self::Make(ObjType::Text) => 4,
+            Self::Inc(_) => 5,
+            Self::Make(ObjType::Table) => 6,
+        }
+    }
+
+    pub(crate) fn from_index_and_value(index: u64, value: ScalarValue) -> Result<OpType, error::InvalidOpType> {
+        match index {
+            0 => Ok(Self::Make(ObjType::Map)),
+            1 => Ok(Self::Set(value)),
+            2 => Ok(Self::Make(ObjType::List)),
+            3 => Ok(Self::Del),
+            4 => Ok(Self::Make(ObjType::Text)),
+            5 => match value {
+                ScalarValue::Int(i) => Ok(Self::Inc(i)),
+                ScalarValue::Uint(i) => Ok(Self::Inc(i as i64)),
+                _ => Err(error::InvalidOpType::NonNumericInc),
+            },
+            6 => Ok(Self::Make(ObjType::Table)),
+            other => Err(error::InvalidOpType::UnknownAction(other)),
+        }
+    }
+}
+
 impl From<ObjType> for OpType {
     fn from(v: ObjType) -> Self {
         OpType::Make(v)
@@ -232,6 +272,12 @@ impl Exportable for Key {
             Key::Map(p) => Export::Prop(*p),
             Key::Seq(e) => e.export(),
         }
+    }
+}
+
+impl From<ObjId> for OpId {
+    fn from(o: ObjId) -> Self {
+        o.0 
     }
 }
 
@@ -325,12 +371,26 @@ impl Key {
 #[derive(Debug, Clone, PartialOrd, Ord, Eq, PartialEq, Copy, Hash, Default)]
 pub(crate) struct OpId(pub u64, pub usize);
 
+impl OpId {
+    pub(crate) fn new(actor: usize, counter: u64) -> Self {
+        Self(counter, actor)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialOrd, Eq, PartialEq, Ord, Hash, Default)]
 pub(crate) struct ObjId(pub OpId);
 
 impl ObjId {
     pub fn root() -> Self {
         ObjId(OpId(0, 0))
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.0.counter() == 0
+    }
+
+    pub(crate) fn opid(&self) -> &OpId {
+        &self.0
     }
 }
 
@@ -450,6 +510,22 @@ pub struct Peer {}
 /// The sha256 hash of a change.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
+
+impl ChangeHash {
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub(crate) fn checksum(&self) -> [u8; 4] {
+        [self.0[0], self.0[1], self.0[2], self.0[3]]
+    }
+}
+
+impl AsRef<[u8]> for ChangeHash {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 impl fmt::Debug for ChangeHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

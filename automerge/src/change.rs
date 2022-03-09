@@ -360,6 +360,22 @@ impl Change {
         self.start_op + (self.len() as u64) - 1
     }
 
+    pub fn deps(&self) -> &[amp::ChangeHash] {
+        &self.deps
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub fn hash(&self) -> amp::ChangeHash {
+        self.hash
+    }
+
+    pub fn start_op(&self) -> u64 {
+        self.start_op
+    }
+
     pub fn message(&self) -> Option<String> {
         let m = &self.bytes.uncompressed()[self.message.clone()];
         if m.is_empty() {

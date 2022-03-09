@@ -1,6 +1,8 @@
 use crate::decoding;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
+#[cfg(feature = "storage-v2")]
+use crate::columnar_2::load::Error as LoadError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,6 +25,9 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("generic automerge error")]
     Fail,
+    #[cfg(feature = "storage-v2")]
+    #[error(transparent)]
+    Load(#[from] LoadError),
 }
 
 impl From<std::io::Error> for AutomergeError {
@@ -72,3 +77,11 @@ pub struct InvalidElementId(pub String);
 #[derive(Error, Debug)]
 #[error("Invalid OpID: {0}")]
 pub struct InvalidOpId(pub String);
+
+#[derive(Error, Debug)]
+pub enum InvalidOpType {
+    #[error("unrecognized action index {0}")]
+    UnknownAction(u64),
+    #[error("non numeric argument for inc op")]
+    NonNumericInc,
+}

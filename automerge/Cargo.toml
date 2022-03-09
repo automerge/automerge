@@ -9,6 +9,7 @@ license = "MIT"
 [features]
 optree-visualisation = ["dot"]
 wasm = ["js-sys", "wasm-bindgen"]
+storage-v2 = []
 
 [dependencies]
 hex = "^0.4.3"

@@ -2,3 +2,5 @@
 /.direnv
 perf.*
 /Cargo.lock
+automerge/proptest-regressions/
+.vim

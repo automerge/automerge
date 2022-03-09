@@ -8,10 +8,13 @@ use std::{
 use flate2::{bufread::DeflateEncoder, Compression};
 use smol_str::SmolStr;
 
+#[cfg(not(feature = "storage-v2"))]
 use crate::columnar::COLUMN_TYPE_DEFLATE;
 use crate::ActorId;
 
 pub(crate) const DEFLATE_MIN_SIZE: usize = 256;
+#[cfg(feature = "storage-v2")]
+const COLUMN_TYPE_DEFLATE: u32 = 8;
 
 /// The error type for encoding operations.
 #[derive(Debug, thiserror::Error)]
@@ -330,6 +333,47 @@ impl Encodable for i32 {
         i64::from(*self).encode(buf)
     }
 }
+
+impl Encodable for [ActorId] {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let mut len = self.len().encode(buf)?;
+        for i in self {
+            len += i.to_bytes().encode(buf)?;
+        }
+        Ok(len)
+    }
+}
+
+fn actor_index(actor: &ActorId, actors: &[ActorId]) -> usize {
+    actors.iter().position(|a| a == actor).unwrap()
+}
+
+impl Encodable for ActorId {
+    fn encode_with_actors<R: Write>(&self, buf: &mut R, actors: &[ActorId]) -> io::Result<usize> {
+        actor_index(self, actors).encode(buf)
+    }
+
+    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
+        // we instead encode actors as their position on a sequence
+        Ok(0)
+    }
+}
+
+impl Encodable for Vec<u8> {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        self.as_slice().encode(buf)
+    }
+}
+
+impl Encodable for &[u8] {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        let head = self.len().encode(buf)?;
+        buf.write_all(self)?;
+        Ok(head + self.len())
+    }
+}
+
+
 
 #[derive(Debug)]
 pub(crate) struct ColData {

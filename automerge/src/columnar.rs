@@ -5,6 +5,7 @@ use std::{
     borrow::Cow,
     cmp::Ordering,
     collections::HashMap,
+    convert::TryFrom,
     io,
     io::{Read, Write},
     ops::Range,
@@ -34,43 +35,8 @@ impl Encodable for Action {
     }
 }
 
-impl Encodable for [ActorId] {
-    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        let mut len = self.len().encode(buf)?;
-        for i in self {
-            len += i.to_bytes().encode(buf)?;
-        }
-        Ok(len)
-    }
-}
-
 fn actor_index(actor: &ActorId, actors: &[ActorId]) -> usize {
     actors.iter().position(|a| a == actor).unwrap()
-}
-
-impl Encodable for ActorId {
-    fn encode_with_actors<R: Write>(&self, buf: &mut R, actors: &[ActorId]) -> io::Result<usize> {
-        actor_index(self, actors).encode(buf)
-    }
-
-    fn encode<R: Write>(&self, _buf: &mut R) -> io::Result<usize> {
-        // we instead encode actors as their position on a sequence
-        Ok(0)
-    }
-}
-
-impl Encodable for Vec<u8> {
-    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        self.as_slice().encode(buf)
-    }
-}
-
-impl Encodable for &[u8] {
-    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
-        let head = self.len().encode(buf)?;
-        buf.write_all(self)?;
-        Ok(head + self.len())
-    }
 }
 
 pub(crate) struct OperationIterator<'a> {
@@ -1284,6 +1250,14 @@ const ACTIONS: [Action; 7] = [
     Action::Inc,
     Action::MakeTable,
 ];
+
+impl TryFrom<u64> for Action {
+    type Error = u64;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        ACTIONS.get(value as usize).copied().ok_or(value)
+    }
+}
 
 impl Decodable for Action {
     fn decode<R>(bytes: &mut R) -> Option<Self>

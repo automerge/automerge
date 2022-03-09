@@ -1,0 +1,3 @@
+{
+    "rust-analyzer.cargo.features": ["optree-visualisation", "storage-v2"]
+}

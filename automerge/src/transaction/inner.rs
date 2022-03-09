@@ -1,9 +1,21 @@
+use std::borrow::Cow;
+
 use crate::automerge::Actor;
+use crate::Change;
 use crate::exid::ExId;
+use crate::indexed_cache::IndexedCache;
 use crate::query::{self, OpIdSearch};
 use crate::types::{Key, ObjId, OpId};
-use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
+use crate::{types::{ActorId, Op}, Automerge, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+#[cfg(not(feature = "storage-v2"))]
+use crate::change::export_change;
+#[cfg(feature = "storage-v2")]
+use crate::columnar_2::{
+    storage::{Chunk, Change as StoredChange},
+    save::encode_change_ops
+};
+
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -40,11 +52,38 @@ impl TransactionInner {
         }
 
         let num_ops = self.operations.len();
-        let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
-        let hash = change.hash;
+        let change = self.export(&doc.ops.m.actors, &doc.ops.m.props);
+        let hash = change.hash();
         doc.update_history(change, num_ops);
         debug_assert_eq!(doc.get_heads(), vec![hash]);
         hash
+    }
+
+    #[cfg(feature = "storage-v2")]
+    pub(crate) fn export(self, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> Change {
+        let actor = actors.get(self.actor).clone();
+        let ops = self.operations.iter().map(|o| (&o.0, &o.1));
+        let (ops, op_data, other_actors) = encode_change_ops(ops, actor.clone(), actors, props); 
+        let stored = StoredChange {
+            actor,
+            message: self.message.clone(),
+            extra_bytes: Cow::Owned(vec![]),
+            start_op: self.start_op,
+            seq: self.seq,
+            dependencies: self.deps.clone(),
+            other_actors,
+            timestamp: self.time,
+            ops_meta: ops.metadata(),
+            ops_data: Cow::Owned(op_data),
+        };
+        let written = stored.write();
+        let chunk = Chunk::new_change(written.as_slice());
+        Change::new(stored, chunk.hash(), self.operations.len())
+    }
+
+    #[cfg(not(feature = "storage-v2"))]
+    pub(crate) fn export(self, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> Change {
+        export_change(self, actors, props)
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled

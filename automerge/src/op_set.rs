@@ -5,6 +5,7 @@ use crate::query::{self, TreeQuery};
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::ObjType;
 use fxhash::FxBuildHasher;
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
@@ -19,6 +20,19 @@ pub(crate) struct OpSetInternal<const B: usize> {
 }
 
 impl<const B: usize> OpSetInternal<B> {
+
+    pub(crate) fn from_parts(
+        trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
+        meta: OpSetMetadata,
+    ) -> Self {
+        let len = trees.values().map(|t| t.1.len()).sum();
+        Self {
+            trees,
+            length: len,
+            m: meta,
+        }
+    }
+
     pub fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), (ObjType::Map, Default::default()));
@@ -143,6 +157,7 @@ impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Iter<'a, const B: usize> {
     inner: &'a OpSetInternal<B>,
     index: usize,
@@ -176,7 +191,24 @@ pub(crate) struct OpSetMetadata {
     pub props: IndexedCache<String>,
 }
 
+impl Default for OpSetMetadata {
+    fn default() -> Self {
+        Self {
+            actors: IndexedCache::new(),
+            props: IndexedCache::new(),
+        }
+    }
+}
+
 impl OpSetMetadata {
+
+    pub fn from_actors(actors: Vec<ActorId>) -> Self {
+        Self {
+            props: IndexedCache::new(),
+            actors: actors.into_iter().collect(),
+        }
+    }
+
     pub fn key_cmp(&self, left: &Key, right: &Key) -> Ordering {
         match (left, right) {
             (Key::Map(a), Key::Map(b)) => self.props[*a].cmp(&self.props[*b]),
@@ -192,5 +224,9 @@ impl OpSetMetadata {
             (OpId(a, x), OpId(b, y)) if a == b => self.actors[x].cmp(&self.actors[y]),
             (OpId(a, _), OpId(b, _)) => a.cmp(&b),
         }
+    }
+
+    pub fn import_prop<S: Borrow<str>>(&mut self, key: S) -> usize {
+        self.props.cache(key.borrow().to_string())
     }
 }

@@ -1,9 +1,11 @@
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::{
-    change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
+    transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
+#[cfg(not(feature = "storage-v2"))]
+use crate::change::export_change;
 use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
 
 /// An automerge document that automatically manages transactions.
@@ -83,12 +85,12 @@ impl AutoCommit {
             .get(&actor)
             .and_then(|v| v.get(seq as usize - 1))
             .and_then(|&i| self.doc.history.get(i))
-            .map(|c| c.hash)
+            .map(|c| c.hash())
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
     fn update_history(&mut self, change: Change) -> usize {
-        self.doc.max_op = std::cmp::max(self.doc.max_op, change.start_op + change.len() as u64 - 1);
+        self.doc.max_op = std::cmp::max(self.doc.max_op, change.start_op() + change.len() as u64 - 1);
 
         self.update_deps(&change);
 
@@ -100,17 +102,17 @@ impl AutoCommit {
             .or_default()
             .push(history_index);
 
-        self.doc.history_index.insert(change.hash, history_index);
+        self.doc.history_index.insert(change.hash(), history_index);
         self.doc.history.push(change);
 
         history_index
     }
 
     fn update_deps(&mut self, change: &Change) {
-        for d in &change.deps {
+        for d in change.deps() {
             self.doc.deps.remove(d);
         }
-        self.doc.deps.insert(change.hash);
+        self.doc.deps.insert(change.hash());
     }
 
     pub fn fork(&mut self) -> Self {
@@ -123,8 +125,7 @@ impl AutoCommit {
 
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
-            self.update_history(export_change(
-                tx,
+            self.update_history(tx.export(
                 &self.doc.ops.m.actors,
                 &self.doc.ops.m.props,
             ));

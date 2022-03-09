@@ -100,7 +100,9 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
     }
 }
 
-impl<'a, const B: usize> dot::GraphWalk<'a, &'a Node<'a, B>, Edge> for GraphVisualisation<'a, B> {
+impl<'a, const B: usize> dot::GraphWalk<'a, &'a Node<'a, B>, Edge>
+    for GraphVisualisation<'a, B>
+{
     fn nodes(&'a self) -> dot::Nodes<'a, &'a Node<'a, B>> {
         Cow::Owned(self.nodes.values().collect::<Vec<_>>())
     }
@@ -127,7 +129,9 @@ impl<'a, const B: usize> dot::GraphWalk<'a, &'a Node<'a, B>, Edge> for GraphVisu
     }
 }
 
-impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisualisation<'a, B> {
+impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge>
+    for GraphVisualisation<'a, B>
+{
     fn graph_id(&'a self) -> dot::Id<'a> {
         dot::Id::new("OpSet").unwrap()
     }
@@ -192,6 +196,7 @@ impl OpTable {
                 <td>prop</td>\
                 <td>action</td>\
                 <td>succ</td>\
+                <td>pred</td>\
             </tr>\
             <hr/>\
             {}\
@@ -207,6 +212,7 @@ struct OpTableRow {
     prop: String,
     op_description: String,
     succ: String,
+    pred: String,
 }
 
 impl OpTableRow {
@@ -217,6 +223,7 @@ impl OpTableRow {
             &self.prop,
             &self.op_description,
             &self.succ,
+            &self.pred,
         ];
         let row = rows
             .iter()
@@ -248,12 +255,18 @@ impl OpTableRow {
             .iter()
             .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
             .collect();
+        let pred = op
+            .pred
+            .iter()
+            .map(|s| format!(",{}", print_opid(s, actor_shorthands)))
+            .collect();
         OpTableRow {
             op_description,
             obj_id: print_opid(&obj.0, actor_shorthands),
             op_id: print_opid(&op.id, actor_shorthands),
             prop,
             succ,
+            pred,
         }
     }
 }

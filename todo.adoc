@@ -1,0 +1,25 @@
+== Doing
+
+* Implement `columnar_2::save::save_document`
+
+
+
+== Cleanups
+
+* Add a `*Range` for each column type (including composite)
+* For each of the `*Range` types add an `encode` method. Replace the ad hoc
+  `*Decoder::encode` methods with these methods
+* Get rid of `PrimVal`, do everything with `ScalarValue`. i.e. move the unknown
+  type codes into `ScalarValue`.
+* Make `Change` and `Document` directly hold a `*Columns` instead of
+  `ColumnMetadata`, construct these at parse time
+* Make `Chunk` an actual enum and parse the contents into that enum
+* Change `ChangeOpColumns::encode` to `ChangeOpColumns::splice`, include a
+  `replace_with` range, and create a new `encode` implementation which just
+  calls `ChangeOpColumns::empty().splice(..)`
+* `try_splice` on all encoders
+* Remove rowblock, just have structs for `ChangeOps`, `DocChangeOps`,
+  `DocChanges` which hold their own bytes. Maybe later we add a `GenericRows`
+  thing but we seem to not really need it 
+
+* Replace every use of `usize` as a lookup with a newtype wrapper
