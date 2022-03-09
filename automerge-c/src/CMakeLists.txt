@@ -68,7 +68,7 @@ if(BUILD_SHARED_LIBS)
     if(WIN32)
         set(LIBRARY_DESTINATION "${CMAKE_INSTALL_BINDIR}")
     else()
-    	set(LIBRARY_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+        set(LIBRARY_DESTINATION "${CMAKE_INSTALL_LIBDIR}")
     endif()
 
     set(LIBRARY_DEFINE_SYMBOL "${SYMBOL_PREFIX}_EXPORTS")
@@ -110,7 +110,7 @@ set_target_properties(
         # \note Cargo writes a debug build into a nested directory instead of
         #       decorating its name.
         DEBUG_POSTFIX ""
-    	DEFINE_SYMBOL "${LIBRARY_DEFINE_SYMBOL}"
+        DEFINE_SYMBOL "${LIBRARY_DEFINE_SYMBOL}"
         IMPORTED_IMPLIB "${LIBRARY_IMPLIB}"
         IMPORTED_LOCATION "${LIBRARY_LOCATION}"
         IMPORTED_NO_SONAME "${LIBRARY_NO_SONAME}"

@@ -526,14 +526,11 @@ pub unsafe extern "C" fn AMlistSetBytes(
     let slice = std::slice::from_raw_parts(value, count);
     let mut vec = Vec::new();
     vec.extend_from_slice(slice);
-    to_result(
-        if insert {
-            doc.insert(obj, index, vec)
-        }
-        else {
-            doc.set(obj, index, vec)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, vec)
+    } else {
+        doc.set(obj, index, vec)
+    })
 }
 
 /// \memberof AMdoc
@@ -565,14 +562,11 @@ pub unsafe extern "C" fn AMlistSetCounter(
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
     let value = am::ScalarValue::Counter(value.into());
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -603,14 +597,11 @@ pub unsafe extern "C" fn AMlistSetF64(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -641,14 +632,11 @@ pub unsafe extern "C" fn AMlistSetInt(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -678,14 +666,11 @@ pub unsafe extern "C" fn AMlistSetNull(
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
     let value = ();
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -717,14 +702,11 @@ pub unsafe extern "C" fn AMlistSetObject(
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
     let value = obj_type.into();
-    to_result(
-        if insert {
-            doc.insert_object(obj, index, value)
-        }
-        else {
-            doc.set_object(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert_object(obj, index, value)
+    } else {
+        doc.set_object(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -758,14 +740,11 @@ pub unsafe extern "C" fn AMlistSetStr(
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
     let value = to_str(value);
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -797,14 +776,11 @@ pub unsafe extern "C" fn AMlistSetTimestamp(
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
     let value = am::ScalarValue::Timestamp(value);
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMdoc
@@ -835,14 +811,11 @@ pub unsafe extern "C" fn AMlistSetUint(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
-    to_result(
-        if insert {
-            doc.insert(obj, index, value)
-        }
-        else {
-            doc.set(obj, index, value)
-        }
-    )
+    to_result(if insert {
+        doc.insert(obj, index, value)
+    } else {
+        doc.set(obj, index, value)
+    })
 }
 
 /// \memberof AMresult
