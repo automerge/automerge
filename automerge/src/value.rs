@@ -11,13 +11,6 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn to_string(&self) -> Option<String> {
-        match self {
-            Value::Scalar(val) => Some(val.to_string()),
-            _ => None,
-        }
-    }
-
     pub fn map() -> Value {
         Value::Object(ObjType::Map)
     }
@@ -69,17 +62,152 @@ impl Value {
     pub fn is_scalar(&self) -> bool {
         matches!(&self, Value::Scalar(_))
     }
+
+    pub fn is_bytes(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Bytes(_)))
+    }
+
+    pub fn is_str(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Str(_)))
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Int(_)))
+    }
+
+    pub fn is_uint(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Uint(_)))
+    }
+
+    pub fn is_f64(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::F64(_)))
+    }
+
+    pub fn is_counter(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Counter(_)))
+    }
+
+    pub fn is_timestamp(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Timestamp(_)))
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Boolean(_)))
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Scalar(ScalarValue::Null))
+    }
+
+    pub fn into_scalar(self) -> Result<ScalarValue, Self> {
+        match self {
+            Self::Scalar(s) => Ok(s),
+            _ => Err(self),
+        }
+    }
+
+    pub fn to_scalar(&self) -> Option<&ScalarValue> {
+        match self {
+            Self::Scalar(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn to_objtype(&self) -> Option<ObjType> {
+        match self {
+            Self::Object(o) => Some(*o),
+            _ => None,
+        }
+    }
+
+    pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
+        match self {
+            Value::Scalar(s) => s.into_bytes().map_err(Value::Scalar),
+            _ => Err(self),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Value::Scalar(s) => s.to_bytes(),
+            _ => None,
+        }
+    }
+
+    pub fn into_string(self) -> Result<String, Self> {
+        match self {
+            Value::Scalar(s) => s.into_string().map_err(Value::Scalar),
+            _ => Err(self),
+        }
+    }
+
+    pub fn to_str(&self) -> Option<&str> {
+        match self {
+            Value::Scalar(val) => val.to_str(),
+            _ => None,
+        }
+    }
+
+    /// If this value can be coerced to an i64, return the i64 value
+    pub fn to_i64(&self) -> Option<i64> {
+        match self {
+            Value::Scalar(s) => s.to_i64(),
+            _ => None,
+        }
+    }
+
+    pub fn to_u64(&self) -> Option<u64> {
+        match self {
+            Value::Scalar(s) => s.to_u64(),
+            _ => None,
+        }
+    }
+
+    pub fn to_f64(&self) -> Option<f64> {
+        match self {
+            Value::Scalar(s) => s.to_f64(),
+            _ => None,
+        }
+    }
+
+    pub fn to_bool(&self) -> Option<bool> {
+        match self {
+            Value::Scalar(s) => s.to_bool(),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Object(o) => write!(f, "Object: {}", o),
+            Value::Scalar(s) => write!(f, "Scalar: {}", s),
+        }
+    }
 }
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::Scalar(s.into())
+        Value::Scalar(ScalarValue::Str(s.into()))
     }
 }
 
 impl From<String> for Value {
     fn from(s: String) -> Self {
         Value::Scalar(ScalarValue::Str(s.into()))
+    }
+}
+
+impl From<char> for Value {
+    fn from(c: char) -> Self {
+        Value::Scalar(ScalarValue::Str(SmolStr::new(c.to_string())))
+    }
+}
+
+impl From<Vec<u8>> for Value {
+    fn from(v: Vec<u8>) -> Self {
+        Value::Scalar(ScalarValue::Bytes(v))
     }
 }
 
@@ -98,6 +226,12 @@ impl From<i64> for Value {
 impl From<i32> for Value {
     fn from(n: i32) -> Self {
         Value::Scalar(ScalarValue::Int(n.into()))
+    }
+}
+
+impl From<u32> for Value {
+    fn from(n: u32) -> Self {
+        Value::Scalar(ScalarValue::Uint(n.into()))
     }
 }
 
@@ -352,6 +486,70 @@ impl ScalarValue {
         }
     }
 
+    pub fn is_bytes(&self) -> bool {
+        matches!(self, Self::Bytes(_))
+    }
+
+    pub fn is_str(&self) -> bool {
+        matches!(self, Self::Str(_))
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::Int(_))
+    }
+
+    pub fn is_uint(&self) -> bool {
+        matches!(self, Self::Uint(_))
+    }
+
+    pub fn is_f64(&self) -> bool {
+        matches!(self, Self::F64(_))
+    }
+
+    pub fn is_counter(&self) -> bool {
+        matches!(self, Self::Counter(_))
+    }
+
+    pub fn is_timestamp(&self) -> bool {
+        matches!(self, Self::Timestamp(_))
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        matches!(self, Self::Boolean(_))
+    }
+
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
+        match self {
+            ScalarValue::Bytes(b) => Ok(b),
+            _ => Err(self),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Option<&[u8]> {
+        match self {
+            ScalarValue::Bytes(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    pub fn into_string(self) -> Result<String, Self> {
+        match self {
+            ScalarValue::Str(s) => Ok(s.to_string()),
+            _ => Err(self),
+        }
+    }
+
+    pub fn to_str(&self) -> Option<&str> {
+        match self {
+            ScalarValue::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// If this value can be coerced to an i64, return the i64 value
     pub fn to_i64(&self) -> Option<i64> {
         match self {
@@ -386,16 +584,9 @@ impl ScalarValue {
         }
     }
 
-    pub fn to_bool(self) -> Option<bool> {
+    pub fn to_bool(&self) -> Option<bool> {
         match self {
-            ScalarValue::Boolean(b) => Some(b),
-            _ => None,
-        }
-    }
-
-    pub fn to_string(self) -> Option<String> {
-        match self {
-            ScalarValue::Str(s) => Some(s.to_string()),
+            ScalarValue::Boolean(b) => Some(*b),
             _ => None,
         }
     }
@@ -417,6 +608,12 @@ impl From<String> for ScalarValue {
     }
 }
 
+impl From<Vec<u8>> for ScalarValue {
+    fn from(b: Vec<u8>) -> Self {
+        ScalarValue::Bytes(b)
+    }
+}
+
 impl From<i64> for ScalarValue {
     fn from(n: i64) -> Self {
         ScalarValue::Int(n)
@@ -432,6 +629,12 @@ impl From<f64> for ScalarValue {
 impl From<u64> for ScalarValue {
     fn from(n: u64) -> Self {
         ScalarValue::Uint(n)
+    }
+}
+
+impl From<u32> for ScalarValue {
+    fn from(n: u32) -> Self {
+        ScalarValue::Uint(n.into())
     }
 }
 
