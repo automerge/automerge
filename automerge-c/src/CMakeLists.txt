@@ -178,6 +178,8 @@ if(DOXYGEN_FOUND)
 
     set(DOXYGEN_PROJECT_LOGO "${CMAKE_SOURCE_DIR}/img/brandmark.png")
 
+    set(DOXYGEN_SORT_BRIEF_DOCS YES)
+
     set(DOXYGEN_USE_MDFILE_AS_MAINPAGE "${CMAKE_SOURCE_DIR}/README.md")
 
     doxygen_add_docs(
