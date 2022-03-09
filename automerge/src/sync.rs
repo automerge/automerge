@@ -236,11 +236,16 @@ impl Automerge {
     }
 }
 
+/// The sync message to be sent.
 #[derive(Debug, Clone)]
 pub struct Message {
+    /// The heads of the sender.
     pub heads: Vec<ChangeHash>,
+    /// The hashes of any changes that are being explicitly requested from the recipient.
     pub need: Vec<ChangeHash>,
+    /// A summary of the changes that the sender already has.
     pub have: Vec<Have>,
+    /// The changes for the recipient to apply.
     pub changes: Vec<Change>,
 }
 
