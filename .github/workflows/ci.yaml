@@ -1,5 +1,5 @@
 name: ci
-on: 
+on:
   push:
     branches:
     - experiment
@@ -58,6 +58,15 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           command: check ${{ matrix.checks }}
+
+  wasm_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: run tests
+        run: ./scripts/ci/wasm_tests
 
   js_tests:
     runs-on: ubuntu-latest
