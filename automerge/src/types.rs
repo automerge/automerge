@@ -449,6 +449,7 @@ impl Op {
 #[derive(Debug, Clone)]
 pub struct Peer {}
 
+/// The sha256 hash of a change.
 #[derive(Eq, PartialEq, Hash, Clone, PartialOrd, Ord, Copy)]
 pub struct ChangeHash(pub [u8; 32]);
 

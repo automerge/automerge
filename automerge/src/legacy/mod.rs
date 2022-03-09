@@ -232,19 +232,28 @@ impl Op {
     }
 }
 
+/// A change represents a group of operations performed by an actor.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Change {
+    /// The operations performed in this change.
     #[serde(rename = "ops")]
     pub operations: Vec<Op>,
+    /// The actor that performed this change.
     #[serde(rename = "actor")]
     pub actor_id: ActorId,
+    /// The hash of this change.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub hash: Option<ChangeHash>,
+    /// The index of this change in the changes from this actor.
     pub seq: u64,
+    /// The start operation index.
     #[serde(rename = "startOp")]
     pub start_op: u64,
+    /// The time that this change was committed.
     pub time: i64,
+    /// The message of this change.
     pub message: Option<String>,
+    /// The dependencies of this change.
     pub deps: Vec<ChangeHash>,
     #[serde(skip_serializing_if = "Vec::is_empty", default = "Default::default")]
     pub extra_bytes: Vec<u8>,

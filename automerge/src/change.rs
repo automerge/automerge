@@ -310,16 +310,24 @@ impl ChangeBytes {
     }
 }
 
+/// A change represents a group of operations performed by an actor.
 #[derive(PartialEq, Debug, Clone)]
 pub struct Change {
     bytes: ChangeBytes,
     body_start: usize,
+    /// Hash of this change.
     pub hash: amp::ChangeHash,
+    /// The index of this change in the changes from this actor.
     pub seq: u64,
+    /// The start operation index.
     pub start_op: u64,
+    /// The time that this change was committed.
     pub time: i64,
+    /// The message of this change.
     message: Range<usize>,
+    /// The actors referenced in this change.
     actors: Vec<ActorId>,
+    /// The dependencies of this change.
     pub deps: Vec<amp::ChangeHash>,
     ops: HashMap<u32, Range<usize>>,
     extra_bytes: Range<usize>,
