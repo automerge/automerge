@@ -13,10 +13,10 @@ use result::AMresult;
 /// \enum AmObjType
 #[repr(u8)]
 pub enum AmObjType {
+    /// A list.
+    List = 1,
     /// A key-value map.
     Map,
-    /// A list.
-    List,
     /// A list of Unicode graphemes.
     Text,
 }
@@ -36,18 +36,18 @@ impl From<AmObjType> for am::ObjType {
 #[derive(Debug)]
 #[repr(u8)]
 pub enum AmStatus {
+    /// The result is one or more changes.
+    ChangesOk = 1,
     /// The command was successful.
     CommandOk,
+    /// The result was an error.
+    Error,
+    /// The result is invalid.
+    InvalidResult,
     /// The result is an object ID.
     ObjOk,
     /// The result is one or more values.
     ValuesOk,
-    /// The result is one or more changes.
-    ChangesOk,
-    /// The result is invalid.
-    InvalidResult,
-    /// The result was an error.
-    Error,
 }
 
 unsafe fn to_str(c: *const c_char) -> String {
@@ -142,8 +142,8 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 /// \brief Set a configuration property of an `AMdoc` struct.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] key A configuration property's string key.
-/// \param[in] value A configuration property's string value or `NULL`.
+/// \param[in] key A configuration property's UTF-8 string key.
+/// \param[in] value A configuration property's UTF-8 string value or `NULL`.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn AMconfig(
 /// \brief Get an `AMdoc` struct's actor ID value as a hexadecimal string.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct containing a string value.
+/// \return A pointer to an `AMresult` struct containing a UTF-8 string value.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
@@ -220,7 +220,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AmStatus {
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -249,7 +249,7 @@ pub unsafe extern "C" fn AMmapSetInt(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A 64-bit unsigned integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -274,15 +274,16 @@ pub unsafe extern "C" fn AMmapSetUint(
 }
 
 /// \memberof AMdoc
-/// \brief Set a map object's key to a string value.
+/// \brief Set a map object's key to a UTF-8 string value.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
-/// \param[in] value A string.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
+/// \param[in] value A UTF-8 string.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
+/// \pre \p value must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
 /// \internal
@@ -307,12 +308,14 @@ pub unsafe extern "C" fn AMmapSetStr(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A pointer to an array of bytes.
 /// \param[in] count The number of bytes to copy from \p value.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
+/// \pre \p value must be a valid address.
+/// \pre `0 <=` \p count `<=` length of \p value.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
 /// \internal
@@ -320,8 +323,8 @@ pub unsafe extern "C" fn AMmapSetStr(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj must be a pointer to a valid AMobj or NULL
+/// value must be a byte array of length `count`
 /// key must be a c string of the map key to be used
-/// value must be a byte array of lenth `count`
 #[no_mangle]
 pub unsafe extern "C" fn AMmapSetBytes(
     doc: *mut AMdoc,
@@ -342,7 +345,7 @@ pub unsafe extern "C" fn AMmapSetBytes(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A 64-bit float.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -371,7 +374,7 @@ pub unsafe extern "C" fn AMmapSetF64(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -404,7 +407,7 @@ pub unsafe extern "C" fn AMmapSetCounter(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
@@ -433,7 +436,7 @@ pub unsafe extern "C" fn AMmapSetTimestamp(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -460,8 +463,8 @@ pub unsafe extern "C" fn AMmapSetNull(
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
 /// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
-/// \param[in] key A string key for the map object identified by \p obj.
-/// \param[in] objtype An `AmObjType` enum tag.
+/// \param[in] key A UTF-8 string key for the map object identified by \p obj.
+/// \param[in] obj_type An `AmObjType` enum tag.
 /// \return A pointer to an `AMresult` struct containing a pointer to an `AMobj` struct.
 /// \pre \p doc must be a valid address.
 /// \pre \p key must be a valid address.
@@ -478,10 +481,134 @@ pub unsafe extern "C" fn AMmapSetObject(
     doc: *mut AMdoc,
     obj: *mut AMobj,
     key: *const c_char,
-    objtype: AmObjType,
+    obj_type: AmObjType,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result(doc.set_object(to_obj!(obj), to_str(key), objtype.into()))
+    to_result(doc.set_object(to_obj!(obj), to_str(key), obj_type.into()))
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a byte array value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A pointer to an array of bytes.
+/// \param[in] count The number of bytes to copy from \p value.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \pre \p value must be a valid address.
+/// \pre `0 <=` \p count `<=` length of \p value.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// value must be a byte array of length `count`
+/// key must be a c string of the map key to be used
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetBytes(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: *const u8,
+    count: usize,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let slice = std::slice::from_raw_parts(value, count);
+    let mut vec = Vec::new();
+    vec.extend_from_slice(slice);
+    to_result(
+        if insert {
+            doc.insert(obj, index, vec)
+        }
+        else {
+            doc.set(obj, index, vec)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a CRDT counter value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A 64-bit signed integer.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetCounter(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: i64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let value = am::ScalarValue::Counter(value.into());
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a float value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A 64-bit float.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetF64(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: f64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
 }
 
 /// \memberof AMdoc
@@ -494,7 +621,6 @@ pub unsafe extern "C" fn AMmapSetObject(
 /// \param[in] value A 64-bit signed integer.
 /// \return A pointer to an `AMresult` struct containing no value.
 /// \pre \p doc must be a valid address.
-/// \pre \p obj must be a valid address.
 /// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
@@ -503,7 +629,6 @@ pub unsafe extern "C" fn AMmapSetObject(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 /// obj must be a pointer to a valid AMobj or NULL
-/// value must be a pointer to data of the type specified in data_type
 #[no_mangle]
 pub unsafe extern "C" fn AMlistSetInt(
     doc: *mut AMdoc,
@@ -514,11 +639,208 @@ pub unsafe extern "C" fn AMlistSetInt(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj = to_obj!(obj);
-    if insert {
-        to_result(doc.insert(obj, index, value))
-    } else {
-        to_result(doc.set(obj, index, value))
-    }
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a null value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetNull(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let value = ();
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to an empty object value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] obj_type An `AmObjType` enum tag.
+/// \return A pointer to an `AMresult` struct containing a pointer to an `AMobj` struct.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetObject(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    obj_type: AmObjType,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let value = obj_type.into();
+    to_result(
+        if insert {
+            doc.insert_object(obj, index, value)
+        }
+        else {
+            doc.set_object(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a UTF-8 string value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A UTF-8 string.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \pre \p value must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+/// value must be a pointer to a valid address.
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetStr(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: *const c_char,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let value = to_str(value);
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to a Lamport timestamp value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A 64-bit signed integer.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetTimestamp(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: i64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    let value = am::ScalarValue::Timestamp(value);
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
+}
+
+/// \memberof AMdoc
+/// \brief Set a list object's index to an unsigned integer value.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] obj A pointer to an `AMobj` struct or `NULL`.
+/// \param[in] index An index within the list object identified by \p obj.
+/// \param[in] insert A flag to insert \p value before \p index instead of writing \p value over \p index.
+/// \param[in] value A 64-bit unsigned integer.
+/// \return A pointer to an `AMresult` struct containing no value.
+/// \pre \p doc must be a valid address.
+/// \pre `0 <=` \p index `<=` length of the list object identified by \p obj.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// obj must be a pointer to a valid AMobj or NULL
+#[no_mangle]
+pub unsafe extern "C" fn AMlistSetUint(
+    doc: *mut AMdoc,
+    obj: *mut AMobj,
+    index: usize,
+    insert: bool,
+    value: u64,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let obj = to_obj!(obj);
+    to_result(
+        if insert {
+            doc.insert(obj, index, value)
+        }
+        else {
+            doc.set(obj, index, value)
+        }
+    )
 }
 
 /// \memberof AMresult
@@ -557,7 +879,7 @@ pub unsafe extern "C" fn AMclear(result: *mut AMresult) {
 /// \brief Get an `AMresult` struct's error message string.
 ///
 /// \param[in] result A pointer to an `AMresult` struct.
-/// \return A string value or `NULL`.
+/// \return A UTF-8 string value or `NULL`.
 /// \pre \p result must be a valid address.
 /// \internal
 ///
