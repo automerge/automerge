@@ -11,6 +11,7 @@ use result::AMresult;
 
 /// \ingroup enumerations
 /// \enum AmObjType
+/// \brief The type of an object value.
 #[repr(u8)]
 pub enum AmObjType {
     /// A list.
@@ -31,6 +32,7 @@ impl From<AmObjType> for am::ObjType {
     }
 }
 
+/// \ingroup enumerations
 /// \enum AmStatus
 /// \brief The status of an API call.
 #[derive(Debug)]
