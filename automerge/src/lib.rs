@@ -40,7 +40,7 @@ mod legacy;
 mod op_set;
 mod op_tree;
 mod query;
-mod sync;
+pub mod sync;
 pub mod transaction;
 mod types;
 mod value;
@@ -55,7 +55,6 @@ pub use exid::ExId as ObjId;
 pub use keys::Keys;
 pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
-pub use sync::{BloomFilter, SyncHave, SyncMessage, SyncState};
 pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
 pub use value::{ScalarValue, Value};
 

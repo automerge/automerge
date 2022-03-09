@@ -4,7 +4,7 @@ use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{Keys, KeysAt, ObjType, ScalarValue, SyncMessage, SyncState};
+use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -206,15 +206,15 @@ impl AutoCommit {
         self.doc.dump()
     }
 
-    pub fn generate_sync_message(&mut self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+    pub fn generate_sync_message(&mut self, sync_state: &mut sync::State) -> Option<sync::Message> {
         self.ensure_transaction_closed();
         self.doc.generate_sync_message(sync_state)
     }
 
     pub fn receive_sync_message(
         &mut self,
-        sync_state: &mut SyncState,
-        message: SyncMessage,
+        sync_state: &mut sync::State,
+        message: sync::Message,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.receive_sync_message(sync_state, message)
