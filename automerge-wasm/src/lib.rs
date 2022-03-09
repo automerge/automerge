@@ -72,7 +72,7 @@ impl Automerge {
         (self.0.pending_ops() as u32).into()
     }
 
-    pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> Array {
+    pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let mut commit_opts = CommitOptions::default();
         if let Some(message) = message {
             commit_opts.set_message(message);
@@ -80,12 +80,8 @@ impl Automerge {
         if let Some(time) = time {
             commit_opts.set_time(time as i64);
         }
-        let heads = self.0.commit_with(commit_opts);
-        let heads: Array = heads
-            .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
-            .collect();
-        heads
+        let hash = self.0.commit_with(commit_opts);
+        JsValue::from_str(&hex::encode(&hash.0))
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
@@ -374,7 +370,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
         let changes: Vec<_> = JS(changes).try_into()?;
-        self.0.apply_changes(&changes).map_err(to_js_err)?;
+        self.0.apply_changes(changes).map_err(to_js_err)?;
         Ok(())
     }
 
@@ -446,7 +442,7 @@ impl Automerge {
         message: Uint8Array,
     ) -> Result<(), JsValue> {
         let message = message.to_vec();
-        let message = am::SyncMessage::decode(message.as_slice()).map_err(to_js_err)?;
+        let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
         self.0
             .receive_sync_message(&mut state.0, message)
             .map_err(to_js_err)?;
@@ -578,7 +574,7 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = initSyncState)]
 pub fn init_sync_state() -> SyncState {
-    SyncState(am::SyncState::new())
+    SyncState(am::sync::State::new())
 }
 
 // this is needed to be compatible with the automerge-js api
@@ -600,7 +596,7 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
     let changes = js_get(&message, "changes")?.try_into()?;
     let have = js_get(&message, "have")?.try_into()?;
     Ok(Uint8Array::from(
-        am::SyncMessage {
+        am::sync::Message {
             heads,
             need,
             have,
@@ -614,7 +610,7 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
 #[wasm_bindgen(js_name = decodeSyncMessage)]
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
     let data = msg.to_vec();
-    let msg = am::SyncMessage::decode(&data).map_err(to_js_err)?;
+    let msg = am::sync::Message::decode(&data).map_err(to_js_err)?;
     let heads = AR::from(msg.heads.as_slice());
     let need = AR::from(msg.need.as_slice());
     let changes = AR::from(msg.changes.as_slice());

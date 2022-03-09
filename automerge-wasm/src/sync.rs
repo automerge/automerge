@@ -9,7 +9,7 @@ use crate::interop::{to_js_err, AR, JS};
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct SyncState(pub(crate) am::SyncState);
+pub struct SyncState(pub(crate) am::sync::State);
 
 #[wasm_bindgen]
 impl SyncState {
@@ -45,7 +45,7 @@ impl SyncState {
 
     pub(crate) fn decode(data: Uint8Array) -> Result<SyncState, JsValue> {
         let data = data.to_vec();
-        let s = am::SyncState::decode(&data);
+        let s = am::sync::State::decode(&data);
         let s = s.map_err(to_js_err)?;
         Ok(SyncState(s))
     }

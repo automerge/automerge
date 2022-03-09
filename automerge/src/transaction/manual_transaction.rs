@@ -32,7 +32,7 @@ impl<'a> Transaction<'a> {
 
     /// Commit the operations performed in this transaction, returning the hashes corresponding to
     /// the new heads.
-    pub fn commit(mut self) -> Vec<ChangeHash> {
+    pub fn commit(mut self) -> ChangeHash {
         self.inner.take().unwrap().commit(self.doc, None, None)
     }
 
@@ -52,7 +52,7 @@ impl<'a> Transaction<'a> {
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(mut self, options: CommitOptions) -> Vec<ChangeHash> {
+    pub fn commit_with(mut self, options: CommitOptions) -> ChangeHash {
         self.inner
             .take()
             .unwrap()

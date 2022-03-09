@@ -8,7 +8,7 @@ pub use self::commit::CommitOptions;
 pub use self::transactable::Transactable;
 pub(crate) use inner::TransactionInner;
 pub use manual_transaction::Transaction;
-pub use result::TransactionFailure;
-pub use result::TransactionSuccess;
+pub use result::Failure;
+pub use result::Success;
 
-pub type TransactionResult<O, E> = Result<TransactionSuccess<O>, TransactionFailure<E>>;
+pub type Result<O, E> = std::result::Result<Success<O>, Failure<E>>;

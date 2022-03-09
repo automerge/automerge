@@ -1,11 +1,10 @@
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::Patch;
 use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
-use crate::{Keys, KeysAt, ObjType, ScalarValue, SyncMessage, SyncState};
+use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -145,7 +144,7 @@ impl AutoCommit {
         self.doc.load_incremental(data)
     }
 
-    pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
     }
@@ -207,16 +206,16 @@ impl AutoCommit {
         self.doc.dump()
     }
 
-    pub fn generate_sync_message(&mut self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+    pub fn generate_sync_message(&mut self, sync_state: &mut sync::State) -> Option<sync::Message> {
         self.ensure_transaction_closed();
         self.doc.generate_sync_message(sync_state)
     }
 
     pub fn receive_sync_message(
         &mut self,
-        sync_state: &mut SyncState,
-        message: SyncMessage,
-    ) -> Result<Option<Patch>, AutomergeError> {
+        sync_state: &mut sync::State,
+        message: sync::Message,
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.receive_sync_message(sync_state, message)
     }
@@ -234,13 +233,11 @@ impl AutoCommit {
         self.doc.get_heads()
     }
 
-    pub fn commit(&mut self) -> Vec<ChangeHash> {
+    pub fn commit(&mut self) -> ChangeHash {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, None, None))
-            .unwrap_or_else(|| self.doc.get_heads())
+        let tx = self.transaction.take().unwrap();
+        tx.commit(&mut self.doc, None, None)
     }
 
     /// Commit the current operations with some options.
@@ -258,12 +255,10 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
+    pub fn commit_with(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_open();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
-            .unwrap_or_else(|| self.doc.get_heads())
+        let tx = self.transaction.take().unwrap();
+        tx.commit(&mut self.doc, options.message, options.time)
     }
 
     pub fn rollback(&mut self) -> usize {

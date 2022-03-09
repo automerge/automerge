@@ -6,7 +6,6 @@ use std::{
     io::Write,
 };
 
-use crate::types::Patch;
 use crate::{
     decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
 };
@@ -15,13 +14,13 @@ mod bloom;
 mod state;
 
 pub use bloom::BloomFilter;
-pub use state::{SyncHave, SyncState};
+pub use state::{Have, State};
 
 const HASH_SIZE: usize = 32; // 256 bits = 32 bytes
 const MESSAGE_TYPE_SYNC: u8 = 0x42; // first byte of a sync message, for identification
 
 impl Automerge {
-    pub fn generate_sync_message(&self, sync_state: &mut SyncState) -> Option<SyncMessage> {
+    pub fn generate_sync_message(&self, sync_state: &mut State) -> Option<Message> {
         let our_heads = self.get_heads();
 
         let our_need = self.get_missing_deps(sync_state.their_heads.as_ref().unwrap_or(&vec![]));
@@ -44,10 +43,10 @@ impl Automerge {
                     .iter()
                     .all(|hash| self.get_change_by_hash(hash).is_some())
                 {
-                    let reset_msg = SyncMessage {
+                    let reset_msg = Message {
                         heads: our_heads,
                         need: Vec::new(),
-                        have: vec![SyncHave::default()],
+                        have: vec![Have::default()],
                         changes: Vec::new(),
                     };
                     return Some(reset_msg);
@@ -84,7 +83,7 @@ impl Automerge {
             .sent_hashes
             .extend(changes_to_send.iter().map(|c| c.hash));
 
-        let sync_message = SyncMessage {
+        let sync_message = Message {
             heads: our_heads,
             have: our_have,
             need: our_need,
@@ -96,14 +95,12 @@ impl Automerge {
 
     pub fn receive_sync_message(
         &mut self,
-        sync_state: &mut SyncState,
-        message: SyncMessage,
-    ) -> Result<Option<Patch>, AutomergeError> {
-        let mut patch = None;
-
+        sync_state: &mut State,
+        message: Message,
+    ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
-        let SyncMessage {
+        let Message {
             heads: message_heads,
             changes: message_changes,
             need: message_need,
@@ -112,7 +109,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            patch = Some(self.apply_changes(&message_changes)?);
+            self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -153,22 +150,22 @@ impl Automerge {
         sync_state.their_heads = Some(message_heads);
         sync_state.their_need = Some(message_need);
 
-        Ok(patch)
+        Ok(())
     }
 
-    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {
+    fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {
         let new_changes = self.get_changes(&last_sync);
         let hashes = new_changes
             .into_iter()
             .map(|change| change.hash)
             .collect::<Vec<_>>();
-        SyncHave {
+        Have {
             last_sync,
             bloom: BloomFilter::from(&hashes[..]),
         }
     }
 
-    fn get_changes_to_send(&self, have: Vec<SyncHave>, need: &[ChangeHash]) -> Vec<&Change> {
+    fn get_changes_to_send(&self, have: Vec<Have>, need: &[ChangeHash]) -> Vec<&Change> {
         if have.is_empty() {
             need.iter()
                 .filter_map(|hash| self.get_change_by_hash(hash))
@@ -178,7 +175,7 @@ impl Automerge {
             let mut bloom_filters = Vec::with_capacity(have.len());
 
             for h in have {
-                let SyncHave { last_sync, bloom } = h;
+                let Have { last_sync, bloom } = h;
                 for hash in last_sync {
                     last_sync_hashes.insert(hash);
                 }
@@ -239,15 +236,20 @@ impl Automerge {
     }
 }
 
+/// The sync message to be sent.
 #[derive(Debug, Clone)]
-pub struct SyncMessage {
+pub struct Message {
+    /// The heads of the sender.
     pub heads: Vec<ChangeHash>,
+    /// The hashes of any changes that are being explicitly requested from the recipient.
     pub need: Vec<ChangeHash>,
-    pub have: Vec<SyncHave>,
+    /// A summary of the changes that the sender already has.
+    pub have: Vec<Have>,
+    /// The changes for the recipient to apply.
     pub changes: Vec<Change>,
 }
 
-impl SyncMessage {
+impl Message {
     pub fn encode(self) -> Vec<u8> {
         let mut buf = vec![MESSAGE_TYPE_SYNC];
 
@@ -268,7 +270,7 @@ impl SyncMessage {
         buf
     }
 
-    pub fn decode(bytes: &[u8]) -> Result<SyncMessage, decoding::Error> {
+    pub fn decode(bytes: &[u8]) -> Result<Message, decoding::Error> {
         let mut decoder = Decoder::new(Cow::Borrowed(bytes));
 
         let message_type = decoder.read::<u8>()?;
@@ -287,7 +289,7 @@ impl SyncMessage {
             let last_sync = decode_hashes(&mut decoder)?;
             let bloom_bytes: Vec<u8> = decoder.read()?;
             let bloom = BloomFilter::try_from(bloom_bytes.as_slice())?;
-            have.push(SyncHave { last_sync, bloom });
+            have.push(Have { last_sync, bloom });
         }
 
         let change_count = decoder.read::<u32>()?;
@@ -297,7 +299,7 @@ impl SyncMessage {
             changes.push(Change::from_bytes(change)?);
         }
 
-        Ok(SyncMessage {
+        Ok(Message {
             heads,
             need,
             have,

@@ -313,9 +313,6 @@ pub enum Prop {
     Seq(usize),
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
-pub struct Patch {}
-
 impl Key {
     pub fn elemid(&self) -> Option<ElemId> {
         match self {
