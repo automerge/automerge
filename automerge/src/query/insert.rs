@@ -64,7 +64,7 @@ impl<const B: usize> TreeQuery<B> for InsertNth<B> {
                 num_vis -= 1;
             }
             if self.seen + num_vis >= self.target {
-                QueryResult::Decend
+                QueryResult::Descend
             } else {
                 self.n += child.len();
                 self.seen += num_vis;

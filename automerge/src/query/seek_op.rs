@@ -49,7 +49,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
         m: &OpSetMetadata,
     ) -> QueryResult {
         if self.found {
-            return QueryResult::Decend;
+            return QueryResult::Descend;
         }
         match self.op.key {
             Key::Seq(e) if e == HEAD => {
@@ -67,7 +67,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
             }
             Key::Seq(e) => {
                 if self.found || child.index.ops.contains(&e.0) {
-                    QueryResult::Decend
+                    QueryResult::Descend
                 } else {
                     self.pos += child.len();
                     QueryResult::Next

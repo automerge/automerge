@@ -56,7 +56,7 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node
             .as_ref()
             .map(|root| match query.query_node_with_metadata(root, m) {
-                QueryResult::Decend => root.search(&mut query, m),
+                QueryResult::Descend => root.search(&mut query, m),
                 _ => true,
             });
         query
@@ -199,7 +199,7 @@ impl<const B: usize> OpTreeNode<B> {
         } else {
             for (child_index, child) in self.children.iter().enumerate() {
                 match query.query_node_with_metadata(child, m) {
-                    QueryResult::Decend => {
+                    QueryResult::Descend => {
                         if child.search(query, m) {
                             return true;
                         }

@@ -52,7 +52,7 @@ pub(crate) trait TreeQuery<const B: usize> {
     }
 
     fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
-        QueryResult::Decend
+        QueryResult::Descend
     }
 
     #[inline(always)]
@@ -68,7 +68,7 @@ pub(crate) trait TreeQuery<const B: usize> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum QueryResult {
     Next,
-    Decend,
+    Descend,
     Finish,
 }
 
