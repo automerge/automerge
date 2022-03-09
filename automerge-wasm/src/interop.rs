@@ -25,8 +25,8 @@ impl From<JS> for JsValue {
     }
 }
 
-impl From<am::SyncState> for JS {
-    fn from(state: am::SyncState) -> Self {
+impl From<am::sync::State> for JS {
+    fn from(state: am::sync::State) -> Self {
         let shared_heads: JS = state.shared_heads.into();
         let last_sent_heads: JS = state.last_sent_heads.into();
         let their_heads: JS = state.their_heads.into();
@@ -133,7 +133,7 @@ impl TryFrom<JS> for Vec<Change> {
     }
 }
 
-impl TryFrom<JS> for am::SyncState {
+impl TryFrom<JS> for am::sync::State {
     type Error = JsValue;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -144,7 +144,7 @@ impl TryFrom<JS> for am::SyncState {
         let their_need = js_get(&value, "theirNeed")?.into();
         let their_have = js_get(&value, "theirHave")?.try_into()?;
         let sent_hashes = js_get(&value, "sentHashes")?.try_into()?;
-        Ok(am::SyncState {
+        Ok(am::sync::State {
             shared_heads,
             last_sent_heads,
             their_heads,
@@ -155,7 +155,7 @@ impl TryFrom<JS> for am::SyncState {
     }
 }
 
-impl TryFrom<JS> for Option<Vec<am::SyncHave>> {
+impl TryFrom<JS> for Option<Vec<am::sync::Have>> {
     type Error = JsValue;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -167,17 +167,17 @@ impl TryFrom<JS> for Option<Vec<am::SyncHave>> {
     }
 }
 
-impl TryFrom<JS> for Vec<am::SyncHave> {
+impl TryFrom<JS> for Vec<am::sync::Have> {
     type Error = JsValue;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
         let value = value.0.dyn_into::<Array>()?;
-        let have: Result<Vec<am::SyncHave>, JsValue> = value
+        let have: Result<Vec<am::sync::Have>, JsValue> = value
             .iter()
             .map(|s| {
                 let last_sync = js_get(&s, "lastSync")?.try_into()?;
                 let bloom = js_get(&s, "bloom")?.try_into()?;
-                Ok(am::SyncHave { last_sync, bloom })
+                Ok(am::sync::Have { last_sync, bloom })
             })
             .collect();
         let have = have?;
@@ -185,7 +185,7 @@ impl TryFrom<JS> for Vec<am::SyncHave> {
     }
 }
 
-impl TryFrom<JS> for am::BloomFilter {
+impl TryFrom<JS> for am::sync::BloomFilter {
     type Error = JsValue;
 
     fn try_from(value: JS) -> Result<Self, Self::Error> {
@@ -215,8 +215,8 @@ impl From<&[Change]> for AR {
     }
 }
 
-impl From<&[am::SyncHave]> for AR {
-    fn from(value: &[am::SyncHave]) -> Self {
+impl From<&[am::sync::Have]> for AR {
+    fn from(value: &[am::sync::Have]) -> Self {
         AR(value
             .iter()
             .map(|have| {

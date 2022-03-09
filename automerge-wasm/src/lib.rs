@@ -653,7 +653,7 @@ impl Automerge {
         message: Uint8Array,
     ) -> Result<(), JsValue> {
         let message = message.to_vec();
-        let message = am::SyncMessage::decode(message.as_slice()).map_err(to_js_err)?;
+        let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
         self.0
             .receive_sync_message(&mut state.0, message)
             .map_err(to_js_err)?;
@@ -785,7 +785,7 @@ pub fn decode_change(change: Uint8Array) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = initSyncState)]
 pub fn init_sync_state() -> SyncState {
-    SyncState(am::SyncState::new())
+    SyncState(am::sync::State::new())
 }
 
 // this is needed to be compatible with the automerge-js api
@@ -807,7 +807,7 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
     let changes = js_get(&message, "changes")?.try_into()?;
     let have = js_get(&message, "have")?.try_into()?;
     Ok(Uint8Array::from(
-        am::SyncMessage {
+        am::sync::Message {
             heads,
             need,
             have,
@@ -821,7 +821,7 @@ pub fn encode_sync_message(message: JsValue) -> Result<Uint8Array, JsValue> {
 #[wasm_bindgen(js_name = decodeSyncMessage)]
 pub fn decode_sync_message(msg: Uint8Array) -> Result<JsValue, JsValue> {
     let data = msg.to_vec();
-    let msg = am::SyncMessage::decode(&data).map_err(to_js_err)?;
+    let msg = am::sync::Message::decode(&data).map_err(to_js_err)?;
     let heads = AR::from(msg.heads.as_slice());
     let need = AR::from(msg.need.as_slice());
     let changes = AR::from(msg.changes.as_slice());
