@@ -1,6 +1,5 @@
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::types::Patch;
 use crate::{
     change::export_change, query, transaction::TransactionInner, ActorId, Automerge,
     AutomergeError, Change, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, SyncMessage,
@@ -150,7 +149,7 @@ impl AutoCommit {
         self.doc.load_incremental(data)
     }
 
-    pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
     }
@@ -221,7 +220,7 @@ impl AutoCommit {
         &mut self,
         sync_state: &mut SyncState,
         message: SyncMessage,
-    ) -> Result<Option<Patch>, AutomergeError> {
+    ) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.receive_sync_message(sync_state, message)
     }
@@ -239,13 +238,11 @@ impl AutoCommit {
         self.doc.get_heads()
     }
 
-    pub fn commit(&mut self) -> Vec<ChangeHash> {
+    pub fn commit(&mut self) -> ChangeHash {
         // ensure that even no changes triggers a change
         self.ensure_transaction_open();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, None, None))
-            .unwrap_or_else(|| self.doc.get_heads())
+        let tx = self.transaction.take().unwrap();
+        tx.commit(&mut self.doc, None, None)
     }
 
     /// Commit the current operations with some options.
@@ -263,12 +260,10 @@ impl AutoCommit {
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
-    pub fn commit_with(&mut self, options: CommitOptions) -> Vec<ChangeHash> {
+    pub fn commit_with(&mut self, options: CommitOptions) -> ChangeHash {
         self.ensure_transaction_open();
-        self.transaction
-            .take()
-            .map(|tx| tx.commit(&mut self.doc, options.message, options.time))
-            .unwrap_or_else(|| self.doc.get_heads())
+        let tx = self.transaction.take().unwrap();
+        tx.commit(&mut self.doc, options.message, options.time)
     }
 
     pub fn rollback(&mut self) -> usize {

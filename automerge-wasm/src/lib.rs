@@ -75,7 +75,7 @@ impl Automerge {
         (self.0.pending_ops() as u32).into()
     }
 
-    pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> Array {
+    pub fn commit(&mut self, message: Option<String>, time: Option<f64>) -> JsValue {
         let mut commit_opts = CommitOptions::default();
         if let Some(message) = message {
             commit_opts.set_message(message);
@@ -83,12 +83,8 @@ impl Automerge {
         if let Some(time) = time {
             commit_opts.set_time(time as i64);
         }
-        let heads = self.0.commit_with(commit_opts);
-        let heads: Array = heads
-            .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
-            .collect();
-        heads
+        let hash = self.0.commit_with(commit_opts);
+        JsValue::from_str(&hex::encode(&hash.0))
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
@@ -585,7 +581,7 @@ impl Automerge {
     #[wasm_bindgen(js_name = applyChanges)]
     pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
         let changes: Vec<_> = JS(changes).try_into()?;
-        self.0.apply_changes(&changes).map_err(to_js_err)?;
+        self.0.apply_changes(changes).map_err(to_js_err)?;
         Ok(())
     }
 

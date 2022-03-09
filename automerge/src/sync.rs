@@ -6,7 +6,6 @@ use std::{
     io::Write,
 };
 
-use crate::types::Patch;
 use crate::{
     decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
 };
@@ -98,9 +97,7 @@ impl Automerge {
         &mut self,
         sync_state: &mut SyncState,
         message: SyncMessage,
-    ) -> Result<Option<Patch>, AutomergeError> {
-        let mut patch = None;
-
+    ) -> Result<(), AutomergeError> {
         let before_heads = self.get_heads();
 
         let SyncMessage {
@@ -112,7 +109,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            patch = Some(self.apply_changes(&message_changes)?);
+            self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -153,7 +150,7 @@ impl Automerge {
         sync_state.their_heads = Some(message_heads);
         sync_state.their_need = Some(message_need);
 
-        Ok(patch)
+        Ok(())
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> SyncHave {

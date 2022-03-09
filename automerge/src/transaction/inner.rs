@@ -30,7 +30,7 @@ impl TransactionInner {
         doc: &mut Automerge,
         message: Option<String>,
         time: Option<i64>,
-    ) -> Vec<ChangeHash> {
+    ) -> ChangeHash {
         if message.is_some() {
             self.message = message;
         }
@@ -39,9 +39,11 @@ impl TransactionInner {
             self.time = t;
         }
 
-        doc.update_history(export_change(&self, &doc.ops.m.actors, &doc.ops.m.props));
-
-        doc.get_heads()
+        let change = export_change(&self, &doc.ops.m.actors, &doc.ops.m.props);
+        let hash = change.hash;
+        doc.update_history(change);
+        debug_assert_eq!(doc.get_heads(), vec![hash]);
+        hash
     }
 
     /// Undo the operations added in this transaction, returning the number of cancelled

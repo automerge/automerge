@@ -4,12 +4,9 @@ use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
-use crate::transaction::{
-    CommitOptions, Transaction, TransactionFailure, TransactionInner, TransactionResult,
-    TransactionSuccess,
-};
+use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
     ScalarValue, Value,
 };
 use crate::KeysAt;
@@ -114,18 +111,18 @@ impl Automerge {
 
     /// Run a transaction on this document in a closure, automatically handling commit or rollback
     /// afterwards.
-    pub fn transact<F, O, E>(&mut self, f: F) -> TransactionResult<O, E>
+    pub fn transact<F, O, E>(&mut self, f: F) -> transaction::Result<O, E>
     where
         F: FnOnce(&mut Transaction) -> Result<O, E>,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
-            Ok(result) => Ok(TransactionSuccess {
+            Ok(result) => Ok(Success {
                 result,
-                heads: tx.commit(),
+                hash: tx.commit(),
             }),
-            Err(error) => Err(TransactionFailure {
+            Err(error) => Err(Failure {
                 error,
                 cancelled: tx.rollback(),
             }),
@@ -133,19 +130,22 @@ impl Automerge {
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> TransactionResult<O, E>
+    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
         F: FnOnce(&mut Transaction) -> Result<O, E>,
-        C: FnOnce() -> CommitOptions,
+        C: FnOnce(&O) -> CommitOptions,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
-            Ok(result) => Ok(TransactionSuccess {
-                result,
-                heads: tx.commit_with(c()),
-            }),
-            Err(error) => Err(TransactionFailure {
+            Ok(result) => {
+                let commit_options = c(&result);
+                Ok(Success {
+                    result,
+                    hash: tx.commit_with(commit_options),
+                })
+            }
+            Err(error) => Err(Failure {
                 error,
                 cancelled: tx.rollback(),
             }),
@@ -456,14 +456,14 @@ impl Automerge {
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
-        doc.apply_changes(&changes)?;
+        doc.apply_changes(changes)?;
         Ok(doc)
     }
 
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         let changes = Change::load_document(data)?;
         let start = self.ops.len();
-        self.apply_changes(&changes)?;
+        self.apply_changes(changes)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -478,26 +478,26 @@ impl Automerge {
         dup
     }
 
-    pub fn apply_changes(&mut self, changes: &[Change]) -> Result<Patch, AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
-                if self.duplicate_seq(c) {
+                if self.duplicate_seq(&c) {
                     return Err(AutomergeError::DuplicateSeqNumber(
                         c.seq,
                         c.actor_id().clone(),
                     ));
                 }
-                if self.is_causally_ready(c) {
-                    self.apply_change(c.clone());
+                if self.is_causally_ready(&c) {
+                    self.apply_change(c);
                 } else {
-                    self.queue.push(c.clone());
+                    self.queue.push(c);
                 }
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             self.apply_change(c);
         }
-        Ok(Patch {})
+        Ok(())
     }
 
     pub fn apply_change(&mut self, change: Change) {
@@ -571,7 +571,7 @@ impl Automerge {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes(&changes)?;
+        self.apply_changes(changes)?;
         Ok(self.get_heads())
     }
 

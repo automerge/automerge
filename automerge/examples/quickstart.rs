@@ -9,7 +9,7 @@ fn main() {
     let mut doc1 = Automerge::new();
     let (cards, card1) = doc1
         .transact_with::<_, _, AutomergeError, _>(
-            || CommitOptions::default().with_message("Add card".to_owned()),
+            |_| CommitOptions::default().with_message("Add card".to_owned()),
             |tx| {
                 let cards = tx.set_object(ROOT, "cards", ObjType::List).unwrap();
                 let card1 = tx.insert_object(&cards, 0, ObjType::Map)?;
@@ -22,7 +22,7 @@ fn main() {
             },
         )
         .unwrap()
-        .into_result();
+        .result;
 
     let mut doc2 = Automerge::new();
     doc2.merge(&mut doc1).unwrap();
@@ -31,7 +31,7 @@ fn main() {
     let mut doc2 = Automerge::load(&binary).unwrap();
 
     doc1.transact_with::<_, _, AutomergeError, _>(
-        || CommitOptions::default().with_message("Mark card as done".to_owned()),
+        |_| CommitOptions::default().with_message("Mark card as done".to_owned()),
         |tx| {
             tx.set(&card1, "done", true)?;
             Ok(())
@@ -40,7 +40,7 @@ fn main() {
     .unwrap();
 
     doc2.transact_with::<_, _, AutomergeError, _>(
-        || CommitOptions::default().with_message("Delete card".to_owned()),
+        |_| CommitOptions::default().with_message("Delete card".to_owned()),
         |tx| {
             tx.del(&cards, 0)?;
             Ok(())
