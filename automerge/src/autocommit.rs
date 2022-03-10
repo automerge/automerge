@@ -298,7 +298,7 @@ impl Transactable for AutoCommit {
         self.doc.length_at(obj, heads)
     }
 
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
         self.doc.object_type(obj)
     }
 

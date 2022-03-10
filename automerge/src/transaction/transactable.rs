@@ -105,7 +105,7 @@ pub trait Transactable {
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get type for object
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType>;
 
     /// Get the string that this text object represents.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
