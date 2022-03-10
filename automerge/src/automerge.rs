@@ -811,7 +811,7 @@ impl Automerge {
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::InvalidActor(actor.to_hex_string()))?;
+                .ok_or_else(|| AutomergeError::ForeignObjId(s.to_owned()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),
