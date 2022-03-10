@@ -439,7 +439,7 @@ impl Automerge {
     }
 
     /// Apply a single change to this document.
-    pub fn apply_change(&mut self, change: Change) {
+    fn apply_change(&mut self, change: Change) {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
         for op in ops {

@@ -149,11 +149,6 @@ impl AutoCommit {
         self.doc.apply_changes(changes)
     }
 
-    pub fn apply_change(&mut self, change: Change) {
-        self.ensure_transaction_closed();
-        self.doc.apply_change(change)
-    }
-
     /// Takes all the changes in `other` which are not in `self` and applies them
     pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
         self.ensure_transaction_closed();
