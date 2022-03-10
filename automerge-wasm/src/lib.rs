@@ -12,7 +12,9 @@ mod interop;
 mod sync;
 mod value;
 
-use interop::{get_heads, js_get, js_set, map_to_js, to_js_err, to_objtype, to_prop, AR, JS};
+use interop::{
+    get_heads, js_get, js_set, list_to_js, map_to_js, to_js_err, to_objtype, to_prop, AR, JS,
+};
 use sync::SyncState;
 use value::{datatype, ScalarValue};
 
@@ -465,9 +467,53 @@ impl Automerge {
         map_to_js(&self.0, &ROOT)
     }
 
+    pub fn materialize(&self, obj: JsValue) -> Result<JsValue, JsValue> {
+        let obj = self.import(obj).unwrap_or(ROOT);
+        match self.0.object_type(&obj) {
+            Some(am::ObjType::Map) => Ok(map_to_js(&self.0, &obj)),
+            Some(am::ObjType::List) => Ok(list_to_js(&self.0, &obj)),
+            Some(am::ObjType::Text) => Ok(self.0.text(&obj)?.into()),
+            Some(am::ObjType::Table) => Ok(map_to_js(&self.0, &obj)),
+            None => Err(to_js_err(format!("invalid obj {}", obj))),
+        }
+    }
+
     fn import(&self, id: JsValue) -> Result<ObjId, JsValue> {
         if let Some(s) = id.as_string() {
-            Ok(self.0.import(&s)?)
+            if let Some(post) = s.strip_prefix('/') {
+                let mut obj = ROOT;
+                let mut is_map = true;
+                let parts = post.split('/');
+                for prop in parts {
+                    if prop.is_empty() {
+                        break;
+                    }
+                    let val = if is_map {
+                        self.0.value(obj, prop)?
+                    } else {
+                        self.0.value(obj, am::Prop::Seq(prop.parse().unwrap()))?
+                    };
+                    match val {
+                        Some((am::Value::Object(am::ObjType::Map), id)) => {
+                            is_map = true;
+                            obj = id;
+                        }
+                        Some((am::Value::Object(am::ObjType::Table), id)) => {
+                            is_map = true;
+                            obj = id;
+                        }
+                        Some((am::Value::Object(_), id)) => {
+                            is_map = false;
+                            obj = id;
+                        }
+                        None => return Err(to_js_err(format!("invalid path '{}'", s))),
+                        _ => return Err(to_js_err(format!("path '{}' is not an object", s))),
+                    };
+                }
+                Ok(obj)
+            } else {
+                Ok(self.0.import(&s)?)
+            }
         } else {
             Err(to_js_err("invalid objid"))
         }

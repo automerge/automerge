@@ -236,6 +236,11 @@ impl Automerge {
         }
     }
 
+    pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
+        let obj = self.exid_to_obj(obj.as_ref()).ok()?;
+        self.ops.object_type(&obj)
+    }
+
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
         match id {
             ExId::Root => Ok(ObjId::root()),
@@ -806,7 +811,7 @@ impl Automerge {
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::ForeignObjId(s.to_owned()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),
