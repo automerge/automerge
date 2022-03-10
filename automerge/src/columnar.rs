@@ -139,7 +139,7 @@ impl<'a> Iterator for OperationIterator<'a> {
             Action::Inc => OpType::Inc(value.to_i64()?),
             Action::MarkBegin => {
                 // mark has 3 things in the val column
-                let name = value.to_string()?;
+                let name = value.as_string()?;
                 let expand = self.value.next()?.to_bool()?;
                 let value = self.value.next()?;
                 OpType::mark(name, expand, value)
@@ -189,7 +189,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
             Action::Inc => OpType::Inc(value.to_i64()?),
             Action::MarkBegin => {
                 // mark has 3 things in the val column
-                let name = value.to_string()?;
+                let name = value.as_string()?;
                 let expand = self.value.next()?.to_bool()?;
                 let value = self.value.next()?;
                 OpType::mark(name, expand, value)

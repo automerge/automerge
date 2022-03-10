@@ -34,6 +34,7 @@ pub struct Automerge {
 }
 
 impl Automerge {
+    /// Create a new document with a random actor id.
     pub fn new() -> Self {
         Automerge {
             queue: vec![],
@@ -48,16 +49,19 @@ impl Automerge {
         }
     }
 
+    /// Set the actor id for this document.
     pub fn with_actor(mut self, actor: ActorId) -> Self {
         self.actor = Actor::Unused(actor);
         self
     }
 
+    /// Set the actor id for this document.
     pub fn set_actor(&mut self, actor: ActorId) -> &mut Self {
         self.actor = Actor::Unused(actor);
         self
     }
 
+    /// Get the current actor id of this document.
     pub fn get_actor(&self) -> &ActorId {
         match &self.actor {
             Actor::Unused(actor) => actor,
@@ -152,6 +156,7 @@ impl Automerge {
         }
     }
 
+    /// Fork this document at the current point for use by a different actor.
     pub fn fork(&self) -> Self {
         let mut f = self.clone();
         f.set_actor(ActorId::random());
@@ -199,6 +204,7 @@ impl Automerge {
         }
     }
 
+    /// Get the length of the given object.
     pub fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
             match self.ops.object_type(&inner_obj) {
@@ -213,6 +219,7 @@ impl Automerge {
         }
     }
 
+    /// Historical version of [`length`](Self::length).
     pub fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize {
         if let Ok(inner_obj) = self.exid_to_obj(obj.as_ref()) {
             let clock = self.clock_at(heads);
@@ -226,6 +233,11 @@ impl Automerge {
         } else {
             0
         }
+    }
+
+    pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+        let obj = self.exid_to_obj(obj.as_ref())?;
+        self.ops.object_type(&obj).ok_or(AutomergeError::Fail)
     }
 
     pub(crate) fn exid_to_obj(&self, id: &ExId) -> Result<ObjId, AutomergeError> {
@@ -254,6 +266,7 @@ impl Automerge {
         ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
     }
 
+    /// Get the string represented by the given text object.
     pub fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let query = self.ops.search(obj, query::ListVals::new());
@@ -266,6 +279,7 @@ impl Automerge {
         Ok(buffer)
     }
 
+    /// Historical version of [`text`](Self::text).
     pub fn text_at<O: AsRef<ExId>>(
         &self,
         obj: O,
@@ -371,6 +385,10 @@ impl Automerge {
     // TODO - I need to return these OpId's here **only** to get
     // the legacy conflicts format of { [opid]: value }
     // Something better?
+    /// Get a value out of the document.
+    ///
+    /// Returns both the value and the id of the operation that created it, useful for handling
+    /// conflicts and serves as the object id if the value is an object.
     pub fn value<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -379,6 +397,7 @@ impl Automerge {
         Ok(self.values(obj, prop.into())?.last().cloned())
     }
 
+    /// Historical version of [`value`](Self::value).
     pub fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -388,6 +407,10 @@ impl Automerge {
         Ok(self.values_at(obj, prop, heads)?.last().cloned())
     }
 
+    /// Get all values out of the document at this prop that conflict.
+    ///
+    /// Returns both the value and the id of the operation that created it, useful for handling
+    /// conflicts and serves as the object id if the value is an object.
     pub fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -419,6 +442,7 @@ impl Automerge {
         Ok(result)
     }
 
+    /// Historical version of [`values`](Self::values).
     pub fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
@@ -453,6 +477,7 @@ impl Automerge {
         Ok(result)
     }
 
+    /// Load a document.
     pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
@@ -460,6 +485,7 @@ impl Automerge {
         Ok(doc)
     }
 
+    /// Load an incremental save of a document.
     pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
         let changes = Change::load_document(data)?;
         let start = self.ops.len();
@@ -478,6 +504,7 @@ impl Automerge {
         dup
     }
 
+    /// Apply changes to this document.
     pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
@@ -500,6 +527,7 @@ impl Automerge {
         Ok(())
     }
 
+    /// Apply a single change to this document.
     pub fn apply_change(&mut self, change: Change) {
         let ops = self.import_ops(&change, self.history.len());
         self.update_history(change);
@@ -575,6 +603,7 @@ impl Automerge {
         Ok(self.get_heads())
     }
 
+    /// Save the entirety of this document in a compact form.
     pub fn save(&mut self) -> Vec<u8> {
         let heads = self.get_heads();
         let c = self.history.iter();
@@ -584,6 +613,7 @@ impl Automerge {
         bytes
     }
 
+    /// Save the changes since last save in a compact form.
     pub fn save_incremental(&mut self) -> Vec<u8> {
         let changes = self.get_changes(self.saved.as_slice());
         let mut bytes = vec![];
@@ -657,6 +687,8 @@ impl Automerge {
         }
     }
 
+    /// Get the hashes of the changes in this document that aren't transitive dependencies of the
+    /// given `heads`.
     pub fn get_missing_deps(&self, heads: &[ChangeHash]) -> Vec<ChangeHash> {
         let in_queue: HashSet<_> = self.queue.iter().map(|change| change.hash).collect();
         let mut missing = HashSet::new();
@@ -737,6 +769,7 @@ impl Automerge {
             .collect()
     }
 
+    /// Get the last change this actor made to the document.
     pub fn get_last_local_change(&self) -> Option<&Change> {
         return self
             .history
@@ -773,12 +806,14 @@ impl Automerge {
         clock
     }
 
+    /// Get a change by its hash.
     pub fn get_change_by_hash(&self, hash: &ChangeHash) -> Option<&Change> {
         self.history_index
             .get(hash)
             .and_then(|index| self.history.get(*index))
     }
 
+    /// Get the changes that the other document added compared to this document.
     pub fn get_changes_added<'a>(&self, other: &'a Self) -> Vec<&'a Change> {
         // Depth-first traversal from the heads through the dependency graph,
         // until we reach a change that is already present in other
@@ -860,7 +895,7 @@ impl Automerge {
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidActor(actor.to_hex_string()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),
@@ -1357,5 +1392,17 @@ mod tests {
         let mut tx = doc.transaction();
         // deleting an element in a list that does not exist is an error
         assert!(tx.del(ROOT, 0).is_err());
+    }
+
+    #[test]
+    fn loaded_doc_changes_have_hash() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 1).unwrap();
+        tx.commit();
+        let hash = doc.get_last_local_change().unwrap().hash;
+        let bytes = doc.save();
+        let doc = Automerge::load(&bytes).unwrap();
+        assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
     }
 }

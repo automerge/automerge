@@ -117,6 +117,7 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
+  materialize(obj?: ObjID): any;
 
   // experimental spans api - unstable!
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
@@ -140,7 +141,7 @@ export class Automerge {
 
   // sync over network
   receiveSyncMessage(state: SyncState, message: SyncMessage): void;
-  generateSyncMessage(state: SyncState): SyncMessage;
+  generateSyncMessage(state: SyncState): SyncMessage | null;
 
   // low level change functions
   applyChanges(changes: Change[]): void;

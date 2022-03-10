@@ -165,15 +165,16 @@ describe('Automerge', () => {
       let submap = doc.set_object(root, "letters", [])
       doc.insert(submap, 0, "a");
       doc.insert(submap, 0, "b");
-      assert.deepEqual(doc.toJS(), { letters: ["b", "a" ] })
+      assert.deepEqual(doc.materialize(), { letters: ["b", "a" ] })
       doc.push(submap, "c");
-      assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c" ] })
+      assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c" ] })
       doc.push(submap, 3, "timestamp");
-      assert.deepEqual(doc.toJS(), { letters: ["b", "a", "c", new Date(3) ] })
+      assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3) ] })
       doc.splice(submap, 1, 1, ["d","e","f"]);
-      assert.deepEqual(doc.toJS(), { letters: ["b", "d", "e", "f", "c", new Date(3) ] })
+      assert.deepEqual(doc.materialize(), { letters: ["b", "d", "e", "f", "c", new Date(3) ] })
       doc.set(submap, 0, "z");
-      assert.deepEqual(doc.toJS(), { letters: ["z", "d", "e", "f", "c", new Date(3) ] })
+      assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3) ] })
+      assert.deepEqual(doc.materialize(submap), ["z", "d", "e", "f", "c", new Date(3) ])
       assert.deepEqual(doc.length(submap),6)
 
       doc.free()
@@ -356,19 +357,30 @@ describe('Automerge', () => {
       doc4.free()
     })
 
+    it('paths can be used instead of objids', () => {
+      let doc = create("aaaa")
+      doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])
+      assert.deepEqual(doc.materialize("/"), { list: [{ foo: "bar"}, [1,2,3]] }) 
+      assert.deepEqual(doc.materialize("/list"), [{ foo: "bar"}, [1,2,3]]) 
+      assert.deepEqual(doc.materialize("/list/0"), { foo: "bar"}) 
+    })
+
     it('recursive sets are possible', () => {
       let doc = create("aaaa")
       let l1 = doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])
       let l2 = doc.insert_object(l1, 0, { zip: ["a", "b"] })
-      let l3 = doc.set_object("_root","info1","hello world") // 'text'
-      let l4 = doc.set("_root","info2","hello world")  // 'str'
-      let l5 = doc.set_object("_root","info3","hello world")
-      assert.deepEqual(doc.toJS(), {
+      let l3 = doc.set_object("_root","info1","hello world") // 'text' object
+               doc.set("_root","info2","hello world")  // 'str'
+      let l4 = doc.set_object("_root","info3","hello world")
+      assert.deepEqual(doc.materialize(), {
         "list": [ { zip: ["a", "b"] }, { foo: "bar"}, [ 1,2,3]],
-        "info1": "hello world".split(""),
+        "info1": "hello world",
         "info2": "hello world",
-        "info3": "hello world".split("")
+        "info3": "hello world",
       })
+      assert.deepEqual(doc.materialize(l2), { zip: ["a","b"] })
+      assert.deepEqual(doc.materialize(l1), [ { zip: ["a","b"] }, { foo: "bar" }, [ 1,2,3] ])
+      assert.deepEqual(doc.materialize(l4), "hello world")
       doc.free()
     })
 
@@ -444,6 +456,7 @@ describe('Automerge', () => {
       let doc = create()
       let s1 = initSyncState()
       let m1 = doc.generateSyncMessage(s1)
+      if (m1 === null) { throw new RangeError("message should not be null") }
       const message: DecodedSyncMessage = decodeSyncMessage(m1)
       assert.deepStrictEqual(message.heads, [])
       assert.deepStrictEqual(message.need, [])
@@ -457,6 +470,7 @@ describe('Automerge', () => {
         let n1 = create(), n2 = create()
         let s1 = initSyncState(), s2 = initSyncState()
         let m1 = n1.generateSyncMessage(s1)
+        if (m1 === null) { throw new RangeError("message should not be null") }
         n2.receiveSyncMessage(s2, m1)
         let m2 = n2.generateSyncMessage(s2)
         assert.deepStrictEqual(m2, null)
@@ -474,10 +488,11 @@ describe('Automerge', () => {
         n1.commit("",0)
       }
       n2.applyChanges(n1.getChanges([]))
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
 
       // generate a naive sync message
       let m1 = n1.generateSyncMessage(s1)
+      if (m1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(s1.lastSentHeads, n1.getHeads())
 
       // heads are equal so this message should be null
@@ -497,9 +512,9 @@ describe('Automerge', () => {
         n1.commit("",0)
       }
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2)
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should sync peers where one has commits the other does not', () => {
@@ -513,9 +528,9 @@ describe('Automerge', () => {
         n1.commit("",0)
       }
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2)
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should work with prior sync state', () => {
@@ -536,9 +551,9 @@ describe('Automerge', () => {
         n1.commit("",0)
       }
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2, s1, s2)
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should not generate messages once synced', () => {
@@ -558,21 +573,25 @@ describe('Automerge', () => {
 
       // n1 reports what it has
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
 
       // n2 receives that message and sends changes along with what it has
       n2.receiveSyncMessage(s2, message)
       message = n2.generateSyncMessage(s2)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 5)
       //assert.deepStrictEqual(patch, null) // no changes arrived
 
       // n1 receives the changes and replies with the changes it now knows n2 needs
       n1.receiveSyncMessage(s1, message)
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 5)
 
       // n2 applies the changes and sends confirmation ending the exchange
       n2.receiveSyncMessage(s2, message)
       message = n2.generateSyncMessage(s2)
+      if (message === null) { throw new RangeError("message should not be null") }
 
       // n1 receives the message and has nothing more to say
       n1.receiveSyncMessage(s1, message)
@@ -605,6 +624,8 @@ describe('Automerge', () => {
       let msg1to2, msg2to1
       msg1to2 = n1.generateSyncMessage(s1)
       msg2to1 = n2.generateSyncMessage(s2)
+      if (msg1to2 === null) { throw new RangeError("message should not be null") }
+      if (msg2to1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)
       assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync.length, 0)
       assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 0)
@@ -617,25 +638,29 @@ describe('Automerge', () => {
       // now both reply with their local changes the other lacks
       // (standard warning that 1% of the time this will result in a "need" message)
       msg1to2 = n1.generateSyncMessage(s1)
+      if (msg1to2 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 5)
       msg2to1 = n2.generateSyncMessage(s2)
+      if (msg2to1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 5)
 
       // both should now apply the changes and update the frontend
       n1.receiveSyncMessage(s1, msg2to1)
       assert.deepStrictEqual(n1.getMissingDeps(), [])
       //assert.notDeepStrictEqual(patch1, null)
-      assert.deepStrictEqual(n1.toJS(), {x: 4, y: 4})
+      assert.deepStrictEqual(n1.materialize(), {x: 4, y: 4})
 
       n2.receiveSyncMessage(s2, msg1to2)
       assert.deepStrictEqual(n2.getMissingDeps(), [])
       //assert.notDeepStrictEqual(patch2, null)
-      assert.deepStrictEqual(n2.toJS(), {x: 4, y: 4})
+      assert.deepStrictEqual(n2.materialize(), {x: 4, y: 4})
 
       // The response acknowledges the changes received, and sends no further changes
       msg1to2 = n1.generateSyncMessage(s1)
+      if (msg1to2 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg1to2).changes.length, 0)
       msg2to1 = n2.generateSyncMessage(s2)
+      if (msg2to1 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg2to1).changes.length, 0)
 
       // After receiving acknowledgements, their shared heads should be equal
@@ -655,6 +680,7 @@ describe('Automerge', () => {
       // If we make one more change, and start another sync, its lastSync should be updated
       n1.set("_root","x",5)
       msg1to2 = n1.generateSyncMessage(s1)
+      if (msg1to2 === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(msg1to2).have[0].lastSync, [head1, head2].sort())
     })
 
@@ -670,17 +696,20 @@ describe('Automerge', () => {
       n1.push(items, "x")
       n1.commit("",0)
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)
 
       n1.push(items, "y")
       n1.commit("",0)
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)
 
       n1.push(items, "z")
       n1.commit("",0)
 
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).changes.length, 1)
     })
 
@@ -702,9 +731,9 @@ describe('Automerge', () => {
         n1.commit("",0)
       }
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2, s1, s2)
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should work without prior sync state', () => {
@@ -734,10 +763,10 @@ describe('Automerge', () => {
         n2.commit("",0)
       }
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should work with prior sync state', () => {
@@ -769,10 +798,10 @@ describe('Automerge', () => {
       s1 = decodeSyncState(encodeSyncState(s1))
       s2 = decodeSyncState(encodeSyncState(s2))
 
-      assert.notDeepStrictEqual(n1.toJS(), n2.toJS())
+      assert.notDeepStrictEqual(n1.materialize(), n2.materialize())
       sync(n1, n2, s1, s2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should ensure non-empty state after sync', () => {
@@ -820,7 +849,7 @@ describe('Automerge', () => {
 
       // everyone should be on the same page here
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
 
       // now make a few more changes, then attempt to sync the fully-up-to-date n1 with the confused r
       for (let i = 6; i < 9; i++) {
@@ -832,12 +861,12 @@ describe('Automerge', () => {
       rSyncState = decodeSyncState(encodeSyncState(rSyncState))
 
       assert.notDeepStrictEqual(n1.getHeads(), r.getHeads())
-      assert.notDeepStrictEqual(n1.toJS(), r.toJS())
-      assert.deepStrictEqual(n1.toJS(), {x: 8})
-      assert.deepStrictEqual(r.toJS(), {x: 2})
+      assert.notDeepStrictEqual(n1.materialize(), r.materialize())
+      assert.deepStrictEqual(n1.materialize(), {x: 8})
+      assert.deepStrictEqual(r.materialize(), {x: 2})
       sync(n1, r, s1, rSyncState)
       assert.deepStrictEqual(n1.getHeads(), r.getHeads())
-      assert.deepStrictEqual(n1.toJS(), r.toJS())
+      assert.deepStrictEqual(n1.materialize(), r.materialize())
     })
 
     it('should resync after one node experiences data loss without disconnecting', () => {
@@ -853,7 +882,7 @@ describe('Automerge', () => {
       sync(n1, n2, s1, s2)
 
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
 
       let n2AfterDataLoss = create('89abcdef')
 
@@ -861,7 +890,7 @@ describe('Automerge', () => {
       // decodeSyncState(encodeSyncState(s1)) in order to simulate data loss without disconnecting
       sync(n1, n2AfterDataLoss, s1, initSyncState())
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should handle changes concurrent to the last sync heads', () => {
@@ -896,7 +925,7 @@ describe('Automerge', () => {
       // Now sync n1 and n2. n3's change is concurrent to n1 and n2's last sync heads
       sync(n1, n2, s12, s21)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should handle histories with lots of branching and merging', () => {
@@ -931,7 +960,7 @@ describe('Automerge', () => {
 
       sync(n1, n2, s1, s2)
       assert.deepStrictEqual(n1.getHeads(), n2.getHeads())
-      assert.deepStrictEqual(n1.toJS(), n2.toJS())
+      assert.deepStrictEqual(n1.materialize(), n2.materialize())
     })
 
     it('should handle a false-positive head', () => {
@@ -1031,12 +1060,16 @@ describe('Automerge', () => {
         let m1, m2
         m1 = n1.generateSyncMessage(s1)
         m2 = n2.generateSyncMessage(s2)
+        if (m1 === null) { throw new RangeError("message should not be null") }
+        if (m2 === null) { throw new RangeError("message should not be null") }
         n1.receiveSyncMessage(s1, m2)
         n2.receiveSyncMessage(s2, m1)
 
         // Then n1 and n2 send each other their changes, except for the false positive
         m1 = n1.generateSyncMessage(s1)
         m2 = n2.generateSyncMessage(s2)
+        if (m1 === null) { throw new RangeError("message should not be null") }
+        if (m2 === null) { throw new RangeError("message should not be null") }
         n1.receiveSyncMessage(s1, m2)
         n2.receiveSyncMessage(s2, m1)
         assert.strictEqual(decodeSyncMessage(m1).changes.length, 2) // n1c1 and n1c2
@@ -1176,21 +1209,25 @@ describe('Automerge', () => {
 
       // n1 creates a sync message for n2 with an ill-fated bloom
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.strictEqual(decodeSyncMessage(message).changes.length, 0)
 
       // n2 receives it and DOESN'T send a change back
       n2.receiveSyncMessage(s2, message)
       message = n2.generateSyncMessage(s2)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.strictEqual(decodeSyncMessage(message).changes.length, 0)
 
       // n1 should now realize it's missing that change and request it explicitly
       n1.receiveSyncMessage(s1, message)
       message = n1.generateSyncMessage(s1)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.deepStrictEqual(decodeSyncMessage(message).need, n2.getHeads())
 
       // n2 should fulfill that request
       n2.receiveSyncMessage(s2, message)
       message = n2.generateSyncMessage(s2)
+      if (message === null) { throw new RangeError("message should not be null") }
       assert.strictEqual(decodeSyncMessage(message).changes.length, 1)
 
       // n1 should apply the change and the two should now be in sync
@@ -1244,15 +1281,18 @@ describe('Automerge', () => {
         // changes {n1c1, n1c2, n2c1, n2c2} twice (those are the changes that both n1 and n2 have, but
         // that n3 does not have). We want to prevent this duplication.
         message1 = n1.generateSyncMessage(s13) // message from n1 to n3
+        if (message1 === null) { throw new RangeError("message should not be null") }
         assert.strictEqual(decodeSyncMessage(message1).changes.length, 0)
         n3.receiveSyncMessage(s31, message1)
         message3 = n3.generateSyncMessage(s31) // message from n3 to n1
+        if (message3 === null) { throw new RangeError("message should not be null") }
         assert.strictEqual(decodeSyncMessage(message3).changes.length, 3) // {n3c1, n3c2, n3c3}
         n1.receiveSyncMessage(s13, message3)
 
         // Copy the Bloom filter received from n1 into the message sent from n3 to n2. This Bloom
         // filter indicates what changes n3 is going to receive from n1.
         message3 = n3.generateSyncMessage(s32) // message from n3 to n2
+        if (message3 === null) { throw new RangeError("message should not be null") }
         const modifiedMessage = decodeSyncMessage(message3)
         modifiedMessage.have.push(decodeSyncMessage(message1).have[0])
         assert.strictEqual(modifiedMessage.changes.length, 0)
@@ -1260,11 +1300,13 @@ describe('Automerge', () => {
 
         // n2 replies to n3, sending only n2c3 (the one change that n2 has but n1 doesn't)
         message2 = n2.generateSyncMessage(s23)
+        if (message2 === null) { throw new RangeError("message should not be null") }
         assert.strictEqual(decodeSyncMessage(message2).changes.length, 1) // {n2c3}
         n3.receiveSyncMessage(s32, message2)
 
         // n1 replies to n3
         message1 = n1.generateSyncMessage(s13)
+        if (message1 === null) { throw new RangeError("message should not be null") }
         assert.strictEqual(decodeSyncMessage(message1).changes.length, 5) // {n1c1, n1c2, n1c3, n2c1, n2c2}
         n3.receiveSyncMessage(s31, message1)
         assert.deepStrictEqual(n3.getHeads(), [n1c3, n2c3, n3c3].sort())
@@ -1288,10 +1330,12 @@ describe('Automerge', () => {
         sync(n1, n2, s1, s2)
         s1.lastSentHeads = [] // force generateSyncMessage to return a message even though nothing changed
         message = n1.generateSyncMessage(s1)
+        if (message === null) { throw new RangeError("message should not be null") }
         const modMsg = decodeSyncMessage(message)
         modMsg.need = lastSync // re-request change 2
         n2.receiveSyncMessage(s2, encodeSyncMessage(modMsg))
         message = n2.generateSyncMessage(s2)
+        if (message === null) { throw new RangeError("message should not be null") }
         assert.strictEqual(decodeSyncMessage(message).changes.length, 1)
         assert.strictEqual(decodeChange(decodeSyncMessage(message).changes[0]).hash, lastSync[0])
       })
@@ -1307,6 +1351,7 @@ describe('Automerge', () => {
 
         n2.applyChanges(n1.getChanges([]))
         message = n1.generateSyncMessage(s1)
+        if (message === null) { throw new RangeError("message should not be null") }
         message = decodeSyncMessage(message)
         message.need = ['0000000000000000000000000000000000000000000000000000000000000000']
         message = encodeSyncMessage(message)
@@ -1354,8 +1399,10 @@ describe('Automerge', () => {
 
         // Now n1 initiates a sync with n2, and n2 replies with {c5, c6}. n2 does not send {c7, c8}
         msg = n1.generateSyncMessage(s1)
+        if (msg === null) { throw new RangeError("message should not be null") }
         n2.receiveSyncMessage(s2, msg)
         msg = n2.generateSyncMessage(s2)
+        if (msg === null) { throw new RangeError("message should not be null") }
         decodedMsg = decodeSyncMessage(msg)
         decodedMsg.changes = [change5, change6]
         msg = encodeSyncMessage(decodedMsg)
@@ -1369,6 +1416,7 @@ describe('Automerge', () => {
 
         // n1 replies, confirming the receipt of {c5, c6} and requesting the remaining changes
         msg = n1.generateSyncMessage(s1)
+        if (msg === null) { throw new RangeError("message should not be null") }
         n2.receiveSyncMessage(s2, msg)
         assert.deepStrictEqual(decodeSyncMessage(msg).need, [c8])
         assert.deepStrictEqual(decodeSyncMessage(msg).have[0].lastSync, [c2, c6].sort())
@@ -1377,6 +1425,7 @@ describe('Automerge', () => {
 
         // n2 sends the remaining changes {c7, c8}
         msg = n2.generateSyncMessage(s2)
+        if (msg === null) { throw new RangeError("message should not be null") }
         n1.receiveSyncMessage(s1, msg)
         assert.strictEqual(decodeSyncMessage(msg).changes.length, 2)
         assert.deepStrictEqual(s1.sharedHeads, [c2, c8].sort())

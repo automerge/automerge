@@ -1,11 +1,10 @@
 use automerge::{transaction::Transactable, Automerge, AutomergeError, ROOT};
 use automerge::{ObjType, ScalarValue};
-use std::fs;
 use std::time::Instant;
 
 fn main() -> Result<(), AutomergeError> {
-    let contents = fs::read_to_string("edits.json").expect("cannot read edits file");
-    let edits = json::parse(&contents).expect("cant parse edits");
+    let contents = include_str!("../edits.json");
+    let edits = json::parse(contents).expect("cant parse edits");
     let mut commands = vec![];
     for i in 0..edits.len() {
         let pos: usize = edits[i][0].as_usize().unwrap();
@@ -29,7 +28,14 @@ fn main() -> Result<(), AutomergeError> {
         tx.splice(&text, pos, del, vals)?;
     }
     tx.commit();
-    let _ = doc.save();
+    let save = Instant::now();
+    let bytes = doc.save();
+    println!("Saved in {} ms", save.elapsed().as_millis());
+
+    let load = Instant::now();
+    let _ = Automerge::load(&bytes).unwrap();
+    println!("Loaded in {} ms", load.elapsed().as_millis());
+
     println!("Done in {} ms", now.elapsed().as_millis());
     Ok(())
 }
