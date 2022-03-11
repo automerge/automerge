@@ -287,7 +287,7 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
-    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, crate::legacy::Key)> {
+    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             if obj == ObjId::root() {
                 // root has no parent
@@ -295,20 +295,24 @@ impl Automerge {
             } else {
                 self.ops
                     .parent_object(&obj)
-                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(key)))
+                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(obj, key)))
             }
         } else {
             None
         }
     }
 
-    fn export_key(&self, key: Key) -> crate::legacy::Key {
+    fn export_key(&self, obj: ObjId, key: Key) -> Prop {
         match key {
-            Key::Map(m) => crate::legacy::Key::Map(self.ops.m.props.get(m).into()),
-            Key::Seq(ElemId(OpId(0, 0))) => crate::legacy::Key::Seq(crate::legacy::ElementId::Head),
-            Key::Seq(elem) => crate::legacy::Key::Seq(crate::legacy::ElementId::Id(
-                crate::legacy::OpId(elem.0 .0, self.ops.m.actors.get(elem.0 .1).clone()),
-            )),
+            Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
+            Key::Seq(opid) => {
+                let i = self
+                    .ops
+                    .search(obj, query::OpIdSearch::new(opid.0))
+                    .index()
+                    .unwrap();
+                Prop::Seq(i)
+            }
         }
     }
 
