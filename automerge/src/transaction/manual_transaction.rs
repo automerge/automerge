@@ -158,7 +158,7 @@ impl<'a> Transactable for Transaction<'a> {
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice<O: AsRef<ExId>, V: Iterator<Item = ScalarValue>>(
+    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,

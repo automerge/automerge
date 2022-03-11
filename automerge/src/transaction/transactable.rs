@@ -69,7 +69,7 @@ pub trait Transactable {
     fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
         -> Result<(), AutomergeError>;
 
-    fn splice<O: AsRef<ExId>, V: Iterator<Item = ScalarValue>>(
+    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,
