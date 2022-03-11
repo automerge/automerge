@@ -186,7 +186,6 @@ impl TransactionInner {
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
             key,
@@ -247,7 +246,6 @@ impl TransactionInner {
         let pred = query.ops.iter().map(|op| op.id).collect();
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
             key: Key::Map(prop),
@@ -285,7 +283,6 @@ impl TransactionInner {
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
             key,

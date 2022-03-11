@@ -445,7 +445,7 @@ impl Automerge {
 
     /// Apply a single change to this document.
     fn apply_change(&mut self, change: Change) {
-        let ops = self.import_ops(&change, self.history.len());
+        let ops = self.import_ops(&change);
         self.update_history(change);
         for (obj, op) in ops {
             self.insert_op(&obj, op);
@@ -470,7 +470,7 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change, change_id: usize) -> Vec<(ObjId, Op)> {
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
         change
             .iter_ops()
             .enumerate()
@@ -496,7 +496,6 @@ impl Automerge {
                 (
                     obj,
                     Op {
-                        change: change_id,
                         id,
                         action: c.action,
                         key,
