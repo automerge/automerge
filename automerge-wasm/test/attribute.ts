@@ -79,6 +79,37 @@ describe('Automerge', () => {
         { add: [ {start:4, end: 6}, { start: 7, end: 8 } ], del: [ { pos: 5, val: 'A' }, { pos: 6, val: 'A' }, { pos: 8, val: 'A' } ] }
       ])
     })
+
+    it('should not include attribution of text that is inserted and deleted only within change sets', () => {
+      let doc1 = create()
+      let text = doc1.set_object("_root", "notes","hello little world")
+      let h1 = doc1.getHeads();
+
+      let doc2 = doc1.fork();
+      doc2.splice(text, 5, 7, " big");
+      doc2.splice(text, 9, 0, " bad");
+      doc2.splice(text, 9, 4)
+      doc2.text(text)
+      let h2 = doc2.getHeads();
+      assert.deepEqual(doc2.text(text), "hello big world")
+
+      let doc3 = doc1.fork();
+      doc3.splice(text, 0, 0, "Well, HI THERE");
+      doc3.splice(text, 6, 8, "")
+      let h3 = doc3.getHeads();
+      assert.deepEqual(doc3.text(text), "Well, hello little world")
+
+      doc1.merge(doc2)
+      doc1.merge(doc3)
+      assert.deepEqual(doc1.text(text), "Well, hello big world")
+      let attribute = doc1.attribute(text, h1, [h2, h3])
+
+      assert.deepEqual(attribute, [
+        { add: [ { start: 11, end: 15 } ], del: [ { pos: 15, val: ' little' } ] },
+        { add: [ { start: 0,  end: 6  } ], del: [] }
+      ])
+    })
+
   })
   describe('attribute2', () => {
     it('should be able to attribute text segments on change sets', () => {
@@ -107,6 +138,36 @@ describe('Automerge', () => {
       assert.deepEqual(attribute, [
         { add: [ { actor: "bbbb", start: 16, end: 20 } ], del: [ { actor: "bbbb", pos: 20, val: ' little' } ] },
         { add: [ { actor: "dddd", start:0, end: 5 }, { actor: "cccc", start: 5,  end: 11  } ], del: [] }
+      ])
+    })
+
+    it('should not include attribution of text that is inserted and deleted only within change sets', () => {
+      let doc1 = create("aaaa")
+      let text = doc1.set_object("_root", "notes","hello little world")
+      let h1 = doc1.getHeads();
+
+      let doc2 = doc1.fork("bbbb");
+      doc2.splice(text, 5, 7, " big");
+      doc2.splice(text, 9, 0, " bad");
+      doc2.splice(text, 9, 4)
+      doc2.text(text)
+      let h2 = doc2.getHeads();
+      assert.deepEqual(doc2.text(text), "hello big world")
+
+      let doc3 = doc1.fork("cccc");
+      doc3.splice(text, 0, 0, "Well, HI THERE");
+      doc3.splice(text, 6, 8, "")
+      let h3 = doc3.getHeads();
+      assert.deepEqual(doc3.text(text), "Well, hello little world")
+
+      doc1.merge(doc2)
+      doc1.merge(doc3)
+      assert.deepEqual(doc1.text(text), "Well, hello big world")
+      let attribute = doc1.attribute2(text, h1, [h2, h3])
+
+      assert.deepEqual(attribute, [
+        { add: [ { start: 11, end: 15, actor: "bbbb" } ], del: [ { pos: 15, val: ' little', actor: "bbbb" } ] },
+        { add: [ { start: 0,  end: 6,  actor: "cccc" } ], del: [] }
       ])
     })
   })
