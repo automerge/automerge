@@ -1,3 +1,4 @@
+use crate::types::ObjId;
 use fxhash::FxHasher;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
 
@@ -25,7 +26,7 @@ pub(crate) struct Node<'a, const B: usize> {
 #[derive(Clone)]
 pub(crate) enum NodeType<'a, const B: usize> {
     ObjRoot(crate::types::ObjId),
-    ObjTreeNode(&'a crate::op_tree::OpTreeNode<B>),
+    ObjTreeNode(ObjId, &'a crate::op_tree::OpTreeNode<B>),
 }
 
 #[derive(Clone)]
@@ -51,7 +52,7 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
         let mut nodes = HashMap::new();
         for (obj_id, (_, tree)) in trees {
             if let Some(root_node) = &tree.root_node {
-                let tree_id = Self::construct_nodes(root_node, &mut nodes, metadata);
+                let tree_id = Self::construct_nodes(root_node, obj_id, &mut nodes, metadata);
                 let obj_tree_id = NodeId::default();
                 nodes.insert(
                     obj_tree_id,
@@ -76,13 +77,14 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
 
     fn construct_nodes(
         node: &'a crate::op_tree::OpTreeNode<B>,
+        objid: &ObjId,
         nodes: &mut HashMap<NodeId, Node<'a, B>>,
         m: &'a crate::op_set::OpSetMetadata,
     ) -> NodeId {
         let node_id = NodeId::default();
         let mut child_ids = Vec::new();
         for child in &node.children {
-            let child_id = Self::construct_nodes(child, nodes, m);
+            let child_id = Self::construct_nodes(child, objid, nodes, m);
             child_ids.push(child_id);
         }
         nodes.insert(
@@ -90,7 +92,7 @@ impl<'a, const B: usize> GraphVisualisation<'a, B> {
             Node {
                 id: node_id,
                 children: child_ids,
-                node_type: NodeType::ObjTreeNode(node),
+                node_type: NodeType::ObjTreeNode(*objid, node),
                 metadata: m,
             },
         );
@@ -136,7 +138,7 @@ impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisua
 
     fn node_shape(&'a self, node: &&'a Node<'a, B>) -> Option<dot::LabelText<'a>> {
         let shape = match node.node_type {
-            NodeType::ObjTreeNode(_) => dot::LabelText::label("none"),
+            NodeType::ObjTreeNode(_, _) => dot::LabelText::label("none"),
             NodeType::ObjRoot(_) => dot::LabelText::label("ellipse"),
         };
         Some(shape)
@@ -144,8 +146,8 @@ impl<'a, const B: usize> dot::Labeller<'a, &'a Node<'a, B>, Edge> for GraphVisua
 
     fn node_label(&'a self, n: &&Node<'a, B>) -> dot::LabelText<'a> {
         match n.node_type {
-            NodeType::ObjTreeNode(tree_node) => dot::LabelText::HtmlStr(
-                OpTable::create(tree_node, n.metadata, &self.actor_shorthands)
+            NodeType::ObjTreeNode(objid, tree_node) => dot::LabelText::HtmlStr(
+                OpTable::create(tree_node, &objid, n.metadata, &self.actor_shorthands)
                     .to_html()
                     .into(),
             ),
@@ -163,13 +165,14 @@ struct OpTable {
 impl OpTable {
     fn create<'a, const B: usize>(
         node: &'a crate::op_tree::OpTreeNode<B>,
+        obj: &ObjId,
         metadata: &crate::op_set::OpSetMetadata,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
         let rows = node
             .elements
             .iter()
-            .map(|e| OpTableRow::create(e, metadata, actor_shorthands))
+            .map(|e| OpTableRow::create(e, obj, metadata, actor_shorthands))
             .collect();
         OpTable { rows }
     }
@@ -226,6 +229,7 @@ impl OpTableRow {
 impl OpTableRow {
     fn create(
         op: &super::types::Op,
+        obj: &ObjId,
         metadata: &crate::op_set::OpSetMetadata,
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
@@ -246,7 +250,7 @@ impl OpTableRow {
             .collect();
         OpTableRow {
             op_description,
-            obj_id: print_opid(&op.obj.0, actor_shorthands),
+            obj_id: print_opid(&obj.0, actor_shorthands),
             op_id: print_opid(&op.id, actor_shorthands),
             prop,
             succ,

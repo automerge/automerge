@@ -164,15 +164,15 @@ impl Automerge {
         f
     }
 
-    fn insert_op(&mut self, op: Op) -> Op {
-        let q = self.ops.search(op.obj, query::SeekOp::new(&op));
+    fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+        let q = self.ops.search(obj, query::SeekOp::new(&op));
 
         for i in q.succ {
-            self.ops.replace(op.obj, i, |old_op| old_op.add_succ(&op));
+            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
         if !op.is_del() {
-            self.ops.insert(q.pos, op.clone());
+            self.ops.insert(q.pos, obj, op.clone());
         }
         op
     }
@@ -211,7 +211,7 @@ impl Automerge {
             match self.ops.object_type(&inner_obj) {
                 Some(ObjType::Map) | Some(ObjType::Table) => self.keys(obj).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
-                    self.ops.search(inner_obj, query::Len::new()).len
+                    self.ops.search(&inner_obj, query::Len::new()).len
                 }
                 None => 0,
             }
@@ -227,7 +227,7 @@ impl Automerge {
             match self.ops.object_type(&inner_obj) {
                 Some(ObjType::Map) | Some(ObjType::Table) => self.keys_at(obj, heads).count(),
                 Some(ObjType::List) | Some(ObjType::Text) => {
-                    self.ops.search(inner_obj, query::LenAt::new(clock)).len
+                    self.ops.search(&inner_obj, query::LenAt::new(clock)).len
                 }
                 None => 0,
             }
@@ -270,7 +270,7 @@ impl Automerge {
     /// Get the string represented by the given text object.
     pub fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let query = self.ops.search(obj, query::ListVals::new());
+        let query = self.ops.search(&obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -288,7 +288,7 @@ impl Automerge {
     ) -> Result<String, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
-        let query = self.ops.search(obj, query::ListValsAt::new(clock));
+        let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
@@ -338,7 +338,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(obj, query::Prop::new(p))
+                        .search(&obj, query::Prop::new(p))
                         .ops
                         .into_iter()
                         .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -349,7 +349,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(obj, query::Nth::new(n))
+                .search(&obj, query::Nth::new(n))
                 .ops
                 .into_iter()
                 .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -373,7 +373,7 @@ impl Automerge {
                 let prop = self.ops.m.props.lookup(&p);
                 if let Some(p) = prop {
                     self.ops
-                        .search(obj, query::PropAt::new(p, clock))
+                        .search(&obj, query::PropAt::new(p, clock))
                         .ops
                         .into_iter()
                         .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -384,7 +384,7 @@ impl Automerge {
             }
             Prop::Seq(n) => self
                 .ops
-                .search(obj, query::NthAt::new(n, clock))
+                .search(&obj, query::NthAt::new(n, clock))
                 .ops
                 .into_iter()
                 .map(|o| (o.value(), self.id_to_exid(o.id)))
@@ -445,10 +445,10 @@ impl Automerge {
 
     /// Apply a single change to this document.
     fn apply_change(&mut self, change: Change) {
-        let ops = self.import_ops(&change, self.history.len());
+        let ops = self.import_ops(&change);
         self.update_history(change);
-        for op in ops {
-            self.insert_op(op);
+        for (obj, op) in ops {
+            self.insert_op(&obj, op);
         }
     }
 
@@ -470,7 +470,7 @@ impl Automerge {
         None
     }
 
-    fn import_ops(&mut self, change: &Change, change_id: usize) -> Vec<Op> {
+    fn import_ops(&mut self, change: &Change) -> Vec<(ObjId, Op)> {
         change
             .iter_ops()
             .enumerate()
@@ -493,16 +493,17 @@ impl Automerge {
                         Key::Seq(ElemId(OpId(i.0, self.ops.m.actors.cache(i.1.clone()))))
                     }
                 };
-                Op {
-                    change: change_id,
-                    id,
-                    action: c.action,
+                (
                     obj,
-                    key,
-                    succ: Default::default(),
-                    pred,
-                    insert: c.insert,
-                }
+                    Op {
+                        id,
+                        action: c.action,
+                        key,
+                        succ: Default::default(),
+                        pred,
+                        insert: c.insert,
+                    },
+                )
             })
             .collect()
     }
@@ -838,21 +839,21 @@ impl Automerge {
             "pred",
             "succ"
         );
-        for i in self.ops.iter() {
-            let id = self.to_string(i.id);
-            let obj = self.to_string(i.obj);
-            let key = match i.key {
+        for (obj, op) in self.ops.iter() {
+            let id = self.to_string(op.id);
+            let obj = self.to_string(obj);
+            let key = match op.key {
                 Key::Map(n) => self.ops.m.props[n].clone(),
                 Key::Seq(n) => self.to_string(n),
             };
-            let value: String = match &i.action {
+            let value: String = match &op.action {
                 OpType::Set(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
                 OpType::Inc(obj) => format!("inc({})", obj),
                 OpType::Del => format!("del{}", 0),
             };
-            let pred: Vec<_> = i.pred.iter().map(|id| self.to_string(*id)).collect();
-            let succ: Vec<_> = i.succ.iter().map(|id| self.to_string(*id)).collect();
+            let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
+            let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
             log!(
                 "  {:12} {:12} {:12} {} {:?} {:?}",
                 id,

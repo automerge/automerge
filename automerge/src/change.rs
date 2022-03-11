@@ -39,7 +39,7 @@ const HASH_RANGE: Range<usize> = 4..8;
 pub(crate) fn encode_document<'a, 'b>(
     heads: Vec<amp::ChangeHash>,
     changes: impl Iterator<Item = &'a Change>,
-    doc_ops: impl Iterator<Item = &'b Op>,
+    doc_ops: impl Iterator<Item = (&'b ObjId, &'b Op)>,
     actors_index: &IndexedCache<ActorId>,
     props: &'a [String],
 ) -> Vec<u8> {
@@ -467,13 +467,18 @@ fn export_opid(id: &OpId, actors: &IndexedCache<ActorId>) -> amp::OpId {
     amp::OpId(id.0, actors.get(id.1).clone())
 }
 
-fn export_op(op: &Op, actors: &IndexedCache<ActorId>, props: &IndexedCache<String>) -> amp::Op {
+fn export_op(
+    op: &Op,
+    obj: &ObjId,
+    actors: &IndexedCache<ActorId>,
+    props: &IndexedCache<String>,
+) -> amp::Op {
     let action = op.action.clone();
     let key = match &op.key {
         Key::Map(n) => amp::Key::Map(props.get(*n).clone().into()),
         Key::Seq(id) => amp::Key::Seq(export_elemid(id, actors)),
     };
-    let obj = export_objid(&op.obj, actors);
+    let obj = export_objid(obj, actors);
     let pred = op.pred.iter().map(|id| export_opid(id, actors)).collect();
     amp::Op {
         action,
@@ -500,7 +505,7 @@ pub(crate) fn export_change(
         operations: change
             .operations
             .iter()
-            .map(|op| export_op(op, actors, props))
+            .map(|(obj, op)| export_op(op, obj, actors, props))
             .collect(),
         extra_bytes: change.extra_bytes.clone(),
     }

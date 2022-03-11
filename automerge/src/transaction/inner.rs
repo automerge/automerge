@@ -15,7 +15,7 @@ pub struct TransactionInner {
     pub(crate) extra_bytes: Vec<u8>,
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
-    pub(crate) operations: Vec<Op>,
+    pub(crate) operations: Vec<(ObjId, Op)>,
 }
 
 impl TransactionInner {
@@ -57,14 +57,14 @@ impl TransactionInner {
 
         let num = self.operations.len();
         // remove in reverse order so sets are removed before makes etc...
-        for op in self.operations.iter().rev() {
+        for (obj, op) in self.operations.iter().rev() {
             for pred_id in &op.pred {
-                if let Some(p) = doc.ops.search(op.obj, OpIdSearch::new(*pred_id)).index() {
-                    doc.ops.replace(op.obj, p, |o| o.remove_succ(op));
+                if let Some(p) = doc.ops.search(obj, OpIdSearch::new(*pred_id)).index() {
+                    doc.ops.replace(obj, p, |o| o.remove_succ(op));
                 }
             }
-            if let Some(pos) = doc.ops.search(op.obj, OpIdSearch::new(op.id)).index() {
-                doc.ops.remove(op.obj, pos);
+            if let Some(pos) = doc.ops.search(obj, OpIdSearch::new(op.id)).index() {
+                doc.ops.remove(obj, pos);
             }
         }
         num
@@ -125,18 +125,25 @@ impl TransactionInner {
         OpId(self.start_op + self.operations.len() as u64, self.actor)
     }
 
-    fn insert_local_op(&mut self, doc: &mut Automerge, op: Op, pos: usize, succ_pos: &[usize]) {
+    fn insert_local_op(
+        &mut self,
+        doc: &mut Automerge,
+        op: Op,
+        pos: usize,
+        obj: ObjId,
+        succ_pos: &[usize],
+    ) {
         for succ in succ_pos {
-            doc.ops.replace(op.obj, *succ, |old_op| {
+            doc.ops.replace(&obj, *succ, |old_op| {
                 old_op.add_succ(&op);
             });
         }
 
         if !op.is_del() {
-            doc.ops.insert(pos, op.clone());
+            doc.ops.insert(pos, &obj, op.clone());
         }
 
-        self.operations.push(op);
+        self.operations.push((obj, op));
     }
 
     pub fn insert<V: Into<ScalarValue>>(
@@ -173,24 +180,22 @@ impl TransactionInner {
     ) -> Result<Option<OpId>, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc.ops.search(obj, query::InsertNth::new(index));
+        let query = doc.ops.search(&obj, query::InsertNth::new(index));
 
         let key = query.key()?;
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
-            obj,
             key,
             succ: Default::default(),
             pred: Default::default(),
             insert: true,
         };
 
-        doc.ops.insert(query.pos(), op.clone());
-        self.operations.push(op);
+        doc.ops.insert(query.pos(), &obj, op.clone());
+        self.operations.push((obj, op));
 
         if is_make {
             Ok(Some(id))
@@ -225,7 +230,7 @@ impl TransactionInner {
 
         let id = self.next_id();
         let prop = doc.ops.m.props.cache(prop);
-        let query = doc.ops.search(obj, query::Prop::new(prop));
+        let query = doc.ops.search(&obj, query::Prop::new(prop));
 
         // no key present to delete
         if query.ops.is_empty() && action == OpType::Del {
@@ -241,17 +246,15 @@ impl TransactionInner {
         let pred = query.ops.iter().map(|op| op.id).collect();
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
-            obj,
             key: Key::Map(prop),
             succ: Default::default(),
             pred,
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, &query.ops_pos);
+        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
 
         if is_make {
             Ok(Some(id))
@@ -267,7 +270,7 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let query = doc.ops.search(obj, query::Nth::new(index));
+        let query = doc.ops.search(&obj, query::Nth::new(index));
 
         let id = self.next_id();
         let pred = query.ops.iter().map(|op| op.id).collect();
@@ -280,17 +283,15 @@ impl TransactionInner {
         let is_make = matches!(&action, OpType::Make(_));
 
         let op = Op {
-            change: doc.history.len(),
             id,
             action,
-            obj,
             key,
             succ: Default::default(),
             pred,
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, &query.ops_pos);
+        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
 
         if is_make {
             Ok(Some(id))
