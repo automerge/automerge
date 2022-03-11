@@ -331,7 +331,7 @@ impl TransactionInner {
         obj: &ExId,
         mut pos: usize,
         del: usize,
-        vals: impl Iterator<Item = ScalarValue>,
+        vals: impl IntoIterator<Item = ScalarValue>,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
