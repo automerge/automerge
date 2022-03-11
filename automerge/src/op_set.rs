@@ -70,14 +70,12 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F) -> Option<Op>
+    pub fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
         if let Some((_typ, tree)) = self.trees.get_mut(obj) {
             tree.replace(index, f)
-        } else {
-            None
         }
     }
 

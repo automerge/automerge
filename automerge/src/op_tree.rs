@@ -123,18 +123,15 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub fn replace<F>(&mut self, index: usize, mut f: F) -> Option<Op>
+    pub fn replace<F>(&mut self, index: usize, mut f: F)
     where
         F: FnMut(&mut Op),
     {
         if self.len() > index {
-            let op = self.get(index).unwrap().clone();
+            let op = self.get(index).unwrap();
             let mut new_op = op.clone();
             f(&mut new_op);
             self.set(index, new_op);
-            Some(op)
-        } else {
-            None
         }
     }
 
