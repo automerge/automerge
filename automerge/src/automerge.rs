@@ -287,6 +287,31 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
+    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, crate::legacy::Key)> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            if obj == ObjId::root() {
+                // root has no parent
+                None
+            } else {
+                self.ops
+                    .parent_object(&obj)
+                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(key)))
+            }
+        } else {
+            None
+        }
+    }
+
+    fn export_key(&self, key: Key) -> crate::legacy::Key {
+        match key {
+            Key::Map(m) => crate::legacy::Key::Map(self.ops.m.props.get(m).into()),
+            Key::Seq(ElemId(OpId(0, 0))) => crate::legacy::Key::Seq(crate::legacy::ElementId::Head),
+            Key::Seq(elem) => crate::legacy::Key::Seq(crate::legacy::ElementId::Id(
+                crate::legacy::OpId(elem.0 .0, self.ops.m.actors.get(elem.0 .1).clone()),
+            )),
+        }
+    }
+
     /// Get the keys of the object `obj`.
     ///
     /// For a map this returns the keys of the map.
