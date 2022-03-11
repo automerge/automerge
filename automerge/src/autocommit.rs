@@ -124,7 +124,7 @@ impl AutoCommit {
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             self.update_history(export_change(
-                &tx,
+                tx,
                 &self.doc.ops.m.actors,
                 &self.doc.ops.m.props,
             ));

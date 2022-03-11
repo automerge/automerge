@@ -446,7 +446,7 @@ impl Automerge {
     /// Apply a single change to this document.
     fn apply_change(&mut self, change: Change) {
         let ops = self.import_ops(&change);
-        self.update_history(change);
+        self.update_history(change, ops.len());
         for (obj, op) in ops {
             self.insert_op(&obj, op);
         }
@@ -771,8 +771,8 @@ impl Automerge {
             .ok_or(AutomergeError::InvalidSeq(seq))
     }
 
-    pub(crate) fn update_history(&mut self, change: Change) -> usize {
-        self.max_op = std::cmp::max(self.max_op, change.start_op + change.len() as u64 - 1);
+    pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
+        self.max_op = std::cmp::max(self.max_op, change.start_op + num_ops as u64 - 1);
 
         self.update_deps(&change);
 

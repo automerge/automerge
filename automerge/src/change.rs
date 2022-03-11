@@ -490,7 +490,7 @@ fn export_op(
 }
 
 pub(crate) fn export_change(
-    change: &TransactionInner,
+    change: TransactionInner,
     actors: &IndexedCache<ActorId>,
     props: &IndexedCache<String>,
 ) -> Change {
@@ -499,15 +499,15 @@ pub(crate) fn export_change(
         seq: change.seq,
         start_op: change.start_op,
         time: change.time,
-        deps: change.deps.clone(),
-        message: change.message.clone(),
+        deps: change.deps,
+        message: change.message,
         hash: change.hash,
         operations: change
             .operations
             .iter()
             .map(|(obj, op)| export_op(op, obj, actors, props))
             .collect(),
-        extra_bytes: change.extra_bytes.clone(),
+        extra_bytes: change.extra_bytes,
     }
     .into()
 }
