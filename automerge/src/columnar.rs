@@ -1019,7 +1019,7 @@ impl DocOpEncoder {
         props: &'b [String],
     ) -> (Vec<u8>, Vec<u8>)
     where
-        I: IntoIterator<Item = &'c Op>,
+        I: IntoIterator<Item = (&'c ObjId, &'c Op)>,
     {
         let mut e = Self::new();
         e.encode(ops, actors, props);
@@ -1041,12 +1041,12 @@ impl DocOpEncoder {
 
     fn encode<'a, I>(&mut self, ops: I, actors: &[usize], props: &[String])
     where
-        I: IntoIterator<Item = &'a Op>,
+        I: IntoIterator<Item = (&'a ObjId, &'a Op)>,
     {
-        for op in ops {
+        for (obj, op) in ops {
             self.actor.append_value(actors[op.id.actor()]);
             self.ctr.append_value(op.id.counter());
-            self.obj.append(&op.obj, actors);
+            self.obj.append(obj, actors);
             self.key.append(op.key, actors, props);
             self.insert.append(op.insert);
             self.succ.append(&op.succ, actors);

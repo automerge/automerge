@@ -640,13 +640,11 @@ mod tests {
 
     use super::*;
 
-    fn op(n: usize) -> Op {
+    fn op() -> Op {
         let zero = OpId(0, 0);
         Op {
-            change: n,
             id: zero,
             action: amp::OpType::Set(0.into()),
-            obj: zero.into(),
             key: zero.into(),
             succ: vec![],
             pred: vec![],
@@ -658,13 +656,13 @@ mod tests {
     fn insert() {
         let mut t = OpTree::new();
 
-        t.insert(0, op(1));
-        t.insert(1, op(1));
-        t.insert(0, op(1));
-        t.insert(0, op(1));
-        t.insert(0, op(1));
-        t.insert(3, op(1));
-        t.insert(4, op(1));
+        t.insert(0, op());
+        t.insert(1, op());
+        t.insert(0, op());
+        t.insert(0, op());
+        t.insert(0, op());
+        t.insert(3, op());
+        t.insert(4, op());
     }
 
     #[test]
@@ -672,7 +670,7 @@ mod tests {
         let mut t = OpTree::new();
 
         for i in 0..100 {
-            t.insert(i % 2, op(i));
+            t.insert(i % 2, op());
         }
     }
 
@@ -682,8 +680,8 @@ mod tests {
         let mut v = Vec::new();
 
         for i in 0..100 {
-            t.insert(i % 3, op(i));
-            v.insert(i % 3, op(i));
+            t.insert(i % 3, op());
+            v.insert(i % 3, op());
 
             assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
         }
