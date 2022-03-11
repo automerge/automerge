@@ -158,12 +158,12 @@ impl<'a> Transactable for Transaction<'a> {
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice<O: AsRef<ExId>>(
+    fn splice<O: AsRef<ExId>, V: Iterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<ScalarValue>,
+        vals: V,
     ) -> Result<(), AutomergeError> {
         self.inner
             .as_mut()

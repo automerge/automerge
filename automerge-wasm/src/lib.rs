@@ -145,7 +145,7 @@ impl Automerge {
                     vals.push(value);
                 }
             }
-            self.0.splice(&obj, start, delete_count, vals)?;
+            self.0.splice(&obj, start, delete_count, vals.into_iter())?;
         }
         Ok(())
     }
