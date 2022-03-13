@@ -11,155 +11,214 @@
 
 /* local */
 #include "group_state.h"
+#include "macro_utils.h"
 
-#define test_AMlistSet(label, mode) test_AMlistSet ## label ## _ ## mode
+#define test_AMlistSet(suffix, mode) test_AMlistSet ## suffix ## _ ## mode
 
-#define static_void_test_AMlistSet(label, mode, value) \
-static void test_AMlistSet ## label ## _ ## mode(void **state) { \
-    GroupState* group_state = *state; \
-    AMresult* res = AMlistSet ## label(group_state->doc, AM_ROOT, 0, !strcmp(#mode, "insert"), value); \
-    if (AMresultStatus(res) != AM_STATUS_COMMAND_OK) { \
-        fail_msg("%s", AMerrorMessage(res)); \
-    } \
+#define static_void_test_AMlistSet(suffix, mode, member, scalar_value)        \
+static void test_AMlistSet ## suffix ## _ ## mode(void **state) {             \
+    GroupState* group_state = *state;                                         \
+    AMresult* res = AMlistSet ## suffix(                                      \
+        group_state->doc, AM_ROOT, 0, !strcmp(#mode, "insert"), scalar_value  \
+    );                                                                        \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 0);                                   \
+    AMvalue value = AMresultValue(res, 0);                                    \
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    AMclear(res);                                                             \
+    res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 1);                                   \
+    value = AMresultValue(res, 0);                                            \
+    assert_int_equal(value.tag, AMvalue_discriminant(#suffix));               \
+    assert_true(value.member == scalar_value);                                \
+    AMclear(res);                                                             \
 }
 
-static_void_test_AMlistSet(Counter, insert, INT64_MAX)
+#define test_AMlistSetBytes(mode) test_AMlistSetBytes ## _ ## mode
 
-static_void_test_AMlistSet(Counter, update, INT64_MAX)
-
-static_void_test_AMlistSet(F64, insert, DBL_MAX)
-
-static_void_test_AMlistSet(F64, update, DBL_MAX)
-
-static_void_test_AMlistSet(Int, insert, INT64_MAX)
-
-static_void_test_AMlistSet(Int, update, INT64_MAX)
-
-static_void_test_AMlistSet(Str, insert, "Hello, world!")
-
-static_void_test_AMlistSet(Str, update, "Hello, world!")
-
-static_void_test_AMlistSet(Timestamp, insert, INT64_MAX)
-
-static_void_test_AMlistSet(Timestamp, update, INT64_MAX)
-
-static_void_test_AMlistSet(Uint, insert, UINT64_MAX)
-
-static_void_test_AMlistSet(Uint, update, UINT64_MAX)
-
-static void test_AMlistSetBytes_insert(void **state) {
-    static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
-
-    GroupState* group_state = *state;
-    AMresult* res = AMlistSetBytes(
-        group_state->doc,
-        AM_ROOT,
-        0,
-        true,
-        BYTES_VALUE,
-        sizeof(BYTES_VALUE) / sizeof(uint8_t)
-    );
-    if (AMresultStatus(res) != AM_STATUS_COMMAND_OK) {
-        fail_msg("%s", AMerrorMessage(res));
-    }
+#define static_void_test_AMlistSetBytes(mode, bytes_value)                    \
+static void test_AMlistSetBytes_ ## mode(void **state) {                      \
+    static size_t const BYTES_SIZE = sizeof(bytes_value) / sizeof(uint8_t);   \
+                                                                              \
+    GroupState* group_state = *state;                                         \
+    AMresult* res = AMlistSetBytes(                                           \
+        group_state->doc,                                                     \
+        AM_ROOT,                                                              \
+        0,                                                                    \
+        !strcmp(#mode, "insert"),                                             \
+        bytes_value,                                                          \
+        BYTES_SIZE                                                            \
+    );                                                                        \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 0);                                   \
+    AMvalue value = AMresultValue(res, 0);                                    \
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    AMclear(res);                                                             \
+    res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 1);                                   \
+    value = AMresultValue(res, 0);                                            \
+    assert_int_equal(value.tag, AM_VALUE_BYTES);                              \
+    assert_int_equal(value.bytes.count, BYTES_SIZE);                          \
+    assert_memory_equal(value.bytes.src, bytes_value, BYTES_SIZE);            \
+    AMclear(res);                                                             \
 }
 
-static void test_AMlistSetBytes_update(void **state) {
-    static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
+#define test_AMlistSetNull(mode) test_AMlistSetNull_ ## mode
 
-    GroupState* group_state = *state;
-    AMresult* res = AMlistSetBytes(
-        group_state->doc,
-        AM_ROOT,
-        0,
-        false,
-        BYTES_VALUE,
-        sizeof(BYTES_VALUE) / sizeof(uint8_t)
-    );
-    if (AMresultStatus(res) != AM_STATUS_COMMAND_OK) {
-        fail_msg("%s", AMerrorMessage(res));
-    }
+#define static_void_test_AMlistSetNull(mode)                                  \
+static void test_AMlistSetNull_ ## mode(void **state) {                       \
+    GroupState* group_state = *state;                                         \
+    AMresult* res = AMlistSetNull(                                            \
+        group_state->doc, AM_ROOT, 0, !strcmp(#mode, "insert"));              \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 0);                                   \
+    AMvalue value = AMresultValue(res, 0);                                    \
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    AMclear(res);                                                             \
+    res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 1);                                   \
+    value = AMresultValue(res, 0);                                            \
+    assert_int_equal(value.tag, AM_VALUE_NULL);                               \
+    AMclear(res);                                                             \
 }
 
+#define test_AMlistSetObject(label, mode) test_AMlistSetObject_ ## label ## _ ## mode
 
-static void test_AMlistSetNull_insert(void **state) {
-    GroupState* group_state = *state;
-    AMresult* res = AMlistSetNull(group_state->doc, AM_ROOT, 0, true);
-    if (AMresultStatus(res) != AM_STATUS_COMMAND_OK) {
-        fail_msg("%s", AMerrorMessage(res));
-    }
+#define static_void_test_AMlistSetObject(label, mode)                         \
+static void test_AMlistSetObject_ ## label ## _ ## mode(void **state) {       \
+    GroupState* group_state = *state;                                         \
+    AMresult* res = AMlistSetObject(                                          \
+        group_state->doc,                                                     \
+        AM_ROOT,                                                              \
+        0,                                                                    \
+        !strcmp(#mode, "insert"),                                             \
+        AMobjType_tag(#label)                                                 \
+    );                                                                        \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 1);                                   \
+    AMvalue value = AMresultValue(res, 0);                                    \
+    assert_int_equal(value.tag, AM_VALUE_OBJ);                                \
+    assert_int_equal(value.obj.tag, AM_OBJ_ID);                               \
+    assert_int_equal(AMobjSize(group_state->doc, &value.obj), 0);             \
+    AMclear(res);                                                             \
 }
 
-static void test_AMlistSetNull_update(void **state) {
-    GroupState* group_state = *state;
-    AMresult* res = AMlistSetNull(group_state->doc, AM_ROOT, 0, false);
-    if (AMresultStatus(res) != AM_STATUS_COMMAND_OK) {
-        fail_msg("would be consolidated into%s", AMerrorMessage(res));
-    }
+#define test_AMlistSetStr(mode) test_AMlistSetStr ## _ ## mode
+
+#define static_void_test_AMlistSetStr(mode, str_value)                        \
+static void test_AMlistSetStr_ ## mode(void **state) {                        \
+    static size_t const STR_LEN = strlen(str_value);                          \
+                                                                              \
+    GroupState* group_state = *state;                                         \
+    AMresult* res = AMlistSetStr(                                             \
+        group_state->doc,                                                     \
+        AM_ROOT,                                                              \
+        0,                                                                    \
+        !strcmp(#mode, "insert"),                                             \
+        str_value                                                             \
+    );                                                                        \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 0);                                   \
+    AMvalue value = AMresultValue(res, 0);                                    \
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
+    AMclear(res);                                                             \
+    res = AMlistGet(group_state->doc, AM_ROOT, 0);                            \
+    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
+        fail_msg("%s", AMerrorMessage(res));                                  \
+    }                                                                         \
+    assert_int_equal(AMresultSize(res), 1);                                   \
+    value = AMresultValue(res, 0);                                            \
+    assert_int_equal(value.tag, AM_VALUE_STR);                                \
+    assert_int_equal(strlen(value.str), STR_LEN);                             \
+    assert_memory_equal(value.str, str_value, STR_LEN + 1);                   \
+    AMclear(res);                                                             \
 }
 
-static void test_AMlistSetObject_insert(void **state) {
-    static AmObjType const OBJ_TYPES[] = {
-        AM_OBJ_TYPE_LIST,
-        AM_OBJ_TYPE_MAP,
-        AM_OBJ_TYPE_TEXT,
-    };
-    static AmObjType const* const end = OBJ_TYPES + sizeof(OBJ_TYPES) / sizeof(AmObjType);
+static uint8_t const BYTES_VALUE[] = {INT8_MIN, INT8_MAX / 2, INT8_MAX};
 
-    GroupState* group_state = *state;
-    for (AmObjType const* next = OBJ_TYPES; next != end; ++next) {
-        AMresult* res = AMlistSetObject(
-            group_state->doc,
-            AM_ROOT,
-            0,
-            true,
-            *next
-        );
-        if (AMresultStatus(res) != AM_STATUS_OBJ_OK) {
-            fail_msg("%s", AMerrorMessage(res));
-        }
-    }
-}
+static_void_test_AMlistSetBytes(insert, BYTES_VALUE)
 
-static void test_AMlistSetObject_update(void **state) {
-    static AmObjType const OBJ_TYPES[] = {
-        AM_OBJ_TYPE_LIST,
-        AM_OBJ_TYPE_MAP,
-        AM_OBJ_TYPE_TEXT,
-    };
-    static AmObjType const* const end = OBJ_TYPES + sizeof(OBJ_TYPES) / sizeof(AmObjType);
+static_void_test_AMlistSetBytes(update, BYTES_VALUE)
 
-    GroupState* group_state = *state;
-    for (AmObjType const* next = OBJ_TYPES; next != end; ++next) {
-        AMresult* res = AMlistSetObject(
-            group_state->doc,
-            AM_ROOT,
-            0,
-            false,
-            *next
-        );
-        if (AMresultStatus(res) != AM_STATUS_OBJ_OK) {
-            fail_msg("%s", AMerrorMessage(res));
-        }
-    }
-}
+static_void_test_AMlistSet(Counter, insert, counter, INT64_MAX)
+
+static_void_test_AMlistSet(Counter, update, counter, INT64_MAX)
+
+static_void_test_AMlistSet(F64, insert, f64, DBL_MAX)
+
+static_void_test_AMlistSet(F64, update, f64, DBL_MAX)
+
+static_void_test_AMlistSet(Int, insert, int_, INT64_MAX)
+
+static_void_test_AMlistSet(Int, update, int_, INT64_MAX)
+
+static_void_test_AMlistSetNull(insert)
+
+static_void_test_AMlistSetNull(update)
+
+static_void_test_AMlistSetObject(List, insert)
+
+static_void_test_AMlistSetObject(List, update)
+
+static_void_test_AMlistSetObject(Map, insert)
+
+static_void_test_AMlistSetObject(Map, update)
+
+static_void_test_AMlistSetObject(Text, insert)
+
+static_void_test_AMlistSetObject(Text, update)
+
+static_void_test_AMlistSetStr(insert, "Hello, world!")
+
+static_void_test_AMlistSetStr(update, "Hello, world!")
+
+static_void_test_AMlistSet(Timestamp, insert, timestamp, INT64_MAX)
+
+static_void_test_AMlistSet(Timestamp, update, timestamp, INT64_MAX)
+
+static_void_test_AMlistSet(Uint, insert, uint, UINT64_MAX)
+
+static_void_test_AMlistSet(Uint, update, uint, UINT64_MAX)
 
 int run_AMlistSet_tests(void) {
     const struct CMUnitTest tests[] = {
-        cmocka_unit_test(test_AMlistSetBytes_insert),
-        cmocka_unit_test(test_AMlistSetBytes_update),
+        cmocka_unit_test(test_AMlistSetBytes(insert)),
+        cmocka_unit_test(test_AMlistSetBytes(update)),
         cmocka_unit_test(test_AMlistSet(Counter, insert)),
         cmocka_unit_test(test_AMlistSet(Counter, update)),
         cmocka_unit_test(test_AMlistSet(F64, insert)),
         cmocka_unit_test(test_AMlistSet(F64, update)),
         cmocka_unit_test(test_AMlistSet(Int, insert)),
         cmocka_unit_test(test_AMlistSet(Int, update)),
-        cmocka_unit_test(test_AMlistSetNull_insert),
-        cmocka_unit_test(test_AMlistSetNull_update),
-        cmocka_unit_test(test_AMlistSetObject_insert),
-        cmocka_unit_test(test_AMlistSetObject_update),
-        cmocka_unit_test(test_AMlistSet(Str, insert)),
-        cmocka_unit_test(test_AMlistSet(Str, update)),
+        cmocka_unit_test(test_AMlistSetNull(insert)),
+        cmocka_unit_test(test_AMlistSetNull(update)),
+        cmocka_unit_test(test_AMlistSetObject(List, insert)),
+        cmocka_unit_test(test_AMlistSetObject(List, update)),
+        cmocka_unit_test(test_AMlistSetObject(Map, insert)),
+        cmocka_unit_test(test_AMlistSetObject(Map, update)),
+        cmocka_unit_test(test_AMlistSetObject(Text, insert)),
+        cmocka_unit_test(test_AMlistSetObject(Text, update)),
+        cmocka_unit_test(test_AMlistSetStr(insert)),
+        cmocka_unit_test(test_AMlistSetStr(update)),
         cmocka_unit_test(test_AMlistSet(Timestamp, insert)),
         cmocka_unit_test(test_AMlistSet(Timestamp, update)),
         cmocka_unit_test(test_AMlistSet(Uint, insert)),

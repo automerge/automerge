@@ -4,10 +4,11 @@ find_package(cmocka REQUIRED)
 
 add_executable(
     test_${LIBRARY_NAME}
-    group_state.c
-    amlistset_tests.c
-    ammapset_tests.c
-    main.c
+        group_state.c
+        amlistset_tests.c
+        ammapset_tests.c
+        macro_utils.c
+        main.c
 )
 
 set_target_properties(test_${LIBRARY_NAME} PROPERTIES LINKER_LANGUAGE C)
