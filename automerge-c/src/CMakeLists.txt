@@ -27,8 +27,7 @@ set(CARGO_CURRENT_BINARY_DIR "${CARGO_TARGET_DIR}/${CARGO_BUILD_TYPE}")
 
 set(
     CARGO_OUTPUT
-        # \note cbindgen won't regenerate a missing header so it can't be cleaned.
-        #${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+        ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_SHARED_LIBRARY_SUFFIX}
         ${CARGO_CURRENT_BINARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}${LIBRARY_NAME}${CMAKE_STATIC_LIBRARY_SUFFIX}
 )
@@ -43,9 +42,21 @@ add_custom_command(
     OUTPUT ${CARGO_OUTPUT}
     COMMAND
         ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${CARGO_TARGET_DIR} ${CARGO_CMD} build ${CARGO_FLAG}
+    COMMAND
+        # Compensate for cbindgen's variant struct naming.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+_[^_]+\)_Body -DREPLACE_EXPR=AM\\1 -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen's union tag enum type naming.
+        ${CMAKE_COMMAND} -DMATCH_REGEX=AM\([^_]+\)_Tag -DREPLACE_EXPR=AM\\1Variant -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
+    COMMAND
+        # Compensate for cbindgen's translation of consecutive uppercase letters to "ScreamingSnakeCase".
+        ${CMAKE_COMMAND} -DMATCH_REGEX=A_M\([^_]+\)_ -DREPLACE_EXPR=AM_\\1_ -P ${CMAKE_SOURCE_DIR}/cmake/file_regex_replace.cmake -- ${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h
     MAIN_DEPENDENCY
         lib.rs
     DEPENDS
+        doc.rs
+        result.rs
+        utils.rs
         ${CMAKE_SOURCE_DIR}/build.rs
         ${CMAKE_SOURCE_DIR}/Cargo.toml
         ${CMAKE_SOURCE_DIR}/cbindgen.toml
@@ -56,9 +67,8 @@ add_custom_command(
     VERBATIM
 )
 
-# \note This target is only necessary because cbindgen won't allow the
-#       generated header to be listed in the Cargo command's output, being
-#       another target's source file would've been enough otherwise.
+# \note cbindgen doesn't notice the removal of the header file it generated so
+#       Cargo has to be re-run after a clean.
 add_custom_target(
     ${LIBRARY_NAME}_artifacts
     DEPENDS ${CARGO_OUTPUT}
@@ -101,8 +111,6 @@ else()
 endif()
 
 add_library(${LIBRARY_NAME} ${LIBRARY_TYPE} IMPORTED GLOBAL)
-
-add_dependencies(${LIBRARY_NAME} ${LIBRARY_NAME}_artifacts)
 
 set_target_properties(
     ${LIBRARY_NAME}
@@ -186,9 +194,8 @@ if(DOXYGEN_FOUND)
         ${LIBRARY_NAME}_docs
         "${CARGO_TARGET_DIR}/${LIBRARY_NAME}.h"
         "${CMAKE_SOURCE_DIR}/README.md"
+        USE_STAMP_FILE
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         COMMENT "Producing documentation with Doxygen..."
     )
-
-    add_dependencies(${LIBRARY_NAME}_docs ${LIBRARY_NAME}_artifacts)
 endif()
