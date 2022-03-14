@@ -23,7 +23,7 @@ pub enum AMobj {
         /// The actor component of an object identifier.
         actor: [u8; 16],
         /// The index component of an object identifier.
-        idx: usize
+        idx: usize,
     },
     /// A root object signifier variant.
     Root,
@@ -38,11 +38,16 @@ impl From<&am::ObjId> for AMobj {
                     actor: Default::default(),
                     idx: *idx,
                 };
-                if let AMobj::Id{ctr: _, actor: a, idx: _} = &mut am_obj {
+                if let AMobj::Id {
+                    ctr: _,
+                    actor: a,
+                    idx: _,
+                } = &mut am_obj
+                {
                     a.copy_from_slice(actor.to_bytes());
                 }
                 am_obj
-            },
+            }
             am::ObjId::Root => AMobj::Root,
         }
     }
@@ -51,9 +56,9 @@ impl From<&am::ObjId> for AMobj {
 impl From<&AMobj> for am::ObjId {
     fn from(am_obj: &AMobj) -> Self {
         match am_obj {
-            AMobj::Id{ctr, actor, idx} => {
+            AMobj::Id { ctr, actor, idx } => {
                 am::ObjId::Id(*ctr, am::ActorId::from(actor.as_slice()), *idx)
-            },
+            }
             AMobj::Root => am::ObjId::Root,
         }
     }
@@ -140,24 +145,24 @@ pub enum AMvalue {
     Boolean(libc::c_char),
     /// An array of bytes variant.
     Bytes(AMbyteSpan),
-/*
+    /*
     /// A changes variant.
     Changes(_),
-*/
+    */
     /// A CRDT counter variant.
     Counter(i64),
     /// A 64-bit float variant.
     F64(f64),
-/*
+    /*
     /// A heads variant.
     Heads(_),
-*/
+    */
     /// A 64-bit signed integer variant.
     Int(i64),
-/*
+    /*
     /// A keys variant.
     Keys(_),
-*/
+    */
     /// A nothing variant.
     Nothing,
     /// A null variant.
@@ -168,10 +173,10 @@ pub enum AMvalue {
     Str(*const libc::c_char),
     /// A Lamport timestamp variant.
     Timestamp(i64),
-/*
+    /*
     /// A transaction variant.
     Transaction(_),
- */
+    */
     /// A 64-bit unsigned integer variant.
     Uint(u64),
 }

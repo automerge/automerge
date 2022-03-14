@@ -205,9 +205,7 @@ pub unsafe extern "C" fn AMresultStatus(result: *mut AMresult) -> AMstatus {
 /// \return The count of values in \p result.
 /// \pre \p result must be a valid address.
 #[no_mangle]
-pub unsafe extern "C" fn AMresultSize(
-    result: *mut AMresult,
-) -> usize {
+pub unsafe extern "C" fn AMresultSize(result: *mut AMresult) -> usize {
     if let Some(result) = result.as_mut() {
         match result {
             AMresult::ActorId(_) | AMresult::ObjId(_) => 1,
@@ -233,10 +231,7 @@ pub unsafe extern "C" fn AMresultSize(
 /// # Safety
 /// result must be a pointer to a valid AMresult
 #[no_mangle]
-pub unsafe extern "C" fn AMresultValue(
-    result: *mut AMresult,
-    index: usize,
-) -> AMvalue {
+pub unsafe extern "C" fn AMresultValue(result: *mut AMresult, index: usize) -> AMvalue {
     let mut value = AMvalue::Nothing;
     if let Some(result) = result.as_mut() {
         match result {
@@ -244,61 +239,57 @@ pub unsafe extern "C" fn AMresultValue(
                 if index == 0 {
                     value = AMvalue::ActorId(actor_id.into());
                 }
-            },
-            AMresult::Changes(_) => {},
-            AMresult::Error(_) => {},
+            }
+            AMresult::Changes(_) => {}
+            AMresult::Error(_) => {}
             AMresult::ObjId(obj_id) => {
                 if index == 0 {
                     value = AMvalue::Obj((&*obj_id).into());
                 }
-            },
+            }
             AMresult::Nothing => (),
             AMresult::Scalars(vec, hosted_str) => {
                 if let Some(element) = vec.get(index) {
                     match element {
-                        am::Value::Scalar(scalar) => {
-                            match scalar {
-                                am::ScalarValue::Boolean(flag) => {
-                                    value = AMvalue::Boolean(*flag as i8);
-                                },
-                                am::ScalarValue::Bytes(bytes) => {
-                                    value = AMvalue::Bytes(bytes.into());
-                                },
-                                am::ScalarValue::Counter(counter) => {
-                                    value = AMvalue::Counter(counter.into());
-                                },
-                                am::ScalarValue::F64(float) => {
-                                    value = AMvalue::F64(*float);
-                                },
-                                am::ScalarValue::Int(int) => {
-                                    value = AMvalue::Int(*int);
-                                },
-                                am::ScalarValue::Null => {
-                                    value = AMvalue::Null;
-                                },
-                                am::ScalarValue::Str(smol_str) => {
-                                    *hosted_str = CString::new(smol_str.to_string()).ok();
-                                    if let Some(c_str) = hosted_str {
-                                        value = AMvalue::Str(c_str.as_ptr());
-                                    }
-                                },
-                                am::ScalarValue::Timestamp(timestamp) => {
-                                    value = AMvalue::Timestamp(*timestamp);
-                                },
-                                am::ScalarValue::Uint(uint) => {
-                                    value = AMvalue::Uint(*uint);
-                                },
+                        am::Value::Scalar(scalar) => match scalar {
+                            am::ScalarValue::Boolean(flag) => {
+                                value = AMvalue::Boolean(*flag as i8);
+                            }
+                            am::ScalarValue::Bytes(bytes) => {
+                                value = AMvalue::Bytes(bytes.into());
+                            }
+                            am::ScalarValue::Counter(counter) => {
+                                value = AMvalue::Counter(counter.into());
+                            }
+                            am::ScalarValue::F64(float) => {
+                                value = AMvalue::F64(*float);
+                            }
+                            am::ScalarValue::Int(int) => {
+                                value = AMvalue::Int(*int);
+                            }
+                            am::ScalarValue::Null => {
+                                value = AMvalue::Null;
+                            }
+                            am::ScalarValue::Str(smol_str) => {
+                                *hosted_str = CString::new(smol_str.to_string()).ok();
+                                if let Some(c_str) = hosted_str {
+                                    value = AMvalue::Str(c_str.as_ptr());
+                                }
+                            }
+                            am::ScalarValue::Timestamp(timestamp) => {
+                                value = AMvalue::Timestamp(*timestamp);
+                            }
+                            am::ScalarValue::Uint(uint) => {
+                                value = AMvalue::Uint(*uint);
                             }
                         },
                         // \todo Confirm that an object value should be ignored
                         //       when there's no object ID variant.
                         am::Value::Object(_) => (),
                     }
-//                } else {
-//                    value = AMvalue::Null;
                 }
-            },
-       }
+            }
+        }
     };
     value
 }
@@ -516,7 +507,11 @@ pub unsafe extern "C" fn AMmapSetTimestamp(
     value: i64,
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
-    to_result(doc.set(to_obj_id!(obj), to_str(key), am::ScalarValue::Timestamp(value)))
+    to_result(doc.set(
+        to_obj_id!(obj),
+        to_str(key),
+        am::ScalarValue::Timestamp(value),
+    ))
 }
 
 /// \memberof AMdoc
@@ -1000,10 +995,7 @@ pub unsafe extern "C" fn AMerrorMessage(result: *mut AMresult) -> *const c_char 
 /// \return The count of values in \p obj.
 /// \pre \p doc must be a valid address.
 #[no_mangle]
-pub unsafe extern "C" fn AMobjSize(
-    doc: *const AMdoc,
-    obj: *const AMobj,
-) -> usize {
+pub unsafe extern "C" fn AMobjSize(doc: *const AMdoc, obj: *const AMobj) -> usize {
     if let Some(doc) = doc.as_ref() {
         doc.length(to_obj_id!(obj))
     } else {
