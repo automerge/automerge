@@ -242,6 +242,15 @@ describe('Automerge', () => {
       doc.free()
     })
 
+    it('should be able to insert objects into text', () => {
+      let doc = create()
+      let text = doc.set_object("/", "text", "Hello world");
+      let obj = doc.insert_object(text, 6, { hello: "world" });
+      assert.deepEqual(doc.text(text), "Hello \ufffcworld");
+      assert.deepEqual(doc.value(text, 6), ["map", obj]);
+      assert.deepEqual(doc.value(obj, "hello"), ["str", "world"]);
+    })
+
     it('should be able save all or incrementally', () => {
       let doc = create()
 
