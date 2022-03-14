@@ -274,6 +274,8 @@ impl Automerge {
         for q in &query.ops {
             if let OpType::Set(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
+            } else {
+                buffer.push('\u{fffc}');
             }
         }
         Ok(buffer)
