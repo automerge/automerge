@@ -6,23 +6,26 @@
   ],
   "name": "automerge-wasm",
   "description": "wasm-bindgen bindings to the automerge rust implementation",
-  "version": "0.0.1",
+  "version": "0.0.19",
   "license": "MIT",
   "files": [
     "README.md",
-    "LICENSE",
     "package.json",
-    "automerge_wasm_bg.wasm",
-    "automerge_wasm.js"
+    "index.d.ts",
+    "node/index.js",
+    "node/index_bg.wasm",
+    "web/index.js",
+    "web/index_bg.wasm"
   ],
-  "module": "./pkg/index.js",
-  "main": "./dev/index.js",
+  "types": "index.d.ts",
+  "module": "./web/index.js",
+  "main": "./node/index.js",
   "scripts": {
-    "build": "rimraf ./dev && wasm-pack build --target nodejs --dev --out-name index -d dev && cp index.d.ts dev",
-    "release": "rimraf ./dev && wasm-pack build --target nodejs --release --out-name index -d dev && cp index.d.ts dev",
-    "pkg": "rimraf ./pkg && wasm-pack build --target web --release --out-name index -d pkg && cp index.d.ts pkg && cd pkg && yarn pack && mv automerge-wasm*tgz ..",
-    "prof": "rimraf ./dev && wasm-pack build --target nodejs --profiling --out-name index -d dev",
-    "test": "yarn build && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
+    "build": "rimraf ./node && wasm-pack build --target nodejs --dev --out-name bindgen -d node && cp node-index.js node/index.js",
+    "release-w": "rimraf ./web && wasm-pack build --target web --release --out-name index -d web",
+    "release-n": "rimraf ./node && wasm-pack build --target nodejs --release --out-name index -d node && cp node-index.js node/index.js",
+    "release": "yarn release-w && yarn release-n",
+    "test": "ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "dependencies": {},
   "devDependencies": {

@@ -3,9 +3,8 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../dev/index'
-import { DecodedSyncMessage } from '../index';
-import { Hash } from '../dev/index';
+import init, { create, loadDoc, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { DecodedSyncMessage, Hash } from '..';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
@@ -29,7 +28,11 @@ function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncSta
 
 describe('Automerge', () => {
   describe('basics', () => {
-    it('should init clone and free', () => {
+    it('default import init() should return a promise', () => {
+      assert(init() instanceof Promise)
+    })
+
+    it('should create, clone and free', () => {
       let doc1 = create()
       let doc2 = doc1.clone()
       doc1.free()
