@@ -84,7 +84,7 @@ static void test_AMmapSetBytes(void **state) {
     AMvalue value = AMresultValue(res, 0);                                    \
     assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
     AMclear(res);                                                             \
-    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                            \
+    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                           \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
@@ -114,7 +114,7 @@ static void test_AMmapSetNull(void **state) {
     AMvalue value = AMresultValue(res, 0);                                    \
     assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
     AMclear(res);                                                             \
-    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                            \
+    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                           \
     if (AMresultStatus(res) != AM_STATUS_OK) {                                \
         fail_msg("%s", AMerrorMessage(res));                                  \
     }                                                                         \
