@@ -338,6 +338,71 @@ impl Automerge {
         Ok(result)
     }
 
+    #[wasm_bindgen(js_name = enablePatches)]
+    pub fn enable_patches(&mut self, enable: JsValue) -> Result<(), JsValue> {
+        let enable = enable
+            .as_bool()
+            .ok_or_else(|| to_js_err("expected boolean"))?;
+        self.0.enable_patches(enable);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = popPatches)]
+    pub fn pop_patches(&mut self) -> Result<Array, JsValue> {
+        let patches = self.0.pop_patches();
+        let result = Array::new();
+        for p in patches {
+            let patch = Object::new();
+            match p {
+                am::Patch::Del(obj, key) => {
+                    js_set(&patch, "action", "del")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "key", key)?;
+                }
+
+                am::Patch::Set(am::PatchSet {
+                    obj,
+                    key,
+                    value,
+                    conflict,
+                }) => {
+                    js_set(&patch, "action", "set")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "key", key)?;
+                    match value {
+                        (Value::Object(obj_type), obj_id) => {
+                            js_set(&patch, "datatype", obj_type.to_string())?;
+                            js_set(&patch, "value", obj_id.to_string())?;
+                        }
+                        (Value::Scalar(value), _) => {
+                            js_set(&patch, "datatype", datatype(&value))?;
+                            js_set(&patch, "value", ScalarValue(value))?;
+                        }
+                    };
+                    js_set(&patch, "conflict", conflict)?;
+                }
+
+                am::Patch::Insert(obj, index, value) => {
+                    js_set(&patch, "action", "insert")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "index", index)?;
+                    match value {
+                        (Value::Object(obj_type), obj_id) => {
+                            js_set(&patch, "datatype", obj_type.to_string())?;
+                            js_set(&patch, "value", obj_id.to_string())?;
+                        }
+                        (Value::Scalar(value), _) => {
+                            js_set(&patch, "datatype", datatype(&value))?;
+                            js_set(&patch, "value", ScalarValue(value))?;
+                        }
+                    };
+                }
+            }
+            result.push(&patch);
+        }
+        Ok(result)
+    }
+
     pub fn length(&mut self, obj: JsValue, heads: Option<Array>) -> Result<f64, JsValue> {
         let obj = self.import(obj)?;
         if let Some(heads) = get_heads(heads) {

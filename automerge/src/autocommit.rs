@@ -4,6 +4,7 @@ use crate::{
     change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
     Change, ChangeHash, Prop, Value,
 };
+use crate::types::Patch;
 use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
 
 /// An automerge document that automatically manages transactions.
@@ -48,6 +49,14 @@ impl AutoCommit {
 
     pub fn get_actor(&self) -> &ActorId {
         self.doc.get_actor()
+    }
+
+    pub fn enable_patches(&mut self, enable: bool) {
+        self.doc.enable_patches(enable)
+    }
+
+    pub fn pop_patches(&mut self) -> Vec<Patch> {
+        self.doc.pop_patches()
     }
 
     fn ensure_transaction_open(&mut self) {

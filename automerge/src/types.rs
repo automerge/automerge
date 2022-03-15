@@ -1,4 +1,5 @@
 use crate::error;
+use crate::exid::ExId;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
@@ -498,6 +499,31 @@ impl TryFrom<&[u8]> for ChangeHash {
             let mut array = [0; 32];
             array.copy_from_slice(bytes);
             Ok(ChangeHash(array))
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatchSet {
+    pub obj: ExId,
+    pub key: Prop,
+    pub value: (Value, ExId),
+    pub conflict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Patch {
+    Del(ExId, Prop),
+    Set(PatchSet),
+    Insert(ExId, usize, (Value, ExId)),
+}
+
+#[cfg(feature = "wasm")]
+impl From<Prop> for wasm_bindgen::JsValue {
+    fn from(prop: Prop) -> Self {
+        match prop {
+            Prop::Map(key) => key.into(),
+            Prop::Seq(index) => index.into(),
         }
     }
 }

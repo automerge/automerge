@@ -29,6 +29,15 @@ function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncSta
 
 describe('Automerge', () => {
   describe('basics', () => {
+    it.only('patch generation', () => {
+      let doc1 = create("aaaa"), doc2 = create("bbbb")
+      doc1.set("_root", "hello", "world")
+      doc2.enablePatches(true)
+      doc2.applyChanges(doc1.getChanges([]))
+      let patches = doc2.popPatches()
+      assert.deepEqual(patches, [])
+    })
+
     it('should init clone and free', () => {
       let doc1 = create()
       let doc2 = doc1.clone()

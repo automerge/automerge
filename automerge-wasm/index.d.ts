@@ -71,6 +71,15 @@ export type Op = {
   pred: string[],
 }
 
+export type Patch = {
+  obj: ObjID
+  action: 'set' | 'del' | 'insert'
+  key: Prop
+  value: Value
+  datatype: Datatype
+  conflict: boolean
+}
+
 export function create(actor?: Actor): Automerge;
 export function loadDoc(data: Uint8Array, actor?: Actor): Automerge;
 export function encodeChange(change: DecodedChange): Change;
@@ -108,6 +117,10 @@ export class Automerge {
   getActorId(): Actor;
   pendingOps(): number;
   rollback(): number;
+
+  // patches
+  enablePatches(enable: boolean): void;
+  popPatches(): Patch[];
 
   // save and load to local store
   save(): Uint8Array;
