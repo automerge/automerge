@@ -11,18 +11,21 @@ use std::ffi::CString;
 /// \var AMobj::tag
 /// The variant discriminator of an `AMobj` struct.
 ///
+/// \var AMobj::ID
+/// An object identifier.
+///
 /// \struct AMobj_Id
-/// \brief An object identifier.
+/// \brief An object identifier's fields.
 ///
 #[repr(C)]
 pub enum AMobj {
     /// An object identifier variant.
     Id {
-        /// The counter component of an object identifier.
+        /// The counter field of an object identifier.
         ctr: u64,
-        /// The actor component of an object identifier.
+        /// The actor field of an object identifier.
         actor: [u8; 16],
-        /// The index component of an object identifier.
+        /// The index field of an object identifier.
         idx: usize,
     },
     /// A root object signifier variant.
