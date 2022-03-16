@@ -22,18 +22,17 @@ This is a rust/wasm package and will work in a node or web environment.  Node is
 
 This creates a document in node.  The memory allocated is handled by wasm and isn't managed by the javascript garbage collector and thus needs to be manually freed.
 
-```
+```javascript
   import { create } from "automerge-wasm"
 
   let doc = create()
 
   doc.free()
-
 ```
 
 While this will work in both node and in a web context
 
-```
+```javascript
   import init, { create } from "automerge-wasm"
 
   init().then(_ => {
@@ -51,7 +50,7 @@ Automerge has many scalar types.  Methods like `set()` and `insert()` take an op
 
 These are sets without a datatype
 
-```
+```javascript
   import { create } from "automerge-wasm"
 
   let doc = create()
@@ -69,7 +68,7 @@ Sets with a datatype and examples of all the supported datatypes.
 
 While int vs uint vs f64 matters little in javascript, Automerge is a cross platform library where these distinctions matter.
 
-```
+```javascript
   import { create } from "automerge-wasm"
 
   let doc = create()
@@ -89,7 +88,7 @@ While int vs uint vs f64 matters little in javascript, Automerge is a cross plat
 
 Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed set of data that can hold any scalar or any object type.  Text is numerically indexed sets of graphmeme clusters.
 
-```
+```javascript
   import { create } from "automerge-wasm"
 
   let doc = create()
@@ -115,7 +114,7 @@ Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key va
 
 You can access objects by passing the object id as the first parameter for a call.
 
-```
+```javascript
   import { create } from "automerge-wasm"
 
   let doc = create()
@@ -127,7 +126,7 @@ You can access objects by passing the object id as the first parameter for a cal
 
 Anywhere Object Id's are being used a path can also be used.  The following two statements are equivelent:
 
-```
+```javascript
   // get the id then use it
 
   let id = doc.value("/", "config")[1]
@@ -142,20 +141,60 @@ Using the id directly is always faster (as it prevents the path to id conversion
 
 ### Maps
 
+Maps are key/value store.  The root object is always a map.  The keys are always strings.  The values can be any scalar type or any object.
+
+```javascript
+    let doc = create()
+    let mymap = doc.set_object("_root", "mymap", { foo: "bar"})
+                              // make a new map with the foo key
+
+    doc.set(mymap, "bytes", new Uint8Array([1,2,3]))
+                              // assign a byte array to key `bytes` of the mymap object
+
+    let submap = doc.set_object(mymap, "sub", {})
+                              // make a new empty object and assign it to the key `sub` of mymap
+
+    doc.keys(mymap)           // returns ["bytes","foo","sub"]
+    doc.materialize("_root")  // returns { mymap: { bytes: new Uint8Array([1,2,3]), foo: "bar", sub: {} }
+    doc.free()
+```
+
 ### Lists
+
+Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with with `insert()`, `set()`, `push()`, `splice()`, and `del()`.
+
+```javascript
+    let doc = create()
+    let items = doc.set_object("_root", "items", [10,"box"])
+                                                  // init a new list with two elements
+    doc.push(items, true)                         // push `true` to the end of the list
+    doc.set_object(items, 0, { hello: "world" })  // overwrite the value 10 with an object with a key and value
+    doc.del(items, 1)                             // delete "box"
+    doc.splice(items, 2, 0, ["bag", "brick"])     // splice in "bag" and "brick" at position 2
+    doc.insert(items, 0, "bat")                   // insert "bat" to the beginning of the list
+
+    doc.materialize(items)                        // returns [ "bat", { hello : "world" }, true, "bag", "brick"]
+    doc.length(items)                             // returns 5
+    doc.free()
+```
 
 ### Text
 
-Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the slice operation.
+Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the slice operation.  Non text can be inserted into a text document and will be represented with the unicode object replacement character.
 
-```
-    let doc = create()
+```javascript
+    let doc = create("aaaaaa")
     let notes = doc.set_object("_root", "notes", "Hello world")
     doc.splice(notes, 6, 5, "everyone")
-    assert.equal(doc.text(notes), "Hello everyone")
 
-    // Non text can be inserted into a text document and will be represented with the unicode object replacement character
+    doc.text(notes)      // returns "Hello everyone"
 
+    let obj = doc.insert_object(text, 6, { hi: "there" });
+
+    doc.text(text)       // returns "Hello \ufffceveryone"
+    doc.value(text, 6)   // returns ["map", obj]
+    doc.value(obj, "hi") // returns ["str", "there"]
+    doc.free()
 ```
 
 
@@ -163,11 +202,59 @@ Text is a specialized list type intended for modifying a text document.  The pri
 
 Automerge's Table type is currently not implemented.
 
+### Querying Data
+
+When querying maps use the `value()` method with the object in question and the property to query.  This method returns a tuple with the datatype and the data.  The `keys()` method will return all the keys on the object.  If you are interested in conflicted values from a merge use `values()` instead which returns an array of values instead of just the winner.
+
+```javascript
+    let doc1 = create("aabbcc")
+    doc1.set("_root", "key1", "val1")
+    let key2 = doc1.set_object("_root", "key2", [])
+
+    doc1.value("_root", "key1") // returns ["str", "val1"]
+    doc1.value("_root", "key1") // returns ["list", "2@aabbcc"]
+    doc1.keys("_root")          // returns ["key1", "key2"]
+
+    let doc2 = doc1.fork("ffaaff")
+    
+    // set a value concurrently
+    doc1.set("_root","key3","doc1val")
+    doc2.set("_root","key3","doc2val")
+
+    doc1.merge(doc2)
+
+    doc1.value("_root","key3")   // returns ["str", "doc2val"]
+    doc1.values("_root","key3")  // returns [[ "str", "doc1val"], ["str", "doc2val"]]
+    doc1.free(); doc2.free() 
+```
+
 ### Counters
+
+// TODO
 
 ### Transactions
 
+// TODO
+
 ### Viewing Old Versions of the Document
+
+All query functions can take a optional argument of `heads` in which case you are query the document state.  Heads is a set of change hashes that uniquly identifies a point in the document history.  The `getHeads()` method can retrieve these at any point.
+
+```javascript
+    let doc = create() 
+    doc.set("_root", "key", "val1")
+    let heads1 = doc.getHeads()
+    doc.set("_root", "key", "val2")
+    let heads2 = doc.getHeads()
+    doc.set("_root", "key", "val3")
+
+    doc.value("_root","key")          // returns ["str","val3"]
+    doc.value("_root","key",heads2)   // returns ["str","val2"]
+    doc.value("_root","key",heads1)   // returns ["str","val1"]
+    doc.value("_root","key",[])       // returns null
+```
+
+This works for `value()`, `values()`, `keys()`, `length()`, `text()`, and `materialize()`
 
 ### Forking and Merging
 
@@ -194,6 +281,8 @@ Methods that create new documents will generate random actors automatically - if
   let doc6 = loadDoc(doc4.save(), "00aabb11")
 
   let actor = doc1.getActor()
+
+  doc1.free(); doc2.free(); doc3.free(); doc4.free(); doc5.free(); doc6.free()
 ```
 
 ### Glossery: Object Id's
@@ -216,6 +305,13 @@ Object Id's uniquly identify an object within a document.  They are represented 
   doc.set(o1v2, "x", "y")  // modifying the new "o1" object
 
   assert.deepEqual(doc.materialize("_root"), { "o1": { x: "y" }, "o2": {} })
+
 ```
 
 ### Glossery: Heads
+
+// FIXME
+loadDoc()
+forkAt()
+set_object() -> setObject()
+materialize(heads)
