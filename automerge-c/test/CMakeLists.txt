@@ -5,6 +5,7 @@ find_package(cmocka REQUIRED)
 add_executable(
     test_${LIBRARY_NAME}
         group_state.c
+        amdoc_property_tests.c
         amlistset_tests.c
         ammapset_tests.c
         macro_utils.c

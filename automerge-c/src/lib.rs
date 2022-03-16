@@ -1,4 +1,6 @@
 use automerge as am;
+use hex;
+use smol_str::SmolStr;
 use std::{ffi::CStr, ffi::CString, os::raw::c_char};
 
 mod doc;
@@ -125,48 +127,28 @@ pub unsafe extern "C" fn AMdup(doc: *mut AMdoc) -> *mut AMdoc {
 }
 
 /// \memberof AMdoc
-/// \brief Set a configuration property of an `AMdoc` struct.
+/// \brief Get an `AMdoc` struct's actor ID value as an array of bytes.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \param[in] key A configuration property's UTF-8 string key.
-/// \param[in] value A configuration property's UTF-8 string value or `NULL`.
-/// \return A pointer to an `AMresult` struct containing nothing.
+/// \return A pointer to an `AMresult` struct containing an `AMbyteSpan`.
 /// \pre \p doc must be a valid address.
-/// \pre \p key must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
 /// \internal
 ///
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
-/// key and value must be valid c strings
 #[no_mangle]
-pub unsafe extern "C" fn AMconfig(
-    doc: *mut AMdoc,
-    key: *const c_char,
-    value: *const c_char,
-) -> *mut AMresult {
+pub unsafe extern "C" fn AMgetActor(doc: *mut AMdoc) -> *mut AMresult {
     let doc = to_doc!(doc);
-    let key = to_str(key);
-    match key.as_str() {
-        "actor" => {
-            let actor = to_str(value);
-            if let Ok(actor) = actor.try_into() {
-                doc.set_actor(actor);
-                AMresult::Nothing.into()
-            } else {
-                AMresult::err(&format!("Invalid actor '{}'", to_str(value))).into()
-            }
-        }
-        k => AMresult::err(&format!("Invalid config key '{}'", k)).into(),
-    }
+    to_result(Ok(doc.get_actor().clone()))
 }
 
 /// \memberof AMdoc
 /// \brief Get an `AMdoc` struct's actor ID value as a hexadecimal string.
 ///
 /// \param[in] doc A pointer to an `AMdoc` struct.
-/// \return A pointer to an `AMresult` struct containing a UTF-8 string value.
+/// \return A pointer to an `AMresult` struct containing a `char const*`.
 /// \pre \p doc must be a valid address.
 /// \warning To avoid a memory leak, the returned pointer must be deallocated
 ///          with `AMclear()`.
@@ -175,8 +157,68 @@ pub unsafe extern "C" fn AMconfig(
 /// # Safety
 /// doc must be a pointer to a valid AMdoc
 #[no_mangle]
-pub unsafe extern "C" fn AMgetActor(_doc: *mut AMdoc) -> *mut AMresult {
-    unimplemented!()
+pub unsafe extern "C" fn AMgetActorHex(doc: *mut AMdoc) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let hex_str = doc.get_actor().to_hex_string();
+    let value = am::Value::Scalar(am::ScalarValue::Str(SmolStr::new(hex_str)));
+    to_result(Ok(value))
+}
+
+/// \memberof AMdoc
+/// \brief Set an `AMdoc` struct's actor ID value from an array of bytes.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] value A pointer to an array of bytes.
+/// \param[in] count The number of bytes to copy from \p value.
+/// \return A pointer to an `AMresult` struct containing nothing.
+/// \pre \p doc must be a valid address.
+/// \pre \p value must be a valid address.
+/// \pre `0 <=` \p count `<=` length of \p value.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// value must be a byte array of length `count`
+#[no_mangle]
+pub unsafe extern "C" fn AMsetActor(
+    doc: *mut AMdoc,
+    value: *const u8,
+    count: usize,
+) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let slice = std::slice::from_raw_parts(value, count);
+    doc.set_actor(am::ActorId::from(slice));
+    to_result(Ok(()))
+}
+
+/// \memberof AMdoc
+/// \brief Set an `AMdoc` struct's actor ID value from a hexadecimal string.
+///
+/// \param[in] doc A pointer to an `AMdoc` struct.
+/// \param[in] hex_str A string of hexadecimal characters.
+/// \return A pointer to an `AMresult` struct containing nothing.
+/// \pre \p doc must be a valid address.
+/// \pre \p hex_str must be a valid address.
+/// \warning To avoid a memory leak, the returned pointer must be deallocated
+///          with `AMclear()`.
+/// \internal
+///
+/// # Safety
+/// doc must be a pointer to a valid AMdoc
+/// hex_str must be a null-terminated array of `c_char`.
+#[no_mangle]
+pub unsafe extern "C" fn AMsetActorHex(doc: *mut AMdoc, hex_str: *const c_char) -> *mut AMresult {
+    let doc = to_doc!(doc);
+    let slice = std::slice::from_raw_parts(hex_str as *const u8, libc::strlen(hex_str));
+    to_result(match hex::decode(slice) {
+        Ok(vec) => {
+            doc.set_actor(vec.into());
+            Ok(())
+        }
+        Err(_) => Err(am::AutomergeError::Decoding),
+    })
 }
 
 /// \memberof AMresult

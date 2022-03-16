@@ -199,6 +199,15 @@ impl AMresult {
     }
 }
 
+impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::ActorId, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(actor_id) => AMresult::ActorId(actor_id),
+            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+        }
+    }
+}
+
 impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
     fn from(maybe: Result<am::ObjId, am::AutomergeError>) -> Self {
         match maybe {
@@ -223,6 +232,15 @@ impl From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AMresu
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
             Ok(Some((value, _))) => AMresult::Scalars(vec![value], None),
             Ok(None) => AMresult::Nothing,
+            Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
+        }
+    }
+}
+
+impl From<Result<am::Value, am::AutomergeError>> for AMresult {
+    fn from(maybe: Result<am::Value, am::AutomergeError>) -> Self {
+        match maybe {
+            Ok(value) => AMresult::Scalars(vec![value], None),
             Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
         }
     }
