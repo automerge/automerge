@@ -189,17 +189,17 @@ describe('Automerge', () => {
 
       doc.put("_root", "foo","bar")
       doc.put("_root", "bip","bap")
-      let heads1 = doc.commit()
+      let hash1 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip","foo"])
 
       doc.delete("_root", "foo")
       doc.delete("_root", "baz")
-      let heads2 = doc.commit()
+      let hash2 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip"])
-      assert.deepEqual(doc.keys("_root", heads1),["bip", "foo"])
-      assert.deepEqual(doc.keys("_root", heads2),["bip"])
+      assert.deepEqual(doc.keys("_root", [hash1]),["bip", "foo"])
+      assert.deepEqual(doc.keys("_root", [hash2]),["bip"])
       doc.free()
     })
 
@@ -232,7 +232,6 @@ describe('Automerge', () => {
       let root = "_root";
 
       let text = doc.putObject(root, "text", "");
-      if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
       doc.splice(text, 11, 0, ["!","?"])
@@ -294,15 +293,15 @@ describe('Automerge', () => {
       let doc = create()
       let text = doc.putObject("_root", "text", "");
       doc.splice(text, 0, 0, "hello world");
-      let heads1 = doc.commit();
+      let hash1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
-      let heads2 = doc.commit();
+      let hash2 = doc.commit();
       assert.strictEqual(doc.text(text), "hello big bad world")
       assert.strictEqual(doc.length(text), 19)
-      assert.strictEqual(doc.text(text, heads1), "hello world")
-      assert.strictEqual(doc.length(text, heads1), 11)
-      assert.strictEqual(doc.text(text, heads2), "hello big bad world")
-      assert.strictEqual(doc.length(text, heads2), 19)
+      assert.strictEqual(doc.text(text, [ hash1 ]), "hello world")
+      assert.strictEqual(doc.length(text, [ hash1 ]), 11)
+      assert.strictEqual(doc.text(text, [ hash2 ]), "hello big bad world")
+      assert.strictEqual(doc.length(text, [ hash2 ]), 19)
       doc.free()
     })
 

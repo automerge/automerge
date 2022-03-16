@@ -914,17 +914,17 @@ impl Automerge {
         } else {
             let n = s
                 .find('@')
-                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let counter = s[0..n]
                 .parse()
-                .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .map_err(|_| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::ForeignObjId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),

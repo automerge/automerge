@@ -83,9 +83,7 @@ impl Automerge {
             commit_opts.set_time(time as i64);
         }
         let hash = self.0.commit_with(commit_opts);
-        let result = Array::new();
-        result.push(&JsValue::from_str(&hex::encode(&hash.0)));
-        result.into()
+        JsValue::from_str(&hex::encode(&hash.0))
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {

@@ -112,7 +112,7 @@ export class Automerge {
   materialize(obj?: ObjID): any;
 
   // transactions
-  commit(message?: string, time?: number): Heads;
+  commit(message?: string, time?: number): Hash;
   merge(other: Automerge): Heads;
   getActorId(): Actor;
   pendingOps(): number;
@@ -142,7 +142,7 @@ export class Automerge {
 
   // memory management
   free(): void;
-  //clone(actor?: string): Automerge;
+  clone(actor?: string): Automerge;
   fork(actor?: string): Automerge;
 
   // dump internal state to console.log

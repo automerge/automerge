@@ -4,7 +4,7 @@ This package is a low level interface to the [automerge rust](https://github.com
 
 ### Why CRDT?
 
-// TODO
+CRDT stands for Conflict Free Replicated Datatype.  It is a datastructure that offers eventual consistency where multiple actors can write to the document independantly and then these edits can be automatically merged together into a coherent document that, as much as possible, preserves the inten of the different writers.  This allows for novel masterless application design where different components need not have a central coordinating server when altering application state.
 
 ### Terminology
 
@@ -55,8 +55,8 @@ These are sets without a datatype
   import { create } from "automerge-wasm"
 
   let doc = create()
-  doc.set("/", "prop1", 100) // int
-  doc.set("/", "prop2", 3.14)
+  doc.set("/", "prop1", 100)  // int
+  doc.set("/", "prop2", 3.14) // f64
   doc.set("/", "prop3", "hello world")
   doc.set("/", "prop4", new Date())
   doc.set("/", "prop5", new Uint8Array([1,2,3]))
@@ -146,11 +146,26 @@ Using the id directly is always faster (as it prevents the path to id conversion
 
 ### Text
 
+Text is a specialized list type intended for modifying a text document.  The primary way to interact with a text document is via the slice operation.
+
+```
+    let doc = create()
+    let notes = doc.set_object("_root", "notes", "Hello world")
+    doc.splice(notes, 6, 5, "everyone")
+    assert.equal(doc.text(notes), "Hello everyone")
+
+    // Non text can be inserted into a text document and will be represented with the unicode object replacement character
+
+```
+
+
 ### Tables
 
-Automerge's Table type is currently not implemented
+Automerge's Table type is currently not implemented.
 
 ### Counters
+
+### Transactions
 
 ### Viewing Old Versions of the Document
 
@@ -182,4 +197,25 @@ Methods that create new documents will generate random actors automatically - if
 ```
 
 ### Glossery: Object Id's
+
+Object Id's uniquly identify an object within a document.  They are represented as strings in the format of `{counter}@{actor}`.  The root object is a special case and can be referred to as `_root`.  The counter in an ever increasing integer, starting at 1, that is always one higher than the highest counter seen in the document thus far.  Object Id's do not change when the object is modified but they do if it is overwritten with a new object.
+
+```
+  let doc = create("aabbcc")
+  let o1 = doc.set_object("_root", "o1", {})
+  let o2 = doc.set_object("_root", "o2", {})
+  doc.set(o1, "hello", "world")
+
+  assert.deepEqual(doc.materialize("_root"), { "o1": { hello: "world" }, "o2": {} })
+  assert.equal(o1, "1@aabbcc")
+  assert.equal(o2, "2@aabbcc")
+
+  let o1v2 = doc.set_object("_root", "o1", {})
+
+  doc.set(o1, "a", "b")    // modifying an overwritten object - does nothing
+  doc.set(o1v2, "x", "y")  // modifying the new "o1" object
+
+  assert.deepEqual(doc.materialize("_root"), { "o1": { x: "y" }, "o2": {} })
+```
+
 ### Glossery: Heads
