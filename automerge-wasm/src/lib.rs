@@ -354,19 +354,13 @@ impl Automerge {
         for p in patches {
             let patch = Object::new();
             match p {
-                am::Patch::Del(obj, key) => {
-                    js_set(&patch, "action", "del")?;
-                    js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "key", key)?;
-                }
-
-                am::Patch::Set(am::PatchSet {
+                am::Patch::Assign(am::AssignPatch {
                     obj,
                     key,
                     value,
                     conflict,
                 }) => {
-                    js_set(&patch, "action", "set")?;
+                    js_set(&patch, "action", "assign")?;
                     js_set(&patch, "obj", obj.to_string())?;
                     js_set(&patch, "key", key)?;
                     match value {
@@ -397,6 +391,13 @@ impl Automerge {
                         }
                     };
                 }
+
+                am::Patch::Delete(obj, key) => {
+                    js_set(&patch, "action", "delete")?;
+                    js_set(&patch, "obj", obj.to_string())?;
+                    js_set(&patch, "key", key)?;
+                }
+
             }
             result.push(&patch);
         }

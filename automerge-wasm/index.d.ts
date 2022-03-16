@@ -73,7 +73,7 @@ export type Op = {
 
 export type Patch = {
   obj: ObjID
-  action: 'set' | 'del' | 'insert'
+  action: 'assign' | 'insert' | 'delete'
   key: Prop
   value: Value
   datatype: Datatype

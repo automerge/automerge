@@ -1,19 +1,19 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use std::cmp::Ordering;
 use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType, Patch, PatchSet,
-    ScalarValue, Value,
+    ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
+    OpType, Patch, ScalarValue, Value,
 };
 use crate::KeysAt;
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Actor {
@@ -221,9 +221,14 @@ impl Automerge {
             if let Some(winner) = &q.values.last() {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = q.values.len() > 1;
-                Patch::Set(PatchSet {obj, key, value, conflict})
+                Patch::Assign(AssignPatch {
+                    obj,
+                    key,
+                    value,
+                    conflict,
+                })
             } else {
-                Patch::Del(obj, key)
+                Patch::Delete(obj, key)
             }
         } else {
             let winner = if let Some(last_value) = q.values.last() {
@@ -237,7 +242,12 @@ impl Automerge {
             };
             let value = (winner.value(), self.id_to_exid(winner.id));
             let conflict = !q.values.is_empty();
-            Patch::Set(PatchSet {obj, key, value, conflict})
+            Patch::Assign(AssignPatch {
+                obj,
+                key,
+                value,
+                conflict,
+            })
         };
 
         if let Some(patches) = &mut self.patches {

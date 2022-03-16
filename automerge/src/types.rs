@@ -503,19 +503,24 @@ impl TryFrom<&[u8]> for ChangeHash {
     }
 }
 
+/// Properties of `Patch::Assign`
 #[derive(Debug, Clone, PartialEq)]
-pub struct PatchSet {
+pub struct AssignPatch {
     pub obj: ExId,
     pub key: Prop,
     pub value: (Value, ExId),
     pub conflict: bool,
 }
 
+/// A notification to the application that something has changed in a document.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Patch {
-    Del(ExId, Prop),
-    Set(PatchSet),
+    /// Associating a new value with a key in a map, or an existing list element
+    Assign(AssignPatch),
+    /// Inserting a new element into a list/text
     Insert(ExId, usize, (Value, ExId)),
+    /// Deleting an element from a list/text
+    Delete(ExId, Prop),
 }
 
 #[cfg(feature = "wasm")]
