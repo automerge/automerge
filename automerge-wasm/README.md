@@ -1,10 +1,10 @@
 ## Automerge WASM Low Level Interface
 
-This package is a low level interface to the [automerge rust](https://github.com/automerge/automerge-rs/tree/experiment) CRDT.  The api is intended to be a "close to the metal" as possible only a few ease of use accomodations.  This library is used as the underpinnings for the [Automerge JS wrapper](https://github.com/automerge/automerge-rs/tree/experiment/automerge-js) and can be used as is or as a basis for another higher level expression of a CRDT.
+This package is a low level interface to the [automerge rust](https://github.com/automerge/automerge-rs/tree/experiment) CRDT.  The api is intended to be as "close to the metal" as possible with only a few ease of use accommodations.  This library is used as the underpinnings for the [Automerge JS wrapper](https://github.com/automerge/automerge-rs/tree/experiment/automerge-js) and can be used as is or as a basis for another higher level expression of a CRDT.
 
 ### Why CRDT?
 
-CRDT stands for Conflict Free Replicated Datatype.  It is a datastructure that offers eventual consistency where multiple actors can write to the document independantly and then these edits can be automatically merged together into a coherent document that, as much as possible, preserves the inten of the different writers.  This allows for novel masterless application design where different components need not have a central coordinating server when altering application state.
+CRDT stands for Conflict Free Replicated Data Type.  It is a data structure that offers eventual consistency where multiple actors can write to the document independently and then these edits can be automatically merged together into a coherent document that, as much as possible, preserves the intent of the different writers.  This allows for novel masterless application design where different components need not have a central coordinating server when altering application state.
 
 ### Terminology
 
@@ -12,13 +12,13 @@ The term Actor, Object Id and Heads are used through this documentation.  Detail
 
 An Actor is a unique id that distinguishes a single writer to a document.  It can be any hex string.
 
-An Object id uniquely identifies a Map, List or Text object within a document.  This id comes as a string in the form on `{number}@{actor}` - so `"10@aabbcc"` for example.  The string `"_root"` or `"/"` can also be used to refer to the document root.  These strings are durable and can be used on any decendant or copy of the document that generated them.
+An Object id uniquely identifies a Map, List or Text object within a document.  This id comes as a string in the form of `{number}@{actor}` - so `"10@aabbcc"` for example.  The string `"_root"` or `"/"` can also be used to refer to the document root.  These strings are durable and can be used on any descendant or copy of the document that generated them.
 
-Heads refers to a set of hashes that uniquly identifies a point in time in a documents history.  Heads are useful for comparing documents state or retrieving past states from the document.
+Heads refers to a set of hashes that uniquely identifies a point in time in a document's history.  Heads are useful for comparing documents state or retrieving past states from the document.
 
 ### Using the Library and Creating a Document
 
-This is a rust/wasm package and will work in a node or web environment.  Node is able to load wasm syncronously but a web environment is not.  The default import of the package is a function that returns a promise that resolves once the wasm is loaded.
+This is a rust/wasm package and will work in a node or web environment.  Node is able to load wasm synchronously but a web environment is not.  The default import of the package is a function that returns a promise that resolves once the wasm is loaded.
 
 This creates a document in node.  The memory allocated is handled by wasm and isn't managed by the javascript garbage collector and thus needs to be manually freed.
 
@@ -46,9 +46,9 @@ The examples below will assume a node context for brevity.
 
 ### Automerge Scalar Types
 
-Automerge has many scalar types.  Methods like `set()` and `insert()` take an optional datatype parameter.  Normally the type can be inferred but in some cases, such as telling the difference between int, uint and a counter, it cannot.
+Automerge has many scalar types.  Methods like `set()` and `insert()` take an optional data type parameter.  Normally the type can be inferred but in some cases, such as telling the difference between int, uint and a counter, it cannot.
 
-These are sets without a datatype
+These are sets without a data type
 
 ```javascript
   import { create } from "automerge-wasm"
@@ -64,7 +64,7 @@ These are sets without a datatype
   doc.free()
 ```
 
-Sets with a datatype and examples of all the supported datatypes.
+Sets with a data type and examples of all the supported data types.
 
 While int vs uint vs f64 matters little in javascript, Automerge is a cross platform library where these distinctions matter.
 
@@ -86,7 +86,7 @@ While int vs uint vs f64 matters little in javascript, Automerge is a cross plat
 
 ### Automerge Object Types
 
-Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed set of data that can hold any scalar or any object type.  Text is numerically indexed sets of graphmeme clusters.
+Automerge WASM supports 3 object types.  Maps, lists, and text.  Maps are key value stores where the values can be any scalar type or any object type.  Lists are numerically indexed sets of data that can hold any scalar or any object type.  Text is numerically indexed sets of grapheme clusters.
 
 ```javascript
   import { create } from "automerge-wasm"
@@ -124,7 +124,7 @@ You can access objects by passing the object id as the first parameter for a cal
   doc.set(config, "align", "right")
 ```
 
-Anywhere Object Id's are being used a path can also be used.  The following two statements are equivelent:
+Anywhere Object Ids are being used a path can also be used.  The following two statements are equivalent:
 
 ```javascript
   // get the id then use it
@@ -141,7 +141,7 @@ Using the id directly is always faster (as it prevents the path to id conversion
 
 ### Maps
 
-Maps are key/value store.  The root object is always a map.  The keys are always strings.  The values can be any scalar type or any object.
+Maps are key/value stores.  The root object is always a map.  The keys are always strings.  The values can be any scalar type or any object.
 
 ```javascript
     let doc = create()
@@ -161,7 +161,7 @@ Maps are key/value store.  The root object is always a map.  The keys are always
 
 ### Lists
 
-Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with with `insert()`, `set()`, `push()`, `splice()`, and `del()`.
+Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with `insert()`, `set()`, `push()`, `splice()`, and `del()`.
 
 ```javascript
     let doc = create()
@@ -204,7 +204,7 @@ Automerge's Table type is currently not implemented.
 
 ### Querying Data
 
-When querying maps use the `value()` method with the object in question and the property to query.  This method returns a tuple with the datatype and the data.  The `keys()` method will return all the keys on the object.  If you are interested in conflicted values from a merge use `values()` instead which returns an array of values instead of just the winner.
+When querying maps use the `value()` method with the object in question and the property to query.  This method returns a tuple with the data type and the data.  The `keys()` method will return all the keys on the object.  If you are interested in conflicted values from a merge use `values()` instead which returns an array of values instead of just the winner.
 
 ```javascript
     let doc1 = create("aabbcc")
@@ -238,7 +238,7 @@ When querying maps use the `value()` method with the object in question and the 
 
 ### Viewing Old Versions of the Document
 
-All query functions can take a optional argument of `heads` in which case you are query the document state.  Heads is a set of change hashes that uniquly identifies a point in the document history.  The `getHeads()` method can retrieve these at any point.
+All query functions can take an optional argument of `heads` which allow you to query a prior document state. Heads are a set of change hashes that uniquly identify a point in the document history.  The `getHeads()` method can retrieve these at any point.
 
 ```javascript
     let doc = create() 
@@ -262,7 +262,7 @@ This works for `value()`, `values()`, `keys()`, `length()`, `text()`, and `mater
 
 ### Syncing
 
-### Glossery: Actors
+### Glossary: Actors
 
 Some basic concepts you will need to know to better understand the api are Actors and Object Ids.
 
@@ -285,7 +285,7 @@ Methods that create new documents will generate random actors automatically - if
   doc1.free(); doc2.free(); doc3.free(); doc4.free(); doc5.free(); doc6.free()
 ```
 
-### Glossery: Object Id's
+### Glossary: Object Id's
 
 Object Id's uniquly identify an object within a document.  They are represented as strings in the format of `{counter}@{actor}`.  The root object is a special case and can be referred to as `_root`.  The counter in an ever increasing integer, starting at 1, that is always one higher than the highest counter seen in the document thus far.  Object Id's do not change when the object is modified but they do if it is overwritten with a new object.
 
@@ -308,7 +308,7 @@ Object Id's uniquly identify an object within a document.  They are represented 
 
 ```
 
-### Glossery: Heads
+### Glossary: Heads
 
 // FIXME
 loadDoc()
