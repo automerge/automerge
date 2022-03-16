@@ -80,20 +80,20 @@ static void test_AMmapSetBytes(void **state) {
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
-    assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
-    AMclear(res);                                                             \
-    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                           \
-    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
-        fail_msg("%s", AMerrorMessage(res));                                  \
-    }                                                                         \
-    assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
-    assert_int_equal(value.tag, AM_VALUE_BYTES);                              \
-    assert_int_equal(value.bytes.count, BYTES_SIZE);                          \
-    assert_memory_equal(value.bytes.src, BYTES_VALUE, BYTES_SIZE);            \
-    AMclear(res);                                                             \
+    assert_int_equal(AMresultSize(res), 0);
+    AMvalue value = AMresultValue(res, 0);
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    AMclear(res);
+    res = AMmapGet(group_state->doc, AM_ROOT, KEY);
+    if (AMresultStatus(res) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(res));
+    }
+    assert_int_equal(AMresultSize(res), 1);
+    value = AMresultValue(res, 0);
+    assert_int_equal(value.tag, AM_VALUE_BYTES);
+    assert_int_equal(value.bytes.count, BYTES_SIZE);
+    assert_memory_equal(value.bytes.src, BYTES_VALUE, BYTES_SIZE);
+    AMclear(res);
 }
 
 static_void_test_AMmapSet(Counter, counter, INT64_MAX)
@@ -110,18 +110,18 @@ static void test_AMmapSetNull(void **state) {
     if (AMresultStatus(res) != AM_STATUS_OK) {
         fail_msg("%s", AMerrorMessage(res));
     }
-    assert_int_equal(AMresultSize(res), 0);                                   \
-    AMvalue value = AMresultValue(res, 0);                                    \
-    assert_int_equal(value.tag, AM_VALUE_NOTHING);                            \
-    AMclear(res);                                                             \
-    res = AMmapGet(group_state->doc, AM_ROOT, KEY);                           \
-    if (AMresultStatus(res) != AM_STATUS_OK) {                                \
-        fail_msg("%s", AMerrorMessage(res));                                  \
-    }                                                                         \
-    assert_int_equal(AMresultSize(res), 1);                                   \
-    value = AMresultValue(res, 0);                                            \
-    assert_int_equal(value.tag, AM_VALUE_NULL);                               \
-    AMclear(res);                                                             \
+    assert_int_equal(AMresultSize(res), 0);
+    AMvalue value = AMresultValue(res, 0);
+    assert_int_equal(value.tag, AM_VALUE_NOTHING);
+    AMclear(res);
+    res = AMmapGet(group_state->doc, AM_ROOT, KEY);
+    if (AMresultStatus(res) != AM_STATUS_OK) {
+        fail_msg("%s", AMerrorMessage(res));
+    }
+    assert_int_equal(AMresultSize(res), 1);
+    value = AMresultValue(res, 0);
+    assert_int_equal(value.tag, AM_VALUE_NULL);
+    AMclear(res);
 }
 
 static_void_test_AMmapSetObject(List)
