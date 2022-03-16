@@ -7,7 +7,7 @@ use thiserror::Error;
 pub enum AutomergeError {
     #[error("invalid opid format `{0}`")]
     InvalidOpId(String),
-    #[error("there was an ecoding problem")]
+    #[error("there was an encoding problem")]
     Encoding,
     #[error("there was a decoding problem")]
     Decoding,
