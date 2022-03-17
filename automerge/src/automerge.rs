@@ -344,7 +344,11 @@ impl Automerge {
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
-        ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        }
     }
 
     /// Get the string represented by the given text object.
