@@ -147,7 +147,7 @@ impl Automerge {
                     vals.push(value);
                 }
             }
-            self.0.splice(&obj, start, delete_count, vals)?;
+            self.0.splice(&obj, start, delete_count, vals.into_iter())?;
         }
         Ok(())
     }
@@ -679,11 +679,12 @@ impl Automerge {
 
     pub fn materialize(&self, obj: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj).unwrap_or(ROOT);
-        match self.0.object_type(&obj)? {
-            am::ObjType::Map => Ok(map_to_js(&self.0, &obj)),
-            am::ObjType::List => Ok(list_to_js(&self.0, &obj)),
-            am::ObjType::Text => Ok(self.0.text(&obj)?.into()),
-            am::ObjType::Table => Ok(map_to_js(&self.0, &obj)),
+        match self.0.object_type(&obj) {
+            Some(am::ObjType::Map) => Ok(map_to_js(&self.0, &obj)),
+            Some(am::ObjType::List) => Ok(list_to_js(&self.0, &obj)),
+            Some(am::ObjType::Text) => Ok(self.0.text(&obj)?.into()),
+            Some(am::ObjType::Table) => Ok(map_to_js(&self.0, &obj)),
+            None => Err(to_js_err(format!("invalid obj {}", obj))),
         }
     }
 

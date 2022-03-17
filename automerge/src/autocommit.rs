@@ -128,7 +128,7 @@ impl AutoCommit {
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             self.update_history(export_change(
-                &tx,
+                tx,
                 &self.doc.ops.m.actors,
                 &self.doc.ops.m.props,
             ));
@@ -151,11 +151,6 @@ impl AutoCommit {
     pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
-    }
-
-    pub fn apply_change(&mut self, change: Change) {
-        self.ensure_transaction_closed();
-        self.doc.apply_change(change)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
@@ -302,7 +297,7 @@ impl Transactable for AutoCommit {
         self.doc.length_at(obj, heads)
     }
 
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError> {
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
         self.doc.object_type(obj)
     }
 
@@ -416,12 +411,12 @@ impl Transactable for AutoCommit {
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert
     /// the new elements
-    fn splice<O: AsRef<ExId>>(
+    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<ScalarValue>,
+        vals: V,
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();

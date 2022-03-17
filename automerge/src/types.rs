@@ -362,10 +362,8 @@ pub(crate) struct ElemId(pub OpId);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Op {
-    pub change: usize,
     pub id: OpId,
     pub action: OpType,
-    pub obj: ObjId,
     pub key: Key,
     pub succ: Vec<OpId>,
     pub pred: Vec<OpId>,

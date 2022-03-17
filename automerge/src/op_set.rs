@@ -59,31 +59,29 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn search<Q>(&self, obj: ObjId, query: Q) -> Q
+    pub fn search<Q>(&self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<B>,
     {
-        if let Some((_typ, tree)) = self.trees.get(&obj) {
+        if let Some((_typ, tree)) = self.trees.get(obj) {
             tree.search(query, &self.m)
         } else {
             query
         }
     }
 
-    pub fn replace<F>(&mut self, obj: ObjId, index: usize, f: F) -> Option<Op>
+    pub fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
-        if let Some((_typ, tree)) = self.trees.get_mut(&obj) {
+        if let Some((_typ, tree)) = self.trees.get_mut(obj) {
             tree.replace(index, f)
-        } else {
-            None
         }
     }
 
-    pub fn remove(&mut self, obj: ObjId, index: usize) -> Op {
+    pub fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
-        let (_typ, tree) = self.trees.get_mut(&obj).unwrap();
+        let (_typ, tree) = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
         let op = tree.remove(index);
         if let OpType::Make(_) = &op.action {
@@ -96,13 +94,13 @@ impl<const B: usize> OpSetInternal<B> {
         self.length
     }
 
-    pub fn insert(&mut self, index: usize, element: Op) {
+    pub fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees
                 .insert(element.id.into(), (typ, Default::default()));
         }
 
-        if let Some((_typ, tree)) = self.trees.get_mut(&element.obj) {
+        if let Some((_typ, tree)) = self.trees.get_mut(obj) {
             //let tree = self.trees.get_mut(&element.obj).unwrap();
             tree.insert(index, element);
             self.length += 1;
@@ -129,7 +127,7 @@ impl<const B: usize> Default for OpSetInternal<B> {
 }
 
 impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
-    type Item = &'a Op;
+    type Item = (&'a ObjId, &'a Op);
 
     type IntoIter = Iter<'a, B>;
 
@@ -153,13 +151,13 @@ pub(crate) struct Iter<'a, const B: usize> {
 }
 
 impl<'a, const B: usize> Iterator for Iter<'a, B> {
-    type Item = &'a Op;
+    type Item = (&'a ObjId, &'a Op);
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
             let (_typ, tree) = self.inner.trees.get(obj)?;
-            result = tree.get(self.sub_index);
+            result = tree.get(self.sub_index).map(|op| (*obj, op));
             if result.is_some() {
                 self.sub_index += 1;
                 break;

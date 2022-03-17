@@ -83,12 +83,12 @@ pub trait Transactable {
     fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
         -> Result<(), AutomergeError>;
 
-    fn splice<O: AsRef<ExId>>(
+    fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,
         obj: O,
         pos: usize,
         del: usize,
-        vals: Vec<ScalarValue>,
+        vals: V,
     ) -> Result<(), AutomergeError>;
 
     /// Like [`Self::splice`] but for text.
@@ -99,10 +99,8 @@ pub trait Transactable {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let mut vals = vec![];
-        for c in text.to_owned().graphemes(true) {
-            vals.push(c.into());
-        }
+        let text = text.to_owned();
+        let vals = text.graphemes(true).map(|c| c.into());
         self.splice(obj, pos, del, vals)
     }
 
@@ -119,7 +117,7 @@ pub trait Transactable {
     fn length_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> usize;
 
     /// Get type for object
-    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Result<ObjType, AutomergeError>;
+    fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType>;
 
     /// Get the string that this text object represents.
     fn text<O: AsRef<ExId>>(&self, obj: O) -> Result<String, AutomergeError>;
