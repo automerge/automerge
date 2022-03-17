@@ -549,10 +549,24 @@ describe('Automerge', () => {
       doc2.insert('1@aaaa', 0, 'a')
       doc2.insert('1@aaaa', 1, 'b')
       let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
       doc3.loadIncremental(change2); doc3.loadIncremental(change3)
       doc4.loadIncremental(change3); doc4.loadIncremental(change2)
       assert.deepEqual([0, 1, 2, 3].map(i => (doc3.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
       assert.deepEqual([0, 1, 2, 3].map(i => (doc4.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'd', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str'}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str'}
+      ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
 
