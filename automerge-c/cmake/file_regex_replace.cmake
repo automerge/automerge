@@ -24,6 +24,8 @@ else()
     set(OUTPUT_FILE "${CMAKE_ARGV6}")
 endif()
 
-message(STATUS "Creating/updating \"${OUTPUT_FILE}\"...")
+if(NOT "${OUTPUT_STRING}" STREQUAL "${INPUT_STRING}")
+    file(WRITE ${OUTPUT_FILE} "${OUTPUT_STRING}")
 
-file(WRITE ${OUTPUT_FILE} "${OUTPUT_STRING}")
+    message(STATUS "Created/updated \"${OUTPUT_FILE}\".")
+endif()
