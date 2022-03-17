@@ -37,10 +37,7 @@ impl<const B: usize> SeekOpWithPatch<B> {
     }
 
     fn is_target_insert(&self, op: &Op) -> bool {
-        if !op.insert {
-            return false;
-        }
-        op.elemid() == self.op.elemid()
+        return op.insert && op.elemid() == self.op.key.elemid()
     }
 
     fn count_visible(&mut self, e: &Op) {

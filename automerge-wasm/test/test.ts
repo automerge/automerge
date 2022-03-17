@@ -536,6 +536,27 @@ describe('Automerge', () => {
       doc1.free()
       doc2.free()
     })
+
+    it('should handle concurrent insertions at the head of a list', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'values', [])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.insert('1@aaaa', 0, 'c')
+      doc1.insert('1@aaaa', 1, 'd')
+      doc2.insert('1@aaaa', 0, 'a')
+      doc2.insert('1@aaaa', 1, 'b')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual([0, 1, 2, 3].map(i => (doc3.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
+      assert.deepEqual([0, 1, 2, 3].map(i => (doc4.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    // TODO: concurrent insertions at the same position
   })
 
   describe('sync', () => {
