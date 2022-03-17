@@ -301,7 +301,7 @@ impl Automerge {
 
     pub fn list<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let query = self.ops.search(obj, query::ListVals::new());
+        let query = self.ops.search(&obj, query::ListVals::new());
         Ok(query
             .ops
             .iter()
@@ -316,7 +316,7 @@ impl Automerge {
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
         let clock = self.clock_at(heads);
-        let query = self.ops.search(obj, query::ListValsAt::new(clock));
+        let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         Ok(query
             .ops
             .iter()
@@ -326,7 +326,7 @@ impl Automerge {
 
     pub fn spans<O: AsRef<ExId>>(&self, obj: O) -> Result<Vec<query::Span>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let mut query = self.ops.search(obj, query::Spans::new());
+        let mut query = self.ops.search(&obj, query::Spans::new());
         query.check_marks();
         Ok(query.spans)
     }
@@ -342,7 +342,7 @@ impl Automerge {
         let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
         let mut query = self
             .ops
-            .search(obj, query::Attribute::new(baseline, change_sets));
+            .search(&obj, query::Attribute::new(baseline, change_sets));
         query.finish();
         Ok(query.change_sets)
     }
@@ -358,7 +358,7 @@ impl Automerge {
         let change_sets: Vec<Clock> = change_sets.iter().map(|p| self.clock_at(p)).collect();
         let mut query = self
             .ops
-            .search(obj, query::Attribute2::new(baseline, change_sets));
+            .search(&obj, query::Attribute2::new(baseline, change_sets));
         query.finish();
         Ok(query.change_sets)
     }
@@ -368,13 +368,12 @@ impl Automerge {
         obj: O,
     ) -> Result<Vec<query::SpanInfo>, AutomergeError> {
         let obj = self.exid_to_obj(obj.as_ref())?;
-        let query = self.ops.search(obj, query::RawSpans::new());
+        let query = self.ops.search(&obj, query::RawSpans::new());
         let result = query
             .spans
             .into_iter()
             .map(|s| query::SpanInfo {
                 id: self.id_to_exid(s.id),
-                time: self.history[s.change].time,
                 start: s.start,
                 end: s.end,
                 span_type: s.name,

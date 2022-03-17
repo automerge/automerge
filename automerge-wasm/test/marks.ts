@@ -8,10 +8,9 @@ describe('Automerge', () => {
   describe('marks', () => {
     it('should handle marks [..]', () => {
       let doc = create()
-       let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
-       doc.splice(list, 0, 0, "aaabbbccc")
-       doc.mark(list, "[3..6]", "bold" , true)
+      let list = doc.set_object("_root", "list", "")
+      doc.splice(list, 0, 0, "aaabbbccc")
+      doc.mark(list, "[3..6]", "bold" , true)
       let spans = doc.spans(list);
       assert.deepStrictEqual(spans, [ 'aaa', [ [ 'bold', 'boolean', true ] ], 'bbb', [], 'ccc' ]);
       doc.insert(list, 6, "A")
@@ -22,8 +21,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] at the beginning of a string', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -39,8 +37,7 @@ describe('Automerge', () => {
 
     it('should handle marks [..] with splice', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -56,8 +53,7 @@ describe('Automerge', () => {
 
     it('should handle marks across multiple forks', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[0..3]", "bold", true)
       let spans = doc.spans(list);
@@ -79,8 +75,7 @@ describe('Automerge', () => {
 
     it('should handle marks with deleted ends [..]', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
 
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "[3..6]", "bold" , true)
@@ -100,8 +95,7 @@ describe('Automerge', () => {
 
     it('should handle sticky marks (..)', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -114,8 +108,7 @@ describe('Automerge', () => {
 
     it('should handle sticky marks with deleted ends (..)', () => {
       let doc = create()
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "aaabbbccc")
       doc.mark(list, "(3..6)", "bold" , true)
       let spans = doc.spans(list);
@@ -143,13 +136,12 @@ describe('Automerge', () => {
 
     it('should handle overlapping marks', () => {
       let doc : Automerge = create("aabbcc")
-      let list = doc.make("_root", "list", "")
-      if (!list) throw new Error('should not be undefined')
+      let list = doc.set_object("_root", "list", "")
       doc.splice(list, 0, 0, "the quick fox jumps over the lazy dog")
       doc.mark(list, "[0..37]", "bold" , true)
       doc.mark(list, "[4..19]", "itallic" , true)
       doc.mark(list, "[10..13]", "comment" , "foxes are my favorite animal!")
-      doc.commit("marks",999);
+      doc.commit("marks");
       let spans = doc.spans(list);
       assert.deepStrictEqual(spans,
         [
@@ -175,9 +167,9 @@ describe('Automerge', () => {
       let raw_spans = doc.raw_spans(list);
       assert.deepStrictEqual(raw_spans,
         [
-          { id: "39@aabbcc", time: 999, start: 0, end: 37, type: 'bold', value: true },
-          { id: "41@aabbcc", time: 999, start: 4, end: 19, type: 'itallic', value: true },
-          { id: "43@aabbcc", time: 999, start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
+          { id: "39@aabbcc", start: 0, end: 37, type: 'bold', value: true },
+          { id: "41@aabbcc", start: 4, end: 19, type: 'itallic', value: true },
+          { id: "43@aabbcc", start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
         ]);
 
       // mark sure encode decode can handle marks

@@ -46,7 +46,6 @@ pub(crate) use spans::{Span, Spans};
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct SpanInfo {
     pub id: ExId,
-    pub time: i64,
     pub start: usize,
     pub end: usize,
     #[serde(rename = "type")]

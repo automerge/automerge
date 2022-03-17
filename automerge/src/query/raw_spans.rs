@@ -15,7 +15,6 @@ pub(crate) struct RawSpans<const B: usize> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RawSpan {
     pub id: OpId,
-    pub change: usize,
     pub start: usize,
     pub end: usize,
     pub name: String,
@@ -49,7 +48,6 @@ impl<const B: usize> TreeQuery<B> for RawSpans<B> {
                     pos,
                     RawSpan {
                         id: element.id,
-                        change: element.change,
                         start: self.seen,
                         end: 0,
                         name: md.name.clone(),
