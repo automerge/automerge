@@ -238,7 +238,7 @@ When querying maps use the `value()` method with the object in question and the 
 
 Counters are 64 bit ints that support the increment operation.  Frequently different actors will want to increment or decrement a number and have all these coalesse into a merged value.
 
-```
+```javascript
     let doc1 = create("aaaaaa")
     doc1.put("_root", "number", 0)
     doc1.put("_root", "total", 0, "counter")
@@ -437,7 +437,7 @@ Actors are ids that need to be unique to each process writing to a document.  Th
 
 Methods that create new documents will generate random actors automatically - if you wish to supply your own it is always taken as an optional argument.  This is true for the following functions.
 
-```
+```javascript
   import { create, load } from "automerge-wasm"
 
   let doc1 = create()  // random actorid
@@ -456,7 +456,7 @@ Methods that create new documents will generate random actors automatically - if
 
 Object Ids uniquely identify an object within a document.  They are represented as strings in the format of `{counter}@{actor}`.  The root object is a special case and can be referred to as `_root`.  The counter is an ever increasing integer, starting at 1, that is always one higher than the highest counter seen in the document thus far.  Object Id's do not change when the object is modified but they do if it is overwritten with a new object.
 
-```
+```javascript
   let doc = create("aabbcc")
   let o1 = doc.putObject("_root", "o1", {})
   let o2 = doc.putObject("_root", "o2", {})
@@ -476,9 +476,10 @@ Object Ids uniquely identify an object within a document.  They are represented 
   doc.free()
 ```
 
+```
 // TODO:
 can I rename loadDoc() to load()???
 implement forkAt()
-port sync example to typescript
-what about a doc.equals()
-remove the opid from values
+port sync example to typescript - make sure its right
+remove the opid from values()
+```
