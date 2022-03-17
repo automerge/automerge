@@ -236,7 +236,7 @@ When querying maps use the `value()` method with the object in question and the 
 
 ### Counters
 
-Counters are 64 bit ints that support the increment operation.  Frequently different actords will want to increment or decrement a number and have all these coalesse into a merged value.
+Counters are 64 bit ints that support the increment operation.  Frequently different actors will want to increment or decrement a number and have all these coalesse into a merged value.
 
 ```
     let doc1 = create("aaaaaa")
@@ -259,7 +259,7 @@ Counters are 64 bit ints that support the increment operation.  Frequently diffe
 
 ### Transactions
 
-Generally speaking you don't need to think about transaction when using automerge.  Normal edits queue up into an in progress trasnaction.  You can query the number of ops in the current transaction with `pendingOps()`.  The transaction will commit automatically on certains calls such as `save()`, `saveIncremental()`, `fork()`, `merge()`, `getHeads()`, `applyChanges()`, `generateSyncMessage()`, and `receiveSyncMessage()`.  When the transaction commits the heads of the document change.  If you want to roll back all the in progress ops you can call `doc.rollback()`.  If you want to manually commit a transaction in progress you can call`doc.commit()` with an optional commit message and timestamp.
+Generally speaking you don't need to think about transactions when using Automerge.  Normal edits queue up into an in-progress transaction.  You can query the number of ops in the current transaction with `pendingOps()`.  The transaction will commit automatically on certains calls such as `save()`, `saveIncremental()`, `fork()`, `merge()`, `getHeads()`, `applyChanges()`, `generateSyncMessage()`, and `receiveSyncMessage()`.  When the transaction commits the heads of the document change.  If you want to roll back all the in progress ops you can call `doc.rollback()`.  If you want to manually commit a transaction in progress you can call `doc.commit()` with an optional commit message and timestamp.
 
 ```javascript
     let doc = create()
@@ -288,7 +288,7 @@ Generally speaking you don't need to think about transaction when using automerg
 
 ### Viewing Old Versions of the Document
 
-All query functions can take an optional argument of `heads` which allow you to query a prior document state. Heads are a set of change hashes that uniquly identify a point in the document history.  The `getHeads()` method can retrieve these at any point.
+All query functions can take an optional argument of `heads` which allow you to query a prior document state. Heads are a set of change hashes that uniquely identify a point in the document history.  The `getHeads()` method can retrieve these at any point.
 
 ```javascript
     let doc = create()
@@ -315,9 +315,9 @@ Queries of old document states are not indexed internally and will be slower tha
 
 ### Forking and Merging
 
-You can `fork()` a document which makes an exact copy of it.  This assigns a new actor so changes made to the fork can be merged back in with the origional.  The `forkAt()` takes a heads allowing you to fork off a document from a previous point in its history.  These documents allocate new memory in WASM and need to be freed.
+You can `fork()` a document which makes an exact copy of it.  This assigns a new actor so changes made to the fork can be merged back in with the original.  The `forkAt()` takes a Heads, allowing you to fork off a document from a previous point in its history.  These documents allocate new memory in WASM and need to be freed.
 
-The `merge()` command applys all changes in the argument doc into the calling doc.  Therefore if doc a has 1000 changes that doc b lacks and doc b has only 10 changes that doc a lacks, `a.merge(b)` will be much faster than `b.merge(a)`.
+The `merge()` command applies all changes in the argument doc into the calling doc.  Therefore if doc a has 1000 changes that doc b lacks and doc b has only 10 changes that doc a lacks, `a.merge(b)` will be much faster than `b.merge(a)`.
 
 ```javascript
     let doc1 = create()
@@ -340,11 +340,11 @@ Note that calling `a.merge(a)` will produce an unrecoverable error from the wasm
 
 ### Saving and Loading
 
-Calling `save()` converts the document to a compressed `Uint8Array()` that can be saved to durable storage.  This format uses a columnar storage format that compresses away most of the automerge metadata needed to manage the CRDT state, but does include all of the change history.
+Calling `save()` converts the document to a compressed `Uint8Array()` that can be saved to durable storage.  This format uses a columnar storage format that compresses away most of the Automerge metadata needed to manage the CRDT state, but does include all of the change history.
 
-If you wish to incrementally update a saved automerge doc you can call `saveIncremental()` to get a `Uint8Array()` of bytes that can be appended to the file with all the new changes(). Note that the `saveIncremental()` bytes are not as compressed the whole document save as each chunk has metadata information needed to parse it.  It may make sense to periodically perform a new `save()` to get the smallest possible file footprint.
+If you wish to incrementally update a saved Automerge doc you can call `saveIncremental()` to get a `Uint8Array()` of bytes that can be appended to the file with all the new changes(). Note that the `saveIncremental()` bytes are not as compressed as the whole document save as each chunk has metadata information needed to parse it.  It may make sense to periodically perform a new `save()` to get the smallest possible file footprint.
 
-The `load()` function takes a `Uint8Array()` of bytes produced in this way and constitutes a new document.  The `loadIncremental()` method is availble if you wish to consume the result of a `saveIncremental()` with a already instanciated document.
+The `load()` function takes a `Uint8Array()` of bytes produced in this way and constitutes a new document.  The `loadIncremental()` method is available if you wish to consume the result of a `saveIncremental()` with an already instanciated document.
 
 ```javascript
   import { create, load } from "automerge-wasm"
@@ -454,7 +454,7 @@ Methods that create new documents will generate random actors automatically - if
 
 ### Glossary: Object Id's
 
-Object Id's uniquly identify an object within a document.  They are represented as strings in the format of `{counter}@{actor}`.  The root object is a special case and can be referred to as `_root`.  The counter in an ever increasing integer, starting at 1, that is always one higher than the highest counter seen in the document thus far.  Object Id's do not change when the object is modified but they do if it is overwritten with a new object.
+Object Ids uniquely identify an object within a document.  They are represented as strings in the format of `{counter}@{actor}`.  The root object is a special case and can be referred to as `_root`.  The counter is an ever increasing integer, starting at 1, that is always one higher than the highest counter seen in the document thus far.  Object Id's do not change when the object is modified but they do if it is overwritten with a new object.
 
 ```
   let doc = create("aabbcc")
