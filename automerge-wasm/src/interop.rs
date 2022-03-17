@@ -355,6 +355,32 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     map.into()
 }
 
+pub(crate) fn map_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHash]) -> JsValue {
+    let keys = doc.keys(obj);
+    let map = Object::new();
+    for k in keys {
+        let val = doc.value_at(obj, &k, heads);
+        match val {
+            Ok(Some((Value::Object(o), exid)))
+                if o == am::ObjType::Map || o == am::ObjType::Table =>
+            {
+                Reflect::set(&map, &k.into(), &map_to_js_at(doc, &exid, heads)).unwrap();
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
+                Reflect::set(&map, &k.into(), &list_to_js_at(doc, &exid, heads)).unwrap();
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
+                Reflect::set(&map, &k.into(), &doc.text_at(&exid, heads).unwrap().into()).unwrap();
+            }
+            Ok(Some((Value::Scalar(v), _))) => {
+                Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
+            }
+            _ => (),
+        };
+    }
+    map.into()
+}
+
 pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
@@ -366,8 +392,37 @@ pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
             {
                 array.push(&map_to_js(doc, &exid));
             }
-            Ok(Some((Value::Object(_), exid))) => {
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
                 array.push(&list_to_js(doc, &exid));
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
+                array.push(&doc.text(&exid).unwrap().into());
+            }
+            Ok(Some((Value::Scalar(v), _))) => {
+                array.push(&ScalarValue(v).into());
+            }
+            _ => (),
+        };
+    }
+    array.into()
+}
+
+pub(crate) fn list_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHash]) -> JsValue {
+    let len = doc.length(obj);
+    let array = Array::new();
+    for i in 0..len {
+        let val = doc.value_at(obj, i as usize, heads);
+        match val {
+            Ok(Some((Value::Object(o), exid)))
+                if o == am::ObjType::Map || o == am::ObjType::Table =>
+            {
+                array.push(&map_to_js_at(doc, &exid, heads));
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
+                array.push(&list_to_js_at(doc, &exid, heads));
+            }
+            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
+                array.push(&doc.text_at(exid, heads).unwrap().into());
             }
             Ok(Some((Value::Scalar(v), _))) => {
                 array.push(&ScalarValue(v).into());

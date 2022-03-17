@@ -13,7 +13,8 @@ mod sync;
 mod value;
 
 use interop::{
-    get_heads, js_get, js_set, list_to_js, map_to_js, to_js_err, to_objtype, to_prop, AR, JS,
+    get_heads, js_get, js_set, list_to_js, list_to_js_at, map_to_js, map_to_js_at, to_js_err,
+    to_objtype, to_prop, AR, JS,
 };
 use sync::SyncState;
 use value::{datatype, ScalarValue};
@@ -57,7 +58,6 @@ impl Automerge {
         Ok(automerge)
     }
 
-    #[allow(clippy::should_implement_trait)]
     pub fn fork(&mut self, actor: Option<String>) -> Result<Automerge, JsValue> {
         let mut automerge = Automerge(self.0.fork());
         if let Some(s) = actor {
@@ -549,14 +549,25 @@ impl Automerge {
         map_to_js(&self.0, &ROOT)
     }
 
-    pub fn materialize(&self, obj: JsValue) -> Result<JsValue, JsValue> {
+    pub fn materialize(&self, obj: JsValue, heads: Option<Array>) -> Result<JsValue, JsValue> {
         let obj = self.import(obj).unwrap_or(ROOT);
-        match self.0.object_type(&obj) {
-            Some(am::ObjType::Map) => Ok(map_to_js(&self.0, &obj)),
-            Some(am::ObjType::List) => Ok(list_to_js(&self.0, &obj)),
-            Some(am::ObjType::Text) => Ok(self.0.text(&obj)?.into()),
-            Some(am::ObjType::Table) => Ok(map_to_js(&self.0, &obj)),
-            None => Err(to_js_err(format!("invalid obj {}", obj))),
+        let heads = get_heads(heads);
+        if let Some(heads) = heads {
+            match self.0.object_type(&obj) {
+                Some(am::ObjType::Map) => Ok(map_to_js_at(&self.0, &obj, heads.as_slice())),
+                Some(am::ObjType::List) => Ok(list_to_js_at(&self.0, &obj, heads.as_slice())),
+                Some(am::ObjType::Text) => Ok(self.0.text_at(&obj, heads.as_slice())?.into()),
+                Some(am::ObjType::Table) => Ok(map_to_js_at(&self.0, &obj, heads.as_slice())),
+                None => Err(to_js_err(format!("invalid obj {}", obj))),
+            }
+        } else {
+            match self.0.object_type(&obj) {
+                Some(am::ObjType::Map) => Ok(map_to_js(&self.0, &obj)),
+                Some(am::ObjType::List) => Ok(list_to_js(&self.0, &obj)),
+                Some(am::ObjType::Text) => Ok(self.0.text(&obj)?.into()),
+                Some(am::ObjType::Table) => Ok(map_to_js(&self.0, &obj)),
+                None => Err(to_js_err(format!("invalid obj {}", obj))),
+            }
         }
     }
 
@@ -620,12 +631,21 @@ impl Automerge {
             Some("boolean") => value.as_bool().map(am::ScalarValue::Boolean),
             Some("int") => value.as_f64().map(|v| am::ScalarValue::Int(v as i64)),
             Some("uint") => value.as_f64().map(|v| am::ScalarValue::Uint(v as u64)),
+            Some("str") => value.as_string().map(|v| am::ScalarValue::Str(v.into())),
             Some("f64") => value.as_f64().map(am::ScalarValue::F64),
             Some("bytes") => Some(am::ScalarValue::Bytes(
                 value.clone().dyn_into::<Uint8Array>().unwrap().to_vec(),
             )),
             Some("counter") => value.as_f64().map(|v| am::ScalarValue::counter(v as i64)),
-            Some("timestamp") => value.as_f64().map(|v| am::ScalarValue::Timestamp(v as i64)),
+            Some("timestamp") => {
+                if let Some(v) = value.as_f64() {
+                    Some(am::ScalarValue::Timestamp(v as i64))
+                } else if let Ok(d) = value.clone().dyn_into::<js_sys::Date>() {
+                    Some(am::ScalarValue::Timestamp(d.get_time() as i64))
+                } else {
+                    None
+                }
+            }
             Some("null") => Some(am::ScalarValue::Null),
             Some(_) => None,
             None => {

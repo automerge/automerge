@@ -171,6 +171,7 @@ describe('Automerge', () => {
       doc.insert(submap, 0, "b");
       assert.deepEqual(doc.materialize(), { letters: ["b", "a" ] })
       doc.push(submap, "c");
+      let heads = doc.getHeads()
       assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c" ] })
       doc.push(submap, 3, "timestamp");
       assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3) ] })
@@ -180,6 +181,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3) ] })
       assert.deepEqual(doc.materialize(submap), ["z", "d", "e", "f", "c", new Date(3) ])
       assert.deepEqual(doc.length(submap),6)
+      assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c" ] })
 
       doc.free()
     })

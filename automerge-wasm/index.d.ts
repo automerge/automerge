@@ -109,7 +109,7 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID): any;
+  materialize(obj?: ObjID, heas?: Heads): any;
 
   // transactions
   commit(message?: string, time?: number): Hash;
