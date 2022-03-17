@@ -196,7 +196,7 @@ Text is a specialized list type intended for modifying a text document.  The pri
 
     doc.text(notes)      // returns "Hello everyone"
 
-    let obj = doc.insert_object(notes, 6, { hi: "there" })
+    let obj = doc.insertObject(notes, 6, { hi: "there" })
 
     doc.text(notes)       // returns "Hello \ufffceveryone"
     doc.value(notes, 6)   // returns ["map", obj]
