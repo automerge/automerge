@@ -29,15 +29,6 @@ function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncSta
 
 describe('Automerge', () => {
   describe('basics', () => {
-    it.only('patch generation', () => {
-      let doc1 = create("aaaa"), doc2 = create("bbbb")
-      doc1.set("_root", "hello", "world")
-      doc2.enablePatches(true)
-      doc2.applyChanges(doc1.getChanges([]))
-      let patches = doc2.popPatches()
-      assert.deepEqual(patches, [])
-    })
-
     it('should init clone and free', () => {
       let doc1 = create()
       let doc2 = doc1.clone()
@@ -469,8 +460,84 @@ describe('Automerge', () => {
       assert.deepEqual(C.value('_root', 'text'), ['text', '1@aabbcc'])
       assert.deepEqual(C.text(At), 'hell! world')
     })
-
   })
+
+  describe('patch generation', () => {
+    it('should include root object key updates', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set('_root', 'hello', 'world')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'hello', value: 'world', datatype: 'str', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should include nested object creation', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', {friday: {robins: 3}})
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root',  key: 'birds',  value: '1@aaaa', datatype: 'map', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 'friday', value: '2@aaaa', datatype: 'map', conflict: false},
+        {action: 'assign', obj: '2@aaaa', key: 'robins', value: 3,        datatype: 'int', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should include list element insertion', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root',  key: 'birds',  value: '1@aaaa',    datatype: 'list', conflict: false},
+        {action: 'insert', obj: '1@aaaa', key: 0,        value: 'Goldfinch', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1,        value: 'Chaffinch', datatype: 'str'}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should insert nested maps into a list', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', [])
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.insert_object('1@aaaa', 0, {species: 'Goldfinch', count: 3})
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0,         value: '2@aaaa',    datatype: 'map'},
+        {action: 'assign', obj: '2@aaaa', key: 'species', value: 'Goldfinch', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '2@aaaa', key: 'count',   value: 3,           datatype: 'int', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should calculate list indexes based on visible elements', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.del('1@aaaa', 0)
+      doc1.insert('1@aaaa', 1, 'Greenfinch')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc1.value('1@aaaa', 0), ['str', 'Chaffinch'])
+      assert.deepEqual(doc1.value('1@aaaa', 1), ['str', 'Greenfinch'])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'delete', obj: '1@aaaa', key: 0},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'Greenfinch', datatype: 'str'}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+  })
+
   describe('sync', () => {
     it('should send a sync message implying no local data', () => {
       let doc = create()

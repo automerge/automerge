@@ -138,9 +138,7 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
     }
 
     fn query_element_with_metadata(&mut self, e: &Op, m: &OpSetMetadata) -> QueryResult {
-        self.count_visible(e);
-
-        if !self.found {
+        let result = if !self.found {
             if self.is_target_insert(e) {
                 self.found = true;
                 if self.op.overwrites(e) {
@@ -171,6 +169,11 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                 self.pos += 1;
                 QueryResult::Next
             }
+        };
+
+        if result == QueryResult::Next {
+            self.count_visible(e);
         }
+        result
     }
 }

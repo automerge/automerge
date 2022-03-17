@@ -528,7 +528,7 @@ impl From<Prop> for wasm_bindgen::JsValue {
     fn from(prop: Prop) -> Self {
         match prop {
             Prop::Map(key) => key.into(),
-            Prop::Seq(index) => index.into(),
+            Prop::Seq(index) => (index as f64).into(),
         }
     }
 }

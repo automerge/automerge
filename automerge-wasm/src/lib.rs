@@ -379,7 +379,7 @@ impl Automerge {
                 am::Patch::Insert(obj, index, value) => {
                     js_set(&patch, "action", "insert")?;
                     js_set(&patch, "obj", obj.to_string())?;
-                    js_set(&patch, "index", index)?;
+                    js_set(&patch, "key", index as f64)?;
                     match value {
                         (Value::Object(obj_type), obj_id) => {
                             js_set(&patch, "datatype", obj_type.to_string())?;
