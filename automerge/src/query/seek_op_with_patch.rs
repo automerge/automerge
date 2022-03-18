@@ -98,13 +98,20 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                     // subtract one if the last visible element also appears in this tree node.
                     let mut num_vis = child.index.len;
                     if num_vis > 0 {
-                        // num vis is the number of keys in the index
-                        // minus one if we're counting last_seen
-                        // let mut num_vis = s.keys().count();
+                        // FIXME: I think this is wrong: we should subtract one only if this
+                        // subtree contains a *visible* (i.e. empty succs) operation for the list
+                        // element with elemId `last_seen`; this will subtract one even if all
+                        // values for this list element have been deleted in this subtree.
                         if child.index.has(&self.last_seen) {
                             num_vis -= 1;
                         }
                         self.seen += num_vis;
+
+                        // FIXME: this is also wrong: `last_seen` needs to be the elemId of the
+                        // last *visible* list element in this subtree, but I think this returns
+                        // the last operation's elemId regardless of whether it's visible or not.
+                        // This will lead to incorrect counting if `last_seen` is not visible: it's
+                        // not counted towards `num_vis`, so we shouldn't be subtracting 1.
                         self.last_seen = child.last().elemid();
                     }
                     QueryResult::Next
