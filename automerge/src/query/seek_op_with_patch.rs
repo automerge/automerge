@@ -40,6 +40,10 @@ impl<const B: usize> SeekOpWithPatch<B> {
         op.insert && op.elemid() == self.op.key.elemid()
     }
 
+    /// Keeps track of the number of visible list elements we have seen. Increments `self.seen` if
+    /// operation `e` associates a visible value with a list element, and if we have not already
+    /// counted that list element (this ensures that if a list element has several values, i.e.
+    /// a conflict, then it is still only counted once).
     fn count_visible(&mut self, e: &Op) {
         if e.elemid() == self.op.elemid() {
             return;
@@ -64,6 +68,9 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
             return QueryResult::Descend;
         }
         match self.op.key {
+            // Special case for insertion at the head of the list (`e == HEAD` is only possible for
+            // an insertion operation). Skip over any list elements whose elemId is greater than
+            // the opId of the operation being inserted.
             Key::Seq(e) if e == HEAD => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
@@ -79,12 +86,19 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                 QueryResult::Finish
             }
 
+            // Updating a list: search for the tree node that contains the new operation's
+            // reference element (i.e. the element we're updating or inserting after)
             Key::Seq(e) => {
                 if self.found || child.index.ops.contains(&e.0) {
                     QueryResult::Descend
                 } else {
                     self.pos += child.len();
 
+                    // When we skip over a subtree, we need to count the number of visible list
+                    // elements we're skipping over. Each node stores the number of visible
+                    // elements it contains. However, it could happen that a visible element is
+                    // split across two tree nodes. To avoid double-counting in this situation, we
+                    // subtract one if the last visible element also appears in this tree node.
                     let mut num_vis = child.index.len;
                     if num_vis > 0 {
                         // num vis is the number of keys in the index
@@ -100,30 +114,45 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                 }
             }
 
+            // Updating a map: operations appear in sorted order by key
             Key::Map(_) => {
+                // Search for the place where we need to insert the new operation. First find the
+                // first op with a key >= the key we're updating
                 self.pos = binary_search_by(child, |op| m.key_cmp(&op.key, &self.op.key));
                 while self.pos < child.len() {
+                    // Iterate over any existing operations for the same key; stop when we reach an
+                    // operation with a different key
                     let op = child.get(self.pos).unwrap();
                     if op.key != self.op.key {
                         break;
                     }
+
+                    // Keep track of any ops we're overwriting and any conflicts on this key
                     if self.op.overwrites(op) {
                         self.succ.push(self.pos);
                     } else if op.visible() {
                         self.values.push(op.clone());
                     }
+
+                    // Ops for the same key should be in ascending order of opId, so we break when
+                    // we reach an op with an opId greater than that of the new operation
                     if m.lamport_cmp(op.id, self.op.id) == Ordering::Greater {
                         break;
                     }
                     self.pos += 1;
                 }
 
+                // For the purpose of reporting conflicts, we also need to take into account any
+                // ops for the same key that appear after the new operation
                 let mut later_pos = self.pos;
                 while later_pos < child.len() {
                     let op = child.get(later_pos).unwrap();
                     if op.key != self.op.key {
                         break;
                     }
+                    // No need to check if `self.op.overwrites(op)` because an operation's `preds`
+                    // must always have lower Lamport timestamps than that op itself, and the ops
+                    // here all have greater opIds than the new op
                     if op.visible() {
                         self.values.push(op.clone());
                     }
@@ -134,8 +163,12 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
         }
     }
 
+    // Only called when operating on a sequence (list/text) object, since updates of a map are
+    // handled in `query_node_with_metadata`.
     fn query_element_with_metadata(&mut self, e: &Op, m: &OpSetMetadata) -> QueryResult {
         let result = if !self.found {
+            // First search for the referenced list element (i.e. the element we're updating, or
+            // after which we're inserting)
             if self.is_target_insert(e) {
                 self.found = true;
                 if self.op.overwrites(e) {
@@ -144,20 +177,34 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
             }
             self.pos += 1;
             QueryResult::Next
+
         } else {
+            // Once we've found the reference element, keep track of any ops that we're overwriting
             if self.op.overwrites(e) {
                 self.succ.push(self.pos);
             }
+
+            // If the new op is an insertion, skip over any existing list elements whose elemId is
+            // greater than the ID of the new insertion
             if self.op.insert {
                 if self.lesser_insert(e, m) {
+                    // Insert before the first existing list element whose elemId is less than that
+                    // of the new insertion
                     QueryResult::Finish
                 } else {
                     self.pos += 1;
                     QueryResult::Next
                 }
+
             } else if e.insert {
+                // If the new op is an update of an existing list element, the first insertion op
+                // we encounter after the reference element indicates the end of the reference elem
                 QueryResult::Finish
+
             } else if self.greater_opid(e, m) {
+                // When updating an existing list element, we need to put the ops for the same list
+                // element into ascending order, so we skip over any ops whose ID is less than that
+                // of the new operation. Also keep track of any conflicts on this list element.
                 if e.visible() {
                     self.values.push(e.clone());
                 }
@@ -168,6 +215,8 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
             }
         };
 
+        // The patch needs to know the list index of each operation, so we count the number of
+        // visible list elements up to the insertion position of the new operation
         if result == QueryResult::Next {
             self.count_visible(e);
         }
