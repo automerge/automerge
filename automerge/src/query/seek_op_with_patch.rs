@@ -186,7 +186,6 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
             }
             self.pos += 1;
             QueryResult::Next
-
         } else {
             // Once we've found the reference element, keep track of any ops that we're overwriting
             let overwritten = self.op.overwrites(e);
@@ -205,12 +204,10 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                     self.pos += 1;
                     QueryResult::Next
                 }
-
             } else if e.insert {
                 // If the new op is an update of an existing list element, the first insertion op
                 // we encounter after the reference element indicates the end of the reference elem
                 QueryResult::Finish
-
             } else {
                 // When updating an existing list element, keep track of any conflicts on this list
                 // element. We also need to remember if the list element had any visible elements

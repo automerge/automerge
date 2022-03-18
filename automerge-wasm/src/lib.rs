@@ -397,7 +397,6 @@ impl Automerge {
                     js_set(&patch, "obj", obj.to_string())?;
                     js_set(&patch, "key", key)?;
                 }
-
             }
             result.push(&patch);
         }
