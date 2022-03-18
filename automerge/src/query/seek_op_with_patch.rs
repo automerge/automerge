@@ -13,6 +13,7 @@ pub(crate) struct SeekOpWithPatch<const B: usize> {
     pub seen: usize,
     last_seen: Option<ElemId>,
     pub values: Vec<Op>,
+    pub had_value_before: bool,
 }
 
 impl<const B: usize> SeekOpWithPatch<B> {
@@ -25,6 +26,7 @@ impl<const B: usize> SeekOpWithPatch<B> {
             seen: 0,
             last_seen: None,
             values: vec![],
+            had_value_before: false,
         }
     }
 
@@ -178,6 +180,9 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                 if self.op.overwrites(e) {
                     self.succ.push(self.pos);
                 }
+                if e.visible() {
+                    self.had_value_before = true;
+                }
             }
             self.pos += 1;
             QueryResult::Next
@@ -208,11 +213,18 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
 
             } else {
                 // When updating an existing list element, keep track of any conflicts on this list
-                // element. We now need to put the ops for the same list element into ascending
-                // order, so we skip over any ops whose ID is less than that of the new operation.
-                if !overwritten && e.visible() {
-                    self.values.push(e.clone());
+                // element. We also need to remember if the list element had any visible elements
+                // prior to applying the new operation: if not, the new operation is resurrecting
+                // a deleted list element, so it looks like an insertion in the patch.
+                if e.visible() {
+                    self.had_value_before = true;
+                    if !overwritten {
+                        self.values.push(e.clone());
+                    }
                 }
+
+                // We now need to put the ops for the same list element into ascending order, so we
+                // skip over any ops whose ID is less than that of the new operation.
                 if !self.greater_opid(e, m) {
                     self.pos += 1;
                 }

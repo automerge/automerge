@@ -413,6 +413,10 @@ impl Op {
         matches!((&self.action, action), (OpType::Set(n), OpType::Set(m)) if n == m)
     }
 
+    pub fn is_list_op(&self) -> bool {
+        matches!(&self.key, Key::Seq(_))
+    }
+
     pub fn overwrites(&self, other: &Op) -> bool {
         self.pred.iter().any(|i| i == &other.id)
     }

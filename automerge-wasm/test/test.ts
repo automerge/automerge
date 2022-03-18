@@ -685,6 +685,41 @@ describe('Automerge', () => {
       ])
       doc1.free(); doc2.free(); doc3.free(); doc4.free()
     })
+
+    it('should handle a concurrent list element overwrite and delete', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'birds', ['Parakeet', 'Magpie', 'Thrush'])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.del('1@aaaa', 0)
+      doc1.set('1@aaaa', 1, 'Song Thrush')
+      doc2.set('1@aaaa', 0, 'Ring-necked parakeet')
+      doc2.set('1@aaaa', 2, 'Redwing')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual(doc3.values('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
+      assert.deepEqual(doc3.values('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
+      assert.deepEqual(doc4.values('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
+      assert.deepEqual(doc4.values('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'delete', obj: '1@aaaa', key: 0},
+        {action: 'assign', obj: '1@aaaa', key: 1, value: 'Song Thrush', datatype: 'str', conflict: false},
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet', datatype: 'str'},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet',  datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet',  datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
   })
 
   describe('sync', () => {

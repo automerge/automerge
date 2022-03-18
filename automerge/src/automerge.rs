@@ -241,13 +241,16 @@ impl Automerge {
                 &op
             };
             let value = (winner.value(), self.id_to_exid(winner.id));
-            let conflict = !q.values.is_empty();
-            Patch::Assign(AssignPatch {
-                obj,
-                key,
-                value,
-                conflict,
-            })
+            if op.is_list_op() && !q.had_value_before {
+                Patch::Insert(obj, q.seen, value)
+            } else {
+                Patch::Assign(AssignPatch {
+                    obj,
+                    key,
+                    value,
+                    conflict: !q.values.is_empty(),
+                })
+            }
         };
 
         if let Some(patches) = &mut self.patches {
