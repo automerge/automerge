@@ -31,14 +31,7 @@ impl<const B: usize> SeekOp<B> {
     }
 
     fn is_target_insert(&self, op: &Op) -> bool {
-        if !op.insert {
-            return false;
-        }
-        if self.op.insert {
-            op.elemid() == self.op.key.elemid()
-        } else {
-            op.elemid() == self.op.elemid()
-        }
+        op.insert && op.elemid() == self.op.key.elemid()
     }
 }
 
