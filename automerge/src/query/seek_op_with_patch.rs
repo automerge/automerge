@@ -180,7 +180,8 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
 
         } else {
             // Once we've found the reference element, keep track of any ops that we're overwriting
-            if self.op.overwrites(e) {
+            let overwritten = self.op.overwrites(e);
+            if overwritten {
                 self.succ.push(self.pos);
             }
 
@@ -201,16 +202,16 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                 // we encounter after the reference element indicates the end of the reference elem
                 QueryResult::Finish
 
-            } else if self.greater_opid(e, m) {
-                // When updating an existing list element, we need to put the ops for the same list
-                // element into ascending order, so we skip over any ops whose ID is less than that
-                // of the new operation. Also keep track of any conflicts on this list element.
-                if e.visible() {
+            } else {
+                // When updating an existing list element, keep track of any conflicts on this list
+                // element. We now need to put the ops for the same list element into ascending
+                // order, so we skip over any ops whose ID is less than that of the new operation.
+                if !overwritten && e.visible() {
                     self.values.push(e.clone());
                 }
-                QueryResult::Next
-            } else {
-                self.pos += 1;
+                if !self.greater_opid(e, m) {
+                    self.pos += 1;
+                }
                 QueryResult::Next
             }
         };
