@@ -74,9 +74,6 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
             Key::Seq(e) if e == HEAD => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
-                    if self.op.overwrites(op) {
-                        self.succ.push(self.pos);
-                    }
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }
