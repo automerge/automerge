@@ -164,7 +164,7 @@ impl<'a> Iterator for Iter<'a> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
             let tree = self.inner.trees.get(obj)?;
-            result = tree.internal.get(self.sub_index);
+            result = tree.internal.get(self.sub_index).map(|op| (*obj, op));
             if result.is_some() {
                 self.sub_index += 1;
                 break;

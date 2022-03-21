@@ -308,7 +308,7 @@ impl Automerge {
             Key::Seq(opid) => {
                 let i = self
                     .ops
-                    .search(obj, query::OpIdSearch::new(opid.0))
+                    .search(&obj, query::OpIdSearch::new(opid.0))
                     .index()
                     .unwrap();
                 Prop::Seq(i)
