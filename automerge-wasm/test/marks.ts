@@ -172,7 +172,21 @@ describe('Automerge', () => {
           { id: "43@aabbcc", start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
         ]);
 
+      doc.unmark(list, "41@aabbcc")
+      raw_spans = doc.raw_spans(list);
+      assert.deepStrictEqual(raw_spans,
+        [
+          { id: "39@aabbcc", start: 0, end: 37, type: 'bold', value: true },
+          { id: "43@aabbcc", start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
+        ]);
       // mark sure encode decode can handle marks
+
+      doc.unmark(list, "39@aabbcc")
+      raw_spans = doc.raw_spans(list);
+      assert.deepStrictEqual(raw_spans,
+        [
+          { id: "43@aabbcc", start: 10, end: 13, type: 'comment', value: 'foxes are my favorite animal!' }
+        ]);
 
       let all = doc.getChanges([])
       let decoded = all.map((c) => decodeChange(c))
@@ -180,6 +194,8 @@ describe('Automerge', () => {
       let doc2 = create();
       doc2.applyChanges(encoded)
 
+      doc.dump()
+      doc2.dump()
       assert.deepStrictEqual(doc.spans(list) , doc2.spans(list))
       assert.deepStrictEqual(doc.save(), doc2.save())
     })

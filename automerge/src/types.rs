@@ -211,6 +211,10 @@ impl OpId {
     pub fn prev(&self) -> OpId {
         OpId(self.0 - 1, self.1)
     }
+    #[inline]
+    pub fn next(&self) -> OpId {
+        OpId(self.0 + 1, self.1)
+    }
 }
 
 impl Exportable for ObjId {

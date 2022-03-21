@@ -121,6 +121,7 @@ export class Automerge {
 
   // experimental spans api - unstable!
   mark(obj: ObjID, name: string, range: string, value: Value, datatype?: Datatype): void;
+  unmark(obj: ObjID, mark: ObjID): void;
   spans(obj: ObjID): any;
   raw_spans(obj: ObjID): any;
   blame(obj: ObjID, baseline: Heads, changeset: Heads[]): ChangeSet[];

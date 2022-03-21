@@ -71,6 +71,8 @@ pub trait Transactable {
         value: ScalarValue,
     ) -> Result<(), AutomergeError>;
 
+    fn unmark<O: AsRef<ExId>>(&mut self, obj: O, mark: O) -> Result<(), AutomergeError>;
+
     /// Increment the counter at the prop in the object by `value`.
     fn inc<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,

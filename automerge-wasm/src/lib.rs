@@ -397,6 +397,13 @@ impl Automerge {
         Ok(())
     }
 
+    pub fn unmark(&mut self, obj: JsValue, mark: JsValue) -> Result<(), JsValue> {
+        let obj = self.import(obj)?;
+        let mark = self.import(mark)?;
+        self.0.unmark(&obj, &mark).map_err(to_js_err)?;
+        Ok(())
+    }
+
     pub fn spans(&mut self, obj: JsValue) -> Result<JsValue, JsValue> {
         let obj = self.import(obj)?;
         let text = self.0.list(&obj).map_err(to_js_err)?;

@@ -134,7 +134,7 @@ impl<'a> Transactable for Transaction<'a> {
     ) -> Result<(), AutomergeError> {
         self.inner.as_mut().unwrap().mark(
             self.doc,
-            obj.as_ref(),
+            obj,
             start,
             expand_start,
             end,
@@ -142,6 +142,10 @@ impl<'a> Transactable for Transaction<'a> {
             mark,
             value,
         )
+    }
+
+    fn unmark<O: AsRef<ExId>>(&mut self, obj: O, mark: O) -> Result<(), AutomergeError> {
+        self.inner.as_mut().unwrap().unmark(self.doc, obj, mark)
     }
 
     fn insert_object(

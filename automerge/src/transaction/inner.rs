@@ -148,10 +148,10 @@ impl TransactionInner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn mark(
+    pub fn mark<O: AsRef<ExId>>(
         &mut self,
         doc: &mut Automerge,
-        obj: &ExId,
+        obj: O,
         start: usize,
         expand_start: bool,
         end: usize,
@@ -159,7 +159,7 @@ impl TransactionInner {
         mark: &str,
         value: ScalarValue,
     ) -> Result<(), AutomergeError> {
-        let obj = doc.exid_to_obj(obj)?;
+        let obj = doc.exid_to_obj(obj.as_ref())?;
 
         self.do_insert(
             doc,
@@ -169,6 +169,46 @@ impl TransactionInner {
         )?;
         self.do_insert(doc, obj, end, OpType::MarkEnd(expand_end))?;
 
+        Ok(())
+    }
+
+    pub fn unmark<O: AsRef<ExId>>(
+        &mut self,
+        doc: &mut Automerge,
+        obj: O,
+        mark: O,
+    ) -> Result<(), AutomergeError> {
+        let obj = doc.exid_to_obj(obj.as_ref())?;
+        let markid = doc.exid_to_obj(mark.as_ref())?.0;
+        let op1 = Op {
+            id: self.next_id(),
+            action: OpType::Del,
+            key: markid.into(),
+            succ: Default::default(),
+            pred: vec![markid],
+            insert: false,
+        };
+        let q1 = doc.ops.search(&obj, query::SeekOp::new(&op1));
+        for i in q1.succ {
+            doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op1));
+        }
+        self.operations.push((obj, op1));
+
+        let markid = markid.next();
+        let op2 = Op {
+            id: self.next_id(),
+            action: OpType::Del,
+            key: markid.into(),
+            succ: Default::default(),
+            pred: vec![markid],
+            insert: false,
+        };
+        let q2 = doc.ops.search(&obj, query::SeekOp::new(&op2));
+
+        for i in q2.succ {
+            doc.ops.replace(&obj, i, |old_op| old_op.add_succ(&op2));
+        }
+        self.operations.push((obj, op2));
         Ok(())
     }
 

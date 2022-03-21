@@ -367,7 +367,7 @@ impl Transactable for AutoCommit {
         let tx = self.transaction.as_mut().unwrap();
         tx.mark(
             &mut self.doc,
-            obj.as_ref(),
+            obj,
             start,
             expand_start,
             end,
@@ -375,6 +375,12 @@ impl Transactable for AutoCommit {
             mark,
             value,
         )
+    }
+
+    fn unmark<O: AsRef<ExId>>(&mut self, obj: O, mark: O) -> Result<(), AutomergeError> {
+        self.ensure_transaction_open();
+        let tx = self.transaction.as_mut().unwrap();
+        tx.unmark(&mut self.doc, obj, mark)
     }
 
     fn insert_object(
