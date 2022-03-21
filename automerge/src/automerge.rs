@@ -263,7 +263,11 @@ impl Automerge {
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
-        ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        }
     }
 
     /// Get the string represented by the given text object.
@@ -487,12 +491,9 @@ impl Automerge {
     }
 
     /// Load an incremental save of a document.
-    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
+    pub fn load_incremental(&mut self, data: &[u8]) -> Result<Vec<ExId>, AutomergeError> {
         let changes = Change::load_document(data)?;
-        let start = self.ops.len();
-        self.apply_changes(changes)?;
-        let delta = self.ops.len() - start;
-        Ok(delta)
+        self.apply_changes(changes)
     }
 
     fn duplicate_seq(&self, change: &Change) -> bool {
@@ -506,7 +507,8 @@ impl Automerge {
     }
 
     /// Apply changes to this document.
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Vec<ExId>, AutomergeError> {
+        let mut objs = HashSet::new();
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
                 if self.duplicate_seq(&c) {
@@ -516,23 +518,24 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c);
+                    self.apply_change(c, &mut objs);
                 } else {
                     self.queue.push(c);
                 }
             }
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
-            self.apply_change(c);
+            self.apply_change(c, &mut objs);
         }
-        Ok(())
+        Ok(objs.into_iter().map(|obj| self.id_to_exid(obj.0)).collect())
     }
 
     /// Apply a single change to this document.
-    fn apply_change(&mut self, change: Change) {
+    fn apply_change(&mut self, change: Change, objs: &mut HashSet<ObjId>) {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
         for (obj, op) in ops {
+            objs.insert(obj);
             self.insert_op(&obj, op);
         }
     }
@@ -594,15 +597,14 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ExId>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
             .get_changes_added(other)
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes(changes)?;
-        Ok(self.get_heads())
+        self.apply_changes(changes)
     }
 
     /// Save the entirety of this document in a compact form.
