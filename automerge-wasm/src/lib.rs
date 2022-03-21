@@ -89,12 +89,9 @@ impl Automerge {
     }
 
     pub fn merge(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
-        let heads = self.0.merge(&mut other.0)?;
-        let heads: Array = heads
-            .iter()
-            .map(|h| JsValue::from_str(&hex::encode(&h.0)))
-            .collect();
-        Ok(heads)
+        let objs = self.0.merge(&mut other.0)?;
+        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
+        Ok(objs)
     }
 
     pub fn rollback(&mut self) -> f64 {
@@ -365,17 +362,19 @@ impl Automerge {
     }
 
     #[wasm_bindgen(js_name = loadIncremental)]
-    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<f64, JsValue> {
+    pub fn load_incremental(&mut self, data: Uint8Array) -> Result<Array, JsValue> {
         let data = data.to_vec();
-        let len = self.0.load_incremental(&data).map_err(to_js_err)?;
-        Ok(len as f64)
+        let objs = self.0.load_incremental(&data).map_err(to_js_err)?;
+        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
+        Ok(objs)
     }
 
     #[wasm_bindgen(js_name = applyChanges)]
-    pub fn apply_changes(&mut self, changes: JsValue) -> Result<(), JsValue> {
+    pub fn apply_changes(&mut self, changes: JsValue) -> Result<Array, JsValue> {
         let changes: Vec<_> = JS(changes).try_into()?;
-        self.0.apply_changes(changes).map_err(to_js_err)?;
-        Ok(())
+        let objs = self.0.apply_changes(changes).map_err(to_js_err)?;
+        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
+        Ok(objs)
     }
 
     #[wasm_bindgen(js_name = getChanges)]
@@ -444,13 +443,15 @@ impl Automerge {
         &mut self,
         state: &mut SyncState,
         message: Uint8Array,
-    ) -> Result<(), JsValue> {
+    ) -> Result<Array, JsValue> {
         let message = message.to_vec();
         let message = am::sync::Message::decode(message.as_slice()).map_err(to_js_err)?;
-        self.0
+        let objs = self
+            .0
             .receive_sync_message(&mut state.0, message)
             .map_err(to_js_err)?;
-        Ok(())
+        let objs: Array = objs.iter().map(|o| JsValue::from(o.to_string())).collect();
+        Ok(objs)
     }
 
     #[wasm_bindgen(js_name = generateSyncMessage)]

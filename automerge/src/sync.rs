@@ -1,13 +1,13 @@
+use crate::exid::ExId;
+use crate::{
+    decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
+};
 use itertools::Itertools;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     io,
     io::Write,
-};
-
-use crate::{
-    decoding, decoding::Decoder, encoding::Encodable, Automerge, AutomergeError, Change, ChangeHash,
 };
 
 mod bloom;
@@ -97,7 +97,8 @@ impl Automerge {
         &mut self,
         sync_state: &mut State,
         message: Message,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<ExId>, AutomergeError> {
+        let mut result = vec![];
         let before_heads = self.get_heads();
 
         let Message {
@@ -109,7 +110,7 @@ impl Automerge {
 
         let changes_is_empty = message_changes.is_empty();
         if !changes_is_empty {
-            self.apply_changes(message_changes)?;
+            result = self.apply_changes(message_changes)?;
             sync_state.shared_heads = advance_heads(
                 &before_heads.iter().collect(),
                 &self.get_heads().into_iter().collect(),
@@ -150,7 +151,7 @@ impl Automerge {
         sync_state.their_heads = Some(message_heads);
         sync_state.their_need = Some(message_need);
 
-        Ok(())
+        Ok(result)
     }
 
     fn make_bloom_filter(&self, last_sync: Vec<ChangeHash>) -> Have {

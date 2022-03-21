@@ -276,8 +276,9 @@ describe('Automerge', () => {
       let docA = loadDoc(saveA);
       let docB = loadDoc(saveB);
       let docC = loadDoc(saveMidway)
-      docC.loadIncremental(save3)
+      let touched = docC.loadIncremental(save3)
 
+      assert.deepEqual(touched, ["_root"]);
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
       assert.deepEqual(docA.save(), docB.save());
       assert.deepEqual(docA.save(), docC.save());
@@ -344,9 +345,11 @@ describe('Automerge', () => {
       doc1.set(seq, 0, 20)
       doc2.set(seq, 0, 0, "counter")
       doc3.set(seq, 0, 10, "counter")
-      doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
-      doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
+      let touched1 = doc1.applyChanges(doc2.getChanges(doc1.getHeads()))
+      let touched2 = doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values(seq, 0)
+      assert.deepEqual(touched1,["1@aaaa"])
+      assert.deepEqual(touched2,["1@aaaa"])
       assert.deepEqual(result,[
         ['int',20,'3@aaaa'],
         ['counter',0,'3@bbbb'],
@@ -1073,16 +1076,20 @@ describe('Automerge', () => {
         m2 = n2.generateSyncMessage(s2)
         if (m1 === null) { throw new RangeError("message should not be null") }
         if (m2 === null) { throw new RangeError("message should not be null") }
-        n1.receiveSyncMessage(s1, m2)
-        n2.receiveSyncMessage(s2, m1)
+        let touched1 =  n1.receiveSyncMessage(s1, m2)
+        let touched2 = n2.receiveSyncMessage(s2, m1)
+        assert.deepEqual(touched1, []);
+        assert.deepEqual(touched2, []);
 
         // Then n1 and n2 send each other their changes, except for the false positive
         m1 = n1.generateSyncMessage(s1)
         m2 = n2.generateSyncMessage(s2)
         if (m1 === null) { throw new RangeError("message should not be null") }
         if (m2 === null) { throw new RangeError("message should not be null") }
-        n1.receiveSyncMessage(s1, m2)
-        n2.receiveSyncMessage(s2, m1)
+        let touched3 = n1.receiveSyncMessage(s1, m2)
+        let touched4 = n2.receiveSyncMessage(s2, m1)
+        assert.deepEqual(touched3, []);
+        assert.deepEqual(touched4, ["_root"]);
         assert.strictEqual(decodeSyncMessage(m1).changes.length, 2) // n1c1 and n1c2
         assert.strictEqual(decodeSyncMessage(m2).changes.length, 1) // only n2c2; change n2c1 is not sent
 

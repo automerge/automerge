@@ -90,10 +90,6 @@ impl<const B: usize> OpSetInternal<B> {
         op
     }
 
-    pub fn len(&self) -> usize {
-        self.length
-    }
-
     pub fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
             self.trees

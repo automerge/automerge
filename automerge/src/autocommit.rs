@@ -139,18 +139,18 @@ impl AutoCommit {
         })
     }
 
-    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
+    pub fn load_incremental(&mut self, data: &[u8]) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.load_incremental(data)
     }
 
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.apply_changes(changes)
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_closed();
         other.ensure_transaction_closed();
         self.doc.merge(&mut other.doc)
@@ -210,7 +210,7 @@ impl AutoCommit {
         &mut self,
         sync_state: &mut sync::State,
         message: sync::Message,
-    ) -> Result<(), AutomergeError> {
+    ) -> Result<Vec<ExId>, AutomergeError> {
         self.ensure_transaction_closed();
         self.doc.receive_sync_message(sync_state, message)
     }
