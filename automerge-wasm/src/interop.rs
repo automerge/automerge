@@ -335,18 +335,18 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     for k in keys {
         let val = doc.value(obj, &k);
         match val {
-            Ok(Some((Value::Object(o), exid)))
+            Ok(Some(Value::Object(o, exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
             {
                 Reflect::set(&map, &k.into(), &map_to_js(doc, &exid)).unwrap();
             }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::List => {
+            Ok(Some(Value::Object(o, exid))) if o == am::ObjType::List => {
                 Reflect::set(&map, &k.into(), &list_to_js(doc, &exid)).unwrap();
             }
-            Ok(Some((Value::Object(o), exid))) if o == am::ObjType::Text => {
+            Ok(Some(Value::Object(o, exid))) if o == am::ObjType::Text => {
                 Reflect::set(&map, &k.into(), &doc.text(&exid).unwrap().into()).unwrap();
             }
-            Ok(Some((Value::Scalar(v), _))) => {
+            Ok(Some(Value::Scalar(v))) => {
                 Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
             }
             _ => (),
@@ -361,15 +361,15 @@ pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     for i in 0..len {
         let val = doc.value(obj, i as usize);
         match val {
-            Ok(Some((Value::Object(o), exid)))
+            Ok(Some(Value::Object(o, exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
             {
                 array.push(&map_to_js(doc, &exid));
             }
-            Ok(Some((Value::Object(_), exid))) => {
+            Ok(Some(Value::Object(_, exid))) => {
                 array.push(&list_to_js(doc, &exid));
             }
-            Ok(Some((Value::Scalar(v), _))) => {
+            Ok(Some(Value::Scalar(v))) => {
                 array.push(&ScalarValue(v).into());
             }
             _ => (),

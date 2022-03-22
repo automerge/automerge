@@ -1,32 +1,17 @@
 use crate::error;
-use crate::types::{ObjType, Op, OpId, OpType};
+use crate::exid::ExId;
+use crate::types::ObjType;
 use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    Object(ObjType),
+    Object(ObjType, ExId),
     Scalar(ScalarValue),
 }
 
 impl Value {
-    pub fn map() -> Value {
-        Value::Object(ObjType::Map)
-    }
-
-    pub fn list() -> Value {
-        Value::Object(ObjType::List)
-    }
-
-    pub fn text() -> Value {
-        Value::Object(ObjType::Text)
-    }
-
-    pub fn table() -> Value {
-        Value::Object(ObjType::Table)
-    }
-
     pub fn str(s: &str) -> Value {
         Value::Scalar(ScalarValue::Str(s.into()))
     }
@@ -56,7 +41,7 @@ impl Value {
     }
 
     pub fn is_object(&self) -> bool {
-        matches!(&self, Value::Object(_))
+        matches!(&self, Value::Object(_, _))
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -115,7 +100,7 @@ impl Value {
 
     pub fn to_objtype(&self) -> Option<ObjType> {
         match self {
-            Self::Object(o) => Some(*o),
+            Self::Object(o, _) => Some(*o),
             _ => None,
         }
     }
@@ -176,12 +161,19 @@ impl Value {
             _ => None,
         }
     }
+
+    pub fn id(&self) -> Option<ExId> {
+        match self {
+            Value::Object(_, id) => Some(id.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Object(o) => write!(f, "Object: {}", o),
+            Value::Object(o, id) => write!(f, "Object: {} {}", o, id),
             Value::Scalar(s) => write!(f, "Scalar: {}", s),
         }
     }
@@ -253,44 +245,9 @@ impl From<()> for Value {
     }
 }
 
-impl From<ObjType> for Value {
-    fn from(o: ObjType) -> Self {
-        Value::Object(o)
-    }
-}
-
 impl From<ScalarValue> for Value {
     fn from(v: ScalarValue) -> Self {
         Value::Scalar(v)
-    }
-}
-
-impl From<&Op> for (Value, OpId) {
-    fn from(op: &Op) -> Self {
-        match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
-            _ => panic!("cant convert op into a value - {:?}", op),
-        }
-    }
-}
-
-impl From<Op> for (Value, OpId) {
-    fn from(op: Op) -> Self {
-        match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
-            _ => panic!("cant convert op into a value - {:?}", op),
-        }
-    }
-}
-
-impl From<Value> for OpType {
-    fn from(v: Value) -> Self {
-        match v {
-            Value::Object(o) => OpType::Make(o),
-            Value::Scalar(s) => OpType::Set(s),
-        }
     }
 }
 

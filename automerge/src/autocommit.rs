@@ -413,7 +413,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<Value>, AutomergeError> {
         self.doc.value(obj, prop)
     }
 
@@ -422,7 +422,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<Value>, AutomergeError> {
         self.doc.value_at(obj, prop, heads)
     }
 
@@ -430,7 +430,7 @@ impl Transactable for AutoCommit {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<Value>, AutomergeError> {
         self.doc.values(obj, prop)
     }
 
@@ -439,7 +439,7 @@ impl Transactable for AutoCommit {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<Value>, AutomergeError> {
         self.doc.values_at(obj, prop, heads)
     }
 }

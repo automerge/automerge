@@ -237,15 +237,15 @@ impl Automerge {
             let (value, subvals) = self.import_value(&v, None)?;
             //let opid = self.0.set(id, p, value)?;
             let opid = match (p, value) {
-                (Prop::Map(s), Value::Object(objtype)) => Some(self.0.set_object(obj, s, objtype)?),
-                (Prop::Map(s), Value::Scalar(scalar)) => {
+                (Prop::Map(s), AMVal::Object(objtype)) => Some(self.0.set_object(obj, s, objtype)?),
+                (Prop::Map(s), AMVal::Scalar(scalar)) => {
                     self.0.set(obj, s, scalar)?;
                     None
                 }
-                (Prop::Seq(i), Value::Object(objtype)) => {
+                (Prop::Seq(i), AMVal::Object(objtype)) => {
                     Some(self.0.insert_object(obj, i, objtype)?)
                 }
-                (Prop::Seq(i), Value::Scalar(scalar)) => {
+                (Prop::Seq(i), AMVal::Scalar(scalar)) => {
                     self.0.insert(obj, i, scalar)?;
                     None
                 }
@@ -284,12 +284,12 @@ impl Automerge {
                 self.0.value(&obj, prop)?
             };
             match value {
-                Some((Value::Object(obj_type), obj_id)) => {
+                Some(Value::Object(obj_type, obj_id)) => {
                     result.push(&obj_type.to_string().into());
                     result.push(&obj_id.to_string().into());
                     Ok(Some(result))
                 }
-                Some((Value::Scalar(value), _)) => {
+                Some(Value::Scalar(value)) => {
                     result.push(&datatype(&value).into());
                     result.push(&ScalarValue(value).into());
                     Ok(Some(result))
@@ -319,17 +319,16 @@ impl Automerge {
             .map_err(to_js_err)?;
             for value in values {
                 match value {
-                    (Value::Object(obj_type), obj_id) => {
+                    Value::Object(obj_type, obj_id) => {
                         let sub = Array::new();
                         sub.push(&obj_type.to_string().into());
                         sub.push(&obj_id.to_string().into());
                         result.push(&sub.into());
                     }
-                    (Value::Scalar(value), id) => {
+                    Value::Scalar(value) => {
                         let sub = Array::new();
                         sub.push(&datatype(&value).into());
                         sub.push(&ScalarValue(value).into());
-                        sub.push(&id.to_string().into());
                         result.push(&sub.into());
                     }
                 }
@@ -494,15 +493,15 @@ impl Automerge {
                         self.0.value(obj, am::Prop::Seq(prop.parse().unwrap()))?
                     };
                     match val {
-                        Some((am::Value::Object(am::ObjType::Map), id)) => {
+                        Some(am::Value::Object(am::ObjType::Map, id)) => {
                             is_map = true;
                             obj = id;
                         }
-                        Some((am::Value::Object(am::ObjType::Table), id)) => {
+                        Some(am::Value::Object(am::ObjType::Table, id)) => {
                             is_map = true;
                             obj = id;
                         }
-                        Some((am::Value::Object(_), id)) => {
+                        Some(am::Value::Object(_, id)) => {
                             is_map = false;
                             obj = id;
                         }
@@ -574,7 +573,7 @@ impl Automerge {
         &mut self,
         value: &JsValue,
         datatype: Option<String>,
-    ) -> Result<(Value, Vec<(Prop, JsValue)>), JsValue> {
+    ) -> Result<(AMVal, Vec<(Prop, JsValue)>), JsValue> {
         match self.import_scalar(value, &datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {
@@ -680,4 +679,21 @@ pub fn encode_sync_state(state: SyncState) -> Result<Uint8Array, JsValue> {
 #[wasm_bindgen(js_name = decodeSyncState)]
 pub fn decode_sync_state(data: Uint8Array) -> Result<SyncState, JsValue> {
     SyncState::decode(data)
+}
+
+enum AMVal {
+    Scalar(am::ScalarValue),
+    Object(am::ObjType),
+}
+
+impl From<am::ObjType> for AMVal {
+    fn from(o: am::ObjType) -> Self {
+        AMVal::Object(o)
+    }
+}
+
+impl From<am::ScalarValue> for AMVal {
+    fn from(s: am::ScalarValue) -> Self {
+        AMVal::Scalar(s)
+    }
 }

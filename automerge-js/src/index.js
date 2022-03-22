@@ -131,19 +131,20 @@ function conflictAt(context, objectId, prop) {
       if (values.length <= 1) {
         return
       }
-      let result = {}
-      for (const conflict of values) {
+      let result = []
+      for (const i in values) {
+        const conflict = values[i]
         const datatype = conflict[0]
         const value = conflict[1]
         switch (datatype) {
           case "map":
-            result[value] = mapProxy(context, value, [ prop ], true)
+            result.push(mapProxy(context, value, [ prop ], true))
             break;
           case "list":
-            result[value] = listProxy(context, value, [ prop ], true)
+            result.push(listProxy(context, value, [ prop ], true))
             break;
           case "text":
-            result[value] = textProxy(context, value, [ prop ], true)
+            result.push(textProxy(context, value, [ prop ], true))
             break;
           //case "table":
           //case "cursor":
@@ -154,13 +155,13 @@ function conflictAt(context, objectId, prop) {
           case "boolean":
           case "bytes":
           case "null":
-            result[conflict[2]] = value
+            result.push(value)
             break;
           case "counter":
-            result[conflict[2]] = new Counter(value)
+            result.push(new Counter(value))
             break;
           case "timestamp":
-            result[conflict[2]] = new Date(value)
+            result.push(new Date(value))
             break;
           default:
             throw RangeError(`datatype ${datatype} unimplemented`)

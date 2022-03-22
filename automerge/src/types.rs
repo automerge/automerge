@@ -424,14 +424,6 @@ impl Op {
         }
     }
 
-    pub fn value(&self) -> Value {
-        match &self.action {
-            OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
-            _ => panic!("cant convert op into a value - {:?}", self),
-        }
-    }
-
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         match &self.action {

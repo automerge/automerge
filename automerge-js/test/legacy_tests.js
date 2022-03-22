@@ -6,7 +6,6 @@ const { decodeChange } = require('../src/columnar')
 //const { decodeChange } = Automerge
 
 const UUID_PATTERN = /^[0-9a-f]{32}$/
-const OPID_PATTERN = /^[0-9]+@[0-9a-f]{32}$/
 
 // CORE FEATURES
 //
@@ -77,7 +76,7 @@ describe('Automerge', () => {
   describe('sequential use', () => {
     let s1, s2
     beforeEach(() => {
-      s1 = Automerge.init()
+      s1 = Automerge.init("aaaa")
     })
 
     it('should not mutate objects', () => {
@@ -185,7 +184,7 @@ describe('Automerge', () => {
         s1 = Automerge.change(s1, doc => doc.field = 123)
         s2 = Automerge.change(s2, doc => doc.field = 321)
         s1 = Automerge.merge(s1, s2)
-        assert.strictEqual(Object.keys(Automerge.getConflicts(s1, 'field')).length, 2)
+        assert.strictEqual(Automerge.getConflicts(s1, 'field').length, 2)
         const resolved = Automerge.change(s1, doc => doc.field = s1.field)
         assert.notStrictEqual(resolved, s1)
         assert.deepStrictEqual(resolved, {field: s1.field})
@@ -200,14 +199,11 @@ describe('Automerge', () => {
 
       it('should not ignore list element updates that resolve a conflict', () => {
         s1 = Automerge.change(s1, doc => doc.list = [1])
-        s2 = Automerge.merge(Automerge.init(), s1)
+        s2 = Automerge.merge(Automerge.init("bbbb"), s1)
         s1 = Automerge.change(s1, doc => doc.list[0] = 123)
         s2 = Automerge.change(s2, doc => doc.list[0] = 321)
         s1 = Automerge.merge(s1, s2)
-        assert.deepStrictEqual(Automerge.getConflicts(s1.list, 0), {
-          [`3@${Automerge.getActorId(s1)}`]: 123,
-          [`3@${Automerge.getActorId(s2)}`]: 321
-        })
+        assert.deepStrictEqual(Automerge.getConflicts(s1.list, 0), [ 123, 321 ])
         const resolved = Automerge.change(s1, doc => doc.list[0] = s1.list[0])
         assert.deepStrictEqual(resolved, s1)
         assert.notStrictEqual(resolved, s1)
@@ -424,7 +420,7 @@ describe('Automerge', () => {
       it('should assign an objectId to nested maps', () => {
         s1 = Automerge.change(s1, doc => { doc.nested = {} })
         let id = Automerge.getObjectId(s1.nested)
-        assert.strictEqual(OPID_PATTERN.test(Automerge.getObjectId(s1.nested)), true)
+        assert.strictEqual(/^[0-9]+@[0-9a-f]{4}$/.test(Automerge.getObjectId(s1.nested)), true)
         assert.notEqual(Automerge.getObjectId(s1.nested), '_root')
       })
 
@@ -812,9 +808,9 @@ describe('Automerge', () => {
   describe('concurrent use', () => {
     let s1, s2, s3
     beforeEach(() => {
-      s1 = Automerge.init()
-      s2 = Automerge.init()
-      s3 = Automerge.init()
+      s1 = Automerge.init("aaaa")
+      s2 = Automerge.init("bbbb")
+      s3 = Automerge.init("cccc")
     })
 
     it('should merge concurrent updates of different properties', () => {
@@ -855,10 +851,10 @@ describe('Automerge', () => {
       } else {
         assert.deepStrictEqual(s3, {counter: new Automerge.Counter(103)})
       }
-      assert.deepStrictEqual(Automerge.getConflicts(s3, 'counter'), {
-        [`1@${Automerge.getActorId(s1)}`]: new Automerge.Counter(1),
-        [`1@${Automerge.getActorId(s2)}`]: new Automerge.Counter(103)
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3, 'counter'), [
+        new Automerge.Counter(1),
+        new Automerge.Counter(103)
+      ])
       s4 = Automerge.load(Automerge.save(s3))
       assert.deepEqual(s3,s4)
     })
@@ -872,10 +868,7 @@ describe('Automerge', () => {
       } else {
         assert.deepStrictEqual(s3, {field: 'two'})
       }
-      assert.deepStrictEqual(Automerge.getConflicts(s3, 'field'), {
-        [`1@${Automerge.getActorId(s1)}`]: 'one',
-        [`1@${Automerge.getActorId(s2)}`]: 'two'
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3, 'field'), [ 'one', 'two' ])
     })
 
     it('should detect concurrent updates of the same list element', () => {
@@ -889,10 +882,7 @@ describe('Automerge', () => {
       } else {
         assert.deepStrictEqual(s3.birds, ['goldfinch'])
       }
-      assert.deepStrictEqual(Automerge.getConflicts(s3.birds, 0), {
-        [`3@${Automerge.getActorId(s1)}`]: 'greenfinch',
-        [`3@${Automerge.getActorId(s2)}`]: 'goldfinch'
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3.birds, 0), [ 'greenfinch', 'goldfinch' ])
     })
 
     it('should handle assignment conflicts of different types', () => {
@@ -901,11 +891,11 @@ describe('Automerge', () => {
       s3 = Automerge.change(s3, doc => doc.field = {thing: 'map'})
       s1 = Automerge.merge(Automerge.merge(s1, s2), s3)
       assertEqualsOneOf(s1.field, 'string', ['list'], {thing: 'map'})
-      assert.deepStrictEqual(Automerge.getConflicts(s1, 'field'), {
-        [`1@${Automerge.getActorId(s1)}`]: 'string',
-        [`1@${Automerge.getActorId(s2)}`]: ['list'],
-        [`1@${Automerge.getActorId(s3)}`]: {thing: 'map'}
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s1, 'field'), [
+        'string',
+        ['list'],
+        {thing: 'map'}
+      ])
     })
 
     it('should handle changes within a conflicting map field', () => {
@@ -914,10 +904,7 @@ describe('Automerge', () => {
       s2 = Automerge.change(s2, doc => doc.field.innerKey = 42)
       s3 = Automerge.merge(s1, s2)
       assertEqualsOneOf(s3.field, 'string', {innerKey: 42})
-      assert.deepStrictEqual(Automerge.getConflicts(s3, 'field'), {
-        [`1@${Automerge.getActorId(s1)}`]: 'string',
-        [`1@${Automerge.getActorId(s2)}`]: {innerKey: 42}
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3, 'field'), [ 'string', {innerKey: 42} ])
     })
 
     it('should handle changes within a conflicting list element', () => {
@@ -933,10 +920,10 @@ describe('Automerge', () => {
       } else {
         assert.deepStrictEqual(s3.list, [{map2: true, key: 2}])
       }
-      assert.deepStrictEqual(Automerge.getConflicts(s3.list, 0), {
-        [`3@${Automerge.getActorId(s1)}`]: {map1: true, key: 1},
-        [`3@${Automerge.getActorId(s2)}`]: {map2: true, key: 2}
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3.list, 0), [
+        {map1: true, key: 1},
+        {map2: true, key: 2}
+      ])
     })
 
     it('should not merge concurrently assigned nested maps', () => {
@@ -944,10 +931,10 @@ describe('Automerge', () => {
       s2 = Automerge.change(s2, doc => doc.config = {logo_url: 'logo.png'})
       s3 = Automerge.merge(s1, s2)
       assertEqualsOneOf(s3.config, {background: 'blue'}, {logo_url: 'logo.png'})
-      assert.deepStrictEqual(Automerge.getConflicts(s3, 'config'), {
-        [`1@${Automerge.getActorId(s1)}`]: {background: 'blue'},
-        [`1@${Automerge.getActorId(s2)}`]: {logo_url: 'logo.png'}
-      })
+      assert.deepStrictEqual(Automerge.getConflicts(s3, 'config'), [
+        {background: 'blue'},
+        {logo_url: 'logo.png'}
+      ])
     })
 
     it('should clear conflicts after assigning a new value', () => {
@@ -1154,8 +1141,8 @@ describe('Automerge', () => {
       let s3 = Automerge.load(Automerge.save(s1))
       assert.strictEqual(s1.x, 5)
       assert.strictEqual(s3.x, 5)
-      assert.deepStrictEqual(Automerge.getConflicts(s1, 'x'), {'1@111111': 3, '1@222222': 5})
-      assert.deepStrictEqual(Automerge.getConflicts(s3, 'x'), {'1@111111': 3, '1@222222': 5})
+      assert.deepStrictEqual(Automerge.getConflicts(s1, 'x'), [ 3, 5 ])
+      assert.deepStrictEqual(Automerge.getConflicts(s3, 'x'), [ 3, 5 ])
     })
 
     it('should reconstitute element ID counters', () => {

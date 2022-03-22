@@ -207,7 +207,7 @@ impl<'a> Transactable for Transaction<'a> {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<Value>, AutomergeError> {
         self.doc.value(obj, prop)
     }
 
@@ -216,7 +216,7 @@ impl<'a> Transactable for Transaction<'a> {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Option<Value>, AutomergeError> {
         self.doc.value_at(obj, prop, heads)
     }
 
@@ -224,7 +224,7 @@ impl<'a> Transactable for Transaction<'a> {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<Value>, AutomergeError> {
         self.doc.values(obj, prop)
     }
 
@@ -233,7 +233,7 @@ impl<'a> Transactable for Transaction<'a> {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
+    ) -> Result<Vec<Value>, AutomergeError> {
         self.doc.values_at(obj, prop, heads)
     }
 }

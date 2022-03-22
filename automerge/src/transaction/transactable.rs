@@ -120,7 +120,7 @@ pub trait Transactable {
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<Value>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
     fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
@@ -128,18 +128,18 @@ pub trait Transactable {
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Option<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Option<Value>, AutomergeError>;
 
     fn values<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<Value>, AutomergeError>;
 
     fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
-    ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
+    ) -> Result<Vec<Value>, AutomergeError>;
 }

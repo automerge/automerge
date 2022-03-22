@@ -7,15 +7,15 @@ pub(crate) fn map_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::V
     for k in keys {
         let val = doc.value(obj, &k);
         match val {
-            Ok(Some((am::Value::Object(o), exid)))
+            Ok(Some(am::Value::Object(o, exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
             {
                 map.insert(k.to_owned(), map_to_json(doc, &exid));
             }
-            Ok(Some((am::Value::Object(_), exid))) => {
+            Ok(Some(am::Value::Object(_, exid))) => {
                 map.insert(k.to_owned(), list_to_json(doc, &exid));
             }
-            Ok(Some((am::Value::Scalar(v), _))) => {
+            Ok(Some(am::Value::Scalar(v))) => {
                 map.insert(k.to_owned(), scalar_to_json(&v));
             }
             _ => (),
@@ -30,15 +30,15 @@ fn list_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     for i in 0..len {
         let val = doc.value(obj, i as usize);
         match val {
-            Ok(Some((am::Value::Object(o), exid)))
+            Ok(Some(am::Value::Object(o, exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
             {
                 array.push(map_to_json(doc, &exid));
             }
-            Ok(Some((am::Value::Object(_), exid))) => {
+            Ok(Some(am::Value::Object(_, exid))) => {
                 array.push(list_to_json(doc, &exid));
             }
-            Ok(Some((am::Value::Scalar(v), _))) => {
+            Ok(Some(am::Value::Scalar(v))) => {
                 array.push(scalar_to_json(&v));
             }
             _ => (),

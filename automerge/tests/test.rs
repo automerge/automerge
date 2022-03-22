@@ -94,7 +94,7 @@ fn merge_concurrent_map_prop_updates() {
     doc2.set(&automerge::ROOT, "hello", "world").unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_eq!(
-        doc1.value(&automerge::ROOT, "foo").unwrap().unwrap().0,
+        doc1.value(&automerge::ROOT, "foo").unwrap().unwrap(),
         "bar".into()
     );
     assert_doc!(
@@ -857,29 +857,29 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     let values = doc1.values(&list, 1)?;
     assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::counter(100));
+    assert_eq!(&values[0], &Value::counter(1));
+    assert_eq!(&values[1], &Value::counter(10));
+    assert_eq!(&values[2], &Value::counter(100));
 
     let values = doc1.values(&list, 2)?;
     assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(1));
-    assert_eq!(&values[1].0, &Value::counter(10));
-    assert_eq!(&values[2].0, &Value::int(100));
+    assert_eq!(&values[0], &Value::counter(1));
+    assert_eq!(&values[1], &Value::counter(10));
+    assert_eq!(&values[2], &Value::int(100));
 
     doc1.inc(&list, 1, 1)?;
     doc1.inc(&list, 2, 1)?;
 
     let values = doc1.values(&list, 1)?;
     assert_eq!(values.len(), 3);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
-    assert_eq!(&values[2].0, &Value::counter(101));
+    assert_eq!(&values[0], &Value::counter(2));
+    assert_eq!(&values[1], &Value::counter(11));
+    assert_eq!(&values[2], &Value::counter(101));
 
     let values = doc1.values(&list, 2)?;
     assert_eq!(values.len(), 2);
-    assert_eq!(&values[0].0, &Value::counter(2));
-    assert_eq!(&values[1].0, &Value::counter(11));
+    assert_eq!(&values[0], &Value::counter(2));
+    assert_eq!(&values[1], &Value::counter(11));
 
     assert_eq!(doc1.length(&list), 3);
 

@@ -315,15 +315,15 @@ describe('Automerge', () => {
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values("_root", "cnt")
       assert.deepEqual(result,[
-        ['int',20,'2@aaaa'],
-        ['counter',0,'2@bbbb'],
-        ['counter',10,'2@cccc'],
+        ['int',20],
+        ['counter',0],
+        ['counter',10],
       ])
       doc1.inc("_root", "cnt", 5)
       result = doc1.values("_root", "cnt")
       assert.deepEqual(result, [
-        [ 'counter', 5, '2@bbbb' ],
-        [ 'counter', 15, '2@cccc' ],
+        [ 'counter', 5],
+        [ 'counter', 15],
       ])
 
       let save1 = doc1.save()
@@ -348,15 +348,15 @@ describe('Automerge', () => {
       doc1.applyChanges(doc3.getChanges(doc1.getHeads()))
       let result = doc1.values(seq, 0)
       assert.deepEqual(result,[
-        ['int',20,'3@aaaa'],
-        ['counter',0,'3@bbbb'],
-        ['counter',10,'3@cccc'],
+        ['int',20],
+        ['counter',0],
+        ['counter',10],
       ])
       doc1.inc(seq, 0, 5)
       result = doc1.values(seq, 0)
       assert.deepEqual(result, [
-        [ 'counter', 5, '3@bbbb' ],
-        [ 'counter', 15, '3@cccc' ],
+        [ 'counter', 5 ],
+        [ 'counter', 15 ],
       ])
 
       let save = doc1.save()
