@@ -473,7 +473,7 @@ describe('Automerge', () => {
       A.insert('/list', 2, 'c')
 
       let opIds = A.merge(B)
-      assert.equal(opIds.length, 1)
+      assert.equal(opIds.length, 0)
     })
   })
   describe('sync', () => {
