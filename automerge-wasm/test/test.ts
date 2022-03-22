@@ -462,6 +462,19 @@ describe('Automerge', () => {
       assert.deepEqual(C.text(At), 'hell! world')
     })
 
+    it('should return opIds that were changed', () => {
+      let A = create("aabbcc")
+      let At = A.set_object('_root', 'list', [])
+      A.insert('/list', 0, 'a')
+      A.insert('/list', 1, 'b')
+
+      let B = A.fork()
+
+      A.insert('/list', 2, 'c')
+
+      let opIds = A.merge(B)
+      assert.equal(opIds.length, 1)
+    })
   })
   describe('sync', () => {
     it('should send a sync message implying no local data', () => {
