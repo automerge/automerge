@@ -295,7 +295,7 @@ impl Automerge {
             } else {
                 self.ops
                     .parent_object(&obj)
-                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(obj, key)))
+                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(id, key)))
             }
         } else {
             None
@@ -308,7 +308,7 @@ impl Automerge {
             Key::Seq(opid) => {
                 let i = self
                     .ops
-                    .search(&obj, query::OpIdSearch::new(opid.0))
+                    .search(&obj, query::ElemIdPos::new(opid))
                     .index()
                     .unwrap();
                 Prop::Seq(i)

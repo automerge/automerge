@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
 use std::fmt;
+use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
@@ -329,6 +330,15 @@ pub(crate) enum Key {
 pub enum Prop {
     Map(String),
     Seq(usize),
+}
+
+impl Display for Prop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Prop::Map(s) => write!(f, "{}", s),
+            Prop::Seq(i) => write!(f, "{}", i),
+        }
+    }
 }
 
 impl Key {

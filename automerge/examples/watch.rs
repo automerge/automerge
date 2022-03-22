@@ -21,9 +21,14 @@ fn main() {
     tx.set(&map, "blah", 1).unwrap();
     tx.set(&map, "blah2", 1).unwrap();
     let list = tx
-        .set_object(&map, "blaho", automerge::ObjType::List)
+        .set_object(&map, "my list", automerge::ObjType::List)
         .unwrap();
-    tx.insert(list, 0, "yay").unwrap();
+    // tx.insert(&list, 0, "yay").unwrap();
+    let m = tx.insert_object(&list, 0, automerge::ObjType::Map).unwrap();
+    tx.set(&m, "hi", 2).unwrap();
+    tx.insert(&list, 1, "woo").unwrap();
+    let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
+    tx.set(&m, "hi", 2).unwrap();
     let _heads3 = tx.commit();
     get_changes(&[heads2], &doc);
 
@@ -40,9 +45,11 @@ fn get_changes(heads: &[ChangeHash], doc: &Automerge) {
             // get the object that it changed
             let obj = doc.import(&op.obj.to_string()).unwrap();
             // get the prop too
-            let prop = op.key;
+            let prop = format!("{:?}", op.key);
+            println!("{:?}", op);
             println!(
-                "changed {:?} in obj {:?}, path {:?}",
+                "{} {:?} in obj {:?}, object path {:?}",
+                if op.insert { "inserted" } else { "changed" },
                 prop,
                 obj,
                 get_path_for_obj(doc, &obj)
@@ -55,7 +62,7 @@ fn get_path_for_obj(doc: &Automerge, obj: &ObjId) -> String {
     let mut s = String::new();
     let mut obj = obj.clone();
     while let Some((parent, key)) = doc.parent_object(obj) {
-        s = format!("{:?}/{}", key, s);
+        s = format!("{}/{}", key, s);
         obj = parent;
     }
     s

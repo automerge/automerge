@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+mod elem_id_pos;
 mod insert;
 mod keys;
 mod keys_at;
@@ -20,6 +21,7 @@ mod prop_at;
 mod seek_op;
 mod seek_op_with_patch;
 
+pub(crate) use elem_id_pos::ElemIdPos;
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
