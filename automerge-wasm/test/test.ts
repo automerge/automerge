@@ -389,6 +389,8 @@ describe('Automerge', () => {
       assert.deepEqual(change2, null)
       if (change1 === null) { throw new RangeError("change1 should not be null") }
       assert.deepEqual(decodeChange(change1).hash, head1[0])
+      assert.deepEqual(head1.some((hash) => doc1.getChangeByHash(hash) === null), false)
+      assert.deepEqual(head2.some((hash) => doc1.getChangeByHash(hash) === null), true)
     })
 
     it('recursive sets are possible', () => {
