@@ -389,6 +389,17 @@ impl Automerge {
         Ok(changes)
     }
 
+    #[wasm_bindgen(js_name = getChangeByHash)]
+    pub fn get_change_by_hash(&mut self, hash: JsValue) -> Result<JsValue, JsValue> {
+        let hash = hash.into_serde().map_err(to_js_err)?;
+        let change = self.0.get_change_by_hash(&hash);
+        if let Some(c) = change {
+            Ok(Uint8Array::from(c.raw_bytes()).into())
+        } else {
+            Ok(JsValue::null())
+        }
+    }
+
     #[wasm_bindgen(js_name = getChangesAdded)]
     pub fn get_changes_added(&mut self, other: &mut Automerge) -> Result<Array, JsValue> {
         let changes = self.0.get_changes_added(&mut other.0);
