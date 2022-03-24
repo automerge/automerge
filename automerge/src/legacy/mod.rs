@@ -1,6 +1,8 @@
 mod serde_impls;
 mod utility_impls;
 
+use std::num::NonZeroU64;
+
 pub(crate) use crate::types::{ActorId, ChangeHash, ObjType, OpType, ScalarValue};
 pub(crate) use crate::value::DataType;
 
@@ -246,9 +248,9 @@ pub struct Change {
     pub hash: Option<ChangeHash>,
     /// The index of this change in the changes from this actor.
     pub seq: u64,
-    /// The start operation index.
+    /// The start operation index. Starts at 1.
     #[serde(rename = "startOp")]
-    pub start_op: u64,
+    pub start_op: NonZeroU64,
     /// The time that this change was committed.
     pub time: i64,
     /// The message of this change.

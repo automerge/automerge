@@ -35,7 +35,7 @@ pub fn examine(
     if is_tty {
         let json_changes = serde_json::to_value(uncompressed_changes).unwrap();
         colored_json::write_colored_json(&json_changes, &mut output).unwrap();
-        writeln!(&mut output).unwrap();
+        writeln!(output).unwrap();
     } else {
         let json_changes = serde_json::to_string_pretty(&uncompressed_changes).unwrap();
         output
