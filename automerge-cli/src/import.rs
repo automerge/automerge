@@ -3,14 +3,14 @@ use automerge::transaction::Transactable;
 
 pub(crate) fn initialize_from_json(
     json_value: &serde_json::Value,
-) -> Result<am::AutoCommit, am::AutomergeError> {
+) -> anyhow::Result<am::AutoCommit> {
     let mut doc = am::AutoCommit::new();
     match json_value {
         serde_json::Value::Object(m) => {
             import_map(&mut doc, &am::ObjId::Root, m)?;
             Ok(doc)
         }
-        _ => Err(am::AutomergeError::Decoding),
+        _ => anyhow::bail!("expected an object"),
     }
 }
 
@@ -18,7 +18,7 @@ fn import_map(
     doc: &mut am::AutoCommit,
     obj: &am::ObjId,
     map: &serde_json::Map<String, serde_json::Value>,
-) -> Result<(), am::AutomergeError> {
+) -> anyhow::Result<()> {
     for (key, value) in map {
         match value {
             serde_json::Value::Null => {
@@ -42,7 +42,7 @@ fn import_map(
                 } else if let Some(m) = n.as_f64() {
                     doc.set(obj, key, m)?;
                 } else {
-                    return Err(am::AutomergeError::Decoding);
+                    anyhow::bail!("not a number");
                 }
             }
             serde_json::Value::Object(map) => {
@@ -58,7 +58,7 @@ fn import_list(
     doc: &mut am::AutoCommit,
     obj: &am::ObjId,
     list: &[serde_json::Value],
-) -> Result<(), am::AutomergeError> {
+) -> anyhow::Result<()> {
     for (i, value) in list.iter().enumerate() {
         match value {
             serde_json::Value::Null => {
@@ -82,7 +82,7 @@ fn import_list(
                 } else if let Some(m) = n.as_f64() {
                     doc.insert(obj, i, m)?;
                 } else {
-                    return Err(am::AutomergeError::Decoding);
+                    anyhow::bail!("not a number");
                 }
             }
             serde_json::Value::Object(map) => {
