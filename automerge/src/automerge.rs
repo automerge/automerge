@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::num::NonZeroU64;
 
 use crate::change::encode_document;
 use crate::exid::ExId;
@@ -87,6 +88,13 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
+        Transaction {
+            inner: Some(self.transaction_inner()),
+            doc: self,
+        }
+    }
+
+    pub(crate) fn transaction_inner(&mut self) -> TransactionInner {
         let actor = self.get_actor_index();
         let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
         let mut deps = self.get_heads();
@@ -97,20 +105,17 @@ impl Automerge {
             }
         }
 
-        let tx_inner = TransactionInner {
+        TransactionInner {
             actor,
             seq,
-            start_op: self.max_op + 1,
+            // SAFETY: this unwrap is safe as we always add 1
+            start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
             time: 0,
             message: None,
             extra_bytes: Default::default(),
             hash: None,
             operations: vec![],
             deps,
-        };
-        Transaction {
-            inner: Some(tx_inner),
-            doc: self,
         }
     }
 
@@ -478,7 +483,7 @@ impl Automerge {
             .enumerate()
             .map(|(i, c)| {
                 let actor = self.ops.m.actors.cache(change.actor_id().clone());
-                let id = OpId(change.start_op + i as u64, actor);
+                let id = OpId(change.start_op.get() + i as u64, actor);
                 let obj = match c.obj {
                     legacy::ObjectId::Root => ObjId::root(),
                     legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
@@ -774,7 +779,7 @@ impl Automerge {
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
-        self.max_op = std::cmp::max(self.max_op, change.start_op + num_ops as u64 - 1);
+        self.max_op = std::cmp::max(self.max_op, change.start_op.get() + num_ops as u64 - 1);
 
         self.update_deps(&change);
 
@@ -1333,5 +1338,19 @@ mod tests {
         let bytes = doc.save();
         let doc = Automerge::load(&bytes).unwrap();
         assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
+    }
+
+    #[test]
+    fn load_change_with_zero_start_op() {
+        let bytes = &[
+            133, 111, 74, 131, 202, 50, 52, 158, 2, 96, 163, 163, 83, 255, 255, 255, 50, 50, 50,
+            50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 255, 255, 245, 53, 1, 0, 0, 0, 0, 0, 0, 4,
+            233, 245, 239, 255, 1, 0, 0, 0, 133, 111, 74, 131, 163, 96, 0, 0, 2, 10, 202, 144, 125,
+            19, 48, 89, 133, 49, 10, 10, 67, 91, 111, 10, 74, 131, 96, 0, 163, 131, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 1, 153, 0, 0, 246, 255, 255, 255, 157, 157, 157, 157,
+            157, 157, 157, 157, 157, 157, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
+        ];
+        let _ = Automerge::load(bytes);
     }
 }
