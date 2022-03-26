@@ -76,6 +76,7 @@ pub(crate) enum QueryResult {
 pub(crate) struct Index {
     pub len: usize,
     pub visible: HashMap<ElemId, usize, FxBuildHasher>,
+    /// Set of opids found in this node and below.
     pub ops: HashSet<OpId, FxBuildHasher>,
 }
 

@@ -9,6 +9,15 @@ pub(crate) struct IndexedCache<T> {
     lookup: HashMap<T, usize>,
 }
 
+impl<T> PartialEq for IndexedCache<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.cache == other.cache
+    }
+}
+
 impl<T> IndexedCache<T>
 where
     T: Clone + Eq + Hash + Ord,

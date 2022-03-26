@@ -56,7 +56,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp {
             return QueryResult::Descend;
         }
         match self.op.key {
-            Key::Seq(e) if e == HEAD => {
+            Key::Seq(HEAD) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
                     if self.op.overwrites(op) {
@@ -70,7 +70,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp {
                 QueryResult::Finish
             }
             Key::Seq(e) => {
-                if self.found || child.index.ops.contains(&e.0) {
+                if child.index.ops.contains(&e.0) {
                     QueryResult::Descend
                 } else {
                     self.pos += child.len();
@@ -108,6 +108,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp {
             self.pos += 1;
             QueryResult::Next
         } else {
+            // we have already found the target
             if self.op.overwrites(e) {
                 self.succ.push(self.pos);
             }

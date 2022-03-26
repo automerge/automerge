@@ -15,7 +15,7 @@ use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
     Unused(ActorId),
     Cached(usize),
@@ -1352,5 +1352,149 @@ mod tests {
             255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
         ];
         let _ = Automerge::load(bytes);
+    }
+
+    #[test]
+    fn load_broken_list() {
+        enum Action {
+            InsertText(usize, char),
+            DelText(usize),
+        }
+        use Action::*;
+        let actions = [
+            InsertText(0, 'a'),
+            InsertText(0, 'b'),
+            DelText(1),
+            InsertText(0, 'c'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'd'),
+            InsertText(0, 'e'),
+            InsertText(1, 'f'),
+            DelText(2),
+            DelText(1),
+            InsertText(0, 'g'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'h'),
+            InsertText(1, 'i'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'j'),
+            InsertText(0, 'k'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'l'),
+            DelText(0),
+            InsertText(0, 'm'),
+            InsertText(0, 'n'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'o'),
+            DelText(0),
+            InsertText(0, 'p'),
+            InsertText(1, 'q'),
+            InsertText(1, 'r'),
+            InsertText(1, 's'),
+            InsertText(3, 't'),
+            InsertText(5, 'u'),
+            InsertText(0, 'v'),
+            InsertText(3, 'w'),
+            InsertText(4, 'x'),
+            InsertText(0, 'y'),
+            InsertText(6, 'z'),
+            InsertText(11, '1'),
+            InsertText(0, '2'),
+            InsertText(0, '3'),
+            InsertText(0, '4'),
+            InsertText(13, '5'),
+            InsertText(11, '6'),
+            InsertText(17, '7'),
+        ];
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        for action in actions {
+            match action {
+                Action::InsertText(index, c) => {
+                    println!("inserting {} at {}", c, index);
+                    tx.insert(&list, index, c).unwrap();
+                }
+                Action::DelText(index) => {
+                    println!("deleting at {} ", index);
+                    tx.del(&list, index).unwrap();
+                }
+            }
+        }
+        tx.commit();
+        let bytes = doc.save();
+        println!("doc2 time");
+        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let bytes2 = doc2.save();
+        assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
+
+        assert_eq!(doc.queue, doc2.queue);
+        assert_eq!(doc.history, doc2.history);
+        assert_eq!(doc.history_index, doc2.history_index);
+        assert_eq!(doc.states, doc2.states);
+        assert_eq!(doc.deps, doc2.deps);
+        assert_eq!(doc.saved, doc2.saved);
+        assert_eq!(doc.ops, doc2.ops);
+        assert_eq!(doc.max_op, doc2.max_op);
+
+        assert_eq!(bytes, bytes2);
+    }
+
+    #[test]
+    fn load_broken_list_short() {
+        // breaks when the B constant in OpSet is 3
+        enum Action {
+            InsertText(usize, char),
+            DelText(usize),
+        }
+        use Action::*;
+        let actions = [
+            InsertText(0, 'a'),
+            InsertText(1, 'b'),
+            DelText(1),
+            InsertText(1, 'c'),
+            InsertText(2, 'd'),
+            InsertText(2, 'e'),
+            InsertText(0, 'f'),
+            DelText(4),
+            InsertText(4, 'g'),
+        ];
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        for action in actions {
+            match action {
+                Action::InsertText(index, c) => {
+                    println!("inserting {} at {}", c, index);
+                    tx.insert(&list, index, c).unwrap();
+                }
+                Action::DelText(index) => {
+                    println!("deleting at {} ", index);
+                    tx.del(&list, index).unwrap();
+                }
+            }
+        }
+        tx.commit();
+        let bytes = doc.save();
+        println!("doc2 time");
+        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let bytes2 = doc2.save();
+        assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
+
+        assert_eq!(doc.queue, doc2.queue);
+        assert_eq!(doc.history, doc2.history);
+        assert_eq!(doc.history_index, doc2.history_index);
+        assert_eq!(doc.states, doc2.states);
+        assert_eq!(doc.deps, doc2.deps);
+        assert_eq!(doc.saved, doc2.saved);
+        assert_eq!(doc.ops, doc2.ops);
+        assert_eq!(doc.max_op, doc2.max_op);
+
+        assert_eq!(bytes, bytes2);
     }
 }
