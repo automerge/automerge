@@ -5,14 +5,18 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SeekOp<const B: usize> {
+pub(crate) struct SeekOp {
+    /// the op we are looking for
     op: Op,
+    /// The position to insert at
     pub pos: usize,
+    /// The indices of ops that this op overwrites
     pub succ: Vec<usize>,
+    /// whether a position has been found
     found: bool,
 }
 
-impl<const B: usize> SeekOp<B> {
+impl SeekOp {
     pub fn new(op: &Op) -> Self {
         SeekOp {
             op: op.clone(),
@@ -42,7 +46,7 @@ impl<const B: usize> SeekOp<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for SeekOp<B> {
+impl<const B: usize> TreeQuery<B> for SeekOp {
     fn query_node_with_metadata(
         &mut self,
         child: &OpTreeNode<B>,
