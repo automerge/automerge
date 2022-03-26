@@ -5,7 +5,7 @@ use crate::types::{ElemId, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Nth<const B: usize> {
+pub(crate) struct Nth {
     target: usize,
     seen: usize,
     last_seen: Option<ElemId>,
@@ -15,7 +15,7 @@ pub(crate) struct Nth<const B: usize> {
     pub pos: usize,
 }
 
-impl<const B: usize> Nth<B> {
+impl Nth {
     pub fn new(target: usize) -> Self {
         Nth {
             target,
@@ -37,7 +37,7 @@ impl<const B: usize> Nth<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Nth<B> {
+impl<const B: usize> TreeQuery<B> for Nth {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         let mut num_vis = child.index.len;
         if num_vis > 0 {

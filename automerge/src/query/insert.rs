@@ -5,10 +5,13 @@ use crate::types::{ElemId, Key, Op, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InsertNth<const B: usize> {
+pub(crate) struct InsertNth {
+    /// the index in the realised list that we want to insert at
     target: usize,
+    /// the number of visible operations seen
     seen: usize,
     //pub pos: usize,
+    /// the number of operations (including non-visible) that we have seen
     n: usize,
     valid: Option<usize>,
     last_seen: Option<ElemId>,
@@ -16,7 +19,7 @@ pub(crate) struct InsertNth<const B: usize> {
     last_valid_insert: Option<ElemId>,
 }
 
-impl<const B: usize> InsertNth<B> {
+impl InsertNth {
     pub fn new(target: usize) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
             (Some(0), Some(HEAD))
@@ -56,16 +59,19 @@ impl<const B: usize> InsertNth<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for InsertNth<B> {
+impl<const B: usize> TreeQuery<B> for InsertNth {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         let mut num_vis = child.index.len;
+        // if this node has some visible elements then we may find our target within
         if num_vis > 0 {
             if child.index.has(&self.last_seen) {
                 num_vis -= 1;
             }
             if self.seen + num_vis >= self.target {
+                // our target is within this node
                 QueryResult::Descend
             } else {
+                // our target is not in this node so try the next one
                 self.n += child.len();
                 self.seen += num_vis;
                 self.last_seen = child.last().elemid();
