@@ -9,7 +9,6 @@ pub(crate) struct Nth<const B: usize> {
     target: usize,
     seen: usize,
     last_seen: Option<ElemId>,
-    last_elem: Option<ElemId>,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
@@ -24,12 +23,13 @@ impl<const B: usize> Nth<B> {
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
-            last_elem: None,
         }
     }
 
+    /// Get the key
     pub fn key(&self) -> Result<Key, AutomergeError> {
-        if let Some(e) = self.last_elem {
+        // the query collects the ops so we can use that to get the key they all use
+        if let Some(e) = self.ops.first().and_then(|op| op.elemid()) {
             Ok(Key::Seq(e))
         } else {
             Err(AutomergeError::InvalidIndex(self.target))
@@ -56,6 +56,7 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
                 QueryResult::Next
             }
         } else {
+            // skip this node as no useful ops in it
             self.pos += child.len();
             QueryResult::Next
         }
@@ -66,7 +67,6 @@ impl<const B: usize> TreeQuery<B> for Nth<B> {
             if self.seen > self.target {
                 return QueryResult::Finish;
             };
-            self.last_elem = element.elemid();
             self.last_seen = None
         }
         let visible = element.visible();
