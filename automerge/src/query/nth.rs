@@ -11,7 +11,6 @@ pub(crate) struct Nth {
     // last_seen is the target elemid of the last `seen` operation.
     // It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
-    last_elem: Option<ElemId>,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
@@ -26,12 +25,13 @@ impl Nth {
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
-            last_elem: None,
         }
     }
 
+    /// Get the key
     pub fn key(&self) -> Result<Key, AutomergeError> {
-        if let Some(e) = self.last_elem {
+        // the query collects the ops so we can use that to get the key they all use
+        if let Some(e) = self.ops.first().and_then(|op| op.elemid()) {
             Ok(Key::Seq(e))
         } else {
             Err(AutomergeError::InvalidIndex(self.target))
@@ -68,6 +68,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
                 QueryResult::Next
             }
         } else {
+            // skip this node as no useful ops in it
             self.pos += child.len();
             QueryResult::Next
         }
@@ -77,8 +78,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
         if element.insert {
             if self.seen > self.target {
                 return QueryResult::Finish;
-            };
-            self.last_elem = element.elemid();
+            }
             // we have a new potentially visible element so reset last_seen
             self.last_seen = None
         }
