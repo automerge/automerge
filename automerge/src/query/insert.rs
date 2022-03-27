@@ -78,8 +78,14 @@ impl<const B: usize> TreeQuery<B> for InsertNth {
                 QueryResult::Next
             }
         } else {
-            self.n += child.len();
-            QueryResult::Next
+            if self.seen + num_vis >= self.target {
+                // we may have found the point to insert at so descend to check
+                QueryResult::Descend
+            } else {
+                // we haven't found the point to insert at so just skip this node
+                self.n += child.len();
+                QueryResult::Next
+            }
         }
     }
 
