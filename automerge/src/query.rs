@@ -89,7 +89,7 @@ impl Index {
         }
     }
 
-    pub fn has(&self, e: &Option<ElemId>) -> bool {
+    pub fn has_visible(&self, e: &Option<ElemId>) -> bool {
         if let Some(seen) = e {
             self.visible.contains_key(seen)
         } else {

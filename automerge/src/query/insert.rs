@@ -64,7 +64,7 @@ impl<const B: usize> TreeQuery<B> for InsertNth {
         let mut num_vis = child.index.len;
         // if this node has some visible elements then we may find our target within
         if num_vis > 0 {
-            if child.index.has(&self.last_seen) {
+            if child.index.has_visible(&self.last_seen) {
                 num_vis -= 1;
             }
             if self.seen + num_vis >= self.target {

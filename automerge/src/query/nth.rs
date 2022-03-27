@@ -44,7 +44,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
             // num vis is the number of keys in the index
             // minus one if we're counting last_seen
             // let mut num_vis = s.keys().count();
-            if child.index.has(&self.last_seen) {
+            if child.index.has_visible(&self.last_seen) {
                 num_vis -= 1;
             }
             if self.seen + num_vis > self.target {
