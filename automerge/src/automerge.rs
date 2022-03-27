@@ -902,6 +902,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::op_set::B;
     use crate::transaction::Transactable;
     use crate::*;
     use std::convert::TryInto;
@@ -1352,5 +1353,45 @@ mod tests {
             255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
         ];
         let _ = Automerge::load(bytes);
+    }
+
+    #[test]
+    fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes() {
+        let max = B as u64 * 2;
+        let actor1 = ActorId::from(b"aaaa");
+        let mut doc1 = AutoCommit::new().with_actor(actor1.clone());
+        let actor2 = ActorId::from(b"bbbb");
+        let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
+        let list = doc1.set_object(ROOT, "list", ObjType::List).unwrap();
+        doc1.insert(&list, 0, 0).unwrap();
+        doc2.load_incremental(&doc1.save_incremental()).unwrap();
+        for i in 1..=max {
+            doc1.set(&list, 0, i).unwrap()
+        }
+        for i in 1..=max {
+            doc2.set(&list, 0, i).unwrap()
+        }
+        let change1 = doc1.save_incremental();
+        let change2 = doc2.save_incremental();
+        doc2.load_incremental(&change1).unwrap();
+        doc1.load_incremental(&change2).unwrap();
+        assert_eq!(doc1.length(&list), 1);
+        assert_eq!(doc2.length(&list), 1);
+        assert_eq!(
+            doc1.values(&list, 0).unwrap(),
+            vec![
+                (max.into(), ExId::Id(max + 2, actor1.clone(), 0)),
+                (max.into(), ExId::Id(max + 2, actor2.clone(), 1))
+            ]
+        );
+        assert_eq!(
+            doc2.values(&list, 0).unwrap(),
+            vec![
+                (max.into(), ExId::Id(max + 2, actor1, 0)),
+                (max.into(), ExId::Id(max + 2, actor2, 1))
+            ]
+        );
+        assert!(doc1.value(&list, 1).unwrap().is_none());
+        assert!(doc2.value(&list, 1).unwrap().is_none());
     }
 }
