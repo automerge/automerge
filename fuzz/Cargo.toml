@@ -1,0 +1,31 @@
+[package]
+name = "automerge-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2018"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.automerge]
+path = "../automerge"
+features = ["arbitrary"]
+
+[[bin]]
+name = "load"
+path = "fuzz_targets/load.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "save_load"
+path = "fuzz_targets/save_load.rs"
+test = false
+doc = false

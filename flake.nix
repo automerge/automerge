@@ -15,11 +15,11 @@
       (system:
         let
           pkgs = import nixpkgs {
-            overlays = [ rust-overlay.overlay ];
+            overlays = [ rust-overlay.overlays.default ];
             inherit system;
           };
           lib = pkgs.lib;
-          rust = pkgs.rust-bin.stable.latest.default;
+          rust = pkgs.rust-bin.nightly.latest.default;
           cargoNix = pkgs.callPackage ./Cargo.nix {
             inherit pkgs;
             release = true;

@@ -107,6 +107,19 @@ The C bindings can be built and tested on any platform for which CMake is
 available but the steps for doing so vary across platforms and are too numerous
 to list here.
 
+## Fuzzing
+
+Fuzz tests are contained in the [`fuzz`](fuzz) directory.
+Fuzz tests can be run from the root directory using [`cargo-fuzz`](https://github.com/rust-fuzz/cargo-fuzz):
+
+```sh
+# list fuzz targets available
+cargo fuzz list
+
+# actually run a fuzz target, this runs continuously
+cargo fuzz run save_load
+```
+
 ## Benchmarking
 
 The [`edit-trace`](edit-trace) folder has the main code for running the edit trace benchmarking.

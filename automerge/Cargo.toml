@@ -11,6 +11,7 @@ description = "A JSON-like data structure (a CRDT) that can be modified concurre
 [features]
 optree-visualisation = ["dot", "rand"]
 wasm = ["js-sys", "wasm-bindgen", "web-sys", "uuid/wasm-bindgen"]
+arbitrary = ["dep:arbitrary", "smol_str/arbitrary"]
 
 [dependencies]
 hex = "^0.4.3"
@@ -31,6 +32,7 @@ dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }
 wasm-bindgen = { version = "^0.2", optional = true }
 rand = { version = "^0.8.4", optional = true }
+arbitrary = { version = "1", features = ["derive"], optional = true }
 
 [dependencies.web-sys]
 version = "^0.3.55"

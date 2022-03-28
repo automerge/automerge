@@ -5,3 +5,4 @@ set -eoux pipefail
 # https://github.com/rust-lang/rust-clippy/issues/4612
 find . -name "*.rs" -not -path "./target/*" -exec touch "{}" +
 cargo clippy --all-features --all-targets -- -D warnings
+cd fuzz && cargo clippy --all-features --all-targets -- -D warnings

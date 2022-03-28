@@ -351,6 +351,7 @@ pub(crate) enum DataType {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Counter {
     pub(crate) start: i64,
     pub(crate) current: i64,
@@ -417,6 +418,7 @@ impl From<&Counter> for f64 {
 }
 
 #[derive(Serialize, PartialEq, Debug, Clone)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[serde(untagged)]
 pub enum ScalarValue {
     Bytes(Vec<u8>),

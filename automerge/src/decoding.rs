@@ -303,7 +303,7 @@ impl<'a> Iterator for DeltaDecoder<'a> {
     fn next(&mut self) -> Option<Option<u64>> {
         if let Some(delta) = self.rle.next()? {
             if delta < 0 {
-                self.absolute_val -= delta.abs() as u64;
+                self.absolute_val -= delta.unsigned_abs();
             } else {
                 self.absolute_val += delta as u64;
             }

@@ -302,11 +302,10 @@ pub unsafe extern "C" fn AMlistPutNull(
 ) -> *mut AMresult {
     let doc = to_doc!(doc);
     let obj_id = to_obj_id!(obj_id);
-    let value = ();
     to_result(if insert {
-        doc.insert(obj_id, index, value)
+        doc.insert(obj_id, index, ())
     } else {
-        doc.put(obj_id, index, value)
+        doc.put(obj_id, index, ())
     })
 }
 
