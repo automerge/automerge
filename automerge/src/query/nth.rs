@@ -8,6 +8,8 @@ use std::fmt::Debug;
 pub(crate) struct Nth {
     target: usize,
     seen: usize,
+    // last_seen is the target elemid of the last `seen` operation.
+    // It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
     last_elem: Option<ElemId>,
     pub ops: Vec<Op>,
@@ -52,7 +54,13 @@ impl<const B: usize> TreeQuery<B> for Nth {
             } else {
                 self.pos += child.len();
                 self.seen += num_vis;
-                // if this node has the last elemid as visible then we can set it, otherwise other state doesn't get set correctly.
+
+                // We have updated seen by the number of visible elements in this index, before we skip it.
+                // We also need to keep track of the last elemid that we have seen (and counted as seen).
+                // We can just use the elemid of the last op in this node as either:
+                // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
+                // - the visible op is in this node and the elemid references it so it can be set here
+                // - the visible op is in a future node and so it will be counted as seen there
                 let last_elemid = child.last().elemid();
                 if child.index.has_visible(&last_elemid) {
                     self.last_seen = last_elemid;
@@ -71,11 +79,13 @@ impl<const B: usize> TreeQuery<B> for Nth {
                 return QueryResult::Finish;
             };
             self.last_elem = element.elemid();
+            // we have a new potentially visible element so reset last_seen
             self.last_seen = None
         }
         let visible = element.visible();
         if visible && self.last_seen.is_none() {
             self.seen += 1;
+            // we have a new visible element
             self.last_seen = element.elemid()
         }
         if self.seen == self.target + 1 && visible {
