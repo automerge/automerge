@@ -52,7 +52,11 @@ impl<const B: usize> TreeQuery<B> for Nth {
             } else {
                 self.pos += child.len();
                 self.seen += num_vis;
-                self.last_seen = child.last().elemid();
+                // if this node has the last elemid as visible then we can set it, otherwise other state doesn't get set correctly.
+                let last_elemid = child.last().elemid();
+                if child.index.has_visible(&last_elemid) {
+                    self.last_seen = last_elemid;
+                }
                 QueryResult::Next
             }
         } else {
