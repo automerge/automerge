@@ -42,34 +42,26 @@ impl Nth {
 impl<const B: usize> TreeQuery<B> for Nth {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
         let mut num_vis = child.index.visible_len();
-        if num_vis > 0 {
-            // num vis is the number of keys in the index
-            // minus one if we're counting last_seen
-            // let mut num_vis = s.keys().count();
-            if child.index.has_visible(&self.last_seen) {
-                num_vis -= 1;
-            }
-            if self.seen + num_vis > self.target {
-                QueryResult::Descend
-            } else {
-                self.pos += child.len();
-                self.seen += num_vis;
+        if child.index.has_visible(&self.last_seen) {
+            num_vis -= 1;
+        }
 
-                // We have updated seen by the number of visible elements in this index, before we skip it.
-                // We also need to keep track of the last elemid that we have seen (and counted as seen).
-                // We can just use the elemid of the last op in this node as either:
-                // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
-                // - the visible op is in this node and the elemid references it so it can be set here
-                // - the visible op is in a future node and so it will be counted as seen there
-                let last_elemid = child.last().elemid();
-                if child.index.has_visible(&last_elemid) {
-                    self.last_seen = last_elemid;
-                }
-                QueryResult::Next
-            }
+        if self.seen + num_vis > self.target {
+            QueryResult::Descend
         } else {
-            // skip this node as no useful ops in it
             self.pos += child.len();
+            self.seen += num_vis;
+
+            // We have updated seen by the number of visible elements in this index, before we skip it.
+            // We also need to keep track of the last elemid that we have seen (and counted as seen).
+            // We can just use the elemid of the last op in this node as either:
+            // - the insert was at a previous node and this is a long run of overwrites so last_seen should already be set correctly
+            // - the visible op is in this node and the elemid references it so it can be set here
+            // - the visible op is in a future node and so it will be counted as seen there
+            let last_elemid = child.last().elemid();
+            if child.index.has_visible(&last_elemid) {
+                self.last_seen = last_elemid;
+            }
             QueryResult::Next
         }
     }
