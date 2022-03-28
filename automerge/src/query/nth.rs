@@ -39,7 +39,7 @@ impl Nth {
 
 impl<const B: usize> TreeQuery<B> for Nth {
     fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
-        let mut num_vis = child.index.len;
+        let mut num_vis = child.index.visible_len();
         if num_vis > 0 {
             // num vis is the number of keys in the index
             // minus one if we're counting last_seen
