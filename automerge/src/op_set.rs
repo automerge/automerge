@@ -8,7 +8,7 @@ use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-pub(crate) const B: usize = 3;
+pub(crate) const B: usize = 16;
 pub(crate) type OpSet = OpSetInternal<B>;
 
 #[derive(Debug, Clone, PartialEq)]
