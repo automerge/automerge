@@ -14,6 +14,8 @@ pub(crate) struct InsertNth {
     /// the number of operations (including non-visible) that we have seen
     n: usize,
     valid: Option<usize>,
+    /// last_seen is the target elemid of the last `seen` operation.
+    /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
     last_insert: Option<ElemId>,
     last_valid_insert: Option<ElemId>,

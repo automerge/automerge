@@ -8,8 +8,8 @@ use std::fmt::Debug;
 pub(crate) struct Nth {
     target: usize,
     seen: usize,
-    // last_seen is the target elemid of the last `seen` operation.
-    // It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
+    /// last_seen is the target elemid of the last `seen` operation.
+    /// It is used to avoid double counting visible elements (which arise through conflicts) that are split across nodes.
     last_seen: Option<ElemId>,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
