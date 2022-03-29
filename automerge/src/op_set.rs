@@ -132,14 +132,7 @@ impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
     type IntoIter = Iter<'a, B>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut objs: Vec<_> = self.trees.keys().collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
-        Iter {
-            inner: self,
-            index: 0,
-            objs,
-            sub_index: 0,
-        }
+        self.iter()
     }
 }
 
