@@ -1498,7 +1498,8 @@ mod tests {
 
         assert_eq!(bytes, bytes2);
     }
-  
+
+    #[test]
     fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes() {
         let max = B as u64 * 2;
         let actor1 = ActorId::from(b"aaaa");
