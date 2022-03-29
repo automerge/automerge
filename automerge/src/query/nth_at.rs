@@ -8,7 +8,6 @@ pub(crate) struct NthAt {
     target: usize,
     seen: usize,
     last_seen: Option<ElemId>,
-    last_elem: Option<ElemId>,
     window: VisWindow,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
@@ -25,7 +24,6 @@ impl NthAt {
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
-            last_elem: None,
             window: Default::default(),
         }
     }
@@ -37,7 +35,6 @@ impl<const B: usize> TreeQuery<B> for NthAt {
             if self.seen > self.target {
                 return QueryResult::Finish;
             };
-            self.last_elem = element.elemid();
             self.last_seen = None
         }
         let visible = self.window.visible_at(element, self.pos, &self.clock);
