@@ -119,14 +119,7 @@ impl Index {
                 }
                 None => panic!("remove overun in index"),
             },
-            (true, false, Some(elem)) => match self.visible.get(&elem).copied() {
-                Some(n) => {
-                    self.visible.insert(elem, n + 1);
-                }
-                None => {
-                    self.visible.insert(elem, 1);
-                }
-            },
+            (true, false, Some(elem)) => *self.visible.entry(elem).or_default() += 1,
             _ => {}
         }
     }
@@ -135,14 +128,7 @@ impl Index {
         self.ops.insert(op.id);
         if op.visible() {
             if let Some(elem) = op.elemid() {
-                match self.visible.get(&elem).copied() {
-                    Some(n) => {
-                        self.visible.insert(elem, n + 1);
-                    }
-                    None => {
-                        self.visible.insert(elem, 1);
-                    }
-                }
+                *self.visible.entry(elem).or_default() += 1;
             }
         }
     }
@@ -169,14 +155,7 @@ impl Index {
             self.ops.insert(*id);
         }
         for (elem, n) in other.visible.iter() {
-            match self.visible.get(elem).cloned() {
-                None => {
-                    self.visible.insert(*elem, 1);
-                }
-                Some(m) => {
-                    self.visible.insert(*elem, m + n);
-                }
-            }
+            *self.visible.entry(*elem).or_default() += n;
         }
     }
 }
