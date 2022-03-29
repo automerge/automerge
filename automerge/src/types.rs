@@ -89,6 +89,23 @@ impl From<Vec<u8>> for ActorId {
     }
 }
 
+impl<const N: usize> From<[u8; N]> for ActorId {
+    fn from(array: [u8; N]) -> Self {
+        ActorId::from(&array)
+    }
+}
+
+impl<const N: usize> From<&[u8; N]> for ActorId {
+    fn from(slice: &[u8; N]) -> Self {
+        let inner = if let Ok(arr) = ArrayVec::try_from(slice.as_slice()) {
+            TinyVec::Inline(arr)
+        } else {
+            TinyVec::Heap(slice.to_vec())
+        };
+        ActorId(inner)
+    }
+}
+
 impl FromStr for ActorId {
     type Err = error::InvalidActorId;
 

@@ -3,19 +3,18 @@ use crate::types::{Clock, ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NthAt<const B: usize> {
+pub(crate) struct NthAt {
     clock: Clock,
     target: usize,
     seen: usize,
     last_seen: Option<ElemId>,
-    last_elem: Option<ElemId>,
     window: VisWindow,
     pub ops: Vec<Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
 }
 
-impl<const B: usize> NthAt<B> {
+impl NthAt {
     pub fn new(target: usize, clock: Clock) -> Self {
         NthAt {
             clock,
@@ -25,19 +24,17 @@ impl<const B: usize> NthAt<B> {
             ops: vec![],
             ops_pos: vec![],
             pos: 0,
-            last_elem: None,
             window: Default::default(),
         }
     }
 }
 
-impl<const B: usize> TreeQuery<B> for NthAt<B> {
+impl<const B: usize> TreeQuery<B> for NthAt {
     fn query_element(&mut self, element: &Op) -> QueryResult {
         if element.insert {
             if self.seen > self.target {
                 return QueryResult::Finish;
             };
-            self.last_elem = element.elemid();
             self.last_seen = None
         }
         let visible = self.window.visible_at(element, self.pos, &self.clock);

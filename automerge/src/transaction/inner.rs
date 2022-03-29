@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
@@ -9,7 +11,7 @@ use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 pub struct TransactionInner {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
-    pub(crate) start_op: u64,
+    pub(crate) start_op: NonZeroU64,
     pub(crate) time: i64,
     pub(crate) message: Option<String>,
     pub(crate) extra_bytes: Vec<u8>,
@@ -123,7 +125,10 @@ impl TransactionInner {
     }
 
     fn next_id(&mut self) -> OpId {
-        OpId(self.start_op + self.operations.len() as u64, self.actor)
+        OpId(
+            self.start_op.get() + self.operations.len() as u64,
+            self.actor,
+        )
     }
 
     fn insert_local_op(

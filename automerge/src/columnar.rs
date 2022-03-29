@@ -964,7 +964,7 @@ impl ChangeEncoder {
             self.seq.append_value(change.seq);
             // FIXME iterops.count is crazy slow
             self.max_op
-                .append_value(change.start_op + change.iter_ops().count() as u64 - 1);
+                .append_value(change.start_op.get() + change.iter_ops().count() as u64 - 1);
             self.time.append_value(change.time as u64);
             self.message.append_value(change.message());
             self.deps_num.append_value(change.deps.len());
