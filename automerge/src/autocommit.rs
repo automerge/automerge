@@ -1,9 +1,8 @@
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
-use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
 use crate::{
-    change::export_change, query, sync, transaction::TransactionInner, ActorId, Automerge,
-    AutomergeError, Change, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value,
+    query, sync, transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change,
+    ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value,
 };
 
 /// An automerge document that automatically manages transactions.
