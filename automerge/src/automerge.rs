@@ -241,6 +241,7 @@ impl Automerge {
         }
     }
 
+    /// Get the type of this object, if it is an object.
     pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
         let obj = self.exid_to_obj(obj.as_ref()).ok()?;
         self.ops.object_type(&obj)
