@@ -49,6 +49,7 @@ impl<const B: usize> TreeQuery<B> for Nth {
         if self.seen + num_vis > self.target {
             QueryResult::Descend
         } else {
+            // skip this node as no useful ops in it
             self.pos += child.len();
             self.seen += num_vis;
 
