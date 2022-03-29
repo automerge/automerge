@@ -169,6 +169,21 @@ describe('Automerge', () => {
         { add: [ { start: 11, end: 15, actor: "bbbb" } ], del: [ { pos: 15, val: ' little', actor: "bbbb" } ] },
         { add: [ { start: 0,  end: 6,  actor: "cccc" } ], del: [] }
       ])
+
+      let h4 = doc1.getHeads()
+
+      doc3.splice(text, 24, 0, "!!!")
+      doc1.merge(doc3)
+
+      let h5 = doc1.getHeads()
+
+      assert.deepEqual(doc1.text(text), "Well, hello big world!!!")
+      attribute = doc1.attribute2(text, h4, [h5])
+
+      assert.deepEqual(attribute, [
+        { add: [ { start: 21, end: 24, actor: "cccc" } ], del: [] },
+        { add: [], del: [] }
+      ])
     })
   })
 })
