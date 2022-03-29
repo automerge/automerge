@@ -24,14 +24,23 @@ pub(crate) enum Actor {
 /// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
+    /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: Vec<Change>,
+    /// The history of changes that form this document, topologically sorted too.
     pub(crate) history: Vec<Change>,
+    /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
+    /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
+    /// Current dependencies of this document (heads hashes).
     pub(crate) deps: HashSet<ChangeHash>,
+    /// Heads at the last save.
     pub(crate) saved: Vec<ChangeHash>,
+    /// The set of operations that form this document.
     pub(crate) ops: OpSet,
+    /// The current actor.
     pub(crate) actor: Actor,
+    /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
 }
 

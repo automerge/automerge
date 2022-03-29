@@ -13,8 +13,11 @@ pub(crate) type OpSet = OpSetInternal<B>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal<const B: usize> {
+    /// The map of objects to their type and ops.
     trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
+    /// The number of operations in the opset.
     length: usize,
+    /// Metadata about the operations in this opset.
     pub m: OpSetMetadata,
 }
 
