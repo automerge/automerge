@@ -11,7 +11,7 @@ use std::collections::HashMap;
 pub(crate) const B: usize = 16;
 pub(crate) type OpSet = OpSetInternal<B>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal<const B: usize> {
     trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
     length: usize,
@@ -170,7 +170,7 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpSetMetadata {
     pub actors: IndexedCache<ActorId>,
     pub props: IndexedCache<String>,

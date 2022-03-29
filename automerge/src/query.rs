@@ -74,21 +74,25 @@ pub(crate) enum QueryResult {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Index {
-    pub len: usize,
     pub visible: HashMap<ElemId, usize, FxBuildHasher>,
+    /// Set of opids found in this node and below.
     pub ops: HashSet<OpId, FxBuildHasher>,
 }
 
 impl Index {
     pub fn new() -> Self {
         Index {
-            len: 0,
             visible: Default::default(),
             ops: Default::default(),
         }
     }
 
-    pub fn has(&self, e: &Option<ElemId>) -> bool {
+    /// Get the number of visible elements in this index.
+    pub fn visible_len(&self) -> usize {
+        self.visible.len()
+    }
+
+    pub fn has_visible(&self, e: &Option<ElemId>) -> bool {
         if let Some(seen) = e {
             self.visible.contains_key(seen)
         } else {
@@ -107,7 +111,6 @@ impl Index {
         match (new.visible(), old.visible(), new.elemid()) {
             (false, true, Some(elem)) => match self.visible.get(&elem).copied() {
                 Some(n) if n == 1 => {
-                    self.len -= 1;
                     self.visible.remove(&elem);
                 }
                 Some(n) => {
@@ -120,7 +123,6 @@ impl Index {
                     self.visible.insert(elem, n + 1);
                 }
                 None => {
-                    self.len += 1;
                     self.visible.insert(elem, 1);
                 }
             },
@@ -137,7 +139,6 @@ impl Index {
                         self.visible.insert(elem, n + 1);
                     }
                     None => {
-                        self.len += 1;
                         self.visible.insert(elem, 1);
                     }
                 }
@@ -151,7 +152,6 @@ impl Index {
             if let Some(elem) = op.elemid() {
                 match self.visible.get(&elem).copied() {
                     Some(n) if n == 1 => {
-                        self.len -= 1;
                         self.visible.remove(&elem);
                     }
                     Some(n) => {
@@ -171,7 +171,6 @@ impl Index {
             match self.visible.get(elem).cloned() {
                 None => {
                     self.visible.insert(*elem, 1);
-                    self.len += 1;
                 }
                 Some(m) => {
                     self.visible.insert(*elem, m + n);
