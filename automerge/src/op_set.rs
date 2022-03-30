@@ -78,7 +78,7 @@ impl<const B: usize> OpSetInternal<B> {
         F: FnMut(&mut Op),
     {
         if let Some((_typ, tree)) = self.trees.get_mut(obj) {
-            tree.replace(index, f)
+            tree.update(index, f)
         }
     }
 
