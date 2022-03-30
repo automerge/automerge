@@ -7,13 +7,14 @@ use crate::keys::Keys;
 use crate::op_set::OpSet;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
-    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
-    ScalarValue, Value,
+    ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
+    OpType, Patch, ScalarValue, Value,
 };
 use crate::KeysAt;
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
+use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
@@ -42,6 +43,7 @@ pub struct Automerge {
     pub(crate) actor: Actor,
     /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
+    pub(crate) patches: Option<Vec<Patch>>,
 }
 
 impl Automerge {
@@ -57,6 +59,7 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
+            patches: None,
         }
     }
 
@@ -92,6 +95,23 @@ impl Automerge {
                 index
             }
             Actor::Cached(index) => *index,
+        }
+    }
+
+    pub fn enable_patches(&mut self, enable: bool) {
+        match (enable, &self.patches) {
+            (true, None) => self.patches = Some(vec![]),
+            (false, Some(_)) => self.patches = None,
+            _ => (),
+        }
+    }
+
+    pub fn pop_patches(&mut self) -> Vec<Patch> {
+        if let Some(patches) = self.patches.take() {
+            self.patches = Some(Vec::new());
+            patches
+        } else {
+            Vec::new()
         }
     }
 
@@ -191,6 +211,69 @@ impl Automerge {
         op
     }
 
+    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) -> Op {
+        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
+
+        for i in q.succ {
+            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_del() {
+            self.ops.insert(q.pos, obj, op.clone());
+        }
+
+        let obj = self.id_to_exid(obj.0);
+        let key = match op.key {
+            Key::Map(index) => self.ops.m.props[index].clone().into(),
+            Key::Seq(_) => q.seen.into(),
+        };
+
+        let patch = if op.insert {
+            let value = (op.value(), self.id_to_exid(op.id));
+            Patch::Insert(obj, q.seen, value)
+        } else if op.is_del() {
+            if let Some(winner) = &q.values.last() {
+                let value = (winner.value(), self.id_to_exid(winner.id));
+                let conflict = q.values.len() > 1;
+                Patch::Assign(AssignPatch {
+                    obj,
+                    key,
+                    value,
+                    conflict,
+                })
+            } else {
+                Patch::Delete(obj, key)
+            }
+        } else {
+            let winner = if let Some(last_value) = q.values.last() {
+                if self.ops.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
+                    &op
+                } else {
+                    last_value
+                }
+            } else {
+                &op
+            };
+            let value = (winner.value(), self.id_to_exid(winner.id));
+            if op.is_list_op() && !q.had_value_before {
+                Patch::Insert(obj, q.seen, value)
+            } else {
+                Patch::Assign(AssignPatch {
+                    obj,
+                    key,
+                    value,
+                    conflict: !q.values.is_empty(),
+                })
+            }
+        };
+
+        if let Some(patches) = &mut self.patches {
+            patches.push(patch);
+        }
+
+        op
+    }
+
     // KeysAt::()
     // LenAt::()
     // PropAt::()
@@ -279,7 +362,11 @@ impl Automerge {
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
-        ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        if id == types::ROOT {
+            ExId::Root
+        } else {
+            ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
+        }
     }
 
     /// Get the string represented by the given text object.
@@ -460,12 +547,17 @@ impl Automerge {
         Ok(())
     }
 
-    /// Apply a single change to this document.
     fn apply_change(&mut self, change: Change) {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
-        for (obj, op) in ops {
-            self.insert_op(&obj, op);
+        if self.patches.is_some() {
+            for (obj, op) in ops {
+                self.insert_op_with_patch(&obj, op);
+            }
+        } else {
+            for (obj, op) in ops {
+                self.insert_op(&obj, op);
+            }
         }
     }
 

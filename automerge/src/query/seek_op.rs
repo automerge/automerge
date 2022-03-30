@@ -35,14 +35,7 @@ impl SeekOp {
     }
 
     fn is_target_insert(&self, op: &Op) -> bool {
-        if !op.insert {
-            return false;
-        }
-        if self.op.insert {
-            op.elemid() == self.op.key.elemid()
-        } else {
-            op.elemid() == self.op.elemid()
-        }
+        op.insert && op.elemid() == self.op.key.elemid()
     }
 }
 
@@ -59,9 +52,6 @@ impl<const B: usize> TreeQuery<B> for SeekOp {
             Key::Seq(HEAD) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
-                    if self.op.overwrites(op) {
-                        self.succ.push(self.pos);
-                    }
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }

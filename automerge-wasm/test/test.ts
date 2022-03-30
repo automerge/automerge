@@ -474,8 +474,414 @@ describe('Automerge', () => {
       assert.deepEqual(C.value('_root', 'text'), ['text', '1@aabbcc'])
       assert.deepEqual(C.text(At), 'hell! world')
     })
-
   })
+
+  describe('patch generation', () => {
+    it('should include root object key updates', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set('_root', 'hello', 'world')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'hello', value: 'world', datatype: 'str', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should include nested object creation', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', {friday: {robins: 3}})
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root',  key: 'birds',  value: '1@aaaa', datatype: 'map', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 'friday', value: '2@aaaa', datatype: 'map', conflict: false},
+        {action: 'assign', obj: '2@aaaa', key: 'robins', value: 3,        datatype: 'int', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should delete map keys', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set('_root', 'favouriteBird', 'Robin')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.del('_root', 'favouriteBird')
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'favouriteBird', value: 'Robin', datatype: 'str', conflict: false},
+        {action: 'delete', obj: '_root', key: 'favouriteBird'}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should include list element insertion', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root',  key: 'birds',  value: '1@aaaa',    datatype: 'list', conflict: false},
+        {action: 'insert', obj: '1@aaaa', key: 0,        value: 'Goldfinch', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1,        value: 'Chaffinch', datatype: 'str'}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should insert nested maps into a list', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', [])
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.insert_object('1@aaaa', 0, {species: 'Goldfinch', count: 3})
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0,         value: '2@aaaa',    datatype: 'map'},
+        {action: 'assign', obj: '2@aaaa', key: 'species', value: 'Goldfinch', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '2@aaaa', key: 'count',   value: 3,           datatype: 'int', conflict: false}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should calculate list indexes based on visible elements', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.del('1@aaaa', 0)
+      doc1.insert('1@aaaa', 1, 'Greenfinch')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc1.value('1@aaaa', 0), ['str', 'Chaffinch'])
+      assert.deepEqual(doc1.value('1@aaaa', 1), ['str', 'Greenfinch'])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'delete', obj: '1@aaaa', key: 0},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'Greenfinch', datatype: 'str'}
+      ])
+      doc1.free()
+      doc2.free()
+    })
+
+    it('should handle concurrent insertions at the head of a list', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'values', [])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.insert('1@aaaa', 0, 'c')
+      doc1.insert('1@aaaa', 1, 'd')
+      doc2.insert('1@aaaa', 0, 'a')
+      doc2.insert('1@aaaa', 1, 'b')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual([0, 1, 2, 3].map(i => (doc3.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
+      assert.deepEqual([0, 1, 2, 3].map(i => (doc4.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd'])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'd', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str'}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'a', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 1, value: 'b', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str'}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    it('should handle concurrent insertions beyond the head', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'values', ['a', 'b'])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.insert('1@aaaa', 2, 'e')
+      doc1.insert('1@aaaa', 3, 'f')
+      doc2.insert('1@aaaa', 2, 'c')
+      doc2.insert('1@aaaa', 3, 'd')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc3.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
+      assert.deepEqual([0, 1, 2, 3, 4, 5].map(i => (doc4.value('1@aaaa', i) || [])[1]), ['a', 'b', 'c', 'd', 'e', 'f'])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 2, value: 'e', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 3, value: 'f', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str'}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'insert', obj: '1@aaaa', key: 2, value: 'c', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 3, value: 'd', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 4, value: 'e', datatype: 'str'},
+        {action: 'insert', obj: '1@aaaa', key: 5, value: 'f', datatype: 'str'}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    it('should handle conflicts on root object keys', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set('_root', 'bird', 'Greenfinch')
+      doc2.set('_root', 'bird', 'Goldfinch')
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change1); doc3.loadIncremental(change2)
+      doc4.loadIncremental(change2); doc4.loadIncremental(change1)
+      assert.deepEqual(doc3.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc3.values('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
+      assert.deepEqual(doc4.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc4.values('_root', 'bird'), [['str', 'Greenfinch', '1@aaaa'], ['str', 'Goldfinch', '1@bbbb']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Greenfinch', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch',  datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch',  datatype: 'str', conflict: false},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch',  datatype: 'str', conflict: true}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    it('should handle three-way conflicts', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc')
+      doc1.set('_root', 'bird', 'Greenfinch')
+      doc2.set('_root', 'bird', 'Chaffinch')
+      doc3.set('_root', 'bird', 'Goldfinch')
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental(), change3 = doc3.saveIncremental()
+      doc1.enablePatches(true)
+      doc2.enablePatches(true)
+      doc3.enablePatches(true)
+      doc1.loadIncremental(change2); doc1.loadIncremental(change3)
+      doc2.loadIncremental(change3); doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1); doc3.loadIncremental(change2)
+      assert.deepEqual(doc1.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc1.values('_root', 'bird'), [
+        ['str', 'Greenfinch', '1@aaaa'], ['str', 'Chaffinch', '1@bbbb'], ['str', 'Goldfinch', '1@cccc']
+      ])
+      assert.deepEqual(doc2.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc2.values('_root', 'bird'), [
+        ['str', 'Greenfinch', '1@aaaa'], ['str', 'Chaffinch', '1@bbbb'], ['str', 'Goldfinch', '1@cccc']
+      ])
+      assert.deepEqual(doc3.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc3.values('_root', 'bird'), [
+        ['str', 'Greenfinch', '1@aaaa'], ['str', 'Chaffinch', '1@bbbb'], ['str', 'Goldfinch', '1@cccc']
+      ])
+      assert.deepEqual(doc1.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Chaffinch', datatype: 'str', conflict: true},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: true}
+      ])
+      doc1.free(); doc2.free(); doc3.free()
+    })
+
+    it('should allow a conflict to be resolved', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc')
+      doc1.set('_root', 'bird', 'Greenfinch')
+      doc2.set('_root', 'bird', 'Chaffinch')
+      doc3.enablePatches(true)
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
+      doc1.loadIncremental(change2); doc3.loadIncremental(change1)
+      doc2.loadIncremental(change1); doc3.loadIncremental(change2)
+      doc1.set('_root', 'bird', 'Goldfinch')
+      doc3.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc3.values('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Greenfinch', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Chaffinch', datatype: 'str', conflict: true},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false}
+      ])
+      doc1.free(); doc2.free(); doc3.free()
+    })
+
+    it('should handle a concurrent map key overwrite and delete', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set('_root', 'bird', 'Greenfinch')
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.set('_root', 'bird', 'Goldfinch')
+      doc2.del('_root', 'bird')
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
+      doc1.enablePatches(true)
+      doc2.enablePatches(true)
+      doc1.loadIncremental(change2)
+      doc2.loadIncremental(change1)
+      assert.deepEqual(doc1.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc1.values('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
+      assert.deepEqual(doc2.value('_root', 'bird'), ['str', 'Goldfinch'])
+      assert.deepEqual(doc2.values('_root', 'bird'), [['str', 'Goldfinch', '2@aaaa']])
+      assert.deepEqual(doc1.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false}
+      ])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Goldfinch', datatype: 'str', conflict: false}
+      ])
+      doc1.free(); doc2.free()
+    })
+
+    it('should handle a conflict on a list element', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'birds', ['Thrush', 'Magpie'])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.set('1@aaaa', 0, 'Song Thrush')
+      doc2.set('1@aaaa', 0, 'Redwing')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual(doc3.value('1@aaaa', 0), ['str', 'Redwing'])
+      assert.deepEqual(doc3.values('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
+      assert.deepEqual(doc4.value('1@aaaa', 0), ['str', 'Redwing'])
+      assert.deepEqual(doc4.values('1@aaaa', 0), [['str', 'Song Thrush', '4@aaaa'], ['str', 'Redwing', '4@bbbb']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Song Thrush', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Redwing',     datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Redwing',     datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Redwing',     datatype: 'str', conflict: true}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    it('should handle a concurrent list element overwrite and delete', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
+      doc1.set_object('_root', 'birds', ['Parakeet', 'Magpie', 'Thrush'])
+      let change1 = doc1.saveIncremental()
+      doc2.loadIncremental(change1)
+      doc3.loadIncremental(change1)
+      doc4.loadIncremental(change1)
+      doc1.del('1@aaaa', 0)
+      doc1.set('1@aaaa', 1, 'Song Thrush')
+      doc2.set('1@aaaa', 0, 'Ring-necked parakeet')
+      doc2.set('1@aaaa', 2, 'Redwing')
+      let change2 = doc1.saveIncremental(), change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc4.enablePatches(true)
+      doc3.loadIncremental(change2); doc3.loadIncremental(change3)
+      doc4.loadIncremental(change3); doc4.loadIncremental(change2)
+      assert.deepEqual(doc3.values('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
+      assert.deepEqual(doc3.values('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
+      assert.deepEqual(doc4.values('1@aaaa', 0), [['str', 'Ring-necked parakeet', '5@bbbb']])
+      assert.deepEqual(doc4.values('1@aaaa', 2), [['str', 'Song Thrush', '6@aaaa'], ['str', 'Redwing', '6@bbbb']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'delete', obj: '1@aaaa', key: 0},
+        {action: 'assign', obj: '1@aaaa', key: 1, value: 'Song Thrush', datatype: 'str', conflict: false},
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet', datatype: 'str'},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true}
+      ])
+      assert.deepEqual(doc4.popPatches(), [
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet',  datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 0, value: 'Ring-necked parakeet',  datatype: 'str', conflict: false},
+        {action: 'assign', obj: '1@aaaa', key: 2, value: 'Redwing', datatype: 'str', conflict: true}
+      ])
+      doc1.free(); doc2.free(); doc3.free(); doc4.free()
+    })
+
+    it('should handle deletion of a conflict value', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc')
+      doc1.set('_root', 'bird', 'Robin')
+      doc2.set('_root', 'bird', 'Wren')
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
+      doc2.del('_root', 'bird')
+      let change3 = doc2.saveIncremental()
+      doc3.enablePatches(true)
+      doc3.loadIncremental(change1)
+      doc3.loadIncremental(change2)
+      assert.deepEqual(doc3.values('_root', 'bird'), [['str', 'Robin', '1@aaaa'], ['str', 'Wren', '1@bbbb']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Robin', datatype: 'str', conflict: false},
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Wren',  datatype: 'str', conflict: true}
+      ])
+      doc3.loadIncremental(change3)
+      assert.deepEqual(doc3.value('_root', 'bird'), ['str', 'Robin'])
+      assert.deepEqual(doc3.values('_root', 'bird'), [['str', 'Robin', '1@aaaa']])
+      assert.deepEqual(doc3.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'bird', value: 'Robin', datatype: 'str', conflict: false}
+      ])
+      doc1.free(); doc2.free(); doc3.free()
+    })
+
+    it('should handle conflicting nested objects', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc1.set_object('_root', 'birds', ['Parakeet'])
+      doc2.set_object('_root', 'birds', {'Sparrowhawk': 1})
+      let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
+      doc1.enablePatches(true)
+      doc2.enablePatches(true)
+      doc1.loadIncremental(change2)
+      doc2.loadIncremental(change1)
+      assert.deepEqual(doc1.values('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
+      assert.deepEqual(doc1.popPatches(), [
+        {action: 'assign', obj: '_root',  key: 'birds', value: '1@bbbb', datatype: 'map', conflict: true},
+        {action: 'assign', obj: '1@bbbb', key: 'Sparrowhawk', value: 1, datatype: 'int', conflict: false}
+      ])
+      assert.deepEqual(doc2.values('_root', 'birds'), [['list', '1@aaaa'], ['map', '1@bbbb']])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'birds', value: '1@bbbb', datatype: 'map', conflict: true},
+        {action: 'insert', obj: '1@aaaa', key: 0, value: 'Parakeet', datatype: 'str'}
+      ])
+      doc1.free(); doc2.free()
+    })
+
+    it('should support date objects', () => {
+      // FIXME: either use Date objects or use numbers consistently
+      let doc1 = create('aaaa'), doc2 = create('bbbb'), now = new Date()
+      doc1.set('_root', 'createdAt', now.getTime(), 'timestamp')
+      doc2.enablePatches(true)
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.value('_root', 'createdAt'), ['timestamp', now])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'createdAt', value: now, datatype: 'timestamp', conflict: false}
+      ])
+      doc1.free(); doc2.free()
+    })
+
+    it.skip('should support counters in a map', () => {
+      let doc1 = create('aaaa'), doc2 = create('bbbb')
+      doc2.enablePatches(true)
+      doc1.set('_root', 'starlings', 2, 'counter')
+      doc2.loadIncremental(doc1.saveIncremental())
+      doc1.inc('_root', 'starlings', 1)
+      doc1.dump()
+      doc2.loadIncremental(doc1.saveIncremental())
+      assert.deepEqual(doc2.value('_root', 'starlings'), ['counter', 3])
+      assert.deepEqual(doc2.popPatches(), [
+        {action: 'assign', obj: '_root', key: 'starlings', value: 2, datatype: 'counter', conflict: false},
+        {action: 'assign', obj: '_root', key: 'starlings', value: 3, datatype: 'counter', conflict: false}
+      ])
+      doc1.free(); doc2.free()
+    })
+
+    it('should support counters in a list') // TODO
+
+    it('should delete a counter from a map') // TODO
+  })
+
   describe('sync', () => {
     it('should send a sync message implying no local data', () => {
       let doc = create()

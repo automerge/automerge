@@ -58,7 +58,7 @@ pub use exid::ExId as ObjId;
 pub use keys::Keys;
 pub use keys_at::KeysAt;
 pub use legacy::Change as ExpandedChange;
-pub use types::{ActorId, ChangeHash, ObjType, OpType, Prop};
+pub use types::{ActorId, AssignPatch, ChangeHash, ObjType, OpType, Patch, Prop};
 pub use value::{ScalarValue, Value};
 
 pub const ROOT: ObjId = ObjId::Root;

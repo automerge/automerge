@@ -1,4 +1,5 @@
 use crate::error;
+use crate::exid::ExId;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
 use std::cmp::Eq;
@@ -429,6 +430,10 @@ impl Op {
         matches!((&self.action, action), (OpType::Set(n), OpType::Set(m)) if n == m)
     }
 
+    pub fn is_list_op(&self) -> bool {
+        matches!(&self.key, Key::Seq(_))
+    }
+
     pub fn overwrites(&self, other: &Op) -> bool {
         self.pred.iter().any(|i| i == &other.id)
     }
@@ -515,6 +520,36 @@ impl TryFrom<&[u8]> for ChangeHash {
             let mut array = [0; 32];
             array.copy_from_slice(bytes);
             Ok(ChangeHash(array))
+        }
+    }
+}
+
+/// Properties of `Patch::Assign`
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssignPatch {
+    pub obj: ExId,
+    pub key: Prop,
+    pub value: (Value, ExId),
+    pub conflict: bool,
+}
+
+/// A notification to the application that something has changed in a document.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Patch {
+    /// Associating a new value with a key in a map, or an existing list element
+    Assign(AssignPatch),
+    /// Inserting a new element into a list/text
+    Insert(ExId, usize, (Value, ExId)),
+    /// Deleting an element from a list/text
+    Delete(ExId, Prop),
+}
+
+#[cfg(feature = "wasm")]
+impl From<Prop> for wasm_bindgen::JsValue {
+    fn from(prop: Prop) -> Self {
+        match prop {
+            Prop::Map(key) => key.into(),
+            Prop::Seq(index) => (index as f64).into(),
         }
     }
 }
