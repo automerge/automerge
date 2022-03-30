@@ -20,6 +20,45 @@ pub(crate) struct InsertBuffer {
     last_id: OpId,
 }
 
+impl InsertBuffer {
+    pub fn new(id: OpId, index: usize, tree_index: usize) -> Self {
+        Self {
+            target_index: index,
+            num_actions: 1,
+            tree_index,
+            last_id: id,
+        }
+    }
+
+    pub fn push(
+        &mut self,
+        doc: &Automerge,
+        obj: &ObjId,
+        id: OpId,
+        index: usize,
+    ) -> Result<Key, AutomergeError> {
+        if self.target_index + self.num_actions == index {
+            // this is an insert into the same object and at the next index so we can group it
+            self.num_actions += 1;
+            // key is the id of the last valid insert, since these are sequential inserts we
+            // can just use the last insert's id
+            let key = Ok(Key::Seq(ElemId(self.last_id)));
+            self.last_id = id;
+            key
+        } else {
+            // this buffer is not valid for this insert so start a new one
+            let query = doc.ops.search(obj, InsertNth::new(index));
+            *self = InsertBuffer {
+                last_id: id,
+                target_index: index,
+                num_actions: 1,
+                tree_index: query.pos(),
+            };
+            query.key()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
     pub(crate) actor: usize,
@@ -204,35 +243,11 @@ impl TransactionInner {
         let buffer = self
             .insert_buffers
             .entry(obj)
-            .and_modify(|buffer| {
-                if buffer.target_index + buffer.num_actions == index {
-                    // this is an insert into the same object and at the next index so we can group it
-                    buffer.num_actions += 1;
-                    // key is the id of the last valid insert, since these are sequential inserts we
-                    // can just use the last insert's id
-                    key = Some(Ok(Key::Seq(ElemId(buffer.last_id))));
-                    buffer.last_id = id;
-                } else {
-                    // this buffer is not valid for this insert so start a new one
-                    let query = doc.ops.search(&obj, InsertNth::new(index));
-                    *buffer = InsertBuffer {
-                        last_id: id,
-                        target_index: index,
-                        num_actions: 1,
-                        tree_index: query.pos(),
-                    };
-                    key = Some(query.key());
-                }
-            })
+            .and_modify(|buffer| key = Some(buffer.push(doc, &obj, id, index)))
             .or_insert_with(|| {
                 let query = doc.ops.search(&obj, InsertNth::new(index));
                 key = Some(query.key());
-                InsertBuffer {
-                    last_id: id,
-                    target_index: index,
-                    num_actions: 1,
-                    tree_index: query.pos(),
-                }
+                InsertBuffer::new(id, index, query.pos())
             });
 
         // SAFETY: we set this key in all branches above.
