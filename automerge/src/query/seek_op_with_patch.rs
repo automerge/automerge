@@ -79,7 +79,7 @@ impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
                         break;
                     }
-                    self.count_visible(&op);
+                    self.count_visible(op);
                     self.pos += 1;
                 }
                 QueryResult::Finish
