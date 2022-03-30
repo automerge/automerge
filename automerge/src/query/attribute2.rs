@@ -110,7 +110,9 @@ impl<const B: usize> Attribute2<B> {
     // succ is not in baseline but is in cs
 
     fn update_del(&mut self, element: &Op) {
-        if !self.baseline.covers(&element.id) {
+        if !self.baseline.covers(&element.id)
+            || element.succ.iter().any(|id| self.baseline.covers(id))
+        {
             return;
         }
         for cs in &mut self.change_sets {

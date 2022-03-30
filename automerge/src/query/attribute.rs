@@ -83,9 +83,13 @@ impl<const B: usize> Attribute<B> {
     // succ is not in baseline but is in cs
 
     fn update_del(&mut self, element: &Op) {
-        let baseline = self.baseline.covers(&element.id);
+        if !self.baseline.covers(&element.id)
+            || element.succ.iter().any(|id| self.baseline.covers(id))
+        {
+            return;
+        }
         for cs in &mut self.change_sets {
-            if baseline && element.succ.iter().any(|id| cs.clock.covers(id)) {
+            if element.succ.iter().any(|id| cs.clock.covers(id)) {
                 // was deleted by change set
                 if let Some(s) = element.as_string() {
                     if let Some((_, span)) = &mut cs.next_del {
@@ -94,10 +98,7 @@ impl<const B: usize> Attribute<B> {
                         cs.next_del = Some((self.seen, s))
                     }
                 }
-            } else {
-                //cs.cut_del();
             }
-            //cs.cut_add();
         }
     }
 

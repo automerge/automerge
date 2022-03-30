@@ -182,7 +182,6 @@ describe('Automerge', () => {
 
       assert.deepEqual(attribute, [
         { add: [ { start: 21, end: 24, actor: "cccc" } ], del: [] },
-        { add: [], del: [] }
       ])
     })
   })
