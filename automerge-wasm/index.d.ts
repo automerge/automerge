@@ -134,6 +134,7 @@ export class Automerge {
   // low level change functions
   applyChanges(changes: Change[]): void;
   getChanges(have_deps: Heads): Change[];
+  getChangeByHash(hash: Hash): Change | null;
   getChangesAdded(other: Automerge): Change[];
   getHeads(): Heads;
   getLastLocalChange(): Change;

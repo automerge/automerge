@@ -5,14 +5,18 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SeekOp<const B: usize> {
+pub(crate) struct SeekOp {
+    /// the op we are looking for
     op: Op,
+    /// The position to insert at
     pub pos: usize,
+    /// The indices of ops that this op overwrites
     pub succ: Vec<usize>,
+    /// whether a position has been found
     found: bool,
 }
 
-impl<const B: usize> SeekOp<B> {
+impl SeekOp {
     pub fn new(op: &Op) -> Self {
         SeekOp {
             op: op.clone(),
@@ -35,7 +39,7 @@ impl<const B: usize> SeekOp<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for SeekOp<B> {
+impl<const B: usize> TreeQuery<B> for SeekOp {
     fn query_node_with_metadata(
         &mut self,
         child: &OpTreeNode<B>,
@@ -45,7 +49,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
             return QueryResult::Descend;
         }
         match self.op.key {
-            Key::Seq(e) if e == HEAD => {
+            Key::Seq(HEAD) => {
                 while self.pos < child.len() {
                     let op = child.get(self.pos).unwrap();
                     if op.insert && m.lamport_cmp(op.id, self.op.id) == Ordering::Less {
@@ -56,7 +60,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
                 QueryResult::Finish
             }
             Key::Seq(e) => {
-                if self.found || child.index.ops.contains(&e.0) {
+                if child.index.ops.contains(&e.0) {
                     QueryResult::Descend
                 } else {
                     self.pos += child.len();
@@ -94,6 +98,7 @@ impl<const B: usize> TreeQuery<B> for SeekOp<B> {
             self.pos += 1;
             QueryResult::Next
         } else {
+            // we have already found the target
             if self.op.overwrites(e) {
                 self.succ.push(self.pos);
             }

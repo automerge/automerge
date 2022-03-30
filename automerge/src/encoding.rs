@@ -3,6 +3,7 @@ use std::{
     io,
     io::{Read, Write},
     mem,
+    num::NonZeroU64,
 };
 
 use flate2::{bufread::DeflateEncoder, Compression};
@@ -240,7 +241,7 @@ where
 }
 
 pub(crate) trait Encodable {
-    fn encode_with_actors_to_vec(&self, actors: &mut Vec<ActorId>) -> io::Result<Vec<u8>> {
+    fn encode_with_actors_to_vec(&self, actors: &mut [ActorId]) -> io::Result<Vec<u8>> {
         let mut buf = Vec::new();
         self.encode_with_actors(&mut buf, actors)?;
         Ok(buf)
@@ -288,6 +289,12 @@ impl Encodable for Option<String> {
 impl Encodable for u64 {
     fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
         leb128::write::unsigned(buf, *self)
+    }
+}
+
+impl Encodable for NonZeroU64 {
+    fn encode<R: Write>(&self, buf: &mut R) -> io::Result<usize> {
+        leb128::write::unsigned(buf, self.get())
     }
 }
 

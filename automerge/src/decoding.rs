@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use std::num::NonZeroU64;
 use std::{borrow::Cow, io, io::Read, str};
 
 use crate::error;
@@ -350,6 +351,15 @@ impl Decodable for u64 {
         R: Read,
     {
         leb128::read::unsigned(bytes).ok()
+    }
+}
+
+impl Decodable for NonZeroU64 {
+    fn decode<R>(bytes: &mut R) -> Option<Self>
+    where
+        R: Read,
+    {
+        NonZeroU64::new(leb128::read::unsigned(bytes).ok()?)
     }
 }
 

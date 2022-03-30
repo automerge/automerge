@@ -11,10 +11,13 @@ use std::collections::HashMap;
 pub(crate) const B: usize = 16;
 pub(crate) type OpSet = OpSetInternal<B>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal<const B: usize> {
+    /// The map of objects to their type and ops.
     trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
+    /// The number of operations in the opset.
     length: usize,
+    /// Metadata about the operations in this opset.
     pub m: OpSetMetadata,
 }
 
@@ -132,14 +135,7 @@ impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
     type IntoIter = Iter<'a, B>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut objs: Vec<_> = self.trees.keys().collect();
-        objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
-        Iter {
-            inner: self,
-            index: 0,
-            objs,
-            sub_index: 0,
-        }
+        self.iter()
     }
 }
 
@@ -170,7 +166,7 @@ impl<'a, const B: usize> Iterator for Iter<'a, B> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct OpSetMetadata {
     pub actors: IndexedCache<ActorId>,
     pub props: IndexedCache<String>,

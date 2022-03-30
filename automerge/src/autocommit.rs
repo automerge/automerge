@@ -1,11 +1,11 @@
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
-use crate::{
-    change::export_change, transaction::TransactionInner, ActorId, Automerge, AutomergeError,
-    Change, ChangeHash, Prop, Value,
-};
 use crate::{sync, Keys, KeysAt, ObjType, ScalarValue};
+use crate::{
+    transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
+    Value,
+};
 
 /// An automerge document that automatically manages transactions.
 #[derive(Debug, Clone)]
@@ -61,65 +61,8 @@ impl AutoCommit {
 
     fn ensure_transaction_open(&mut self) {
         if self.transaction.is_none() {
-            let actor = self.doc.get_actor_index();
-
-            let seq = self.doc.states.entry(actor).or_default().len() as u64 + 1;
-            let mut deps = self.doc.get_heads();
-            if seq > 1 {
-                let last_hash = self.get_hash(actor, seq - 1).unwrap();
-                if !deps.contains(&last_hash) {
-                    deps.push(last_hash);
-                }
-            }
-
-            self.transaction = Some(TransactionInner {
-                actor,
-                seq,
-                start_op: self.doc.max_op + 1,
-                time: 0,
-                message: None,
-                extra_bytes: Default::default(),
-                hash: None,
-                operations: vec![],
-                deps,
-            });
+            self.transaction = Some(self.doc.transaction_inner());
         }
-    }
-
-    fn get_hash(&mut self, actor: usize, seq: u64) -> Result<ChangeHash, AutomergeError> {
-        self.doc
-            .states
-            .get(&actor)
-            .and_then(|v| v.get(seq as usize - 1))
-            .and_then(|&i| self.doc.history.get(i))
-            .map(|c| c.hash)
-            .ok_or(AutomergeError::InvalidSeq(seq))
-    }
-
-    fn update_history(&mut self, change: Change) -> usize {
-        self.doc.max_op = std::cmp::max(self.doc.max_op, change.start_op + change.len() as u64 - 1);
-
-        self.update_deps(&change);
-
-        let history_index = self.doc.history.len();
-
-        self.doc
-            .states
-            .entry(self.doc.ops.m.actors.cache(change.actor_id().clone()))
-            .or_default()
-            .push(history_index);
-
-        self.doc.history_index.insert(change.hash, history_index);
-        self.doc.history.push(change);
-
-        history_index
-    }
-
-    fn update_deps(&mut self, change: &Change) {
-        for d in &change.deps {
-            self.doc.deps.remove(d);
-        }
-        self.doc.deps.insert(change.hash);
     }
 
     pub fn fork(&mut self) -> Self {
@@ -132,11 +75,7 @@ impl AutoCommit {
 
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
-            self.update_history(export_change(
-                tx,
-                &self.doc.ops.m.actors,
-                &self.doc.ops.m.props,
-            ));
+            tx.commit(&mut self.doc, None, None);
         }
     }
 
@@ -238,10 +177,7 @@ impl AutoCommit {
     }
 
     pub fn commit(&mut self) -> ChangeHash {
-        // ensure that even no changes triggers a change
-        self.ensure_transaction_open();
-        let tx = self.transaction.take().unwrap();
-        tx.commit(&mut self.doc, None, None)
+        self.commit_with(CommitOptions::default())
     }
 
     /// Commit the current operations with some options.
@@ -260,6 +196,7 @@ impl AutoCommit {
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
     /// ```
     pub fn commit_with(&mut self, options: CommitOptions) -> ChangeHash {
+        // ensure that even no changes triggers a change
         self.ensure_transaction_open();
         let tx = self.transaction.take().unwrap();
         tx.commit(&mut self.doc, options.message, options.time)

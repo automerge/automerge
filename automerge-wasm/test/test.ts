@@ -376,6 +376,20 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize("/list/0"), { foo: "bar"}) 
     })
 
+    it('should be able to fetch changes by hash', () => {
+      let doc1 = create("aaaa")
+      let doc2 = create("bbbb")
+      doc1.set("/","a","b")
+      doc2.set("/","b","c")
+      let head1 = doc1.getHeads()
+      let head2 = doc2.getHeads()
+      let change1 = doc1.getChangeByHash(head1[0])
+      let change2 = doc1.getChangeByHash(head2[0])
+      assert.deepEqual(change2, null)
+      if (change1 === null) { throw new RangeError("change1 should not be null") }
+      assert.deepEqual(decodeChange(change1).hash, head1[0])
+    })
+
     it('recursive sets are possible', () => {
       let doc = create("aaaa")
       let l1 = doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])

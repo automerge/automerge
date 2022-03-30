@@ -1,6 +1,6 @@
-use crate::decoding;
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
+use crate::{decoding, encoding};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -9,10 +9,10 @@ pub enum AutomergeError {
     InvalidOpId(String),
     #[error("obj id not from this document `{0}`")]
     ForeignObjId(String),
-    #[error("there was an ecoding problem")]
-    Encoding,
-    #[error("there was a decoding problem")]
-    Decoding,
+    #[error("there was an encoding problem: {0}")]
+    Encoding(#[from] encoding::Error),
+    #[error("there was a decoding problem: {0}")]
+    Decoding(#[from] decoding::Error),
     #[error("key must not be an empty string")]
     EmptyStringKey,
     #[error("invalid seq {0}")]
@@ -23,18 +23,6 @@ pub enum AutomergeError {
     DuplicateSeqNumber(u64, ActorId),
     #[error("generic automerge error")]
     Fail,
-}
-
-impl From<std::io::Error> for AutomergeError {
-    fn from(_: std::io::Error) -> Self {
-        AutomergeError::Encoding
-    }
-}
-
-impl From<decoding::Error> for AutomergeError {
-    fn from(_: decoding::Error) -> Self {
-        AutomergeError::Decoding
-    }
 }
 
 #[cfg(feature = "wasm")]

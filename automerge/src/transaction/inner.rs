@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use crate::automerge::Actor;
 use crate::exid::ExId;
 use crate::query::{self, OpIdSearch};
@@ -9,7 +11,7 @@ use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 pub struct TransactionInner {
     pub(crate) actor: usize,
     pub(crate) seq: u64,
-    pub(crate) start_op: u64,
+    pub(crate) start_op: NonZeroU64,
     pub(crate) time: i64,
     pub(crate) message: Option<String>,
     pub(crate) extra_bytes: Vec<u8>,
@@ -39,7 +41,7 @@ impl TransactionInner {
             self.time = t;
         }
 
-        let num_ops = self.operations.len();
+        let num_ops = self.pending_ops();
         let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
         let hash = change.hash;
         doc.update_history(change, num_ops);
@@ -56,7 +58,7 @@ impl TransactionInner {
             doc.actor = Actor::Unused(actor);
         }
 
-        let num = self.operations.len();
+        let num = self.pending_ops();
         // remove in reverse order so sets are removed before makes etc...
         for (obj, op) in self.operations.iter().rev() {
             for pred_id in &op.pred {
@@ -123,7 +125,7 @@ impl TransactionInner {
     }
 
     fn next_id(&mut self) -> OpId {
-        OpId(self.start_op + self.operations.len() as u64, self.actor)
+        OpId(self.start_op.get() + self.pending_ops() as u64, self.actor)
     }
 
     fn insert_local_op(

@@ -23,6 +23,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fmt::Debug;
 use std::io::{Read, Write};
+use std::num::NonZeroU64;
 use tracing::instrument;
 
 const MAGIC_BYTES: [u8; 4] = [0x85, 0x6f, 0x4a, 0x83];
@@ -319,8 +320,8 @@ pub struct Change {
     pub hash: amp::ChangeHash,
     /// The index of this change in the changes from this actor.
     pub seq: u64,
-    /// The start operation index.
-    pub start_op: u64,
+    /// The start operation index. Starts at 1.
+    pub start_op: NonZeroU64,
     /// The time that this change was committed.
     pub time: i64,
     /// The message of this change.
@@ -357,7 +358,7 @@ impl Change {
     }
 
     pub fn max_op(&self) -> u64 {
-        self.start_op + (self.len() as u64) - 1
+        self.start_op.get() + (self.len() as u64) - 1
     }
 
     pub fn message(&self) -> Option<String> {
@@ -928,7 +929,8 @@ fn doc_changes_to_uncompressed_changes<'a>(
         actor_id: actors[change.actor].clone(),
         seq: change.seq,
         time: change.time,
-        start_op: change.max_op - change.ops.len() as u64 + 1,
+        // SAFETY: this unwrap is safe as we always add 1
+        start_op: NonZeroU64::new(change.max_op - change.ops.len() as u64 + 1).unwrap(),
         hash: None,
         message: change.message,
         operations: change

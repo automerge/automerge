@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::num::NonZeroU64;
 
 use crate::change::encode_document;
 use crate::exid::ExId;
@@ -15,7 +16,7 @@ use crate::{AutomergeError, Change, Prop};
 use serde::Serialize;
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
     Unused(ActorId),
     Cached(usize),
@@ -24,14 +25,23 @@ pub(crate) enum Actor {
 /// An automerge document.
 #[derive(Debug, Clone)]
 pub struct Automerge {
+    /// The list of unapplied changes that are not causally ready.
     pub(crate) queue: Vec<Change>,
+    /// The history of changes that form this document, topologically sorted too.
     pub(crate) history: Vec<Change>,
+    /// Mapping from change hash to index into the history list.
     pub(crate) history_index: HashMap<ChangeHash, usize>,
+    /// Mapping from actor index to list of seqs seen for them.
     pub(crate) states: HashMap<usize, Vec<usize>>,
+    /// Current dependencies of this document (heads hashes).
     pub(crate) deps: HashSet<ChangeHash>,
+    /// Heads at the last save.
     pub(crate) saved: Vec<ChangeHash>,
+    /// The set of operations that form this document.
     pub(crate) ops: OpSet,
+    /// The current actor.
     pub(crate) actor: Actor,
+    /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
     pub(crate) patches: Option<Vec<Patch>>,
 }
@@ -107,6 +117,13 @@ impl Automerge {
 
     /// Start a transaction.
     pub fn transaction(&mut self) -> Transaction {
+        Transaction {
+            inner: Some(self.transaction_inner()),
+            doc: self,
+        }
+    }
+
+    pub(crate) fn transaction_inner(&mut self) -> TransactionInner {
         let actor = self.get_actor_index();
         let seq = self.states.get(&actor).map_or(0, |v| v.len()) as u64 + 1;
         let mut deps = self.get_heads();
@@ -117,20 +134,17 @@ impl Automerge {
             }
         }
 
-        let tx_inner = TransactionInner {
+        TransactionInner {
             actor,
             seq,
-            start_op: self.max_op + 1,
+            // SAFETY: this unwrap is safe as we always add 1
+            start_op: NonZeroU64::new(self.max_op + 1).unwrap(),
             time: 0,
             message: None,
             extra_bytes: Default::default(),
             hash: None,
             operations: vec![],
             deps,
-        };
-        Transaction {
-            inner: Some(tx_inner),
-            doc: self,
         }
     }
 
@@ -319,6 +333,7 @@ impl Automerge {
         }
     }
 
+    /// Get the type of this object, if it is an object.
     pub fn object_type<O: AsRef<ExId>>(&self, obj: O) -> Option<ObjType> {
         let obj = self.exid_to_obj(obj.as_ref()).ok()?;
         self.ops.object_type(&obj)
@@ -570,7 +585,7 @@ impl Automerge {
             .enumerate()
             .map(|(i, c)| {
                 let actor = self.ops.m.actors.cache(change.actor_id().clone());
-                let id = OpId(change.start_op + i as u64, actor);
+                let id = OpId(change.start_op.get() + i as u64, actor);
                 let obj = match c.obj {
                     legacy::ObjectId::Root => ObjId::root(),
                     legacy::ObjectId::Id(id) => ObjId(OpId(id.0, self.ops.m.actors.cache(id.1))),
@@ -866,7 +881,7 @@ impl Automerge {
     }
 
     pub(crate) fn update_history(&mut self, change: Change, num_ops: usize) -> usize {
-        self.max_op = std::cmp::max(self.max_op, change.start_op + num_ops as u64 - 1);
+        self.max_op = std::cmp::max(self.max_op, change.start_op.get() + num_ops as u64 - 1);
 
         self.update_deps(&change);
 
@@ -989,6 +1004,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::op_set::B;
     use crate::transaction::Transactable;
     use crate::*;
     use std::convert::TryInto;
@@ -1425,5 +1441,203 @@ mod tests {
         let bytes = doc.save();
         let doc = Automerge::load(&bytes).unwrap();
         assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
+    }
+
+    #[test]
+    fn load_change_with_zero_start_op() {
+        let bytes = &[
+            133, 111, 74, 131, 202, 50, 52, 158, 2, 96, 163, 163, 83, 255, 255, 255, 50, 50, 50,
+            50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 255, 255, 245, 53, 1, 0, 0, 0, 0, 0, 0, 4,
+            233, 245, 239, 255, 1, 0, 0, 0, 133, 111, 74, 131, 163, 96, 0, 0, 2, 10, 202, 144, 125,
+            19, 48, 89, 133, 49, 10, 10, 67, 91, 111, 10, 74, 131, 96, 0, 163, 131, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 1, 153, 0, 0, 246, 255, 255, 255, 157, 157, 157, 157,
+            157, 157, 157, 157, 157, 157, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
+        ];
+        let _ = Automerge::load(bytes);
+    }
+
+    #[test]
+    fn load_broken_list() {
+        enum Action {
+            InsertText(usize, char),
+            DelText(usize),
+        }
+        use Action::*;
+        let actions = [
+            InsertText(0, 'a'),
+            InsertText(0, 'b'),
+            DelText(1),
+            InsertText(0, 'c'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'd'),
+            InsertText(0, 'e'),
+            InsertText(1, 'f'),
+            DelText(2),
+            DelText(1),
+            InsertText(0, 'g'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'h'),
+            InsertText(1, 'i'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'j'),
+            InsertText(0, 'k'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'l'),
+            DelText(0),
+            InsertText(0, 'm'),
+            InsertText(0, 'n'),
+            DelText(1),
+            DelText(0),
+            InsertText(0, 'o'),
+            DelText(0),
+            InsertText(0, 'p'),
+            InsertText(1, 'q'),
+            InsertText(1, 'r'),
+            InsertText(1, 's'),
+            InsertText(3, 't'),
+            InsertText(5, 'u'),
+            InsertText(0, 'v'),
+            InsertText(3, 'w'),
+            InsertText(4, 'x'),
+            InsertText(0, 'y'),
+            InsertText(6, 'z'),
+            InsertText(11, '1'),
+            InsertText(0, '2'),
+            InsertText(0, '3'),
+            InsertText(0, '4'),
+            InsertText(13, '5'),
+            InsertText(11, '6'),
+            InsertText(17, '7'),
+        ];
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        for action in actions {
+            match action {
+                Action::InsertText(index, c) => {
+                    println!("inserting {} at {}", c, index);
+                    tx.insert(&list, index, c).unwrap();
+                }
+                Action::DelText(index) => {
+                    println!("deleting at {} ", index);
+                    tx.del(&list, index).unwrap();
+                }
+            }
+        }
+        tx.commit();
+        let bytes = doc.save();
+        println!("doc2 time");
+        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let bytes2 = doc2.save();
+        assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
+
+        assert_eq!(doc.queue, doc2.queue);
+        assert_eq!(doc.history, doc2.history);
+        assert_eq!(doc.history_index, doc2.history_index);
+        assert_eq!(doc.states, doc2.states);
+        assert_eq!(doc.deps, doc2.deps);
+        assert_eq!(doc.saved, doc2.saved);
+        assert_eq!(doc.ops, doc2.ops);
+        assert_eq!(doc.max_op, doc2.max_op);
+
+        assert_eq!(bytes, bytes2);
+    }
+
+    #[test]
+    fn load_broken_list_short() {
+        // breaks when the B constant in OpSet is 3
+        enum Action {
+            InsertText(usize, char),
+            DelText(usize),
+        }
+        use Action::*;
+        let actions = [
+            InsertText(0, 'a'),
+            InsertText(1, 'b'),
+            DelText(1),
+            InsertText(1, 'c'),
+            InsertText(2, 'd'),
+            InsertText(2, 'e'),
+            InsertText(0, 'f'),
+            DelText(4),
+            InsertText(4, 'g'),
+        ];
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        for action in actions {
+            match action {
+                Action::InsertText(index, c) => {
+                    println!("inserting {} at {}", c, index);
+                    tx.insert(&list, index, c).unwrap();
+                }
+                Action::DelText(index) => {
+                    println!("deleting at {} ", index);
+                    tx.del(&list, index).unwrap();
+                }
+            }
+        }
+        tx.commit();
+        let bytes = doc.save();
+        println!("doc2 time");
+        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let bytes2 = doc2.save();
+        assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
+
+        assert_eq!(doc.queue, doc2.queue);
+        assert_eq!(doc.history, doc2.history);
+        assert_eq!(doc.history_index, doc2.history_index);
+        assert_eq!(doc.states, doc2.states);
+        assert_eq!(doc.deps, doc2.deps);
+        assert_eq!(doc.saved, doc2.saved);
+        assert_eq!(doc.ops, doc2.ops);
+        assert_eq!(doc.max_op, doc2.max_op);
+
+        assert_eq!(bytes, bytes2);
+    }
+
+    #[test]
+    fn compute_list_indexes_correctly_when_list_element_is_split_across_tree_nodes() {
+        let max = B as u64 * 2;
+        let actor1 = ActorId::from(b"aaaa");
+        let mut doc1 = AutoCommit::new().with_actor(actor1.clone());
+        let actor2 = ActorId::from(b"bbbb");
+        let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
+        let list = doc1.set_object(ROOT, "list", ObjType::List).unwrap();
+        doc1.insert(&list, 0, 0).unwrap();
+        doc2.load_incremental(&doc1.save_incremental()).unwrap();
+        for i in 1..=max {
+            doc1.set(&list, 0, i).unwrap()
+        }
+        for i in 1..=max {
+            doc2.set(&list, 0, i).unwrap()
+        }
+        let change1 = doc1.save_incremental();
+        let change2 = doc2.save_incremental();
+        doc2.load_incremental(&change1).unwrap();
+        doc1.load_incremental(&change2).unwrap();
+        assert_eq!(doc1.length(&list), 1);
+        assert_eq!(doc2.length(&list), 1);
+        assert_eq!(
+            doc1.values(&list, 0).unwrap(),
+            vec![
+                (max.into(), ExId::Id(max + 2, actor1.clone(), 0)),
+                (max.into(), ExId::Id(max + 2, actor2.clone(), 1))
+            ]
+        );
+        assert_eq!(
+            doc2.values(&list, 0).unwrap(),
+            vec![
+                (max.into(), ExId::Id(max + 2, actor1, 0)),
+                (max.into(), ExId::Id(max + 2, actor2, 1))
+            ]
+        );
+        assert!(doc1.value(&list, 1).unwrap().is_none());
+        assert!(doc2.value(&list, 1).unwrap().is_none());
     }
 }
