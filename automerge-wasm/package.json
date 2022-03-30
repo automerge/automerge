@@ -6,7 +6,7 @@
   ],
   "name": "automerge-wasm-pack",
   "description": "wasm-bindgen bindings to the automerge rust implementation",
-  "version": "0.0.23",
+  "version": "0.0.25",
   "license": "MIT",
   "files": [
     "README.md",
@@ -25,6 +25,9 @@
     "release-w": "rimraf ./web && wasm-pack build --target web --release --out-name index -d web && cp index.d.ts web",
     "release-n": "rimraf ./node && wasm-pack build --target nodejs --release --out-name index -d node && cp index.d.ts node",
     "release": "yarn release-w && yarn release-n",
+    "opt-node": "wasm-opt -Oz ./node/index_bg.wasm -o tmp.wasm && mv tmp.wasm ./node/index_bg.wasm",
+    "opt-web": "wasm-opt -Oz ./web/index_bg.wasm -o tmp.wasm && mv tmp.wasm ./web/index_bg.wasm",
+    "opt": "yarn opt-node && yarn opt-web",
     "test": "yarn build && ts-mocha -p tsconfig.json --type-check --bail --full-trace test/*.ts"
   },
   "dependencies": {},
