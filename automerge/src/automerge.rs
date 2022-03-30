@@ -125,7 +125,7 @@ impl Automerge {
             hash: None,
             operations: vec![],
             deps,
-            insert_buffer: None,
+            insert_buffers: Default::default(),
         }
     }
 

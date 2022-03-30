@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use crate::automerge::Actor;
@@ -9,14 +10,14 @@ use crate::{AutomergeError, ObjType, OpType, ScalarValue};
 
 #[derive(Debug, Clone)]
 pub(crate) struct InsertBuffer {
-    /// object that these inserts are operating on
-    obj: ObjId,
     /// index that the first op in this buffer wanted to insert at
     target_index: usize,
     /// number of actions this buffer has seen
     num_actions: usize,
     /// index in the optree that the first op in this buffer was inserted in
     tree_index: usize,
+    /// OpId of the last insert operation, used as the key for the next.
+    last_id: OpId,
 }
 
 #[derive(Debug, Clone)]
@@ -30,8 +31,8 @@ pub struct TransactionInner {
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) operations: Vec<(ObjId, Op)>,
-    /// A buffer to capture runs of inserts efficiently.
-    pub(crate) insert_buffer: Option<InsertBuffer>,
+    /// Buffers to capture runs of inserts efficiently, one per object.
+    pub(crate) insert_buffers: HashMap<ObjId, InsertBuffer>,
 }
 
 impl TransactionInner {
@@ -138,7 +139,7 @@ impl TransactionInner {
         Ok(doc.id_to_exid(id))
     }
 
-    fn next_id(&mut self) -> OpId {
+    fn next_id(&self) -> OpId {
         OpId(
             self.start_op.get() + self.operations.len() as u64,
             self.actor,
@@ -198,40 +199,47 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let key = if let Some(buffer) = self.insert_buffer.as_mut() {
-            if obj == buffer.obj && buffer.target_index + buffer.num_actions == index {
-                // this is an insert into the same object and at the next index so we can group it
-                buffer.num_actions += 1;
-                // key is the id of the last valid insert, since these are sequential inserts we
-                // can just use the last insert's id
-                // SAFETY: if we have a buffer then we must have had at least one insert operation,
-                // thus there is at least one operation in the operations list.
-                Key::Seq(ElemId(self.operations.last().unwrap().1.id))
-            } else {
-                // this buffer is not valid for this insert so start a new one
+        let id = self.next_id();
+        let mut key = None;
+        let buffer = self
+            .insert_buffers
+            .entry(obj)
+            .and_modify(|buffer| {
+                if buffer.target_index + buffer.num_actions == index {
+                    // this is an insert into the same object and at the next index so we can group it
+                    buffer.num_actions += 1;
+                    // key is the id of the last valid insert, since these are sequential inserts we
+                    // can just use the last insert's id
+                    key = Some(Ok(Key::Seq(ElemId(buffer.last_id))));
+                    buffer.last_id = id;
+                } else {
+                    // this buffer is not valid for this insert so start a new one
+                    let query = doc.ops.search(&obj, InsertNth::new(index));
+                    *buffer = InsertBuffer {
+                        last_id: id,
+                        target_index: index,
+                        num_actions: 1,
+                        tree_index: query.pos(),
+                    };
+                    key = Some(query.key());
+                }
+            })
+            .or_insert_with(|| {
                 let query = doc.ops.search(&obj, InsertNth::new(index));
-                self.insert_buffer = Some(InsertBuffer {
-                    obj,
+                key = Some(query.key());
+                InsertBuffer {
+                    last_id: id,
                     target_index: index,
                     num_actions: 1,
                     tree_index: query.pos(),
-                });
-                query.key()?
-            }
-        } else {
-            let query = doc.ops.search(&obj, InsertNth::new(index));
-            self.insert_buffer = Some(InsertBuffer {
-                obj,
-                target_index: index,
-                num_actions: 1,
-                tree_index: query.pos(),
+                }
             });
-            query.key()?
-        };
+
+        // SAFETY: we set this key in all branches above.
+        let key = key.unwrap()?;
 
         let is_make = matches!(&action, OpType::Make(_));
 
-        let id = self.next_id();
         let op = Op {
             id,
             action,
@@ -241,8 +249,6 @@ impl TransactionInner {
             insert: true,
         };
 
-        // SAFETY: we set the insert_buffer above so know that it must be available.
-        let buffer = self.insert_buffer.as_ref().unwrap();
         doc.ops
             .insert(buffer.tree_index + buffer.num_actions - 1, &obj, op.clone());
 
@@ -263,9 +269,7 @@ impl TransactionInner {
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
         // invalidate the insert buffer as we may clobber things it is targetting
-        // TODO: this could probably only be invalidated if the same object is being updated as a
-        // better move
-        self.insert_buffer = None;
+        self.insert_buffers.remove(&obj);
         match prop {
             Prop::Map(s) => self.local_map_op(doc, obj, s, action),
             Prop::Seq(n) => self.local_list_op(doc, obj, n, action),
