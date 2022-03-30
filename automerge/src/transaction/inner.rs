@@ -2,10 +2,22 @@ use std::num::NonZeroU64;
 
 use crate::automerge::Actor;
 use crate::exid::ExId;
-use crate::query::{self, OpIdSearch};
-use crate::types::{Key, ObjId, OpId};
+use crate::query::{self, InsertNth, OpIdSearch};
+use crate::types::{ElemId, Key, ObjId, OpId};
 use crate::{change::export_change, types::Op, Automerge, ChangeHash, Prop};
 use crate::{AutomergeError, ObjType, OpType, ScalarValue};
+
+#[derive(Debug, Clone)]
+pub(crate) struct InsertBuffer {
+    /// object that these inserts are operating on
+    obj: ObjId,
+    /// index that the first op in this buffer wanted to insert at
+    target_index: usize,
+    /// number of actions this buffer has seen
+    num_actions: usize,
+    /// index in the optree that the first op in this buffer was inserted in
+    tree_index: usize,
+}
 
 #[derive(Debug, Clone)]
 pub struct TransactionInner {
@@ -18,6 +30,8 @@ pub struct TransactionInner {
     pub(crate) hash: Option<ChangeHash>,
     pub(crate) deps: Vec<ChangeHash>,
     pub(crate) operations: Vec<(ObjId, Op)>,
+    /// A buffer to capture runs of inserts efficiently.
+    pub(crate) insert_buffer: Option<InsertBuffer>,
 }
 
 impl TransactionInner {
@@ -184,13 +198,40 @@ impl TransactionInner {
         index: usize,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
-        let id = self.next_id();
+        let key = if let Some(buffer) = self.insert_buffer.as_mut() {
+            if obj == buffer.obj && buffer.target_index + buffer.num_actions == index {
+                // this is an insert into the same object and at the next index so we can group it
+                buffer.num_actions += 1;
+                // key is the id of the last valid insert, since these are sequential inserts we
+                // can just use the last insert's id
+                // SAFETY: if we have a buffer then we must have had at least one insert operation,
+                // thus there is at least one operation in the operations list.
+                Key::Seq(ElemId(self.operations.last().unwrap().1.id))
+            } else {
+                // this buffer is not valid for this insert so start a new one
+                let query = doc.ops.search(&obj, InsertNth::new(index));
+                self.insert_buffer = Some(InsertBuffer {
+                    obj,
+                    target_index: index,
+                    num_actions: 1,
+                    tree_index: query.pos(),
+                });
+                query.key()?
+            }
+        } else {
+            let query = doc.ops.search(&obj, InsertNth::new(index));
+            self.insert_buffer = Some(InsertBuffer {
+                obj,
+                target_index: index,
+                num_actions: 1,
+                tree_index: query.pos(),
+            });
+            query.key()?
+        };
 
-        let query = doc.ops.search(&obj, query::InsertNth::new(index));
-
-        let key = query.key()?;
         let is_make = matches!(&action, OpType::Make(_));
 
+        let id = self.next_id();
         let op = Op {
             id,
             action,
@@ -200,7 +241,11 @@ impl TransactionInner {
             insert: true,
         };
 
-        doc.ops.insert(query.pos(), &obj, op.clone());
+        // SAFETY: we set the insert_buffer above so know that it must be available.
+        let buffer = self.insert_buffer.as_ref().unwrap();
+        doc.ops
+            .insert(buffer.tree_index + buffer.num_actions - 1, &obj, op.clone());
+
         self.operations.push((obj, op));
 
         if is_make {
@@ -217,6 +262,10 @@ impl TransactionInner {
         prop: Prop,
         action: OpType,
     ) -> Result<Option<OpId>, AutomergeError> {
+        // invalidate the insert buffer as we may clobber things it is targetting
+        // TODO: this could probably only be invalidated if the same object is being updated as a
+        // better move
+        self.insert_buffer = None;
         match prop {
             Prop::Map(s) => self.local_map_op(doc, obj, s, action),
             Prop::Seq(n) => self.local_list_op(doc, obj, n, action),

@@ -125,6 +125,7 @@ impl Automerge {
             hash: None,
             operations: vec![],
             deps,
+            insert_buffer: None,
         }
     }
 
@@ -961,16 +962,16 @@ mod tests {
         let mut tx = doc.transaction();
         let list_id = tx.set_object(ROOT, "items", ObjType::List)?;
         tx.set(ROOT, "zzz", "zzzval")?;
-        assert!(tx.value(ROOT, "items")?.unwrap().1 == list_id);
+        assert_eq!(tx.value(ROOT, "items")?.unwrap().1, list_id);
         tx.insert(&list_id, 0, "a")?;
         tx.insert(&list_id, 0, "b")?;
         tx.insert(&list_id, 2, "c")?;
         tx.insert(&list_id, 1, "d")?;
-        assert!(tx.value(&list_id, 0)?.unwrap().0 == "b".into());
-        assert!(tx.value(&list_id, 1)?.unwrap().0 == "d".into());
-        assert!(tx.value(&list_id, 2)?.unwrap().0 == "a".into());
-        assert!(tx.value(&list_id, 3)?.unwrap().0 == "c".into());
-        assert!(tx.length(&list_id) == 4);
+        assert_eq!(tx.value(&list_id, 0)?.unwrap().0, "b".into());
+        assert_eq!(tx.value(&list_id, 1)?.unwrap().0, "d".into());
+        assert_eq!(tx.value(&list_id, 2)?.unwrap().0, "a".into());
+        assert_eq!(tx.value(&list_id, 3)?.unwrap().0, "c".into());
+        assert_eq!(tx.length(&list_id), 4);
         tx.commit();
         doc.save();
         Ok(())
