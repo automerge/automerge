@@ -1,3 +1,4 @@
+use crate::object_data::ObjectData;
 use crate::types::ObjId;
 use fxhash::FxHasher;
 use std::{borrow::Cow, collections::HashMap, hash::BuildHasherDefault};
@@ -42,16 +43,12 @@ pub(crate) struct GraphVisualisation<'a> {
 
 impl<'a> GraphVisualisation<'a> {
     pub(super) fn construct(
-        trees: &'a HashMap<
-            crate::types::ObjId,
-            crate::op_tree::OpTree,
-            BuildHasherDefault<FxHasher>,
-        >,
+        objects: &'a HashMap<crate::types::ObjId, ObjectData, BuildHasherDefault<FxHasher>>,
         metadata: &'a crate::op_set::OpSetMetadata,
     ) -> GraphVisualisation<'a> {
         let mut nodes = HashMap::new();
-        for (obj_id, tree) in trees {
-            if let Some(root_node) = &tree.internal.root_node {
+        for (obj_id, object_data) in objects {
+            if let Some(root_node) = &object_data.ops().root_node {
                 let tree_id = Self::construct_nodes(root_node, obj_id, &mut nodes, metadata);
                 let obj_tree_id = NodeId::default();
                 nodes.insert(
