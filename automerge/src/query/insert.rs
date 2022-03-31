@@ -66,8 +66,8 @@ impl InsertNth {
 
 impl<'a> TreeQuery<'a> for InsertNth {
     fn cache_lookup_seq(&mut self, cache: &crate::object_data::SeqOpsCache) -> bool {
-        if let Some((last_target_index, last_tree_index, last_id)) = cache.last {
-            if last_target_index + 1 == self.target {
+        if let Some((last_target_index, last_tree_index, insert, last_id)) = cache.last {
+            if insert && last_target_index + 1 == self.target {
                 // we can use the cached value
                 let key = ElemId(last_id);
                 self.last_valid_insert = Some(key);
@@ -79,7 +79,7 @@ impl<'a> TreeQuery<'a> for InsertNth {
     }
 
     fn cache_update_seq(&self, cache: &mut crate::object_data::SeqOpsCache) {
-        cache.last = Some((self.target, self.pos(), self.id));
+        cache.last = Some((self.target, self.pos(), true, self.id));
     }
 
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {

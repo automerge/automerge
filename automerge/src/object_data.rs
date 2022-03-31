@@ -55,9 +55,9 @@ impl From<SeqType> for ObjType {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct SeqOpsCache {
-    // last insertion (list index, tree index, opid to be inserted)
+    // last insertion (list index, tree index, whether the last op was an insert, opid to be inserted)
     // TODO: invalidation
-    pub(crate) last: Option<(usize, usize, OpId)>,
+    pub(crate) last: Option<(usize, usize, bool, OpId)>,
 }
 
 impl SeqOpsCache {
