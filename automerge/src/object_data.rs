@@ -21,6 +21,9 @@ impl From<MapType> for ObjType {
     }
 }
 
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct MapOpsCache {}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SeqType {
     List,
@@ -35,6 +38,9 @@ impl From<SeqType> for ObjType {
         }
     }
 }
+
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct SeqOpsCache {}
 
 /// Stores the data for an object.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,17 +57,22 @@ pub(crate) enum ObjectDataInternal {
     Map {
         /// The type of this object.
         typ: MapType,
+        cache: MapOpsCache,
     },
     Seq {
         /// The type of this object.
         typ: SeqType,
+        cache: SeqOpsCache,
     },
 }
 
 impl ObjectData {
     pub fn root() -> Self {
         ObjectData {
-            internal: ObjectDataInternal::Map { typ: MapType::Map },
+            internal: ObjectDataInternal::Map {
+                typ: MapType::Map,
+                cache: Default::default(),
+            },
             ops: Default::default(),
             parent: None,
         }
@@ -93,15 +104,15 @@ impl ObjectData {
 
     fn ops(&self) -> &OpTreeInternal {
         match self {
-            ObjectData::Map { typ: _, ops } => ops,
-            ObjectData::Seq { typ: _, ops } => ops,
+            ObjectData::Map { ops, .. } => ops,
+            ObjectData::Seq { ops, .. } => ops,
         }
     }
 
     fn ops_mut(&mut self) -> &mut OpTreeInternal {
         match self {
-            ObjectData::Map { typ: _, ops } => ops,
-            ObjectData::Seq { typ: _, ops } => ops,
+            ObjectData::Map { ops, .. } => ops,
+            ObjectData::Seq { ops, .. } => ops,
         }
     }
 
@@ -129,8 +140,8 @@ impl ObjectData {
 
     pub fn typ(&self) -> ObjType {
         match self {
-            ObjectData::Map { typ, ops: _ } => (*typ).into(),
-            ObjectData::Seq { typ, ops: _ } => (*typ).into(),
+            ObjectData::Map { typ, .. } => (*typ).into(),
+            ObjectData::Seq { typ, .. } => (*typ).into(),
         }
     }
 
