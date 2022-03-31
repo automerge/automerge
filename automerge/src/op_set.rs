@@ -63,7 +63,7 @@ impl OpSetInternal {
 
     pub(crate) fn keys(&self, obj: ObjId) -> Option<query::Keys<'_>> {
         if let Some(object) = self.objects.get(&obj) {
-            object.ops.keys()
+            object.keys()
         } else {
             None
         }
@@ -71,7 +71,7 @@ impl OpSetInternal {
 
     pub(crate) fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt<'_>> {
         if let Some(object) = self.objects.get(&obj) {
-            object.ops.keys_at(clock)
+            object.keys_at(clock)
         } else {
             None
         }
@@ -107,7 +107,7 @@ impl OpSetInternal {
         Q: TreeQuery<'a>,
     {
         if let Some(object) = self.objects.get(obj) {
-            object.ops.search(query, &self.m)
+            object.search(query, &self.m)
         } else {
             query
         }
@@ -118,7 +118,7 @@ impl OpSetInternal {
         F: FnMut(&mut Op),
     {
         if let Some(object) = self.objects.get_mut(obj) {
-            object.ops.update(index, f)
+            object.update(index, f)
         }
     }
 
@@ -126,7 +126,7 @@ impl OpSetInternal {
         // this happens on rollback - be sure to go back to the old state
         let object = self.objects.get_mut(obj).unwrap();
         self.length -= 1;
-        let op = object.ops.remove(index);
+        let op = object.remove(index);
         if let OpType::Make(_) = &op.action {
             self.objects.remove(&op.id.into());
         }
@@ -144,7 +144,7 @@ impl OpSetInternal {
         }
 
         if let Some(object) = self.objects.get_mut(obj) {
-            object.ops.insert(index, element);
+            object.insert(index, element);
             self.length += 1;
         }
     }
@@ -237,7 +237,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
-        self.objects.get(id).map(|object| object.typ)
+        self.objects.get(id).map(|object| object.typ())
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -279,7 +279,7 @@ impl<'a> Iterator for Iter<'a> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
             let object = self.inner.objects.get(obj)?;
-            result = object.ops.get(self.sub_index).map(|op| (*obj, op));
+            result = object.get(self.sub_index).map(|op| (*obj, op));
             if result.is_some() {
                 self.sub_index += 1;
                 break;
