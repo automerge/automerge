@@ -123,15 +123,12 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 
     // this replaces get_mut() because it allows the indexes to update correctly
-    pub fn replace<F>(&mut self, index: usize, mut f: F)
+    pub fn update<F>(&mut self, index: usize, f: F)
     where
         F: FnMut(&mut Op),
     {
         if self.len() > index {
-            let op = self.get(index).unwrap();
-            let mut new_op = op.clone();
-            f(&mut new_op);
-            self.set(index, new_op);
+            self.root_node.as_mut().unwrap().update(index, f);
         }
     }
 
@@ -160,15 +157,6 @@ impl<const B: usize> OpTreeInternal<B> {
         } else {
             panic!("remove from empty tree")
         }
-    }
-
-    /// Update the `element` at `index` in the sequence, returning the old value.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index > len`
-    pub fn set(&mut self, index: usize, element: Op) -> Op {
-        self.root_node.as_mut().unwrap().set(index, element)
     }
 }
 
@@ -519,31 +507,42 @@ impl<const B: usize> OpTreeNode<B> {
         assert!(self.is_full());
     }
 
-    pub fn set(&mut self, index: usize, element: Op) -> Op {
+    /// Update the operation at the given index using the provided function.
+    ///
+    /// This handles updating the indices after the update.
+    pub fn update<F>(&mut self, index: usize, f: F) -> (Op, &Op)
+    where
+        F: FnOnce(&mut Op),
+    {
         if self.is_leaf() {
-            let old_element = self.elements.get_mut(index).unwrap();
-            self.index.replace(old_element, &element);
-            mem::replace(old_element, element)
+            let new_element = self.elements.get_mut(index).unwrap();
+            let old_element = new_element.clone();
+            f(new_element);
+            self.index.replace(&old_element, new_element);
+            (old_element, new_element)
         } else {
             let mut cumulative_len = 0;
+            let len = self.len();
             for (child_index, child) in self.children.iter_mut().enumerate() {
                 match (cumulative_len + child.len()).cmp(&index) {
                     Ordering::Less => {
                         cumulative_len += child.len() + 1;
                     }
                     Ordering::Equal => {
-                        let old_element = self.elements.get_mut(child_index).unwrap();
-                        self.index.replace(old_element, &element);
-                        return mem::replace(old_element, element);
+                        let new_element = self.elements.get_mut(child_index).unwrap();
+                        let old_element = new_element.clone();
+                        f(new_element);
+                        self.index.replace(&old_element, new_element);
+                        return (old_element, new_element);
                     }
                     Ordering::Greater => {
-                        let old_element = child.set(index - cumulative_len, element.clone());
-                        self.index.replace(&old_element, &element);
-                        return old_element;
+                        let (old_element, new_element) = child.update(index - cumulative_len, f);
+                        self.index.replace(&old_element, new_element);
+                        return (old_element, new_element);
                     }
                 }
             }
-            panic!("Invalid index to set: {} but len was {}", index, self.len())
+            panic!("Invalid index to set: {} but len was {}", index, len)
         }
     }
 
