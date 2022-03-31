@@ -40,6 +40,14 @@ impl<'a> Nth<'a> {
 }
 
 impl<'a> TreeQuery<'a> for Nth<'a> {
+    fn cache_lookup_seq(&mut self, _cache: &crate::object_data::SeqOpsCache) -> bool {
+        false
+    }
+
+    fn cache_update_seq(&self, cache: &mut crate::object_data::SeqOpsCache) {
+        cache.last = None;
+    }
+
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let mut num_vis = child.index.visible_len();
         if child.index.has_visible(&self.last_seen) {
