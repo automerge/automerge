@@ -67,6 +67,7 @@ mod indexed_cache;
 mod keys;
 mod keys_at;
 mod legacy;
+mod object_data;
 mod op_observer;
 mod op_set;
 mod op_tree;

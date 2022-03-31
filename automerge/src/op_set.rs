@@ -1,7 +1,7 @@
 use crate::clock::Clock;
 use crate::exid::ExId;
 use crate::indexed_cache::IndexedCache;
-use crate::op_tree::OpTree;
+use crate::object_data::ObjectData;
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{self, ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::{ObjType, OpObserver};
@@ -14,8 +14,8 @@ pub(crate) type OpSet = OpSetInternal;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal {
-    /// The map of objects to their type and ops.
-    trees: HashMap<ObjId, OpTree, FxBuildHasher>,
+    /// The map of objects to their data.
+    objects: HashMap<ObjId, ObjectData, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
@@ -25,9 +25,9 @@ pub(crate) struct OpSetInternal {
 impl OpSetInternal {
     pub(crate) fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), OpTree::new());
+        trees.insert(ObjId::root(), ObjectData::root());
         OpSetInternal {
-            trees,
+            objects: trees,
             length: 0,
             m: OpSetMetadata {
                 actors: IndexedCache::new(),
@@ -45,7 +45,7 @@ impl OpSetInternal {
     }
 
     pub(crate) fn iter(&self) -> Iter<'_> {
-        let mut objs: Vec<_> = self.trees.keys().collect();
+        let mut objs: Vec<_> = self.objects.keys().collect();
         objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
         Iter {
             inner: self,
@@ -56,22 +56,22 @@ impl OpSetInternal {
     }
 
     pub(crate) fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
-        let parent = self.trees.get(obj)?.parent?;
+        let parent = self.objects.get(obj)?.parent?;
         let key = self.search(&parent, OpIdSearch::new(obj.0)).key().unwrap();
         Some((parent, key))
     }
 
     pub(crate) fn keys(&self, obj: ObjId) -> Option<query::Keys<'_>> {
-        if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.keys()
+        if let Some(object) = self.objects.get(&obj) {
+            object.ops.keys()
         } else {
             None
         }
     }
 
     pub(crate) fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt<'_>> {
-        if let Some(tree) = self.trees.get(&obj) {
-            tree.internal.keys_at(clock)
+        if let Some(object) = self.objects.get(&obj) {
+            object.ops.keys_at(clock)
         } else {
             None
         }
@@ -82,7 +82,7 @@ impl OpSetInternal {
         obj: ObjId,
         range: R,
     ) -> Option<query::Range<'_, R>> {
-        if let Some(tree) = self.trees.get(&obj) {
+        if let Some(tree) = self.objects.get(&obj) {
             tree.internal.range(range, &self.m)
         } else {
             None
@@ -95,7 +95,7 @@ impl OpSetInternal {
         range: R,
         clock: Clock,
     ) -> Option<query::RangeAt<'_, R>> {
-        if let Some(tree) = self.trees.get(&obj) {
+        if let Some(tree) = self.objects.get(&obj) {
             tree.internal.range_at(range, &self.m, clock)
         } else {
             None
@@ -106,8 +106,8 @@ impl OpSetInternal {
     where
         Q: TreeQuery<'a>,
     {
-        if let Some(tree) = self.trees.get(obj) {
-            tree.internal.search(query, &self.m)
+        if let Some(object) = self.objects.get(obj) {
+            object.ops.search(query, &self.m)
         } else {
             query
         }
@@ -117,18 +117,18 @@ impl OpSetInternal {
     where
         F: FnMut(&mut Op),
     {
-        if let Some(tree) = self.trees.get_mut(obj) {
-            tree.internal.update(index, f)
+        if let Some(object) = self.objects.get_mut(obj) {
+            object.ops.update(index, f)
         }
     }
 
     pub(crate) fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
-        let tree = self.trees.get_mut(obj).unwrap();
+        let object = self.objects.get_mut(obj).unwrap();
         self.length -= 1;
-        let op = tree.internal.remove(index);
+        let op = object.ops.remove(index);
         if let OpType::Make(_) = &op.action {
-            self.trees.remove(&op.id.into());
+            self.objects.remove(&op.id.into());
         }
         op
     }
@@ -139,19 +139,12 @@ impl OpSetInternal {
 
     pub(crate) fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
-            self.trees.insert(
-                element.id.into(),
-                OpTree {
-                    internal: Default::default(),
-                    objtype: typ,
-                    parent: Some(*obj),
-                },
-            );
+            self.objects
+                .insert(element.id.into(), ObjectData::new(typ, Some(*obj)));
         }
 
-        if let Some(tree) = self.trees.get_mut(obj) {
-            //let tree = self.trees.get_mut(&element.obj).unwrap();
-            tree.internal.insert(index, element);
+        if let Some(object) = self.objects.get_mut(obj) {
+            object.ops.insert(index, element);
             self.length += 1;
         }
     }
@@ -244,13 +237,13 @@ impl OpSetInternal {
     }
 
     pub(crate) fn object_type(&self, id: &ObjId) -> Option<ObjType> {
-        self.trees.get(id).map(|tree| tree.objtype)
+        self.objects.get(id).map(|object| object.typ)
     }
 
     #[cfg(feature = "optree-visualisation")]
     pub(crate) fn visualise(&self) -> String {
         let mut out = Vec::new();
-        let graph = super::visualisation::GraphVisualisation::construct(&self.trees, &self.m);
+        let graph = super::visualisation::GraphVisualisation::construct(&self.objects, &self.m);
         dot::render(&graph, &mut out).unwrap();
         String::from_utf8_lossy(&out[..]).to_string()
     }
@@ -285,8 +278,8 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
-            let tree = self.inner.trees.get(obj)?;
-            result = tree.internal.get(self.sub_index).map(|op| (*obj, op));
+            let object = self.inner.objects.get(obj)?;
+            result = object.ops.get(self.sub_index).map(|op| (*obj, op));
             if result.is_some() {
                 self.sub_index += 1;
                 break;
