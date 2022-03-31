@@ -115,7 +115,7 @@ impl OpSetInternal {
 
     pub(crate) fn replace<F>(&mut self, obj: &ObjId, index: usize, f: F)
     where
-        F: FnMut(&mut Op),
+        F: FnOnce(&mut Op),
     {
         if let Some(object) = self.objects.get_mut(obj) {
             object.update(index, f)

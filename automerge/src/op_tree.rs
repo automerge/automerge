@@ -167,7 +167,7 @@ impl OpTreeInternal {
     // this replaces get_mut() because it allows the indexes to update correctly
     pub(crate) fn update<F>(&mut self, index: usize, f: F)
     where
-        F: FnMut(&mut Op),
+        F: FnOnce(&mut Op),
     {
         if self.len() > index {
             self.root_node.as_mut().unwrap().update(index, f);

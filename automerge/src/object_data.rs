@@ -201,11 +201,11 @@ impl ObjectData {
         }
     }
 
-    pub fn replace<F>(&mut self, index: usize, f: F)
+    pub fn update<F>(&mut self, index: usize, f: F)
     where
-        F: FnMut(&mut Op),
+        F: FnOnce(&mut Op),
     {
-        self.ops_mut().replace(index, f)
+        self.ops_mut().update(index, f)
     }
 
     pub fn remove(&mut self, index: usize) -> Op {
