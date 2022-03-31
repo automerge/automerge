@@ -26,6 +26,17 @@ impl From<MapType> for ObjType {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct MapOpsCache {}
 
+impl MapOpsCache {
+    fn lookup<Q: TreeQuery>(&self, query: &mut Q) -> bool {
+        query.cache_lookup_map(self)
+    }
+
+    fn update<Q: TreeQuery>(&mut self, query: &Q) {
+        query.cache_update_map(self);
+        // TODO: fixup the cache (reordering etc.)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum SeqType {
     List,
@@ -42,7 +53,21 @@ impl From<SeqType> for ObjType {
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
-pub(crate) struct SeqOpsCache {}
+pub(crate) struct SeqOpsCache {
+    // list of previous insert positions
+    lru: Vec<(usize, usize)>,
+}
+
+impl SeqOpsCache {
+    fn lookup<Q: TreeQuery>(&self, query: &mut Q) -> bool {
+        query.cache_lookup_seq(self)
+    }
+
+    fn update<Q: TreeQuery>(&mut self, query: &Q) {
+        query.cache_update_seq(self);
+        // TODO: fixup the cache (reordering etc.)
+    }
+}
 
 /// Stores the data for an object.
 #[derive(Debug, Clone, PartialEq)]
@@ -157,18 +182,18 @@ impl ObjectData {
         match self {
             ObjectData::Map { cache, ops, .. } => {
                 let mut cache = cache.lock().unwrap();
-                if !query.cache_lookup_map(&cache) {
+                if !cache.lookup(&mut query) {
                     let query = ops.search(query, metadata);
-                    query.cache_update_map(&mut cache);
+                    cache.update(&query);
                     return query;
                 }
                 query
             }
             ObjectData::Seq { cache, ops, .. } => {
                 let mut cache = cache.lock().unwrap();
-                if !query.cache_lookup_seq(&cache) {
+                if !cache.lookup(&mut query) {
                     let query = ops.search(query, metadata);
-                    query.cache_update_seq(&mut cache);
+                    cache.update(&query);
                     return query;
                 }
                 query
