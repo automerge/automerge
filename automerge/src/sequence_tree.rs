@@ -7,18 +7,18 @@ use std::{
 pub type SequenceTree<T> = SequenceTreeInternal<T, 25>;
 
 #[derive(Clone, Debug)]
-pub struct SequenceTreeInternal<T, const B: usize> {
+pub struct SequenceTreeInternal<T> {
     root_node: Option<SequenceTreeNode<T, B>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct SequenceTreeNode<T, const B: usize> {
+struct SequenceTreeNode<T> {
     elements: Vec<T>,
     children: Vec<SequenceTreeNode<T, B>>,
     length: usize,
 }
 
-impl<T, const B: usize> SequenceTreeInternal<T, B>
+impl<T> SequenceTreeInternal<T, B>
 where
     T: Clone + Debug,
 {
@@ -145,7 +145,7 @@ where
     }
 }
 
-impl<T, const B: usize> SequenceTreeNode<T, B>
+impl<T> SequenceTreeNode<T, B>
 where
     T: Clone + Debug,
 {
@@ -496,7 +496,7 @@ where
     }
 }
 
-impl<T, const B: usize> Default for SequenceTreeInternal<T, B>
+impl<T> Default for SequenceTreeInternal<T, B>
 where
     T: Clone + Debug,
 {
@@ -505,7 +505,7 @@ where
     }
 }
 
-impl<T, const B: usize> PartialEq for SequenceTreeInternal<T, B>
+impl<T> PartialEq for SequenceTreeInternal<T, B>
 where
     T: Clone + Debug + PartialEq,
 {
@@ -514,7 +514,7 @@ where
     }
 }
 
-impl<'a, T, const B: usize> IntoIterator for &'a SequenceTreeInternal<T, B>
+impl<'a, T> IntoIterator for &'a SequenceTreeInternal<T, B>
 where
     T: Clone + Debug,
 {
@@ -530,12 +530,12 @@ where
     }
 }
 
-pub struct Iter<'a, T, const B: usize> {
+pub struct Iter<'a, T> {
     inner: &'a SequenceTreeInternal<T, B>,
     index: usize,
 }
 
-impl<'a, T, const B: usize> Iterator for Iter<'a, T, B>
+impl<'a, T> Iterator for Iter<'a, T, B>
 where
     T: Clone + Debug,
 {

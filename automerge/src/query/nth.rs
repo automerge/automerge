@@ -39,8 +39,8 @@ impl Nth {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for Nth {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl TreeQuery for Nth {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let mut num_vis = child.index.visible_len();
         if child.index.has_visible(&self.last_seen) {
             num_vis -= 1;

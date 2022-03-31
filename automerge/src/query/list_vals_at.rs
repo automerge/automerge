@@ -23,7 +23,7 @@ impl ListValsAt {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for ListValsAt {
+impl TreeQuery for ListValsAt {
     fn query_element_with_metadata(&mut self, op: &Op, m: &OpSetMetadata) -> QueryResult {
         if op.insert {
             self.last_elem = None;
