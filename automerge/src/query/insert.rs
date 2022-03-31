@@ -1,13 +1,15 @@
 use crate::error::AutomergeError;
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::{ElemId, Key, Op, HEAD};
+use crate::types::{ElemId, Key, Op, OpId, HEAD};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct InsertNth {
     /// the index in the realised list that we want to insert at
     target: usize,
+    /// OpId of the op we are trying to find a location for.
+    id: OpId,
     /// the number of visible operations seen
     seen: usize,
     //pub pos: usize,
@@ -22,7 +24,7 @@ pub(crate) struct InsertNth {
 }
 
 impl InsertNth {
-    pub(crate) fn new(target: usize) -> Self {
+    pub(crate) fn new(target: usize, opid: OpId) -> Self {
         let (valid, last_valid_insert) = if target == 0 {
             (Some(0), Some(HEAD))
         } else {
@@ -30,6 +32,7 @@ impl InsertNth {
         };
         InsertNth {
             target,
+            id: opid,
             seen: 0,
             n: 0,
             valid,
@@ -62,6 +65,23 @@ impl InsertNth {
 }
 
 impl<'a> TreeQuery<'a> for InsertNth {
+    fn cache_lookup_seq(&mut self, cache: &crate::object_data::SeqOpsCache) -> bool {
+        if let Some((last_target_index, last_tree_index, last_id)) = cache.last {
+            if last_target_index + 1 == self.target {
+                // we can use the cached value
+                let key = ElemId(last_id);
+                self.last_valid_insert = Some(key);
+                self.n = last_tree_index + 1;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn cache_update_seq(&self, cache: &mut crate::object_data::SeqOpsCache) {
+        cache.last = Some((self.target, self.pos(), self.id));
+    }
+
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         // if this node has some visible elements then we may find our target within
         let mut num_vis = child.index.visible_len();

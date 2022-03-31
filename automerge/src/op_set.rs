@@ -24,10 +24,10 @@ pub(crate) struct OpSetInternal {
 
 impl OpSetInternal {
     pub(crate) fn new() -> Self {
-        let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), ObjectData::root());
+        let mut objects: HashMap<_, _, _> = Default::default();
+        objects.insert(ObjId::root(), ObjectData::root());
         OpSetInternal {
-            objects: trees,
+            objects,
             length: 0,
             m: OpSetMetadata {
                 actors: IndexedCache::new(),

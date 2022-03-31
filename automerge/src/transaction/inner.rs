@@ -210,7 +210,7 @@ impl TransactionInner {
     ) -> Result<OpId, AutomergeError> {
         let id = self.next_id();
 
-        let query = doc.ops.search(&obj, query::InsertNth::new(index));
+        let query = doc.ops.search(&obj, query::InsertNth::new(index, id));
 
         let key = query.key()?;
 

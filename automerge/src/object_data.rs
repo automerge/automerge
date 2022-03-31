@@ -5,6 +5,7 @@ use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::query::TreeQuery;
 use crate::types::ObjId;
 use crate::types::Op;
+use crate::types::{Op, OpId};
 use crate::ObjType;
 use crate::{query::Keys, query::KeysAt, ObjType};
 
@@ -54,8 +55,9 @@ impl From<SeqType> for ObjType {
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct SeqOpsCache {
-    // list of previous insert positions
-    lru: Vec<(usize, usize)>,
+    // last insertion (list index, tree index, opid to be inserted)
+    // TODO: invalidation
+    pub(crate) last: Option<(usize, usize, OpId)>,
 }
 
 impl SeqOpsCache {
@@ -161,7 +163,7 @@ impl ObjectData {
         self.ops.keys_at(clock)
     }
 
-    fn ops(&self) -> &OpTreeInternal {
+    pub(crate) fn ops(&self) -> &OpTreeInternal {
         match self {
             ObjectData::Map { ops, .. } => ops,
             ObjectData::Seq { ops, .. } => ops,
@@ -183,19 +185,17 @@ impl ObjectData {
             ObjectData::Map { cache, ops, .. } => {
                 let mut cache = cache.lock().unwrap();
                 if !cache.lookup(&mut query) {
-                    let query = ops.search(query, metadata);
-                    cache.update(&query);
-                    return query;
+                    query = ops.search(query, metadata);
                 }
+                cache.update(&query);
                 query
             }
             ObjectData::Seq { cache, ops, .. } => {
                 let mut cache = cache.lock().unwrap();
                 if !cache.lookup(&mut query) {
-                    let query = ops.search(query, metadata);
-                    cache.update(&query);
-                    return query;
+                    query = ops.search(query, metadata);
                 }
+                cache.update(&query);
                 query
             }
         }
