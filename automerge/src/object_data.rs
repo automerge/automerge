@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use crate::clock::Clock;
 use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::query::TreeQuery;
@@ -57,13 +59,45 @@ pub(crate) enum ObjectDataInternal {
     Map {
         /// The type of this object.
         typ: MapType,
-        cache: MapOpsCache,
+        cache: Arc<Mutex<MapOpsCache>>,
     },
     Seq {
         /// The type of this object.
         typ: SeqType,
-        cache: SeqOpsCache,
+        cache: Arc<Mutex<SeqOpsCache>>,
     },
+}
+
+impl PartialEq for ObjectData {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Map {
+                    typ: l_typ,
+                    ops: l_ops,
+                    cache: _,
+                },
+                Self::Map {
+                    typ: r_typ,
+                    ops: r_ops,
+                    cache: _,
+                },
+            ) => l_typ == r_typ && l_ops == r_ops,
+            (
+                Self::Seq {
+                    typ: l_typ,
+                    ops: l_ops,
+                    cache: _,
+                },
+                Self::Seq {
+                    typ: r_typ,
+                    ops: r_ops,
+                    cache: _,
+                },
+            ) => l_typ == r_typ && l_ops == r_ops,
+            _ => false,
+        }
+    }
 }
 
 impl ObjectData {
@@ -116,11 +150,30 @@ impl ObjectData {
         }
     }
 
-    pub fn search<Q>(&self, query: Q, metadata: &OpSetMetadata) -> Q
+    pub fn search<Q>(&self, mut query: Q, metadata: &OpSetMetadata) -> Q
     where
         Q: TreeQuery,
     {
-        self.ops().search(query, metadata)
+        match self {
+            ObjectData::Map { cache, ops, .. } => {
+                let mut cache = cache.lock().unwrap();
+                if !query.cache_lookup_map(&cache) {
+                    let query = ops.search(query, metadata);
+                    query.cache_update_map(&mut cache);
+                    return query;
+                }
+                query
+            }
+            ObjectData::Seq { cache, ops, .. } => {
+                let mut cache = cache.lock().unwrap();
+                if !query.cache_lookup_seq(&cache) {
+                    let query = ops.search(query, metadata);
+                    query.cache_update_seq(&mut cache);
+                    return query;
+                }
+                query
+            }
+        }
     }
 
     pub fn replace<F>(&mut self, index: usize, f: F)
