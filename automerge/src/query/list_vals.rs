@@ -18,8 +18,8 @@ impl ListVals {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for ListVals {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl TreeQuery for ListVals {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let start = 0;
         for pos in start..child.len() {
             let op = child.get(pos).unwrap();

@@ -1004,7 +1004,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::op_set::B;
+    use crate::op_tree::B;
     use crate::transaction::Transactable;
     use crate::*;
     use std::convert::TryInto;

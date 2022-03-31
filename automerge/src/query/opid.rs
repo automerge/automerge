@@ -30,8 +30,8 @@ impl OpIdSearch {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for OpIdSearch {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl TreeQuery for OpIdSearch {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         if child.index.ops.contains(&self.target) {
             QueryResult::Descend
         } else {

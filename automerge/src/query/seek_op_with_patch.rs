@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SeekOpWithPatch<const B: usize> {
+pub(crate) struct SeekOpWithPatch {
     op: Op,
     pub pos: usize,
     pub succ: Vec<usize>,
@@ -16,7 +16,7 @@ pub(crate) struct SeekOpWithPatch<const B: usize> {
     pub had_value_before: bool,
 }
 
-impl<const B: usize> SeekOpWithPatch<B> {
+impl SeekOpWithPatch {
     pub fn new(op: &Op) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
@@ -60,12 +60,8 @@ impl<const B: usize> SeekOpWithPatch<B> {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for SeekOpWithPatch<B> {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
+impl TreeQuery for SeekOpWithPatch {
+    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
         }

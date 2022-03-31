@@ -12,23 +12,25 @@ use crate::{
 };
 use std::collections::HashSet;
 
+pub(crate) const B: usize = 16;
+
 #[allow(dead_code)]
-pub(crate) type OpTree = OpTreeInternal<16>;
+pub(crate) type OpTree = OpTreeInternal;
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpTreeInternal<const B: usize> {
-    pub(crate) root_node: Option<OpTreeNode<B>>,
+pub(crate) struct OpTreeInternal {
+    pub(crate) root_node: Option<OpTreeNode>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct OpTreeNode<const B: usize> {
+pub(crate) struct OpTreeNode {
     pub(crate) elements: Vec<Op>,
-    pub(crate) children: Vec<OpTreeNode<B>>,
+    pub(crate) children: Vec<OpTreeNode>,
     pub index: Index,
     length: usize,
 }
 
-impl<const B: usize> OpTreeInternal<B> {
+impl OpTreeInternal {
     /// Construct a new, empty, sequence.
     pub fn new() -> Self {
         Self { root_node: None }
@@ -39,11 +41,11 @@ impl<const B: usize> OpTreeInternal<B> {
         self.root_node.as_ref().map_or(0, |n| n.len())
     }
 
-    pub fn keys(&self) -> Option<query::Keys<B>> {
+    pub fn keys(&self) -> Option<query::Keys> {
         self.root_node.as_ref().map(query::Keys::new)
     }
 
-    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt<B>> {
+    pub fn keys_at(&self, clock: Clock) -> Option<query::KeysAt> {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
@@ -51,7 +53,7 @@ impl<const B: usize> OpTreeInternal<B> {
 
     pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
     where
-        Q: TreeQuery<B>,
+        Q: TreeQuery,
     {
         self.root_node
             .as_ref()
@@ -63,7 +65,7 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 
     /// Create an iterator through the sequence.
-    pub fn iter(&self) -> Iter<'_, B> {
+    pub fn iter(&self) -> Iter {
         Iter {
             inner: self,
             index: 0,
@@ -160,7 +162,7 @@ impl<const B: usize> OpTreeInternal<B> {
     }
 }
 
-impl<const B: usize> OpTreeNode<B> {
+impl OpTreeNode {
     fn new() -> Self {
         Self {
             elements: Vec::new(),
@@ -172,7 +174,7 @@ impl<const B: usize> OpTreeNode<B> {
 
     pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
-        Q: TreeQuery<B>,
+        Q: TreeQuery,
     {
         if self.is_leaf() {
             for e in &self.elements {
@@ -497,7 +499,7 @@ impl<const B: usize> OpTreeNode<B> {
         }
     }
 
-    fn merge(&mut self, middle: Op, successor_sibling: OpTreeNode<B>) {
+    fn merge(&mut self, middle: Op, successor_sibling: OpTreeNode) {
         self.index.insert(&middle);
         self.index.merge(&successor_sibling.index);
         self.elements.push(middle);
@@ -577,22 +579,22 @@ impl<const B: usize> OpTreeNode<B> {
     }
 }
 
-impl<const B: usize> Default for OpTreeInternal<B> {
+impl Default for OpTreeInternal {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const B: usize> PartialEq for OpTreeInternal<B> {
+impl PartialEq for OpTreeInternal {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
-impl<'a, const B: usize> IntoIterator for &'a OpTreeInternal<B> {
+impl<'a> IntoIterator for &'a OpTreeInternal {
     type Item = &'a Op;
 
-    type IntoIter = Iter<'a, B>;
+    type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
@@ -602,12 +604,12 @@ impl<'a, const B: usize> IntoIterator for &'a OpTreeInternal<B> {
     }
 }
 
-pub(crate) struct Iter<'a, const B: usize> {
-    inner: &'a OpTreeInternal<B>,
+pub(crate) struct Iter<'a> {
+    inner: &'a OpTreeInternal,
     index: usize,
 }
 
-impl<'a, const B: usize> Iterator for Iter<'a, B> {
+impl<'a> Iterator for Iter<'a> {
     type Item = &'a Op;
 
     fn next(&mut self) -> Option<Self::Item> {

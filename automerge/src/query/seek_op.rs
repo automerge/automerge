@@ -39,12 +39,8 @@ impl SeekOp {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for SeekOp {
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        m: &OpSetMetadata,
-    ) -> QueryResult {
+impl TreeQuery for SeekOp {
+    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
         }

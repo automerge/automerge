@@ -43,17 +43,13 @@ pub(crate) struct CounterData {
     op: Op,
 }
 
-pub(crate) trait TreeQuery<const B: usize> {
+pub(crate) trait TreeQuery {
     #[inline(always)]
-    fn query_node_with_metadata(
-        &mut self,
-        child: &OpTreeNode<B>,
-        _m: &OpSetMetadata,
-    ) -> QueryResult {
+    fn query_node_with_metadata(&mut self, child: &OpTreeNode, _m: &OpSetMetadata) -> QueryResult {
         self.query_node(child)
     }
 
-    fn query_node(&mut self, _child: &OpTreeNode<B>) -> QueryResult {
+    fn query_node(&mut self, _child: &OpTreeNode) -> QueryResult {
         QueryResult::Descend
     }
 
@@ -232,7 +228,7 @@ impl VisWindow {
     }
 }
 
-pub(crate) fn binary_search_by<F, const B: usize>(node: &OpTreeNode<B>, f: F) -> usize
+pub(crate) fn binary_search_by<F>(node: &OpTreeNode, f: F) -> usize
 where
     F: Fn(&Op) -> Ordering,
 {

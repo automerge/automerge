@@ -8,20 +8,19 @@ use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-pub(crate) const B: usize = 16;
-pub(crate) type OpSet = OpSetInternal<B>;
+pub(crate) type OpSet = OpSetInternal;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct OpSetInternal<const B: usize> {
+pub(crate) struct OpSetInternal {
     /// The map of objects to their type and ops.
-    trees: HashMap<ObjId, (ObjType, OpTreeInternal<B>), FxBuildHasher>,
+    trees: HashMap<ObjId, (ObjType, OpTreeInternal), FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
     pub m: OpSetMetadata,
 }
 
-impl<const B: usize> OpSetInternal<B> {
+impl OpSetInternal {
     pub fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
         trees.insert(ObjId::root(), (ObjType::Map, Default::default()));
@@ -35,7 +34,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn iter(&self) -> Iter<'_, B> {
+    pub fn iter(&self) -> Iter<'_> {
         let mut objs: Vec<_> = self.trees.keys().collect();
         objs.sort_by(|a, b| self.m.lamport_cmp(a.0, b.0));
         Iter {
@@ -46,7 +45,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn keys(&self, obj: ObjId) -> Option<query::Keys<B>> {
+    pub fn keys(&self, obj: ObjId) -> Option<query::Keys> {
         if let Some((_typ, tree)) = self.trees.get(&obj) {
             tree.keys()
         } else {
@@ -54,7 +53,7 @@ impl<const B: usize> OpSetInternal<B> {
         }
     }
 
-    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt<B>> {
+    pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt> {
         if let Some((_typ, tree)) = self.trees.get(&obj) {
             tree.keys_at(clock)
         } else {
@@ -64,7 +63,7 @@ impl<const B: usize> OpSetInternal<B> {
 
     pub fn search<Q>(&self, obj: &ObjId, query: Q) -> Q
     where
-        Q: TreeQuery<B>,
+        Q: TreeQuery,
     {
         if let Some((_typ, tree)) = self.trees.get(obj) {
             tree.search(query, &self.m)
@@ -123,30 +122,30 @@ impl<const B: usize> OpSetInternal<B> {
     }
 }
 
-impl<const B: usize> Default for OpSetInternal<B> {
+impl Default for OpSetInternal {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'a, const B: usize> IntoIterator for &'a OpSetInternal<B> {
+impl<'a> IntoIterator for &'a OpSetInternal {
     type Item = (&'a ObjId, &'a Op);
 
-    type IntoIter = Iter<'a, B>;
+    type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
-pub(crate) struct Iter<'a, const B: usize> {
-    inner: &'a OpSetInternal<B>,
+pub(crate) struct Iter<'a> {
+    inner: &'a OpSetInternal,
     index: usize,
     objs: Vec<&'a ObjId>,
     sub_index: usize,
 }
 
-impl<'a, const B: usize> Iterator for Iter<'a, B> {
+impl<'a> Iterator for Iter<'a> {
     type Item = (&'a ObjId, &'a Op);
 
     fn next(&mut self) -> Option<Self::Item> {
