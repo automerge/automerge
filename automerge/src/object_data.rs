@@ -1,11 +1,10 @@
 use crate::clock::Clock;
+use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 use crate::query::TreeQuery;
 use crate::types::ObjId;
 use crate::types::Op;
 use crate::ObjType;
 use crate::{query::Keys, query::KeysAt, ObjType};
-
-use crate::op_tree::{OpSetMetadata, OpTreeInternal};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MapType {
