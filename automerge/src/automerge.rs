@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroU64;
+use std::ops::RangeBounds;
 
 use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
 use crate::op_set::OpSet;
+use crate::range::Range;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
     ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
@@ -350,6 +352,19 @@ impl Automerge {
             KeysAt::new(self, self.ops.keys_at(obj, clock))
         } else {
             KeysAt::new(self, None)
+        }
+    }
+
+    /// Iterate over the keys and values of the object `obj`.
+    ///
+    /// For a map the keys are the keys of the map.
+    /// For a list the keys are the element ids (opids) encoded as strings.
+    pub fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let iter_range = self.ops.range(obj, range);
+            Range::new(self, iter_range)
+        } else {
+            Range::new(self, None)
         }
     }
 
@@ -1358,7 +1373,7 @@ mod tests {
     }
 
     #[test]
-    fn keys_iter() {
+    fn keys_iter_map() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 3).unwrap();
@@ -1404,6 +1419,259 @@ mod tests {
         assert_eq!(keys.next(), None);
         let keys = doc.keys(ROOT);
         assert_eq!(keys.collect::<Vec<_>>(), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn keys_iter_seq() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, 3).unwrap();
+        tx.insert(&list, 1, 4).unwrap();
+        tx.insert(&list, 2, 5).unwrap();
+        tx.insert(&list, 3, 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&list, 0, 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&list, 0, 8).unwrap();
+        tx.set(&list, 3, 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.keys(&list).count(), 4);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next_back(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next_back(), None);
+
+        let mut keys = doc.keys(&list);
+        assert_eq!(keys.next_back(), Some(format!("5@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("2@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("3@{}", actor)));
+        assert_eq!(keys.next(), Some(format!("4@{}", actor)));
+        assert_eq!(keys.next(), None);
+
+        let keys = doc.keys(&list);
+        assert_eq!(
+            keys.collect::<Vec<_>>(),
+            vec![
+                format!("2@{}", actor),
+                format!("3@{}", actor),
+                format!("4@{}", actor),
+                format!("5@{}", actor)
+            ]
+        );
+    }
+
+    #[test]
+    fn range_iter_map() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 3).unwrap();
+        tx.set(ROOT, "b", 4).unwrap();
+        tx.set(ROOT, "c", 5).unwrap();
+        tx.set(ROOT, "d", 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(ROOT, "a", 8).unwrap();
+        tx.set(ROOT, "d", 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.range(ROOT, ..).count(), 4);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into()).."d".into());
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, Prop::Map("b".into())..="d".into());
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(ROOT, ..=Prop::Map("c".into()));
+        assert_eq!(
+            range.next(),
+            Some(("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)))
+        );
+        assert_eq!(
+            range.next(),
+            Some(("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)))
+        );
+        assert_eq!(range.next(), None);
+
+        let range = doc.range(ROOT, Prop::Map("a".into())..);
+        assert_eq!(
+            range.collect::<Vec<_>>(),
+            vec![
+                ("a".into(), 8.into(), ExId::Id(6, actor.clone(), 0)),
+                ("b".into(), 4.into(), ExId::Id(2, actor.clone(), 0)),
+                ("c".into(), 5.into(), ExId::Id(3, actor.clone(), 0)),
+                ("d".into(), 9.into(), ExId::Id(7, actor.clone(), 0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn range_iter_seq() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        tx.insert(&list, 0, 3).unwrap();
+        tx.insert(&list, 1, 4).unwrap();
+        tx.insert(&list, 2, 5).unwrap();
+        tx.insert(&list, 3, 6).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&list, 0, 7).unwrap();
+        tx.commit();
+        let mut tx = doc.transaction();
+        tx.set(&list, 0, 8).unwrap();
+        tx.set(&list, 3, 9).unwrap();
+        tx.commit();
+        let actor = doc.get_actor();
+        assert_eq!(doc.range(&list, ..).count(), 4);
+
+        let mut range = doc.range(&list, Prop::Seq(1)..3.into());
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(&list, Prop::Seq(1)..=3.into());
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("5@{}", actor),
+                9.into(),
+                ExId::Id(8, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let mut range = doc.range(&list, ..Prop::Seq(3));
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("2@{}", actor),
+                8.into(),
+                ExId::Id(7, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("3@{}", actor),
+                4.into(),
+                ExId::Id(3, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(
+            range.next(),
+            Some((
+                format!("4@{}", actor),
+                5.into(),
+                ExId::Id(4, actor.clone(), 0)
+            ))
+        );
+        assert_eq!(range.next(), None);
+
+        let range = doc.range(&list, ..);
+        assert_eq!(
+            range.collect::<Vec<_>>(),
+            vec![
+                (
+                    format!("2@{}", actor),
+                    8.into(),
+                    ExId::Id(7, actor.clone(), 0)
+                ),
+                (
+                    format!("3@{}", actor),
+                    4.into(),
+                    ExId::Id(3, actor.clone(), 0)
+                ),
+                (
+                    format!("4@{}", actor),
+                    5.into(),
+                    ExId::Id(4, actor.clone(), 0)
+                ),
+                (
+                    format!("5@{}", actor),
+                    9.into(),
+                    ExId::Id(8, actor.clone(), 0)
+                ),
+            ]
+        );
     }
 
     #[test]

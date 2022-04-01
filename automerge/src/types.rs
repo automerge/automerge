@@ -449,10 +449,14 @@ impl Op {
     }
 
     pub fn elemid(&self) -> Option<ElemId> {
+        self.elemid_or_key().elemid()
+    }
+
+    pub fn elemid_or_key(&self) -> Key {
         if self.insert {
-            Some(ElemId(self.id))
+            Key::Seq(ElemId(self.id))
         } else {
-            self.key.elemid()
+            self.key
         }
     }
 

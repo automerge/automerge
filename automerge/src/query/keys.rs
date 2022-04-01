@@ -30,9 +30,9 @@ impl<'a> Iterator for Keys<'a> {
         for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             self.index += 1;
-            if Some(op.key) != self.last_key && op.visible() {
-                self.last_key = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key && op.visible() {
+                self.last_key = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None
@@ -43,10 +43,11 @@ impl<'a> DoubleEndedIterator for Keys<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
+            println!("{} {:?}", i, op);
             self.index_back -= 1;
-            if Some(op.key) != self.last_key_back && op.visible() {
-                self.last_key_back = Some(op.key);
-                return Some(op.key);
+            if Some(op.elemid_or_key()) != self.last_key_back && op.visible() {
+                self.last_key_back = Some(op.elemid_or_key());
+                return Some(op.elemid_or_key());
             }
         }
         None
