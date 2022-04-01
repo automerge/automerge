@@ -38,7 +38,7 @@ pub(super) fn merge<W: std::io::Write>(inputs: Inputs, mut output: W) -> Result<
         Inputs::Stdin => {
             let mut input = Vec::new();
             std::io::stdin().read_to_end(&mut input)?;
-            backend.load_incremental(&input)?;
+            backend.load_incremental(&input, am::NULL_OBSERVER)?;
         }
         Inputs::Paths(paths) => {
             for path in paths {
@@ -53,6 +53,8 @@ pub(super) fn merge<W: std::io::Write>(inputs: Inputs, mut output: W) -> Result<
 
 fn load_path(backend: &mut am::Automerge, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let input = std::fs::read(path).map_err(Box::new)?;
-    backend.load_incremental(&input).map_err(Box::new)?;
+    backend
+        .load_incremental(&input, am::NULL_OBSERVER)
+        .map_err(Box::new)?;
     Ok(())
 }

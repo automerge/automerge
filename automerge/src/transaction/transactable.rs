@@ -54,9 +54,9 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Insert an object into a list at the given index.
-    fn insert_object(
+    fn insert_object<O: AsRef<ExId>>(
         &mut self,
-        obj: &ExId,
+        obj: O,
         index: usize,
         object: ObjType,
     ) -> Result<ExId, AutomergeError>;

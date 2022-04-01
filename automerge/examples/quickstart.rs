@@ -2,13 +2,14 @@ use automerge::transaction::CommitOptions;
 use automerge::transaction::Transactable;
 use automerge::AutomergeError;
 use automerge::ObjType;
+use automerge::NULL_OBSERVER;
 use automerge::{Automerge, ROOT};
 
 // Based on https://automerge.github.io/docs/quickstart
 fn main() {
     let mut doc1 = Automerge::new();
     let (cards, card1) = doc1
-        .transact_with::<_, _, AutomergeError, _>(
+        .transact_with::<_, _, AutomergeError, _, ()>(
             |_| CommitOptions::default().with_message("Add card".to_owned()),
             |tx| {
                 let cards = tx.put_object(ROOT, "cards", ObjType::List).unwrap();
@@ -25,12 +26,12 @@ fn main() {
         .result;
 
     let mut doc2 = Automerge::new();
-    doc2.merge(&mut doc1).unwrap();
+    doc2.merge(&mut doc1, NULL_OBSERVER).unwrap();
 
     let binary = doc1.save();
-    let mut doc2 = Automerge::load(&binary).unwrap();
+    let mut doc2 = Automerge::load(&binary, NULL_OBSERVER).unwrap();
 
-    doc1.transact_with::<_, _, AutomergeError, _>(
+    doc1.transact_with::<_, _, AutomergeError, _, ()>(
         |_| CommitOptions::default().with_message("Mark card as done".to_owned()),
         |tx| {
             tx.put(&card1, "done", true)?;
@@ -39,7 +40,7 @@ fn main() {
     )
     .unwrap();
 
-    doc2.transact_with::<_, _, AutomergeError, _>(
+    doc2.transact_with::<_, _, AutomergeError, _, ()>(
         |_| CommitOptions::default().with_message("Delete card".to_owned()),
         |tx| {
             tx.delete(&cards, 0)?;
@@ -48,7 +49,7 @@ fn main() {
     )
     .unwrap();
 
-    doc1.merge(&mut doc2).unwrap();
+    doc1.merge(&mut doc2, NULL_OBSERVER).unwrap();
 
     for change in doc1.get_changes(&[]) {
         let length = doc1.length_at(&cards, &[change.hash]);

@@ -1,23 +1,24 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::ops::RangeBounds;
 
 use crate::change::encode_document;
 use crate::exid::ExId;
 use crate::keys::Keys;
+use crate::op_observer::OpObserver;
 use crate::op_set::OpSet;
 use crate::parents::Parents;
 use crate::range::Range;
 use crate::transaction::{self, CommitOptions, Failure, Success, Transaction, TransactionInner};
 use crate::types::{
-    ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
-    OpType, Patch, ScalarValue, Value,
+    ActorId, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId, OpType,
+    ScalarValue, Value,
 };
-use crate::{legacy, query, types, ObjType, RangeAt, ValuesAt};
+use crate::{legacy, query, types, ObjType, RangeAt, ValuesAt, NULL_OBSERVER};
 use crate::{AutomergeError, Change, Prop};
 use crate::{KeysAt, Values};
 use serde::Serialize;
-use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Actor {
@@ -46,7 +47,6 @@ pub struct Automerge {
     pub(crate) actor: Actor,
     /// The maximum operation counter this document has seen.
     pub(crate) max_op: u64,
-    pub(crate) patches: Option<Vec<Patch>>,
 }
 
 impl Automerge {
@@ -62,7 +62,6 @@ impl Automerge {
             saved: Default::default(),
             actor: Actor::Unused(ActorId::random()),
             max_op: 0,
-            patches: None,
         }
     }
 
@@ -98,23 +97,6 @@ impl Automerge {
                 index
             }
             Actor::Cached(index) => *index,
-        }
-    }
-
-    pub fn enable_patches(&mut self, enable: bool) {
-        match (enable, &self.patches) {
-            (true, None) => self.patches = Some(vec![]),
-            (false, Some(_)) => self.patches = None,
-            _ => (),
-        }
-    }
-
-    pub fn pop_patches(&mut self) -> Vec<Patch> {
-        if let Some(patches) = self.patches.take() {
-            self.patches = Some(Vec::new());
-            patches
-        } else {
-            Vec::new()
         }
     }
 
@@ -172,20 +154,19 @@ impl Automerge {
     }
 
     /// Like [`Self::transact`] but with a function for generating the commit options.
-    pub fn transact_with<F, O, E, C>(&mut self, c: C, f: F) -> transaction::Result<O, E>
+    pub fn transact_with<F, O, E, C, Obs>(&mut self, c: C, f: F) -> transaction::Result<O, E>
     where
         F: FnOnce(&mut Transaction) -> Result<O, E>,
-        C: FnOnce(&O) -> CommitOptions,
+        C: FnOnce(&O) -> CommitOptions<Obs>,
+        Obs: OpObserver,
     {
         let mut tx = self.transaction();
         let result = f(&mut tx);
         match result {
             Ok(result) => {
                 let commit_options = c(&result);
-                Ok(Success {
-                    result,
-                    hash: tx.commit_with(commit_options),
-                })
+                let hash = tx.commit_with(commit_options);
+                Ok(Success { result, hash })
             }
             Err(error) => Err(Failure {
                 error,
@@ -222,92 +203,8 @@ impl Automerge {
         }
         let mut f = Self::new();
         f.set_actor(ActorId::random());
-        f.apply_changes(changes.into_iter().rev().cloned())?;
+        f.apply_changes(changes.into_iter().rev().cloned(), NULL_OBSERVER)?;
         Ok(f)
-    }
-
-    fn insert_op(&mut self, obj: &ObjId, op: Op) {
-        let q = self.ops.search(obj, query::SeekOp::new(&op));
-
-        let succ = q.succ;
-        let pos = q.pos;
-        for i in succ {
-            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
-
-        if !op.is_delete() {
-            self.ops.insert(pos, obj, op);
-        }
-    }
-
-    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
-        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
-
-        let query::SeekOpWithPatch {
-            pos,
-            succ,
-            seen,
-            values,
-            had_value_before,
-            ..
-        } = q;
-
-        let ex_obj = self.id_to_exid(obj.0);
-        let key = match op.key {
-            Key::Map(index) => self.ops.m.props[index].clone().into(),
-            Key::Seq(_) => seen.into(),
-        };
-
-        let patch = if op.insert {
-            let value = (op.clone_value(), self.id_to_exid(op.id));
-            Patch::Insert(ex_obj, seen, value)
-        } else if op.is_delete() {
-            if let Some(winner) = &values.last() {
-                let value = (winner.clone_value(), self.id_to_exid(winner.id));
-                let conflict = values.len() > 1;
-                Patch::Assign(AssignPatch {
-                    obj: ex_obj,
-                    key,
-                    value,
-                    conflict,
-                })
-            } else {
-                Patch::Delete(ex_obj, key)
-            }
-        } else {
-            let winner = if let Some(last_value) = values.last() {
-                if self.ops.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
-                    &op
-                } else {
-                    last_value
-                }
-            } else {
-                &op
-            };
-            let value = (winner.clone_value(), self.id_to_exid(winner.id));
-            if op.is_list_op() && !had_value_before {
-                Patch::Insert(ex_obj, seen, value)
-            } else {
-                Patch::Assign(AssignPatch {
-                    obj: ex_obj,
-                    key,
-                    value,
-                    conflict: !values.is_empty(),
-                })
-            }
-        };
-
-        if let Some(patches) = &mut self.patches {
-            patches.push(patch);
-        }
-
-        for i in succ {
-            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
-
-        if !op.is_delete() {
-            self.ops.insert(pos, obj, op);
-        }
     }
 
     // KeysAt::()
@@ -491,11 +388,7 @@ impl Automerge {
     }
 
     pub(crate) fn id_to_exid(&self, id: OpId) -> ExId {
-        if id == types::ROOT {
-            ExId::Root
-        } else {
-            ExId::Id(id.0, self.ops.m.actors.cache[id.1].clone(), id.1)
-        }
+        self.ops.id_to_exid(id)
     }
 
     /// Get the string represented by the given text object.
@@ -629,18 +522,25 @@ impl Automerge {
     }
 
     /// Load a document.
-    pub fn load(data: &[u8]) -> Result<Self, AutomergeError> {
+    pub fn load<Obs: OpObserver>(
+        data: &[u8],
+        op_observer: Option<&mut Obs>,
+    ) -> Result<Self, AutomergeError> {
         let changes = Change::load_document(data)?;
         let mut doc = Self::new();
-        doc.apply_changes(changes)?;
+        doc.apply_changes(changes, op_observer)?;
         Ok(doc)
     }
 
     /// Load an incremental save of a document.
-    pub fn load_incremental(&mut self, data: &[u8]) -> Result<usize, AutomergeError> {
+    pub fn load_incremental<Obs: OpObserver>(
+        &mut self,
+        data: &[u8],
+        op_observer: Option<&mut Obs>,
+    ) -> Result<usize, AutomergeError> {
         let changes = Change::load_document(data)?;
         let start = self.ops.len();
-        self.apply_changes(changes)?;
+        self.apply_changes(changes, op_observer)?;
         let delta = self.ops.len() - start;
         Ok(delta)
     }
@@ -656,9 +556,10 @@ impl Automerge {
     }
 
     /// Apply changes to this document.
-    pub fn apply_changes(
+    pub fn apply_changes<Obs: OpObserver>(
         &mut self,
         changes: impl IntoIterator<Item = Change>,
+        mut observer: Option<&mut Obs>,
     ) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
@@ -669,7 +570,7 @@ impl Automerge {
                     ));
                 }
                 if self.is_causally_ready(&c) {
-                    self.apply_change(c);
+                    self.apply_change(c, &mut observer);
                 } else {
                     self.queue.push(c);
                 }
@@ -677,22 +578,22 @@ impl Automerge {
         }
         while let Some(c) = self.pop_next_causally_ready_change() {
             if !self.history_index.contains_key(&c.hash) {
-                self.apply_change(c);
+                self.apply_change(c, &mut observer);
             }
         }
         Ok(())
     }
 
-    fn apply_change(&mut self, change: Change) {
+    fn apply_change<Obs: OpObserver>(&mut self, change: Change, observer: &mut Option<&mut Obs>) {
         let ops = self.import_ops(&change);
         self.update_history(change, ops.len());
-        if self.patches.is_some() {
+        if let Some(observer) = observer {
             for (obj, op) in ops {
-                self.insert_op_with_patch(&obj, op);
+                self.ops.insert_op_with_observer(&obj, op, *observer);
             }
         } else {
             for (obj, op) in ops {
-                self.insert_op(&obj, op);
+                self.ops.insert_op(&obj, op);
             }
         }
     }
@@ -754,14 +655,18 @@ impl Automerge {
     }
 
     /// Takes all the changes in `other` which are not in `self` and applies them
-    pub fn merge(&mut self, other: &mut Self) -> Result<Vec<ChangeHash>, AutomergeError> {
+    pub fn merge<Obs: OpObserver>(
+        &mut self,
+        other: &mut Self,
+        op_observer: Option<&mut Obs>,
+    ) -> Result<Vec<ChangeHash>, AutomergeError> {
         // TODO: Make this fallible and figure out how to do this transactionally
         let changes = self
             .get_changes_added(other)
             .into_iter()
             .cloned()
             .collect::<Vec<_>>();
-        self.apply_changes(changes)?;
+        self.apply_changes(changes, op_observer)?;
         Ok(self.get_heads())
     }
 
@@ -1264,8 +1169,8 @@ mod tests {
 
         assert!(save_b.len() < save_a.len());
 
-        let mut doc_a = Automerge::load(&save_a)?;
-        let mut doc_b = Automerge::load(&save_b)?;
+        let mut doc_a = Automerge::load(&save_a, NULL_OBSERVER)?;
+        let mut doc_b = Automerge::load(&save_b, NULL_OBSERVER)?;
 
         assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
@@ -1739,13 +1644,13 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting a missing key in a map should just be a noop
-        assert!(tx.delete(ROOT, "a").is_ok());
+        assert!(tx.delete(ROOT, "a",).is_ok());
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 0);
 
         let bytes = doc.save();
-        assert!(Automerge::load(&bytes).is_ok());
+        assert!(Automerge::load(&bytes, NULL_OBSERVER).is_ok());
 
         let mut tx = doc.transaction();
         tx.put(ROOT, "a", 1).unwrap();
@@ -1768,7 +1673,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting an element in a list that does not exist is an error
-        assert!(tx.delete(ROOT, 0).is_err());
+        assert!(tx.delete(ROOT, 0,).is_err());
     }
 
     #[test]
@@ -1779,7 +1684,7 @@ mod tests {
         tx.commit();
         let hash = doc.get_last_local_change().unwrap().hash;
         let bytes = doc.save();
-        let doc = Automerge::load(&bytes).unwrap();
+        let doc = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
         assert_eq!(doc.get_change_by_hash(&hash).unwrap().hash, hash);
     }
 
@@ -1794,7 +1699,7 @@ mod tests {
             157, 157, 157, 157, 157, 157, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
             255, 255, 255, 255, 255, 255, 255, 48, 254, 208,
         ];
-        let _ = Automerge::load(bytes);
+        let _ = Automerge::load(bytes, NULL_OBSERVER);
     }
 
     #[test]
@@ -1872,7 +1777,7 @@ mod tests {
         tx.commit();
         let bytes = doc.save();
         println!("doc2 time");
-        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let mut doc2 = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
         let bytes2 = doc2.save();
         assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1925,7 +1830,7 @@ mod tests {
         tx.commit();
         let bytes = doc.save();
         println!("doc2 time");
-        let mut doc2 = Automerge::load(&bytes).unwrap();
+        let mut doc2 = Automerge::load(&bytes, NULL_OBSERVER).unwrap();
         let bytes2 = doc2.save();
         assert_eq!(doc.text(&list).unwrap(), doc2.text(&list).unwrap());
 
@@ -1950,7 +1855,8 @@ mod tests {
         let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
         let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, 0).unwrap();
-        doc2.load_incremental(&doc1.save_incremental()).unwrap();
+        doc2.load_incremental(&doc1.save_incremental(), NULL_OBSERVER)
+            .unwrap();
         for i in 1..=max {
             doc1.put(&list, 0, i).unwrap()
         }
@@ -1959,8 +1865,8 @@ mod tests {
         }
         let change1 = doc1.save_incremental();
         let change2 = doc2.save_incremental();
-        doc2.load_incremental(&change1).unwrap();
-        doc1.load_incremental(&change2).unwrap();
+        doc2.load_incremental(&change1, NULL_OBSERVER).unwrap();
+        doc1.load_incremental(&change2, NULL_OBSERVER).unwrap();
         assert_eq!(doc1.length(&list), 1);
         assert_eq!(doc2.length(&list), 1);
         assert_eq!(

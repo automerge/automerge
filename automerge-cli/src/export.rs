@@ -68,7 +68,7 @@ fn scalar_to_json(val: &am::ScalarValue) -> serde_json::Value {
 }
 
 fn get_state_json(input_data: Vec<u8>) -> Result<serde_json::Value> {
-    let doc = am::Automerge::load(&input_data).unwrap(); // FIXME
+    let doc = am::Automerge::load(&input_data, am::NULL_OBSERVER).unwrap(); // FIXME
     Ok(map_to_json(&doc, &am::ObjId::Root))
 }
 

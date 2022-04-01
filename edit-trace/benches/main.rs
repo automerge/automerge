@@ -1,4 +1,4 @@
-use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, ROOT};
+use automerge::{transaction::Transactable, AutoCommit, Automerge, ObjType, NULL_OBSERVER, ROOT};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use std::fs;
 
@@ -32,11 +32,11 @@ fn save_trace_autotx(mut doc: AutoCommit) {
 }
 
 fn load_trace(bytes: &[u8]) {
-    Automerge::load(bytes).unwrap();
+    Automerge::load(bytes, NULL_OBSERVER).unwrap();
 }
 
 fn load_trace_autotx(bytes: &[u8]) {
-    AutoCommit::load(bytes).unwrap();
+    AutoCommit::load(bytes, NULL_OBSERVER).unwrap();
 }
 
 fn bench(c: &mut Criterion) {
