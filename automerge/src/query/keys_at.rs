@@ -32,7 +32,7 @@ impl<'a> Iterator for KeysAt<'a> {
     type Item = Key;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for i in self.index..self.root_child.len() {
+        for i in self.index..self.index_back {
             let op = self.root_child.get(i)?;
             let visible = self.window.visible_at(op, i, &self.clock);
             self.index += 1;
