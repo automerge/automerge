@@ -134,21 +134,21 @@ const MapHandler = {
     }
     switch (datatype) {
       case "list":
-        const list = context.set_object(objectId, key, [])
+        const list = context.setObject(objectId, key, [])
         const proxyList = listProxy(context, list, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyList[i] = value[i]
         }
         break;
       case "text":
-        const text = context.set_object(objectId, key, "", "text")
+        const text = context.setObject(objectId, key, "", "text")
         const proxyText = textProxy(context, text, [ ... path, key ], readonly );
         for (let i = 0; i < value.length; i++) {
           proxyText[i] = value.get(i)
         }
         break;
       case "map":
-        const map = context.set_object(objectId, key, {})
+        const map = context.setObject(objectId, key, {})
         const proxyMap = mapProxy(context, map, [ ... path, key ], readonly );
         for (const key in value) {
           proxyMap[key] = value[key]
@@ -251,9 +251,9 @@ const ListHandler = {
       case "list":
         let list
         if (index >= context.length(objectId)) {
-          list = context.insert_object(objectId, index, [])
+          list = context.insertObject(objectId, index, [])
         } else {
-          list = context.set_object(objectId, index, [])
+          list = context.setObject(objectId, index, [])
         }
         const proxyList = listProxy(context, list, [ ... path, index ], readonly);
         proxyList.splice(0,0,...value)
@@ -261,9 +261,9 @@ const ListHandler = {
       case "text":
         let text
         if (index >= context.length(objectId)) {
-          text = context.insert_object(objectId, index, "", "text")
+          text = context.insertObject(objectId, index, "", "text")
         } else {
-          text = context.set_object(objectId, index, "", "text")
+          text = context.setObject(objectId, index, "", "text")
         }
         const proxyText = textProxy(context, text, [ ... path, index ], readonly);
         proxyText.splice(0,0,...value)
@@ -271,9 +271,9 @@ const ListHandler = {
       case "map":
         let map
         if (index >= context.length(objectId)) {
-          map = context.insert_object(objectId, index, {})
+          map = context.insertObject(objectId, index, {})
         } else {
-          map = context.set_object(objectId, index, {})
+          map = context.setObject(objectId, index, {})
         }
         const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
         for (const key in value) {
@@ -478,17 +478,17 @@ function listMethods(target) {
       for (let [value,datatype] of values) {
         switch (datatype) {
           case "list":
-            const list = context.insert_object(objectId, index, [])
+            const list = context.insertObject(objectId, index, [])
             const proxyList = listProxy(context, list, [ ... path, index ], readonly);
             proxyList.splice(0,0,...value)
             break;
           case "text":
-            const text = context.insert_object(objectId, index, "", "text")
+            const text = context.insertObject(objectId, index, "", "text")
             const proxyText = textProxy(context, text, [ ... path, index ], readonly);
             proxyText.splice(0,0,...value)
             break;
           case "map":
-            const map = context.insert_object(objectId, index, {})
+            const map = context.insertObject(objectId, index, {})
             const proxyMap = mapProxy(context, map, [ ... path, index ], readonly);
             for (const key in value) {
               proxyMap[key] = value[key]

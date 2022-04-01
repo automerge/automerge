@@ -64,7 +64,7 @@ describe('Automerge', () => {
       doc.set(root, "bool", true)
       doc.set(root, "time1", 1000, "timestamp")
       doc.set(root, "time2", new Date(1001))
-      doc.set_object(root, "list", []);
+      doc.setObject(root, "list", []);
       doc.set(root, "null", null)
 
       result = doc.value(root,"hello")
@@ -124,7 +124,7 @@ describe('Automerge', () => {
       let root = "_root"
       let result
 
-      let submap = doc.set_object(root, "submap", {})
+      let submap = doc.setObject(root, "submap", {})
       doc.set(submap, "number", 6, "uint")
       assert.strictEqual(doc.pendingOps(),2)
 
@@ -140,7 +140,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
 
-      let submap = doc.set_object(root, "numbers", [])
+      let submap = doc.setObject(root, "numbers", [])
       doc.insert(submap, 0, "a");
       doc.insert(submap, 1, "b");
       doc.insert(submap, 2, "c");
@@ -163,7 +163,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root"
 
-      let submap = doc.set_object(root, "letters", [])
+      let submap = doc.setObject(root, "letters", [])
       doc.insert(submap, 0, "a");
       doc.insert(submap, 0, "b");
       assert.deepEqual(doc.materialize(), { letters: ["b", "a" ] })
@@ -228,7 +228,7 @@ describe('Automerge', () => {
       let doc = create()
       let root = "_root";
 
-      let text = doc.set_object(root, "text", "");
+      let text = doc.setObject(root, "text", "");
       if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
@@ -244,8 +244,8 @@ describe('Automerge', () => {
 
     it('should be able to insert objects into text', () => {
       let doc = create()
-      let text = doc.set_object("/", "text", "Hello world");
-      let obj = doc.insert_object(text, 6, { hello: "world" });
+      let text = doc.setObject("/", "text", "Hello world");
+      let obj = doc.insertObject(text, 6, { hello: "world" });
       assert.deepEqual(doc.text(text), "Hello \ufffcworld");
       assert.deepEqual(doc.value(text, 6), ["map", obj]);
       assert.deepEqual(doc.value(obj, "hello"), ["str", "world"]);
@@ -289,7 +289,7 @@ describe('Automerge', () => {
 
     it('should be able to splice text', () => {
       let doc = create()
-      let text = doc.set_object("_root", "text", "");
+      let text = doc.setObject("_root", "text", "");
       doc.splice(text, 0, 0, "hello world");
       let heads1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
@@ -337,7 +337,7 @@ describe('Automerge', () => {
 
     it('local inc increments all visible counters in a sequence', () => {
       let doc1 = create("aaaa")
-      let seq = doc1.set_object("_root", "seq", [])
+      let seq = doc1.setObject("_root", "seq", [])
       doc1.insert(seq, 0, "hello")
       let doc2 = loadDoc(doc1.save(), "bbbb");
       let doc3 = loadDoc(doc1.save(), "cccc");
@@ -370,10 +370,10 @@ describe('Automerge', () => {
 
     it('paths can be used instead of objids', () => {
       let doc = create("aaaa")
-      doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])
-      assert.deepEqual(doc.materialize("/"), { list: [{ foo: "bar"}, [1,2,3]] }) 
-      assert.deepEqual(doc.materialize("/list"), [{ foo: "bar"}, [1,2,3]]) 
-      assert.deepEqual(doc.materialize("/list/0"), { foo: "bar"}) 
+      doc.setObject("_root","list",[{ foo: "bar"}, [1,2,3]])
+      assert.deepEqual(doc.materialize("/"), { list: [{ foo: "bar"}, [1,2,3]] })
+      assert.deepEqual(doc.materialize("/list"), [{ foo: "bar"}, [1,2,3]])
+      assert.deepEqual(doc.materialize("/list/0"), { foo: "bar"})
     })
 
     it('should be able to fetch changes by hash', () => {
@@ -392,11 +392,11 @@ describe('Automerge', () => {
 
     it('recursive sets are possible', () => {
       let doc = create("aaaa")
-      let l1 = doc.set_object("_root","list",[{ foo: "bar"}, [1,2,3]])
-      let l2 = doc.insert_object(l1, 0, { zip: ["a", "b"] })
-      let l3 = doc.set_object("_root","info1","hello world") // 'text' object
+      let l1 = doc.setObject("_root","list",[{ foo: "bar"}, [1,2,3]])
+      let l2 = doc.insertObject(l1, 0, { zip: ["a", "b"] })
+      let l3 = doc.setObject("_root","info1","hello world") // 'text' object
                doc.set("_root","info2","hello world")  // 'str'
-      let l4 = doc.set_object("_root","info3","hello world")
+      let l4 = doc.setObject("_root","info3","hello world")
       assert.deepEqual(doc.materialize(), {
         "list": [ { zip: ["a", "b"] }, { foo: "bar"}, [ 1,2,3]],
         "info1": "hello world",
@@ -412,12 +412,12 @@ describe('Automerge', () => {
     it('only returns an object id when objects are created', () => {
       let doc = create("aaaa")
       let r1 = doc.set("_root","foo","bar")
-      let r2 = doc.set_object("_root","list",[])
+      let r2 = doc.setObject("_root","list",[])
       let r3 = doc.set("_root","counter",10, "counter")
       let r4 = doc.inc("_root","counter",1)
       let r5 = doc.del("_root","counter")
       let r6 = doc.insert(r2,0,10);
-      let r7 = doc.insert_object(r2,0,{});
+      let r7 = doc.insertObject(r2,0,{});
       let r8 = doc.splice(r2,1,0,["a","b","c"]);
       //let r9 = doc.splice(r2,1,0,["a",[],{},"d"]);
       assert.deepEqual(r1,null);
@@ -434,9 +434,9 @@ describe('Automerge', () => {
 
     it('objects without properties are preserved', () => {
       let doc1 = create("aaaa")
-      let a = doc1.set_object("_root","a",{});
-      let b = doc1.set_object("_root","b",{});
-      let c = doc1.set_object("_root","c",{});
+      let a = doc1.setObject("_root","a",{});
+      let b = doc1.setObject("_root","b",{});
+      let c = doc1.setObject("_root","c",{});
       let d = doc1.set(c,"d","dd");
       let saved = doc1.save();
       let doc2 = loadDoc(saved);
@@ -453,7 +453,7 @@ describe('Automerge', () => {
 
     it('should handle merging text conflicts then saving & loading', () => {
       let A = create("aabbcc")
-      let At = A.set_object('_root', 'text', "")
+      let At = A.setObject('_root', 'text', "")
       A.splice(At, 0, 0, 'hello')
 
       let B = A.fork()
@@ -491,7 +491,7 @@ describe('Automerge', () => {
 
     it('should include nested object creation', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
-      doc1.set_object('_root', 'birds', {friday: {robins: 3}})
+      doc1.setObject('_root', 'birds', {friday: {robins: 3}})
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
@@ -520,7 +520,7 @@ describe('Automerge', () => {
 
     it('should include list element insertion', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
-      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc1.setObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
@@ -534,9 +534,9 @@ describe('Automerge', () => {
 
     it('should insert nested maps into a list', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
-      doc1.set_object('_root', 'birds', [])
+      doc1.setObject('_root', 'birds', [])
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.insert_object('1@aaaa', 0, {species: 'Goldfinch', count: 3})
+      doc1.insertObject('1@aaaa', 0, {species: 'Goldfinch', count: 3})
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
@@ -550,7 +550,7 @@ describe('Automerge', () => {
 
     it('should calculate list indexes based on visible elements', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
-      doc1.set_object('_root', 'birds', ['Goldfinch', 'Chaffinch'])
+      doc1.setObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.del('1@aaaa', 0)
       doc1.insert('1@aaaa', 1, 'Greenfinch')
@@ -568,7 +568,7 @@ describe('Automerge', () => {
 
     it('should handle concurrent insertions at the head of a list', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
-      doc1.set_object('_root', 'values', [])
+      doc1.setObject('_root', 'values', [])
       let change1 = doc1.saveIncremental()
       doc2.loadIncremental(change1)
       doc3.loadIncremental(change1)
@@ -601,7 +601,7 @@ describe('Automerge', () => {
 
     it('should handle concurrent insertions beyond the head', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
-      doc1.set_object('_root', 'values', ['a', 'b'])
+      doc1.setObject('_root', 'values', ['a', 'b'])
       let change1 = doc1.saveIncremental()
       doc2.loadIncremental(change1)
       doc3.loadIncremental(change1)
@@ -740,7 +740,7 @@ describe('Automerge', () => {
 
     it('should handle a conflict on a list element', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
-      doc1.set_object('_root', 'birds', ['Thrush', 'Magpie'])
+      doc1.setObject('_root', 'birds', ['Thrush', 'Magpie'])
       let change1 = doc1.saveIncremental()
       doc2.loadIncremental(change1)
       doc3.loadIncremental(change1)
@@ -769,7 +769,7 @@ describe('Automerge', () => {
 
     it('should handle a concurrent list element overwrite and delete', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb'), doc3 = create('cccc'), doc4 = create('dddd')
-      doc1.set_object('_root', 'birds', ['Parakeet', 'Magpie', 'Thrush'])
+      doc1.setObject('_root', 'birds', ['Parakeet', 'Magpie', 'Thrush'])
       let change1 = doc1.saveIncremental()
       doc2.loadIncremental(change1)
       doc3.loadIncremental(change1)
@@ -828,8 +828,8 @@ describe('Automerge', () => {
 
     it('should handle conflicting nested objects', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
-      doc1.set_object('_root', 'birds', ['Parakeet'])
-      doc2.set_object('_root', 'birds', {'Sparrowhawk': 1})
+      doc1.setObject('_root', 'birds', ['Parakeet'])
+      doc2.setObject('_root', 'birds', {'Sparrowhawk': 1})
       let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
       doc1.enablePatches(true)
       doc2.enablePatches(true)
@@ -912,7 +912,7 @@ describe('Automerge', () => {
       let s1 = initSyncState(), s2 = initSyncState()
 
       // make two nodes with the same changes
-      let list = n1.set_object("_root","n", [])
+      let list = n1.setObject("_root","n", [])
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -936,7 +936,7 @@ describe('Automerge', () => {
       let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
-      let list = n1.set_object("_root","n",[])
+      let list = n1.setObject("_root","n",[])
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list, i, i)
@@ -952,7 +952,7 @@ describe('Automerge', () => {
       let n1 = create(), n2 = create()
 
       // make changes for n1 that n2 should request
-      let list = n1.set_object("_root","n",[])
+      let list = n1.setObject("_root","n",[])
       n1.commit("",0)
       for (let i = 0; i < 10; i++) {
         n1.insert(list,i,i)
@@ -1119,7 +1119,7 @@ describe('Automerge', () => {
       let n1 = create('01234567'), n2 = create('89abcdef')
       let s1 = initSyncState(), s2 = initSyncState(), message = null
 
-      let items = n1.set_object("_root", "items", [])
+      let items = n1.setObject("_root", "items", [])
       n1.commit("",0)
 
       sync(n1, n2, s1, s2)
