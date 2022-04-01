@@ -1,5 +1,7 @@
+use std::ops::RangeBounds;
+
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
+use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, Range, ScalarValue, Value};
 
 /// A way of mutating a document within a single change.
 pub trait Transactable {
@@ -97,6 +99,8 @@ pub trait Transactable {
     /// Get the keys of the given object at a point in history.
     fn keys_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> KeysAt;
 
+    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R>;
+
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
 
@@ -117,27 +121,27 @@ pub trait Transactable {
     ) -> Result<String, AutomergeError>;
 
     /// Get the value at this prop in the object.
-    fn value<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
     /// Get the value at this prop in the object at a point in history.
-    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
-    fn values<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_conflicts<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
 
-    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_conflicts_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,

@@ -5,7 +5,7 @@ pub(crate) fn map_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::V
     let keys = doc.keys(obj);
     let mut map = serde_json::Map::new();
     for k in keys {
-        let val = doc.value(obj, &k);
+        let val = doc.get(obj, &k);
         match val {
             Ok(Some((am::Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
@@ -28,7 +28,7 @@ fn list_to_json(doc: &am::Automerge, obj: &am::ObjId) -> serde_json::Value {
     let len = doc.length(obj);
     let mut array = Vec::new();
     for i in 0..len {
-        let val = doc.value(obj, i as usize);
+        let val = doc.get(obj, i as usize);
         match val {
             Ok(Some((am::Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>

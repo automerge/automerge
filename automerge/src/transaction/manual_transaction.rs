@@ -1,5 +1,7 @@
+use std::ops::RangeBounds;
+
 use crate::exid::ExId;
-use crate::{Automerge, ChangeHash, KeysAt, ObjType, Prop, ScalarValue, Value};
+use crate::{Automerge, ChangeHash, KeysAt, ObjType, Prop, Range, ScalarValue, Value};
 use crate::{AutomergeError, Keys};
 
 use super::{CommitOptions, Transactable, TransactionInner};
@@ -179,6 +181,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.keys_at(obj, heads)
     }
 
+    fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R> {
+        self.doc.range(obj, range)
+    }
+
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
         self.doc.length(obj)
     }
@@ -203,38 +209,38 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.text_at(obj, heads)
     }
 
-    fn value<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value(obj, prop)
+        self.doc.get(obj, prop)
     }
 
-    fn value_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        self.doc.value_at(obj, prop, heads)
+        self.doc.get_at(obj, prop, heads)
     }
 
-    fn values<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_conflicts<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values(obj, prop)
+        self.doc.get_conflicts(obj, prop)
     }
 
-    fn values_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_conflicts_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.values_at(obj, prop, heads)
+        self.doc.get_conflicts_at(obj, prop, heads)
     }
 
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {

@@ -287,9 +287,9 @@ impl Automerge {
         let heads = get_heads(heads);
         if let Ok(prop) = prop {
             let value = if let Some(h) = heads {
-                self.0.value_at(&obj, prop, &h)?
+                self.0.get_at(&obj, prop, &h)?
             } else {
-                self.0.value(&obj, prop)?
+                self.0.get(&obj, prop)?
             };
             match value {
                 Some((Value::Object(obj_type), obj_id)) => {
@@ -320,9 +320,9 @@ impl Automerge {
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
             let values = if let Some(heads) = get_heads(heads) {
-                self.0.values_at(&obj, prop, &heads)
+                self.0.get_conflicts_at(&obj, prop, &heads)
             } else {
-                self.0.values(&obj, prop)
+                self.0.get_conflicts(&obj, prop)
             }
             .map_err(to_js_err)?;
             for value in values {
@@ -573,9 +573,9 @@ impl Automerge {
                         break;
                     }
                     let val = if is_map {
-                        self.0.value(obj, prop)?
+                        self.0.get(obj, prop)?
                     } else {
-                        self.0.value(obj, am::Prop::Seq(prop.parse().unwrap()))?
+                        self.0.get(obj, am::Prop::Seq(prop.parse().unwrap()))?
                     };
                     match val {
                         Some((am::Value::Object(am::ObjType::Map), id)) => {
