@@ -1,7 +1,10 @@
 use std::ops::RangeBounds;
 
 use crate::exid::ExId;
-use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, Range, ScalarValue, Value};
+use crate::{
+    AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, Range, RangeAt, ScalarValue, Value,
+    Values, ValuesAt,
+};
 
 /// A way of mutating a document within a single change.
 pub trait Transactable {
@@ -101,7 +104,16 @@ pub trait Transactable {
 
     fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R>;
 
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> RangeAt<R>;
+
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values;
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt;
 
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;

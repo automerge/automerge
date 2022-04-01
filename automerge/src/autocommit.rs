@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 use crate::exid::ExId;
 use crate::transaction::{CommitOptions, Transactable};
 use crate::types::Patch;
-use crate::{sync, Keys, KeysAt, ObjType, Range, ScalarValue, Values};
+use crate::{sync, Keys, KeysAt, ObjType, Range, RangeAt, ScalarValue, Values, ValuesAt};
 use crate::{
     transaction::TransactionInner, ActorId, Automerge, AutomergeError, Change, ChangeHash, Prop,
     Value,
@@ -237,8 +237,21 @@ impl Transactable for AutoCommit {
         self.doc.range(obj, range)
     }
 
+    fn range_at<O: AsRef<ExId>, R: RangeBounds<Prop>>(
+        &self,
+        obj: O,
+        range: R,
+        heads: &[ChangeHash],
+    ) -> RangeAt<R> {
+        self.doc.range_at(obj, range, heads)
+    }
+
     fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
         self.doc.values(obj)
+    }
+
+    fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+        self.doc.values_at(obj, heads)
     }
 
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize {
