@@ -246,21 +246,21 @@ impl<'a> Transactable for Transaction<'a> {
         self.doc.get_at(obj, prop, heads)
     }
 
-    fn get_conflicts<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.get_conflicts(obj, prop)
+        self.doc.get_all(obj, prop)
     }
 
-    fn get_conflicts_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
-        self.doc.get_conflicts_at(obj, prop, heads)
+        self.doc.get_all_at(obj, prop, heads)
     }
 
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {

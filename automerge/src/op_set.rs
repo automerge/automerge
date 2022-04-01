@@ -69,8 +69,8 @@ impl OpSetInternal {
     }
 
     pub fn range<R: RangeBounds<Prop>>(&self, obj: ObjId, range: R) -> Option<query::Range<R>> {
-        if let Some((_typ, tree)) = self.trees.get(&obj) {
-            tree.range(range, &self.m)
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.range(range, &self.m)
         } else {
             None
         }
@@ -82,8 +82,8 @@ impl OpSetInternal {
         range: R,
         clock: Clock,
     ) -> Option<query::RangeAt<R>> {
-        if let Some((_typ, tree)) = self.trees.get(&obj) {
-            tree.range_at(range, &self.m, clock)
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.range_at(range, &self.m, clock)
         } else {
             None
         }

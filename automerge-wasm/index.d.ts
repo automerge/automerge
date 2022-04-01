@@ -103,9 +103,9 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // returns a single value - if there is a conflict return the winner
-  value(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
+  get(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
-  values(obj: ObjID, arg: any, heads?: Heads): FullValue[];
+  getAll(obj: ObjID, arg: any, heads?: Heads): FullValue[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
@@ -178,8 +178,8 @@ export interface InitOutput {
   readonly automerge_insert: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
   readonly automerge_set: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
   readonly automerge_inc: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-  readonly automerge_value: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-  readonly automerge_values: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+  readonly automerge_get: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+  readonly automerge_get_all: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
   readonly automerge_length: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly automerge_del: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly automerge_save: (a: number, b: number) => void;

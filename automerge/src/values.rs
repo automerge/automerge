@@ -3,19 +3,19 @@ use std::ops::RangeFull;
 
 use crate::{query, Automerge};
 
-pub struct Values<'a, 'k> {
-    range: Option<query::Range<'k, RangeFull>>,
+pub struct Values<'a> {
+    range: Option<query::Range<'a, RangeFull>>,
     doc: &'a Automerge,
 }
 
-impl<'a, 'k> Values<'a, 'k> {
-    pub(crate) fn new(doc: &'a Automerge, range: Option<query::Range<'k, RangeFull>>) -> Self {
+impl<'a> Values<'a> {
+    pub(crate) fn new(doc: &'a Automerge, range: Option<query::Range<'a, RangeFull>>) -> Self {
         Self { range, doc }
     }
 }
 
-impl<'a, 'k> Iterator for Values<'a, 'k> {
-    type Item = (String, Value, ExId);
+impl<'a> Iterator for Values<'a> {
+    type Item = (String, Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range

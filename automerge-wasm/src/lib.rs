@@ -275,7 +275,8 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn value(
+    #[wasm_bindgen(js_name = get)]
+    pub fn get(
         &mut self,
         obj: JsValue,
         prop: JsValue,
@@ -309,7 +310,8 @@ impl Automerge {
         }
     }
 
-    pub fn values(
+    #[wasm_bindgen(js_name = getAll)]
+    pub fn get_all(
         &mut self,
         obj: JsValue,
         arg: JsValue,
@@ -320,9 +322,9 @@ impl Automerge {
         let prop = to_prop(arg);
         if let Ok(prop) = prop {
             let values = if let Some(heads) = get_heads(heads) {
-                self.0.get_conflicts_at(&obj, prop, &heads)
+                self.0.get_all_at(&obj, prop, &heads)
             } else {
-                self.0.get_conflicts(&obj, prop)
+                self.0.get_all(&obj, prop)
             }
             .map_err(to_js_err)?;
             for value in values {

@@ -149,13 +149,13 @@ pub trait Transactable {
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError>;
 
-    fn get_conflicts<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
     ) -> Result<Vec<(Value, ExId)>, AutomergeError>;
 
-    fn get_conflicts_at<O: AsRef<ExId>, P: Into<Prop>>(
+    fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,

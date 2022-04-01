@@ -43,7 +43,6 @@ impl<'a> DoubleEndedIterator for Keys<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         for i in (self.index..self.index_back).rev() {
             let op = self.root_child.get(i)?;
-            println!("{} {:?}", i, op);
             self.index_back -= 1;
             if Some(op.elemid_or_key()) != self.last_key_back && op.visible() {
                 self.last_key_back = Some(op.elemid_or_key());

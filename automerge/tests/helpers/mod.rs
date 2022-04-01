@@ -353,7 +353,7 @@ fn realize_values<K: Into<automerge::Prop>>(
     key: K,
 ) -> BTreeSet<RealizedObject> {
     let mut values = BTreeSet::new();
-    for (value, objid) in doc.get_conflicts(obj_id, key).unwrap() {
+    for (value, objid) in doc.get_all(obj_id, key).unwrap() {
         let realized = match value {
             automerge::Value::Object(objtype) => realize_obj(doc, &objid, objtype),
             automerge::Value::Scalar(v) => {

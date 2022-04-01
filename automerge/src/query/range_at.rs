@@ -41,8 +41,8 @@ impl<'a, R: RangeBounds<Prop>> RangeAt<'a, R> {
     }
 }
 
-impl<'a, 'm, R: RangeBounds<Prop>> Iterator for RangeAt<'a, R> {
-    type Item = (Key, Value, OpId);
+impl<'a, R: RangeBounds<Prop>> Iterator for RangeAt<'a, R> {
+    type Item = (Key, Value<'a>, OpId);
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.root_child.len() {

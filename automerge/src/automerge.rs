@@ -522,7 +522,7 @@ impl Automerge {
         obj: O,
         prop: P,
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.get_conflicts(obj, prop.into())?.last().cloned())
+        Ok(self.get_all(obj, prop.into())?.last().cloned())
     }
 
     /// Historical version of [`get`](Self::get).
@@ -532,14 +532,14 @@ impl Automerge {
         prop: P,
         heads: &[ChangeHash],
     ) -> Result<Option<(Value, ExId)>, AutomergeError> {
-        Ok(self.get_conflicts_at(obj, prop, heads)?.last().cloned())
+        Ok(self.get_all_at(obj, prop, heads)?.last().cloned())
     }
 
     /// Get all conflicting values out of the document at this prop that conflict.
     ///
     /// Returns both the value and the id of the operation that created it, useful for handling
     /// conflicts and serves as the object id if the value is an object.
-    pub fn get_conflicts<O: AsRef<ExId>, P: Into<Prop>>(
+    pub fn get_all<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -570,8 +570,8 @@ impl Automerge {
         Ok(result)
     }
 
-    /// Historical version of [`get_conflicts`](Self::get_conflicts).
-    pub fn get_conflicts_at<O: AsRef<ExId>, P: Into<Prop>>(
+    /// Historical version of [`get_all`](Self::get_all).
+    pub fn get_all_at<O: AsRef<ExId>, P: Into<Prop>>(
         &self,
         obj: O,
         prop: P,
@@ -1185,9 +1185,9 @@ mod tests {
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
         tx.put(ROOT, "xxx", "xxx")?;
-        assert!(!tx.get(ROOT, "xxx")?.is_empty());
+        assert!(tx.get(ROOT, "xxx")?.is_some());
         tx.delete(ROOT, "xxx")?;
-        assert!(tx.get(ROOT, "xxx")?.is_empty());
+        assert!(tx.get(ROOT, "xxx")?.is_none());
         tx.commit();
         Ok(())
     }
@@ -1242,7 +1242,7 @@ mod tests {
         let mut doc_a = Automerge::load(&save_a)?;
         let mut doc_b = Automerge::load(&save_b)?;
 
-        assert!(doc_a.get_conflicts(ROOT, "baz")? == doc_b.get_conflicts(ROOT, "baz")?);
+        assert!(doc_a.get_all(ROOT, "baz")? == doc_b.get_all(ROOT, "baz")?);
 
         assert!(doc_a.save() == doc_b.save());
 
@@ -1465,18 +1465,18 @@ mod tests {
     fn keys_iter_seq() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         tx.insert(&list, 0, 3).unwrap();
         tx.insert(&list, 1, 4).unwrap();
         tx.insert(&list, 2, 5).unwrap();
         tx.insert(&list, 3, 6).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 7).unwrap();
+        tx.put(&list, 0, 7).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 8).unwrap();
-        tx.set(&list, 3, 9).unwrap();
+        tx.put(&list, 0, 8).unwrap();
+        tx.put(&list, 3, 9).unwrap();
         tx.commit();
         let actor = doc.get_actor();
         assert_eq!(doc.keys(&list).count(), 4);
@@ -1525,17 +1525,17 @@ mod tests {
     fn range_iter_map() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 3).unwrap();
-        tx.set(ROOT, "b", 4).unwrap();
-        tx.set(ROOT, "c", 5).unwrap();
-        tx.set(ROOT, "d", 6).unwrap();
+        tx.put(ROOT, "a", 3).unwrap();
+        tx.put(ROOT, "b", 4).unwrap();
+        tx.put(ROOT, "c", 5).unwrap();
+        tx.put(ROOT, "d", 6).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 7).unwrap();
+        tx.put(ROOT, "a", 7).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 8).unwrap();
-        tx.set(ROOT, "d", 9).unwrap();
+        tx.put(ROOT, "a", 8).unwrap();
+        tx.put(ROOT, "d", 9).unwrap();
         tx.commit();
         let actor = doc.get_actor();
         assert_eq!(doc.range(ROOT, ..).count(), 4);
@@ -1597,18 +1597,18 @@ mod tests {
     fn range_iter_seq() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         tx.insert(&list, 0, 3).unwrap();
         tx.insert(&list, 1, 4).unwrap();
         tx.insert(&list, 2, 5).unwrap();
         tx.insert(&list, 3, 6).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 7).unwrap();
+        tx.put(&list, 0, 7).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 8).unwrap();
-        tx.set(&list, 3, 9).unwrap();
+        tx.put(&list, 0, 8).unwrap();
+        tx.put(&list, 3, 9).unwrap();
         tx.commit();
         let actor = doc.get_actor();
         assert_eq!(doc.range(&list, ..).count(), 4);
@@ -1988,14 +1988,14 @@ mod tests {
         assert_eq!(doc1.length(&list), 1);
         assert_eq!(doc2.length(&list), 1);
         assert_eq!(
-            doc1.get_conflicts(&list, 0).unwrap(),
+            doc1.get_all(&list, 0).unwrap(),
             vec![
                 (max.into(), ExId::Id(max + 2, actor1.clone(), 0)),
                 (max.into(), ExId::Id(max + 2, actor2.clone(), 1))
             ]
         );
         assert_eq!(
-            doc2.get_conflicts(&list, 0).unwrap(),
+            doc2.get_all(&list, 0).unwrap(),
             vec![
                 (max.into(), ExId::Id(max + 2, actor1, 0)),
                 (max.into(), ExId::Id(max + 2, actor2, 1))

@@ -28,13 +28,12 @@ impl<'a, R: RangeBounds<Prop>> Range<'a, R> {
     }
 }
 
-impl<'a, 'm, R: RangeBounds<Prop>> Iterator for Range<'a, R> {
-    type Item = (Key, Value, OpId);
+impl<'a, R: RangeBounds<Prop>> Iterator for Range<'a, R> {
+    type Item = (Key, Value<'a>, OpId);
 
     fn next(&mut self) -> Option<Self::Item> {
         for i in self.index..self.root_child.len() {
             let op = self.root_child.get(i)?;
-            println!("{} {:?}", self.index, op);
             self.index += 1;
             if Some(op.elemid_or_key()) != self.last_key && op.visible() {
                 self.last_key = Some(op.elemid_or_key());
@@ -44,7 +43,6 @@ impl<'a, 'm, R: RangeBounds<Prop>> Iterator for Range<'a, R> {
                         .contains(&Prop::Map(self.meta.props.get(m).clone())),
                     Key::Seq(_) => self.range.contains(&Prop::Seq(self.seen)),
                 };
-                println!("{} {}", self.seen, contains);
                 self.seen += 1;
                 if contains {
                     return Some((op.elemid_or_key(), op.value(), op.id));

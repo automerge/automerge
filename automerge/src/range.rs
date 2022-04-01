@@ -3,19 +3,19 @@ use std::ops::RangeBounds;
 
 use crate::{query, Automerge, Prop};
 
-pub struct Range<'a, 'k, R: RangeBounds<Prop>> {
-    range: Option<query::Range<'k, R>>,
+pub struct Range<'a, R: RangeBounds<Prop>> {
+    range: Option<query::Range<'a, R>>,
     doc: &'a Automerge,
 }
 
-impl<'a, 'k, 'm, R: RangeBounds<Prop>> Range<'a, 'k, R> {
-    pub(crate) fn new(doc: &'a Automerge, range: Option<query::Range<'k, R>>) -> Self {
+impl<'a, R: RangeBounds<Prop>> Range<'a, R> {
+    pub(crate) fn new(doc: &'a Automerge, range: Option<query::Range<'a, R>>) -> Self {
         Self { range, doc }
     }
 }
 
-impl<'a, 'k, 'm, R: RangeBounds<Prop>> Iterator for Range<'a, 'k, R> {
-    type Item = (String, Value, ExId);
+impl<'a, R: RangeBounds<Prop>> Iterator for Range<'a, R> {
+    type Item = (String, Value<'a>, ExId);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.range
