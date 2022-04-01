@@ -160,6 +160,7 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = pushObject)]
     pub fn push_object(&mut self, obj: JsValue, value: JsValue) -> Result<Option<String>, JsValue> {
         let obj = self.import(obj)?;
         let (value, subvals) =
@@ -186,6 +187,7 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = insertObject)]
     pub fn insert_object(
         &mut self,
         obj: JsValue,
@@ -217,6 +219,7 @@ impl Automerge {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = setObject)]
     pub fn set_object(
         &mut self,
         obj: JsValue,
