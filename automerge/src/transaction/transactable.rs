@@ -101,6 +101,8 @@ pub trait Transactable {
 
     fn range<O: AsRef<ExId>, R: RangeBounds<Prop>>(&self, obj: O, range: R) -> Range<R>;
 
+    fn values<O: AsRef<ExId>>(&self, obj: O) -> Values;
+
     /// Get the length of the given object.
     fn length<O: AsRef<ExId>>(&self, obj: O) -> usize;
 

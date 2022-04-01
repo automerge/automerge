@@ -12,9 +12,9 @@ use crate::types::{
     ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
     OpType, Patch, ScalarValue, Value,
 };
-use crate::KeysAt;
 use crate::{legacy, query, types, ObjType};
 use crate::{AutomergeError, Change, Prop};
+use crate::{KeysAt, Values};
 use serde::Serialize;
 use std::cmp::Ordering;
 
@@ -355,7 +355,7 @@ impl Automerge {
         }
     }
 
-    /// Iterate over the keys and values of the object `obj`.
+    /// Iterate over the keys and values of the object `obj` in the given range.
     ///
     /// For a map the keys are the keys of the map.
     /// For a list the keys are the element ids (opids) encoded as strings.
@@ -365,6 +365,19 @@ impl Automerge {
             Range::new(self, iter_range)
         } else {
             Range::new(self, None)
+        }
+    }
+
+    /// Iterate over all the keys and values of the object `obj`.
+    ///
+    /// For a map the keys are the keys of the map.
+    /// For a list the keys are the element ids (opids) encoded as strings.
+    pub fn values<O: AsRef<ExId>>(&self, obj: O) -> Values {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let iter_range = self.ops.range(obj, ..);
+            Values::new(self, iter_range)
+        } else {
+            Values::new(self, None)
         }
     }
 
