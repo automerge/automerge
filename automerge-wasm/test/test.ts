@@ -190,8 +190,8 @@ describe('Automerge', () => {
 
       assert.deepEqual(doc.keys("_root"),["bip","foo"])
 
-      doc.del("_root", "foo")
-      doc.del("_root", "baz")
+      doc.delete("_root", "foo")
+      doc.delete("_root", "baz")
       let heads2 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip"])
@@ -206,7 +206,7 @@ describe('Automerge', () => {
 
       doc.set(root, "xxx", "xxx");
       assert.deepEqual(doc.value(root, "xxx"),["str","xxx"])
-      doc.del(root, "xxx");
+      doc.delete(root, "xxx");
       assert.deepEqual(doc.value(root, "xxx"),undefined)
       doc.free()
     })
@@ -217,9 +217,9 @@ describe('Automerge', () => {
 
       doc.set(root, "counter", 10, "counter");
       assert.deepEqual(doc.value(root, "counter"),["counter",10])
-      doc.inc(root, "counter", 10);
+      doc.increment(root, "counter", 10);
       assert.deepEqual(doc.value(root, "counter"),["counter",20])
-      doc.inc(root, "counter", -5);
+      doc.increment(root, "counter", -5);
       assert.deepEqual(doc.value(root, "counter"),["counter",15])
       doc.free()
     })
@@ -319,7 +319,7 @@ describe('Automerge', () => {
         ['counter',0,'2@bbbb'],
         ['counter',10,'2@cccc'],
       ])
-      doc1.inc("_root", "cnt", 5)
+      doc1.increment("_root", "cnt", 5)
       result = doc1.values("_root", "cnt")
       assert.deepEqual(result, [
         [ 'counter', 5, '2@bbbb' ],
@@ -352,7 +352,7 @@ describe('Automerge', () => {
         ['counter',0,'3@bbbb'],
         ['counter',10,'3@cccc'],
       ])
-      doc1.inc(seq, 0, 5)
+      doc1.increment(seq, 0, 5)
       result = doc1.values(seq, 0)
       assert.deepEqual(result, [
         [ 'counter', 5, '3@bbbb' ],
@@ -414,8 +414,8 @@ describe('Automerge', () => {
       let r1 = doc.set("_root","foo","bar")
       let r2 = doc.setObject("_root","list",[])
       let r3 = doc.set("_root","counter",10, "counter")
-      let r4 = doc.inc("_root","counter",1)
-      let r5 = doc.del("_root","counter")
+      let r4 = doc.increment("_root","counter",1)
+      let r5 = doc.delete("_root","counter")
       let r6 = doc.insert(r2,0,10);
       let r7 = doc.insertObject(r2,0,{});
       let r8 = doc.splice(r2,1,0,["a","b","c"]);
@@ -508,7 +508,7 @@ describe('Automerge', () => {
       doc1.set('_root', 'favouriteBird', 'Robin')
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.del('_root', 'favouriteBird')
+      doc1.delete('_root', 'favouriteBird')
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.popPatches(), [
         {action: 'assign', obj: '_root', key: 'favouriteBird', value: 'Robin', datatype: 'str', conflict: false},
@@ -552,7 +552,7 @@ describe('Automerge', () => {
       let doc1 = create('aaaa'), doc2 = create('bbbb')
       doc1.setObject('_root', 'birds', ['Goldfinch', 'Chaffinch'])
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.del('1@aaaa', 0)
+      doc1.delete('1@aaaa', 0)
       doc1.insert('1@aaaa', 1, 'Greenfinch')
       doc2.enablePatches(true)
       doc2.loadIncremental(doc1.saveIncremental())
@@ -719,7 +719,7 @@ describe('Automerge', () => {
       doc1.set('_root', 'bird', 'Greenfinch')
       doc2.loadIncremental(doc1.saveIncremental())
       doc1.set('_root', 'bird', 'Goldfinch')
-      doc2.del('_root', 'bird')
+      doc2.delete('_root', 'bird')
       let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
       doc1.enablePatches(true)
       doc2.enablePatches(true)
@@ -774,7 +774,7 @@ describe('Automerge', () => {
       doc2.loadIncremental(change1)
       doc3.loadIncremental(change1)
       doc4.loadIncremental(change1)
-      doc1.del('1@aaaa', 0)
+      doc1.delete('1@aaaa', 0)
       doc1.set('1@aaaa', 1, 'Song Thrush')
       doc2.set('1@aaaa', 0, 'Ring-necked parakeet')
       doc2.set('1@aaaa', 2, 'Redwing')
@@ -807,7 +807,7 @@ describe('Automerge', () => {
       doc1.set('_root', 'bird', 'Robin')
       doc2.set('_root', 'bird', 'Wren')
       let change1 = doc1.saveIncremental(), change2 = doc2.saveIncremental()
-      doc2.del('_root', 'bird')
+      doc2.delete('_root', 'bird')
       let change3 = doc2.saveIncremental()
       doc3.enablePatches(true)
       doc3.loadIncremental(change1)
@@ -866,7 +866,7 @@ describe('Automerge', () => {
       doc2.enablePatches(true)
       doc1.set('_root', 'starlings', 2, 'counter')
       doc2.loadIncremental(doc1.saveIncremental())
-      doc1.inc('_root', 'starlings', 1)
+      doc1.increment('_root', 'starlings', 1)
       doc1.dump()
       doc2.loadIncremental(doc1.saveIncremental())
       assert.deepEqual(doc2.value('_root', 'starlings'), ['counter', 3])

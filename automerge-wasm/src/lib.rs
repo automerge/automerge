@@ -260,12 +260,17 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn inc(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
+    pub fn increment(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+    ) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value: f64 = value
             .as_f64()
-            .ok_or_else(|| to_js_err("inc needs a numberic value"))?;
+            .ok_or_else(|| to_js_err("increment needs a numeric value"))?;
         self.0.increment(&obj, prop, value as i64)?;
         Ok(())
     }
@@ -415,7 +420,7 @@ impl Automerge {
         }
     }
 
-    pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
+    pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
         self.0.delete(&obj, prop).map_err(to_js_err)?;

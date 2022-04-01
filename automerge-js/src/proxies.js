@@ -166,7 +166,7 @@ const MapHandler = {
     if (readonly) {
       throw new RangeError(`Object property "${key}" cannot be modified`)
     }
-    context.del(objectId, key)
+    context.delete(objectId, key)
     return true
   },
 
@@ -296,7 +296,7 @@ const ListHandler = {
     if (context.value(objectId, index)[0] == "counter") {
       throw new TypeError('Unsupported operation: deleting a counter from a list')
     }
-    context.del(objectId, index)
+    context.delete(objectId, index)
     return true
   },
 
@@ -395,7 +395,7 @@ function listMethods(target) {
       if (typeof numDelete === 'number') {
         context.splice(objectId, index, numDelete)
       } else {
-        context.del(objectId, index)
+        context.delete(objectId, index)
       }
       return this
     },
@@ -437,7 +437,7 @@ function listMethods(target) {
         return undefined
       }
       let last = valueAt(target, length - 1)
-      context.del(objectId, length - 1)
+      context.delete(objectId, length - 1)
       return last
     },
 
@@ -450,7 +450,7 @@ function listMethods(target) {
     shift() {
       if (context.length(objectId) == 0) return
       const first = valueAt(target, 0)
-      context.del(objectId, 0)
+      context.delete(objectId, 0)
       return first
     },
 
@@ -472,7 +472,7 @@ function listMethods(target) {
       for (let i = 0; i < del; i++) {
         let value = valueAt(target, index)
         result.push(value)
-        context.del(objectId, index)
+        context.delete(objectId, index)
       }
       const values = vals.map((val) => import_value(val))
       for (let [value,datatype] of values) {
