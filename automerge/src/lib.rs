@@ -47,6 +47,7 @@ pub mod transaction;
 mod types;
 mod value;
 mod values;
+mod values_at;
 #[cfg(feature = "optree-visualisation")]
 mod visualisation;
 
@@ -66,5 +67,6 @@ pub use range_at::RangeAt;
 pub use types::{ActorId, AssignPatch, ChangeHash, ObjType, OpType, Patch, Prop};
 pub use value::{ScalarValue, Value};
 pub use values::Values;
+pub use values_at::ValuesAt;
 
 pub const ROOT: ObjId = ObjId::Root;

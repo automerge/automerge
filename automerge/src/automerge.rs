@@ -12,7 +12,7 @@ use crate::types::{
     ActorId, AssignPatch, ChangeHash, Clock, ElemId, Export, Exportable, Key, ObjId, Op, OpId,
     OpType, Patch, ScalarValue, Value,
 };
-use crate::{legacy, query, types, ObjType, RangeAt};
+use crate::{legacy, query, types, ObjType, RangeAt, ValuesAt};
 use crate::{AutomergeError, Change, Prop};
 use crate::{KeysAt, Values};
 use serde::Serialize;
@@ -394,6 +394,17 @@ impl Automerge {
             Values::new(self, iter_range)
         } else {
             Values::new(self, None)
+        }
+    }
+
+    /// Historical version of [`values`](Self::values).
+    pub fn values_at<O: AsRef<ExId>>(&self, obj: O, heads: &[ChangeHash]) -> ValuesAt {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            let clock = self.clock_at(heads);
+            let iter_range = self.ops.range_at(obj, .., clock);
+            ValuesAt::new(self, iter_range)
+        } else {
+            ValuesAt::new(self, None)
         }
     }
 
