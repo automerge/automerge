@@ -190,7 +190,7 @@ impl AutoCommit {
     /// # use automerge::ObjType;
     /// # use std::time::SystemTime;
     /// let mut doc = AutoCommit::new();
-    /// doc.set_object(&ROOT, "todos", ObjType::List).unwrap();
+    /// doc.put_object(&ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// doc.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -261,7 +261,7 @@ impl Transactable for AutoCommit {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
@@ -269,10 +269,10 @@ impl Transactable for AutoCommit {
     ) -> Result<(), AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.set(&mut self.doc, obj.as_ref(), prop, value)
+        tx.put(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -280,7 +280,7 @@ impl Transactable for AutoCommit {
     ) -> Result<ExId, AutomergeError> {
         self.ensure_transaction_open();
         let tx = self.transaction.as_mut().unwrap();
-        tx.set_object(&mut self.doc, obj.as_ref(), prop, value)
+        tx.put_object(&mut self.doc, obj.as_ref(), prop, value)
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(

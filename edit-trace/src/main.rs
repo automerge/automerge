@@ -20,7 +20,7 @@ fn main() -> Result<(), AutomergeError> {
 
     let now = Instant::now();
     let mut tx = doc.transaction();
-    let text = tx.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (i, (pos, del, vals)) in commands.into_iter().enumerate() {
         if i % 1000 == 0 {
             println!("Processed {} edits in {} ms", i, now.elapsed().as_millis());

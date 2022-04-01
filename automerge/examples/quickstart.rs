@@ -11,13 +11,13 @@ fn main() {
         .transact_with::<_, _, AutomergeError, _>(
             |_| CommitOptions::default().with_message("Add card".to_owned()),
             |tx| {
-                let cards = tx.set_object(ROOT, "cards", ObjType::List).unwrap();
+                let cards = tx.put_object(ROOT, "cards", ObjType::List).unwrap();
                 let card1 = tx.insert_object(&cards, 0, ObjType::Map)?;
-                tx.set(&card1, "title", "Rewrite everything in Clojure")?;
-                tx.set(&card1, "done", false)?;
+                tx.put(&card1, "title", "Rewrite everything in Clojure")?;
+                tx.put(&card1, "done", false)?;
                 let card2 = tx.insert_object(&cards, 0, ObjType::Map)?;
-                tx.set(&card2, "title", "Rewrite everything in Haskell")?;
-                tx.set(&card2, "done", false)?;
+                tx.put(&card2, "title", "Rewrite everything in Haskell")?;
+                tx.put(&card2, "done", false)?;
                 Ok((cards, card1))
             },
         )
@@ -33,7 +33,7 @@ fn main() {
     doc1.transact_with::<_, _, AutomergeError, _>(
         |_| CommitOptions::default().with_message("Mark card as done".to_owned()),
         |tx| {
-            tx.set(&card1, "done", true)?;
+            tx.put(&card1, "done", true)?;
             Ok(())
         },
     )

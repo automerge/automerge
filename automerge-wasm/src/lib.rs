@@ -203,7 +203,7 @@ impl Automerge {
         Ok(opid.to_string().into())
     }
 
-    pub fn set(
+    pub fn put(
         &mut self,
         obj: JsValue,
         prop: JsValue,
@@ -215,12 +215,12 @@ impl Automerge {
         let value = self
             .import_scalar(&value, &datatype.as_string())
             .ok_or_else(|| to_js_err("expected scalar value"))?;
-        self.0.set(&obj, prop, value)?;
+        self.0.put(&obj, prop, value)?;
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = setObject)]
-    pub fn set_object(
+    #[wasm_bindgen(js_name = putObject)]
+    pub fn put_object(
         &mut self,
         obj: JsValue,
         prop: JsValue,
@@ -230,7 +230,7 @@ impl Automerge {
         let prop = self.import_prop(prop)?;
         let (value, subvals) =
             to_objtype(&value, &None).ok_or_else(|| to_js_err("expected object"))?;
-        let opid = self.0.set_object(&obj, prop, value)?;
+        let opid = self.0.put_object(&obj, prop, value)?;
         self.subset(&opid, subvals)?;
         Ok(opid.to_string().into())
     }
@@ -240,9 +240,9 @@ impl Automerge {
             let (value, subvals) = self.import_value(&v, None)?;
             //let opid = self.0.set(id, p, value)?;
             let opid = match (p, value) {
-                (Prop::Map(s), Value::Object(objtype)) => Some(self.0.set_object(obj, s, objtype)?),
+                (Prop::Map(s), Value::Object(objtype)) => Some(self.0.put_object(obj, s, objtype)?),
                 (Prop::Map(s), Value::Scalar(scalar)) => {
-                    self.0.set(obj, s, scalar)?;
+                    self.0.put(obj, s, scalar)?;
                     None
                 }
                 (Prop::Seq(i), Value::Object(objtype)) => {

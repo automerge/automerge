@@ -130,7 +130,7 @@ impl<'a> Iterator for OperationIterator<'a> {
         let pred = self.pred.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => OpType::Set(value),
+            Action::Set => OpType::Put(value),
             Action::MakeList => OpType::Make(ObjType::List),
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
@@ -171,7 +171,7 @@ impl<'a> Iterator for DocOpIterator<'a> {
         let succ = self.succ.next()?;
         let value = self.value.next()?;
         let action = match action {
-            Action::Set => OpType::Set(value),
+            Action::Set => OpType::Put(value),
             Action::MakeList => OpType::Make(ObjType::List),
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
@@ -1051,7 +1051,7 @@ impl DocOpEncoder {
             self.insert.append(op.insert);
             self.succ.append(&op.succ, actors);
             let action = match &op.action {
-                amp::OpType::Set(value) => {
+                amp::OpType::Put(value) => {
                     self.val.append_value(value, actors);
                     Action::Set
                 }
@@ -1157,7 +1157,7 @@ impl ColumnEncoder {
 
         self.pred.append(&op.pred, actors);
         let action = match &op.action {
-            OpType::Set(value) => {
+            OpType::Put(value) => {
                 self.val.append_value2(value, actors);
                 Action::Set
             }

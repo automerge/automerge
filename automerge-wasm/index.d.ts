@@ -92,8 +92,8 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
   // change state
-  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
-  setObject(obj: ObjID, prop: Prop, value: ObjType): ObjID;
+  put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
+  putObject(obj: ObjID, prop: Prop, value: ObjType): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): undefined;
   insertObject(obj: ObjID, index: number, value: ObjType): ObjID;
   push(obj: ObjID, value: Value, datatype?: Datatype): undefined;

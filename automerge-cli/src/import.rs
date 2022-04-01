@@ -22,31 +22,31 @@ fn import_map(
     for (key, value) in map {
         match value {
             serde_json::Value::Null => {
-                doc.set(obj, key, ())?;
+                doc.put(obj, key, ())?;
             }
             serde_json::Value::Bool(b) => {
-                doc.set(obj, key, *b)?;
+                doc.put(obj, key, *b)?;
             }
             serde_json::Value::String(s) => {
-                doc.set(obj, key, s.as_ref())?;
+                doc.put(obj, key, s.as_ref())?;
             }
             serde_json::Value::Array(vec) => {
-                let id = doc.set_object(obj, key, am::ObjType::List)?;
+                let id = doc.put_object(obj, key, am::ObjType::List)?;
                 import_list(doc, &id, vec)?;
             }
             serde_json::Value::Number(n) => {
                 if let Some(m) = n.as_i64() {
-                    doc.set(obj, key, m)?;
+                    doc.put(obj, key, m)?;
                 } else if let Some(m) = n.as_u64() {
-                    doc.set(obj, key, m)?;
+                    doc.put(obj, key, m)?;
                 } else if let Some(m) = n.as_f64() {
-                    doc.set(obj, key, m)?;
+                    doc.put(obj, key, m)?;
                 } else {
                     anyhow::bail!("not a number");
                 }
             }
             serde_json::Value::Object(map) => {
-                let id = doc.set_object(obj, key, am::ObjType::Map)?;
+                let id = doc.put_object(obj, key, am::ObjType::Map)?;
                 import_map(doc, &id, map)?;
             }
         }

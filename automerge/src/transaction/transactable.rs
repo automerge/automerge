@@ -15,7 +15,7 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
@@ -34,7 +34,7 @@ pub trait Transactable {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,

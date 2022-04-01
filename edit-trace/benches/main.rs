@@ -5,7 +5,7 @@ use std::fs;
 fn replay_trace_tx(commands: Vec<(usize, usize, Vec<ScalarValue>)>) -> Automerge {
     let mut doc = Automerge::new();
     let mut tx = doc.transaction();
-    let text = tx.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (pos, del, vals) in commands {
         tx.splice(&text, pos, del, vals).unwrap();
     }
@@ -15,7 +15,7 @@ fn replay_trace_tx(commands: Vec<(usize, usize, Vec<ScalarValue>)>) -> Automerge
 
 fn replay_trace_autotx(commands: Vec<(usize, usize, Vec<ScalarValue>)>) -> AutoCommit {
     let mut doc = AutoCommit::new();
-    let text = doc.set_object(ROOT, "text", ObjType::Text).unwrap();
+    let text = doc.put_object(ROOT, "text", ObjType::Text).unwrap();
     for (pos, del, vals) in commands {
         doc.splice(&text, pos, del, vals).unwrap();
     }
