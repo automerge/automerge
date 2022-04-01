@@ -92,15 +92,15 @@ export function decodeSyncState(data: Uint8Array): SyncState;
 
 export class Automerge {
   // change state
-  set(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
-  setObject(obj: ObjID, prop: Prop, value: ObjType): ObjID;
+  put(obj: ObjID, prop: Prop, value: Value, datatype?: Datatype): undefined;
+  putObject(obj: ObjID, prop: Prop, value: ObjType): ObjID;
   insert(obj: ObjID, index: number, value: Value, datatype?: Datatype): undefined;
   insertObject(obj: ObjID, index: number, value: ObjType): ObjID;
   push(obj: ObjID, value: Value, datatype?: Datatype): undefined;
   pushObject(obj: ObjID, value: ObjType): ObjID;
   splice(obj: ObjID, start: number, delete_count: number, text?: string | Array<Value>): ObjID[] | undefined;
-  inc(obj: ObjID, prop: Prop, value: number): void;
-  del(obj: ObjID, prop: Prop): void;
+  increment(obj: ObjID, prop: Prop, value: number): void;
+  delete(obj: ObjID, prop: Prop): void;
 
   // returns a single value - if there is a conflict return the winner
   value(obj: ObjID, prop: any, heads?: Heads): FullValue | null;

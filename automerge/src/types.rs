@@ -168,10 +168,9 @@ impl fmt::Display for ObjType {
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
     Make(ObjType),
-    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
-    Del,
-    Inc(i64),
-    Set(ScalarValue),
+    Delete,
+    Increment(i64),
+    Put(ScalarValue),
 }
 
 impl From<ObjType> for OpType {
@@ -182,7 +181,7 @@ impl From<ObjType> for OpType {
 
 impl From<ScalarValue> for OpType {
     fn from(v: ScalarValue) -> Self {
-        OpType::Set(v)
+        OpType::Put(v)
     }
 }
 
@@ -368,13 +367,13 @@ pub(crate) struct Op {
 impl Op {
     pub(crate) fn add_succ(&mut self, op: &Op) {
         self.succ.push(op.id);
-        if let OpType::Set(ScalarValue::Counter(Counter {
+        if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current += *n;
                 *increments += 1;
             }
@@ -383,13 +382,13 @@ impl Op {
 
     pub(crate) fn remove_succ(&mut self, op: &Op) {
         self.succ.retain(|id| id != &op.id);
-        if let OpType::Set(ScalarValue::Counter(Counter {
+        if let OpType::Put(ScalarValue::Counter(Counter {
             current,
             increments,
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current -= *n;
                 *increments -= 1;
             }
@@ -407,27 +406,27 @@ impl Op {
     }
 
     pub fn incs(&self) -> usize {
-        if let OpType::Set(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
+        if let OpType::Put(ScalarValue::Counter(Counter { increments, .. })) = &self.action {
             *increments
         } else {
             0
         }
     }
 
-    pub fn is_del(&self) -> bool {
-        matches!(&self.action, OpType::Del)
+    pub fn is_delete(&self) -> bool {
+        matches!(&self.action, OpType::Delete)
     }
 
     pub fn is_inc(&self) -> bool {
-        matches!(&self.action, OpType::Inc(_))
+        matches!(&self.action, OpType::Increment(_))
     }
 
     pub fn is_counter(&self) -> bool {
-        matches!(&self.action, OpType::Set(ScalarValue::Counter(_)))
+        matches!(&self.action, OpType::Put(ScalarValue::Counter(_)))
     }
 
     pub fn is_noop(&self, action: &OpType) -> bool {
-        matches!((&self.action, action), (OpType::Set(n), OpType::Set(m)) if n == m)
+        matches!((&self.action, action), (OpType::Put(n), OpType::Put(m)) if n == m)
     }
 
     pub fn is_list_op(&self) -> bool {
@@ -449,7 +448,7 @@ impl Op {
     pub fn value(&self) -> Value {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Set(scalar) => Value::Scalar(scalar.clone()),
+            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -457,11 +456,11 @@ impl Op {
     #[allow(dead_code)]
     pub fn dump(&self) -> String {
         match &self.action {
-            OpType::Set(value) if self.insert => format!("i:{}", value),
-            OpType::Set(value) => format!("s:{}", value),
+            OpType::Put(value) if self.insert => format!("i:{}", value),
+            OpType::Put(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
-            OpType::Inc(val) => format!("inc:{}", val),
-            OpType::Del => "del".to_string(),
+            OpType::Increment(val) => format!("inc:{}", val),
+            OpType::Delete => "del".to_string(),
         }
     }
 }

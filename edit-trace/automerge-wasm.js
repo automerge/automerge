@@ -1,5 +1,5 @@
 
-// make sure to 
+// make sure to
 
 // # cd ../automerge-wasm
 // # yarn release
@@ -11,7 +11,7 @@ const Automerge = require('../automerge-wasm')
 const start = new Date()
 
 let doc = Automerge.create();
-let text = doc.set("_root", "text", "", "text")
+let text = doc.put("_root", "text", "", "text")
 
 for (let i = 0; i < edits.length; i++) {
   let edit = edits[i]

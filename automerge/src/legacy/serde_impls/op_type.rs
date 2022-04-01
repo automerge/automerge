@@ -15,9 +15,9 @@ impl Serialize for OpType {
             OpType::Make(ObjType::Table) => RawOpType::MakeTable,
             OpType::Make(ObjType::List) => RawOpType::MakeList,
             OpType::Make(ObjType::Text) => RawOpType::MakeText,
-            OpType::Del => RawOpType::Del,
-            OpType::Inc(_) => RawOpType::Inc,
-            OpType::Set(_) => RawOpType::Set,
+            OpType::Delete => RawOpType::Del,
+            OpType::Increment(_) => RawOpType::Inc,
+            OpType::Put(_) => RawOpType::Set,
         };
         raw_type.serialize(serializer)
     }

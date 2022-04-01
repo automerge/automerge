@@ -642,7 +642,7 @@ mod tests {
         let zero = OpId(0, 0);
         Op {
             id: zero,
-            action: amp::OpType::Set(0.into()),
+            action: amp::OpType::Put(0.into()),
             key: zero.into(),
             succ: vec![],
             pred: vec![],

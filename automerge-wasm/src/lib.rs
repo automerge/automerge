@@ -203,7 +203,7 @@ impl Automerge {
         Ok(opid.to_string().into())
     }
 
-    pub fn set(
+    pub fn put(
         &mut self,
         obj: JsValue,
         prop: JsValue,
@@ -215,12 +215,12 @@ impl Automerge {
         let value = self
             .import_scalar(&value, &datatype.as_string())
             .ok_or_else(|| to_js_err("expected scalar value"))?;
-        self.0.set(&obj, prop, value)?;
+        self.0.put(&obj, prop, value)?;
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = setObject)]
-    pub fn set_object(
+    #[wasm_bindgen(js_name = putObject)]
+    pub fn put_object(
         &mut self,
         obj: JsValue,
         prop: JsValue,
@@ -230,7 +230,7 @@ impl Automerge {
         let prop = self.import_prop(prop)?;
         let (value, subvals) =
             to_objtype(&value, &None).ok_or_else(|| to_js_err("expected object"))?;
-        let opid = self.0.set_object(&obj, prop, value)?;
+        let opid = self.0.put_object(&obj, prop, value)?;
         self.subset(&opid, subvals)?;
         Ok(opid.to_string().into())
     }
@@ -240,9 +240,9 @@ impl Automerge {
             let (value, subvals) = self.import_value(&v, None)?;
             //let opid = self.0.set(id, p, value)?;
             let opid = match (p, value) {
-                (Prop::Map(s), Value::Object(objtype)) => Some(self.0.set_object(obj, s, objtype)?),
+                (Prop::Map(s), Value::Object(objtype)) => Some(self.0.put_object(obj, s, objtype)?),
                 (Prop::Map(s), Value::Scalar(scalar)) => {
-                    self.0.set(obj, s, scalar)?;
+                    self.0.put(obj, s, scalar)?;
                     None
                 }
                 (Prop::Seq(i), Value::Object(objtype)) => {
@@ -260,13 +260,18 @@ impl Automerge {
         Ok(())
     }
 
-    pub fn inc(&mut self, obj: JsValue, prop: JsValue, value: JsValue) -> Result<(), JsValue> {
+    pub fn increment(
+        &mut self,
+        obj: JsValue,
+        prop: JsValue,
+        value: JsValue,
+    ) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = self.import_prop(prop)?;
         let value: f64 = value
             .as_f64()
-            .ok_or_else(|| to_js_err("inc needs a numberic value"))?;
-        self.0.inc(&obj, prop, value as i64)?;
+            .ok_or_else(|| to_js_err("increment needs a numeric value"))?;
+        self.0.increment(&obj, prop, value as i64)?;
         Ok(())
     }
 
@@ -415,10 +420,10 @@ impl Automerge {
         }
     }
 
-    pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
+    pub fn delete(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
-        self.0.del(&obj, prop).map_err(to_js_err)?;
+        self.0.delete(&obj, prop).map_err(to_js_err)?;
         Ok(())
     }
 

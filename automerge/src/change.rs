@@ -879,7 +879,7 @@ fn group_doc_change_and_doc_ops(
                 let del = DocOp {
                     actor: succ.1,
                     ctr: succ.0,
-                    action: OpType::Del,
+                    action: OpType::Delete,
                     obj: op.obj.clone(),
                     key,
                     succ: Vec::new(),

@@ -205,7 +205,7 @@ impl Automerge {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             self.ops.insert(q.pos, obj, op.clone());
         }
         op
@@ -218,7 +218,7 @@ impl Automerge {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             self.ops.insert(q.pos, obj, op.clone());
         }
 
@@ -231,7 +231,7 @@ impl Automerge {
         let patch = if op.insert {
             let value = (op.value(), self.id_to_exid(op.id));
             Patch::Insert(obj, q.seen, value)
-        } else if op.is_del() {
+        } else if op.is_delete() {
             if let Some(winner) = &q.values.last() {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = q.values.len() > 1;
@@ -375,7 +375,7 @@ impl Automerge {
         let query = self.ops.search(&obj, query::ListVals::new());
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
+            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
             } else {
                 buffer.push('\u{fffc}');
@@ -395,7 +395,7 @@ impl Automerge {
         let query = self.ops.search(&obj, query::ListValsAt::new(clock));
         let mut buffer = String::new();
         for q in &query.ops {
-            if let OpType::Set(ScalarValue::Str(s)) = &q.action {
+            if let OpType::Put(ScalarValue::Str(s)) = &q.action {
                 buffer.push_str(s);
             }
         }
@@ -956,10 +956,10 @@ impl Automerge {
                 Key::Seq(n) => self.to_string(n),
             };
             let value: String = match &op.action {
-                OpType::Set(value) => format!("{}", value),
+                OpType::Put(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
-                OpType::Inc(obj) => format!("inc({})", obj),
-                OpType::Del => format!("del{}", 0),
+                OpType::Increment(obj) => format!("inc({})", obj),
+                OpType::Delete => format!("del{}", 0),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();
@@ -1014,7 +1014,7 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "hello", "world")?;
+        tx.put(ROOT, "hello", "world")?;
         tx.value(ROOT, "hello")?;
         tx.commit();
         Ok(())
@@ -1025,18 +1025,18 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // setting a scalar value shouldn't return an opid as no object was created.
-        tx.set(ROOT, "a", 1)?;
+        tx.put(ROOT, "a", 1)?;
 
         // setting the same value shouldn't return an opid as there is no change.
-        tx.set(ROOT, "a", 1)?;
+        tx.put(ROOT, "a", 1)?;
 
         assert_eq!(tx.pending_ops(), 1);
 
-        let map = tx.set_object(ROOT, "b", ObjType::Map)?;
+        let map = tx.put_object(ROOT, "b", ObjType::Map)?;
         // object already exists at b but setting a map again overwrites it so we get an opid.
-        tx.set(map, "a", 2)?;
+        tx.put(map, "a", 2)?;
 
-        tx.set_object(ROOT, "b", ObjType::Map)?;
+        tx.put_object(ROOT, "b", ObjType::Map)?;
 
         assert_eq!(tx.pending_ops(), 4);
         let map = tx.value(ROOT, "b").unwrap().unwrap().1;
@@ -1051,8 +1051,8 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        let list_id = tx.set_object(ROOT, "items", ObjType::List)?;
-        tx.set(ROOT, "zzz", "zzzval")?;
+        let list_id = tx.put_object(ROOT, "items", ObjType::List)?;
+        tx.put(ROOT, "zzz", "zzzval")?;
         assert!(tx.value(ROOT, "items")?.unwrap().1 == list_id);
         tx.insert(&list_id, 0, "a")?;
         tx.insert(&list_id, 0, "b")?;
@@ -1073,9 +1073,9 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor(ActorId::random());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "xxx", "xxx")?;
+        tx.put(ROOT, "xxx", "xxx")?;
         assert!(!tx.values(ROOT, "xxx")?.is_empty());
-        tx.del(ROOT, "xxx")?;
+        tx.delete(ROOT, "xxx")?;
         assert!(tx.values(ROOT, "xxx")?.is_empty());
         tx.commit();
         Ok(())
@@ -1085,11 +1085,11 @@ mod tests {
     fn test_inc() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "counter", ScalarValue::counter(10))?;
+        tx.put(ROOT, "counter", ScalarValue::counter(10))?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(10));
-        tx.inc(ROOT, "counter", 10)?;
+        tx.increment(ROOT, "counter", 10)?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(20));
-        tx.inc(ROOT, "counter", -5)?;
+        tx.increment(ROOT, "counter", -5)?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(15));
         tx.commit();
         Ok(())
@@ -1100,19 +1100,19 @@ mod tests {
         let mut doc = Automerge::new();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "foo", 1)?;
+        tx.put(ROOT, "foo", 1)?;
         tx.commit();
 
         let save1 = doc.save();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "bar", 2)?;
+        tx.put(ROOT, "bar", 2)?;
         tx.commit();
 
         let save2 = doc.save_incremental();
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "baz", 3)?;
+        tx.put(ROOT, "baz", 3)?;
         tx.commit();
 
         let save3 = doc.save_incremental();
@@ -1142,7 +1142,7 @@ mod tests {
     fn test_save_text() -> Result<(), AutomergeError> {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let text = tx.set_object(ROOT, "text", ObjType::Text)?;
+        let text = tx.put_object(ROOT, "text", ObjType::Text)?;
         tx.commit();
         let heads1 = doc.get_heads();
         let mut tx = doc.transaction();
@@ -1167,27 +1167,27 @@ mod tests {
         let mut doc = Automerge::new();
         doc.set_actor("aaaa".try_into().unwrap());
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop1", "val1")?;
+        tx.put(ROOT, "prop1", "val1")?;
         tx.commit();
         doc.get_heads();
         let heads1 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop1", "val2")?;
+        tx.put(ROOT, "prop1", "val2")?;
         tx.commit();
         doc.get_heads();
         let heads2 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop2", "val3")?;
+        tx.put(ROOT, "prop2", "val3")?;
         tx.commit();
         doc.get_heads();
         let heads3 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.del(ROOT, "prop1")?;
+        tx.delete(ROOT, "prop1")?;
         tx.commit();
         doc.get_heads();
         let heads4 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "prop3", "val4")?;
+        tx.put(ROOT, "prop3", "val4")?;
         tx.commit();
         doc.get_heads();
         let heads5 = doc.get_heads();
@@ -1242,7 +1242,7 @@ mod tests {
         doc.set_actor("aaaa".try_into().unwrap());
 
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List)?;
+        let list = tx.put_object(ROOT, "list", ObjType::List)?;
         tx.commit();
         let heads1 = doc.get_heads();
 
@@ -1252,24 +1252,24 @@ mod tests {
         let heads2 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.set(&list, 0, 20)?;
+        tx.put(&list, 0, 20)?;
         tx.insert(&list, 0, 30)?;
         tx.commit();
         let heads3 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.set(&list, 1, 40)?;
+        tx.put(&list, 1, 40)?;
         tx.insert(&list, 1, 50)?;
         tx.commit();
         let heads4 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 2)?;
+        tx.delete(&list, 2)?;
         tx.commit();
         let heads5 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 0)?;
+        tx.delete(&list, 0)?;
         tx.commit();
         let heads6 = doc.get_heads();
 
@@ -1305,17 +1305,17 @@ mod tests {
     fn keys_iter() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 3).unwrap();
-        tx.set(ROOT, "b", 4).unwrap();
-        tx.set(ROOT, "c", 5).unwrap();
-        tx.set(ROOT, "d", 6).unwrap();
+        tx.put(ROOT, "a", 3).unwrap();
+        tx.put(ROOT, "b", 4).unwrap();
+        tx.put(ROOT, "c", 5).unwrap();
+        tx.put(ROOT, "d", 6).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 7).unwrap();
+        tx.put(ROOT, "a", 7).unwrap();
         tx.commit();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 8).unwrap();
-        tx.set(ROOT, "d", 9).unwrap();
+        tx.put(ROOT, "a", 8).unwrap();
+        tx.put(ROOT, "d", 9).unwrap();
         tx.commit();
         assert_eq!(doc.keys(ROOT).count(), 4);
 
@@ -1368,11 +1368,11 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // create a map
-        let map1 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
-        tx.set(&map1, "b", 1).unwrap();
+        let map1 = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&map1, "b", 1).unwrap();
         // overwrite the first map with a new one
-        let map2 = tx.set_object(ROOT, "a", ObjType::Map).unwrap();
-        tx.set(&map2, "c", 2).unwrap();
+        let map2 = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
+        tx.put(&map2, "c", 2).unwrap();
         tx.commit();
 
         // we can get the new map by traversing the tree
@@ -1388,7 +1388,7 @@ mod tests {
         assert_eq!(doc.value(&map1, "b").unwrap().unwrap().0, Value::int(1));
         // and even set new things in it!
         let mut tx = doc.transaction();
-        tx.set(&map1, "c", 3).unwrap();
+        tx.put(&map1, "c", 3).unwrap();
         tx.commit();
 
         assert_eq!(doc.value(&map1, "c").unwrap().unwrap().0, Value::int(3));
@@ -1399,7 +1399,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting a missing key in a map should just be a noop
-        assert!(tx.del(ROOT, "a").is_ok());
+        assert!(tx.delete(ROOT, "a").is_ok());
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 0);
@@ -1408,16 +1408,16 @@ mod tests {
         assert!(Automerge::load(&bytes).is_ok());
 
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "a", 1).unwrap();
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 1);
 
         let mut tx = doc.transaction();
         // a real op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         // a no-op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 1);
@@ -1428,14 +1428,14 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting an element in a list that does not exist is an error
-        assert!(tx.del(ROOT, 0).is_err());
+        assert!(tx.delete(ROOT, 0).is_err());
     }
 
     #[test]
     fn loaded_doc_changes_have_hash() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        tx.set(ROOT, "a", 1).unwrap();
+        tx.put(ROOT, "a", 1).unwrap();
         tx.commit();
         let hash = doc.get_last_local_change().unwrap().hash;
         let bytes = doc.save();
@@ -1516,7 +1516,7 @@ mod tests {
         ];
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         for action in actions {
             match action {
                 Action::InsertText(index, c) => {
@@ -1525,7 +1525,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }
@@ -1569,7 +1569,7 @@ mod tests {
         ];
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
-        let list = tx.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = tx.put_object(ROOT, "list", ObjType::List).unwrap();
         for action in actions {
             match action {
                 Action::InsertText(index, c) => {
@@ -1578,7 +1578,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }
@@ -1608,14 +1608,14 @@ mod tests {
         let mut doc1 = AutoCommit::new().with_actor(actor1.clone());
         let actor2 = ActorId::from(b"bbbb");
         let mut doc2 = AutoCommit::new().with_actor(actor2.clone());
-        let list = doc1.set_object(ROOT, "list", ObjType::List).unwrap();
+        let list = doc1.put_object(ROOT, "list", ObjType::List).unwrap();
         doc1.insert(&list, 0, 0).unwrap();
         doc2.load_incremental(&doc1.save_incremental()).unwrap();
         for i in 1..=max {
-            doc1.set(&list, 0, i).unwrap()
+            doc1.put(&list, 0, i).unwrap()
         }
         for i in 1..=max {
-            doc2.set(&list, 0, i).unwrap()
+            doc2.put(&list, 0, i).unwrap()
         }
         let change1 = doc1.save_incremental();
         let change2 = doc2.save_incremental();

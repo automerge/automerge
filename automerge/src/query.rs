@@ -177,7 +177,7 @@ impl VisWindow {
 
         let mut visible = false;
         match op.action {
-            OpType::Set(ScalarValue::Counter(Counter { start, .. })) => {
+            OpType::Put(ScalarValue::Counter(Counter { start, .. })) => {
                 self.counters.insert(
                     op.id,
                     CounterData {
@@ -191,13 +191,13 @@ impl VisWindow {
                     visible = true;
                 }
             }
-            OpType::Inc(inc_val) => {
+            OpType::Increment(inc_val) => {
                 for id in &op.pred {
                     // pred is always before op.id so we can see them
                     if let Some(mut entry) = self.counters.get_mut(id) {
                         entry.succ.remove(&op.id);
                         entry.val += inc_val;
-                        entry.op.action = OpType::Set(ScalarValue::counter(entry.val));
+                        entry.op.action = OpType::Put(ScalarValue::counter(entry.val));
                         if !entry.succ.iter().any(|i| clock.covers(i)) {
                             visible = true;
                         }

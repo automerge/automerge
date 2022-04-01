@@ -19,7 +19,7 @@ impl Serialize for Op {
         }
 
         let numerical_datatype = match &self.action {
-            OpType::Set(value) => value.as_numerical_datatype(),
+            OpType::Put(value) => value.as_numerical_datatype(),
             _ => None,
         };
 
@@ -47,8 +47,8 @@ impl Serialize for Op {
             op.serialize_field("datatype", &datatype)?;
         }
         match &self.action {
-            OpType::Inc(n) => op.serialize_field("value", &n)?,
-            OpType::Set(value) => op.serialize_field("value", &value)?,
+            OpType::Increment(n) => op.serialize_field("value", &n)?,
+            OpType::Put(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
         op.serialize_field("pred", &self.pred)?;
@@ -187,7 +187,7 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeTable => OpType::Make(ObjType::Table),
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
-                    RawOpType::Del => OpType::Del,
+                    RawOpType::Del => OpType::Delete,
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             let raw_value = value
@@ -204,14 +204,14 @@ impl<'de> Deserialize<'de> for Op {
                                 .ok_or_else(|| Error::missing_field("value"))?
                                 .unwrap_or(ScalarValue::Null)
                         };
-                        OpType::Set(value)
+                        OpType::Put(value)
                     }
                     RawOpType::Inc => match value.flatten() {
-                        Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
-                        Some(ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::Counter(n)) => Ok(OpType::Inc(n.into())),
-                        Some(ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
+                        Some(ScalarValue::Int(n)) => Ok(OpType::Increment(n)),
+                        Some(ScalarValue::Uint(n)) => Ok(OpType::Increment(n as i64)),
+                        Some(ScalarValue::F64(n)) => Ok(OpType::Increment(n as i64)),
+                        Some(ScalarValue::Counter(n)) => Ok(OpType::Increment(n.into())),
+                        Some(ScalarValue::Timestamp(n)) => Ok(OpType::Increment(n)),
                         Some(ScalarValue::Bytes(s)) => {
                             Err(Error::invalid_value(Unexpected::Bytes(&s), &"a number"))
                         }
@@ -266,7 +266,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Uint(123)),
+                    action: OpType::Put(ScalarValue::Uint(123)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -284,7 +284,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Int(-123)),
+                    action: OpType::Put(ScalarValue::Int(-123)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -302,7 +302,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::F64(-123.0)),
+                    action: OpType::Put(ScalarValue::F64(-123.0)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -319,7 +319,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Str("somestring".into())),
+                    action: OpType::Put(ScalarValue::Str("somestring".into())),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -336,7 +336,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::F64(1.23)),
+                    action: OpType::Put(ScalarValue::F64(1.23)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -353,7 +353,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Boolean(true)),
+                    action: OpType::Put(ScalarValue::Boolean(true)),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -382,7 +382,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Counter(123.into())),
+                    action: OpType::Put(ScalarValue::Counter(123.into())),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -430,7 +430,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Inc(12),
+                    action: OpType::Increment(12),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -447,7 +447,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Inc(12),
+                    action: OpType::Increment(12),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -474,7 +474,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Set(ScalarValue::Null),
+                    action: OpType::Put(ScalarValue::Null),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_serialize_key() {
         let map_key = Op {
-            action: OpType::Inc(12),
+            action: OpType::Increment(12),
             obj: ObjectId::Root,
             key: "somekey".into(),
             insert: false,
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(json.as_object().unwrap().get("key"), Some(&expected));
 
         let elemid_key = Op {
-            action: OpType::Inc(12),
+            action: OpType::Increment(12),
             obj: ObjectId::Root,
             key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                 .unwrap()
@@ -580,35 +580,35 @@ mod tests {
     fn test_round_trips() {
         let testcases = vec![
             Op {
-                action: OpType::Set(ScalarValue::Uint(12)),
+                action: OpType::Put(ScalarValue::Uint(12)),
                 obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
             Op {
-                action: OpType::Inc(12),
+                action: OpType::Increment(12),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
             Op {
-                action: OpType::Set(ScalarValue::Uint(12)),
+                action: OpType::Put(ScalarValue::Uint(12)),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
                 pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()].into(),
             },
             Op {
-                action: OpType::Inc(12),
+                action: OpType::Increment(12),
                 obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,
                 pred: SortedVec::new(),
             },
             Op {
-                action: OpType::Set("seomthing".into()),
+                action: OpType::Put("seomthing".into()),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                     .unwrap()

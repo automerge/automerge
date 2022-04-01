@@ -269,7 +269,7 @@ impl From<&Op> for (Value, OpId) {
     fn from(op: &Op) -> Self {
         match &op.action {
             OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Put(scalar) => (Value::Scalar(scalar.clone()), op.id),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
@@ -279,7 +279,7 @@ impl From<Op> for (Value, OpId) {
     fn from(op: Op) -> Self {
         match &op.action {
             OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Set(scalar) => (Value::Scalar(scalar.clone()), op.id),
+            OpType::Put(scalar) => (Value::Scalar(scalar.clone()), op.id),
             _ => panic!("cant convert op into a value - {:?}", op),
         }
     }
@@ -289,7 +289,7 @@ impl From<Value> for OpType {
     fn from(v: Value) -> Self {
         match v {
             Value::Object(o) => OpType::Make(o),
-            Value::Scalar(s) => OpType::Set(s),
+            Value::Scalar(s) => OpType::Put(s),
         }
     }
 }

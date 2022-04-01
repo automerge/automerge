@@ -50,7 +50,7 @@ class WriteableCounter extends Counter {
    */
   increment(delta) {
     delta = typeof delta === 'number' ? delta : 1
-    this.context.inc(this.objectId, this.key, delta)
+    this.context.increment(this.objectId, this.key, delta)
     this.value += delta
     return this.value
   }
@@ -60,7 +60,7 @@ class WriteableCounter extends Counter {
    * decreases the value of the counter by 1.
    */
   decrement(delta) {
-    return this.inc(typeof delta === 'number' ? -delta : -1)
+    return this.increment(typeof delta === 'number' ? -delta : -1)
   }
 }
 

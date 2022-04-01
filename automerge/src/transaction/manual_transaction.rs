@@ -47,7 +47,7 @@ impl<'a> Transaction<'a> {
     /// # use std::time::SystemTime;
     /// let mut doc = Automerge::new();
     /// let mut tx = doc.transaction();
-    /// tx.set_object(ROOT, "todos", ObjType::List).unwrap();
+    /// tx.put_object(ROOT, "todos", ObjType::List).unwrap();
     /// let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as
     /// i64;
     /// tx.commit_with(CommitOptions::default().with_message("Create todos list").with_time(now));
@@ -85,7 +85,7 @@ impl<'a> Transactable for Transaction<'a> {
     /// - The object does not exist
     /// - The key is the wrong type for the object
     /// - The key does not exist in the object
-    fn set<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
+    fn put<O: AsRef<ExId>, P: Into<Prop>, V: Into<ScalarValue>>(
         &mut self,
         obj: O,
         prop: P,
@@ -94,10 +94,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .set(self.doc, obj.as_ref(), prop, value)
+            .put(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn set_object<O: AsRef<ExId>, P: Into<Prop>>(
+    fn put_object<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -106,7 +106,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .set_object(self.doc, obj.as_ref(), prop, value)
+            .put_object(self.doc, obj.as_ref(), prop, value)
     }
 
     fn insert<O: AsRef<ExId>, V: Into<ScalarValue>>(
@@ -133,7 +133,7 @@ impl<'a> Transactable for Transaction<'a> {
             .insert_object(self.doc, obj, index, value)
     }
 
-    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -142,10 +142,10 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .inc(self.doc, obj.as_ref(), prop, value)
+            .increment(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<O: AsRef<ExId>, P: Into<Prop>>(
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -153,7 +153,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .del(self.doc, obj.as_ref(), prop)
+            .delete(self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert

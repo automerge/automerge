@@ -10,8 +10,8 @@ use helpers::{
 #[test]
 fn no_conflict_on_repeated_assignment() {
     let mut doc = AutoCommit::new();
-    doc.set(&automerge::ROOT, "foo", 1).unwrap();
-    doc.set(&automerge::ROOT, "foo", 2).unwrap();
+    doc.put(&automerge::ROOT, "foo", 1).unwrap();
+    doc.put(&automerge::ROOT, "foo", 2).unwrap();
     assert_doc!(
         doc.document(),
         map! {
@@ -24,14 +24,14 @@ fn no_conflict_on_repeated_assignment() {
 fn repeated_map_assignment_which_resolves_conflict_not_ignored() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "field", 123).unwrap();
+    doc1.put(&automerge::ROOT, "field", 123).unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc2.set(&automerge::ROOT, "field", 456).unwrap();
-    doc1.set(&automerge::ROOT, "field", 789).unwrap();
+    doc2.put(&automerge::ROOT, "field", 456).unwrap();
+    doc1.put(&automerge::ROOT, "field", 789).unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_eq!(doc1.values(&automerge::ROOT, "field").unwrap().len(), 2);
 
-    doc1.set(&automerge::ROOT, "field", 123).unwrap();
+    doc1.put(&automerge::ROOT, "field", 123).unwrap();
     assert_doc!(
         doc1.document(),
         map! {
@@ -45,13 +45,13 @@ fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let list_id = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc1.insert(&list_id, 0, 123).unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc2.set(&list_id, 0, 456).unwrap();
+    doc2.put(&list_id, 0, 456).unwrap();
     doc1.merge(&mut doc2).unwrap();
-    doc1.set(&list_id, 0, 789).unwrap();
+    doc1.put(&list_id, 0, 789).unwrap();
 
     assert_doc!(
         doc1.document(),
@@ -69,12 +69,12 @@ fn repeated_list_assignment_which_resolves_conflict_not_ignored() {
 fn list_deletion() {
     let mut doc = new_doc();
     let list_id = doc
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc.insert(&list_id, 0, 123).unwrap();
     doc.insert(&list_id, 1, 456).unwrap();
     doc.insert(&list_id, 2, 789).unwrap();
-    doc.del(&list_id, 1).unwrap();
+    doc.delete(&list_id, 1).unwrap();
     assert_doc!(
         doc.document(),
         map! {
@@ -90,8 +90,8 @@ fn list_deletion() {
 fn merge_concurrent_map_prop_updates() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "foo", "bar").unwrap();
-    doc2.set(&automerge::ROOT, "hello", "world").unwrap();
+    doc1.put(&automerge::ROOT, "foo", "bar").unwrap();
+    doc2.put(&automerge::ROOT, "hello", "world").unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_eq!(
         doc1.value(&automerge::ROOT, "foo").unwrap().unwrap().0,
@@ -119,11 +119,11 @@ fn merge_concurrent_map_prop_updates() {
 fn add_concurrent_increments_of_same_property() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "counter", mk_counter(0))
+    doc1.put(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.inc(&automerge::ROOT, "counter", 1).unwrap();
-    doc2.inc(&automerge::ROOT, "counter", 2).unwrap();
+    doc1.increment(&automerge::ROOT, "counter", 1).unwrap();
+    doc2.increment(&automerge::ROOT, "counter", 2).unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_doc!(
         doc1.document(),
@@ -140,14 +140,14 @@ fn add_increments_only_to_preceeded_values() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
 
-    doc1.set(&automerge::ROOT, "counter", mk_counter(0))
+    doc1.put(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
-    doc1.inc(&automerge::ROOT, "counter", 1).unwrap();
+    doc1.increment(&automerge::ROOT, "counter", 1).unwrap();
 
     // create a counter in doc2
-    doc2.set(&automerge::ROOT, "counter", mk_counter(0))
+    doc2.put(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
-    doc2.inc(&automerge::ROOT, "counter", 3).unwrap();
+    doc2.increment(&automerge::ROOT, "counter", 3).unwrap();
 
     // The two values should be conflicting rather than added
     doc1.merge(&mut doc2).unwrap();
@@ -167,8 +167,8 @@ fn add_increments_only_to_preceeded_values() {
 fn concurrent_updates_of_same_field() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "field", "one").unwrap();
-    doc2.set(&automerge::ROOT, "field", "two").unwrap();
+    doc1.put(&automerge::ROOT, "field", "one").unwrap();
+    doc2.put(&automerge::ROOT, "field", "two").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -188,12 +188,12 @@ fn concurrent_updates_of_same_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let list_id = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::List)
+        .put_object(&automerge::ROOT, "birds", ObjType::List)
         .unwrap();
     doc1.insert(&list_id, 0, "finch").unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.set(&list_id, 0, "greenfinch").unwrap();
-    doc2.set(&list_id, 0, "goldfinch").unwrap();
+    doc1.put(&list_id, 0, "greenfinch").unwrap();
+    doc2.put(&list_id, 0, "goldfinch").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -215,10 +215,10 @@ fn assignment_conflicts_of_different_types() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let mut doc3 = new_doc();
-    doc1.set(&automerge::ROOT, "field", "string").unwrap();
-    doc2.set_object(&automerge::ROOT, "field", ObjType::List)
+    doc1.put(&automerge::ROOT, "field", "string").unwrap();
+    doc2.put_object(&automerge::ROOT, "field", ObjType::List)
         .unwrap();
-    doc3.set_object(&automerge::ROOT, "field", ObjType::Map)
+    doc3.put_object(&automerge::ROOT, "field", ObjType::Map)
         .unwrap();
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
@@ -239,11 +239,11 @@ fn assignment_conflicts_of_different_types() {
 fn changes_within_conflicting_map_field() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "field", "string").unwrap();
+    doc1.put(&automerge::ROOT, "field", "string").unwrap();
     let map_id = doc2
-        .set_object(&automerge::ROOT, "field", ObjType::Map)
+        .put_object(&automerge::ROOT, "field", ObjType::Map)
         .unwrap();
-    doc2.set(&map_id, "innerKey", 42).unwrap();
+    doc2.put(&map_id, "innerKey", 42).unwrap();
     doc1.merge(&mut doc2).unwrap();
 
     assert_doc!(
@@ -267,19 +267,19 @@ fn changes_within_conflicting_list_element() {
     let mut doc1 = new_doc_with_actor(actor1);
     let mut doc2 = new_doc_with_actor(actor2);
     let list_id = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc1.insert(&list_id, 0, "hello").unwrap();
     doc2.merge(&mut doc1).unwrap();
 
-    let map_in_doc1 = doc1.set_object(&list_id, 0, ObjType::Map).unwrap();
-    doc1.set(&map_in_doc1, "map1", true).unwrap();
-    doc1.set(&map_in_doc1, "key", 1).unwrap();
+    let map_in_doc1 = doc1.put_object(&list_id, 0, ObjType::Map).unwrap();
+    doc1.put(&map_in_doc1, "map1", true).unwrap();
+    doc1.put(&map_in_doc1, "key", 1).unwrap();
 
-    let map_in_doc2 = doc2.set_object(&list_id, 0, ObjType::Map).unwrap();
+    let map_in_doc2 = doc2.put_object(&list_id, 0, ObjType::Map).unwrap();
     doc1.merge(&mut doc2).unwrap();
-    doc2.set(&map_in_doc2, "map2", true).unwrap();
-    doc2.set(&map_in_doc2, "key", 2).unwrap();
+    doc2.put(&map_in_doc2, "map2", true).unwrap();
+    doc2.put(&map_in_doc2, "key", 2).unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -310,14 +310,14 @@ fn concurrently_assigned_nested_maps_should_not_merge() {
     let mut doc2 = new_doc();
 
     let doc1_map_id = doc1
-        .set_object(&automerge::ROOT, "config", ObjType::Map)
+        .put_object(&automerge::ROOT, "config", ObjType::Map)
         .unwrap();
-    doc1.set(&doc1_map_id, "background", "blue").unwrap();
+    doc1.put(&doc1_map_id, "background", "blue").unwrap();
 
     let doc2_map_id = doc2
-        .set_object(&automerge::ROOT, "config", ObjType::Map)
+        .put_object(&automerge::ROOT, "config", ObjType::Map)
         .unwrap();
-    doc2.set(&doc2_map_id, "logo_url", "logo.png").unwrap();
+    doc2.put(&doc2_map_id, "logo_url", "logo.png").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -344,7 +344,7 @@ fn concurrent_insertions_at_different_list_positions() {
     assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
 
     doc1.insert(&list_id, 0, "one").unwrap();
@@ -378,7 +378,7 @@ fn concurrent_insertions_at_same_list_position() {
     assert!(doc1.get_actor() < doc2.get_actor());
 
     let list_id = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::List)
+        .put_object(&automerge::ROOT, "birds", ObjType::List)
         .unwrap();
     doc1.insert(&list_id, 0, "parakeet").unwrap();
 
@@ -411,10 +411,10 @@ fn concurrent_insertions_at_same_list_position() {
 fn concurrent_assignment_and_deletion_of_a_map_entry() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
-    doc1.set(&automerge::ROOT, "bestBird", "robin").unwrap();
+    doc1.put(&automerge::ROOT, "bestBird", "robin").unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.del(&automerge::ROOT, "bestBird").unwrap();
-    doc2.set(&automerge::ROOT, "bestBird", "magpie").unwrap();
+    doc1.delete(&automerge::ROOT, "bestBird").unwrap();
+    doc2.put(&automerge::ROOT, "bestBird", "magpie").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -433,14 +433,14 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let list_id = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::List)
+        .put_object(&automerge::ROOT, "birds", ObjType::List)
         .unwrap();
     doc1.insert(&list_id, 0, "blackbird").unwrap();
     doc1.insert(&list_id, 1, "thrush").unwrap();
     doc1.insert(&list_id, 2, "goldfinch").unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.set(&list_id, 1, "starling").unwrap();
-    doc2.del(&list_id, 1).unwrap();
+    doc1.put(&list_id, 1, "starling").unwrap();
+    doc2.delete(&list_id, 1).unwrap();
 
     assert_doc!(
         doc2.document(),
@@ -482,7 +482,7 @@ fn insertion_after_a_deleted_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let list_id = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::List)
+        .put_object(&automerge::ROOT, "birds", ObjType::List)
         .unwrap();
 
     doc1.insert(&list_id, 0, "blackbird").unwrap();
@@ -525,7 +525,7 @@ fn concurrent_deletion_of_same_list_element() {
     let mut doc1 = new_doc();
     let mut doc2 = new_doc();
     let list_id = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::List)
+        .put_object(&automerge::ROOT, "birds", ObjType::List)
         .unwrap();
 
     doc1.insert(&list_id, 0, "albatross").unwrap();
@@ -534,9 +534,9 @@ fn concurrent_deletion_of_same_list_element() {
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.del(&list_id, 1).unwrap();
+    doc1.delete(&list_id, 1).unwrap();
 
-    doc2.del(&list_id, 1).unwrap();
+    doc2.delete(&list_id, 1).unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -568,20 +568,20 @@ fn concurrent_updates_at_different_levels() {
     let mut doc2 = new_doc();
 
     let animals = doc1
-        .set_object(&automerge::ROOT, "animals", ObjType::Map)
+        .put_object(&automerge::ROOT, "animals", ObjType::Map)
         .unwrap();
-    let birds = doc1.set_object(&animals, "birds", ObjType::Map).unwrap();
-    doc1.set(&birds, "pink", "flamingo").unwrap();
-    doc1.set(&birds, "black", "starling").unwrap();
+    let birds = doc1.put_object(&animals, "birds", ObjType::Map).unwrap();
+    doc1.put(&birds, "pink", "flamingo").unwrap();
+    doc1.put(&birds, "black", "starling").unwrap();
 
-    let mammals = doc1.set_object(&animals, "mammals", ObjType::List).unwrap();
+    let mammals = doc1.put_object(&animals, "mammals", ObjType::List).unwrap();
     doc1.insert(&mammals, 0, "badger").unwrap();
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.set(&birds, "brown", "sparrow").unwrap();
+    doc1.put(&birds, "brown", "sparrow").unwrap();
 
-    doc2.del(&animals, "birds").unwrap();
+    doc2.delete(&animals, "birds").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
     assert_obj!(
@@ -613,16 +613,16 @@ fn concurrent_updates_of_concurrently_deleted_objects() {
     let mut doc2 = new_doc();
 
     let birds = doc1
-        .set_object(&automerge::ROOT, "birds", ObjType::Map)
+        .put_object(&automerge::ROOT, "birds", ObjType::Map)
         .unwrap();
-    let blackbird = doc1.set_object(&birds, "blackbird", ObjType::Map).unwrap();
-    doc1.set(&blackbird, "feathers", "black").unwrap();
+    let blackbird = doc1.put_object(&birds, "blackbird", ObjType::Map).unwrap();
+    doc1.put(&blackbird, "feathers", "black").unwrap();
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.del(&birds, "blackbird").unwrap();
+    doc1.delete(&birds, "blackbird").unwrap();
 
-    doc2.set(&blackbird, "beak", "orange").unwrap();
+    doc2.put(&blackbird, "beak", "orange").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -643,7 +643,7 @@ fn does_not_interleave_sequence_insertions_at_same_position() {
     let mut doc2 = new_doc_with_actor(actor2);
 
     let wisdom = doc1
-        .set_object(&automerge::ROOT, "wisdom", ObjType::List)
+        .put_object(&automerge::ROOT, "wisdom", ObjType::List)
         .unwrap();
     doc2.merge(&mut doc1).unwrap();
 
@@ -704,7 +704,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_greater_actor_id(
     let mut doc2 = new_doc_with_actor(actor2);
 
     let list = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1).unwrap();
@@ -729,7 +729,7 @@ fn mutliple_insertions_at_same_list_position_with_insertion_by_lesser_actor_id()
     let mut doc2 = new_doc_with_actor(actor2);
 
     let list = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc1.insert(&list, 0, "two").unwrap();
     doc2.merge(&mut doc1).unwrap();
@@ -752,7 +752,7 @@ fn insertion_consistent_with_causality() {
     let mut doc2 = new_doc();
 
     let list = doc1
-        .set_object(&automerge::ROOT, "list", ObjType::List)
+        .put_object(&automerge::ROOT, "list", ObjType::List)
         .unwrap();
     doc1.insert(&list, 0, "four").unwrap();
     doc2.merge(&mut doc1).unwrap();
@@ -787,18 +787,18 @@ fn save_and_restore_empty() {
 fn save_restore_complex() {
     let mut doc1 = new_doc();
     let todos = doc1
-        .set_object(&automerge::ROOT, "todos", ObjType::List)
+        .put_object(&automerge::ROOT, "todos", ObjType::List)
         .unwrap();
 
     let first_todo = doc1.insert_object(&todos, 0, ObjType::Map).unwrap();
-    doc1.set(&first_todo, "title", "water plants").unwrap();
-    doc1.set(&first_todo, "done", false).unwrap();
+    doc1.put(&first_todo, "title", "water plants").unwrap();
+    doc1.put(&first_todo, "done", false).unwrap();
 
     let mut doc2 = new_doc();
     doc2.merge(&mut doc1).unwrap();
-    doc2.set(&first_todo, "title", "weed plants").unwrap();
+    doc2.put(&first_todo, "title", "weed plants").unwrap();
 
-    doc1.set(&first_todo, "title", "kill plants").unwrap();
+    doc1.put(&first_todo, "title", "kill plants").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
     let reloaded = Automerge::load(&doc1.save()).unwrap();
@@ -830,7 +830,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     let mut doc1 = new_doc_with_actor(actor1);
 
-    let list = doc1.set_object(ROOT, "list", ObjType::List)?;
+    let list = doc1.put_object(ROOT, "list", ObjType::List)?;
     doc1.insert(&list, 0, "a")?;
     doc1.insert(&list, 1, "b")?;
     doc1.insert(&list, 2, "c")?;
@@ -841,16 +841,16 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     let mut doc3 = AutoCommit::load(&doc1.save())?;
     doc3.set_actor(actor3);
 
-    doc1.set(&list, 1, ScalarValue::counter(0))?;
-    doc2.set(&list, 1, ScalarValue::counter(10))?;
-    doc3.set(&list, 1, ScalarValue::counter(100))?;
+    doc1.put(&list, 1, ScalarValue::counter(0))?;
+    doc2.put(&list, 1, ScalarValue::counter(10))?;
+    doc3.put(&list, 1, ScalarValue::counter(100))?;
 
-    doc1.set(&list, 2, ScalarValue::counter(0))?;
-    doc2.set(&list, 2, ScalarValue::counter(10))?;
-    doc3.set(&list, 2, 100)?;
+    doc1.put(&list, 2, ScalarValue::counter(0))?;
+    doc2.put(&list, 2, ScalarValue::counter(10))?;
+    doc3.put(&list, 2, 100)?;
 
-    doc1.inc(&list, 1, 1)?;
-    doc1.inc(&list, 2, 1)?;
+    doc1.increment(&list, 1, 1)?;
+    doc1.increment(&list, 2, 1)?;
 
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
@@ -867,8 +867,8 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     assert_eq!(&values[1].0, &Value::counter(10));
     assert_eq!(&values[2].0, &Value::int(100));
 
-    doc1.inc(&list, 1, 1)?;
-    doc1.inc(&list, 2, 1)?;
+    doc1.increment(&list, 1, 1)?;
+    doc1.increment(&list, 2, 1)?;
 
     let values = doc1.values(&list, 1)?;
     assert_eq!(values.len(), 3);
@@ -883,7 +883,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 3);
 
-    doc1.del(&list, 2)?;
+    doc1.delete(&list, 2)?;
 
     assert_eq!(doc1.length(&list), 2);
 
@@ -891,7 +891,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc4.length(&list), 2);
 
-    doc1.del(&list, 1)?;
+    doc1.delete(&list, 1)?;
 
     assert_eq!(doc1.length(&list), 1);
 
