@@ -58,7 +58,7 @@ pub trait Transactable {
     ) -> Result<ExId, AutomergeError>;
 
     /// Increment the counter at the prop in the object by `value`.
-    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -66,8 +66,11 @@ pub trait Transactable {
     ) -> Result<(), AutomergeError>;
 
     /// Delete the value at prop in the object.
-    fn del<O: AsRef<ExId>, P: Into<Prop>>(&mut self, obj: O, prop: P)
-        -> Result<(), AutomergeError>;
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
+        &mut self,
+        obj: O,
+        prop: P,
+    ) -> Result<(), AutomergeError>;
 
     fn splice<O: AsRef<ExId>, V: IntoIterator<Item = ScalarValue>>(
         &mut self,

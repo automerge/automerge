@@ -266,7 +266,7 @@ impl Automerge {
         let value: f64 = value
             .as_f64()
             .ok_or_else(|| to_js_err("inc needs a numberic value"))?;
-        self.0.inc(&obj, prop, value as i64)?;
+        self.0.increment(&obj, prop, value as i64)?;
         Ok(())
     }
 
@@ -418,7 +418,7 @@ impl Automerge {
     pub fn del(&mut self, obj: JsValue, prop: JsValue) -> Result<(), JsValue> {
         let obj = self.import(obj)?;
         let prop = to_prop(prop)?;
-        self.0.del(&obj, prop).map_err(to_js_err)?;
+        self.0.delete(&obj, prop).map_err(to_js_err)?;
         Ok(())
     }
 

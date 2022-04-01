@@ -1075,7 +1075,7 @@ mod tests {
         let mut tx = doc.transaction();
         tx.set(ROOT, "xxx", "xxx")?;
         assert!(!tx.values(ROOT, "xxx")?.is_empty());
-        tx.del(ROOT, "xxx")?;
+        tx.delete(ROOT, "xxx")?;
         assert!(tx.values(ROOT, "xxx")?.is_empty());
         tx.commit();
         Ok(())
@@ -1087,9 +1087,9 @@ mod tests {
         let mut tx = doc.transaction();
         tx.set(ROOT, "counter", ScalarValue::counter(10))?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(10));
-        tx.inc(ROOT, "counter", 10)?;
+        tx.increment(ROOT, "counter", 10)?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(20));
-        tx.inc(ROOT, "counter", -5)?;
+        tx.increment(ROOT, "counter", -5)?;
         assert!(tx.value(ROOT, "counter")?.unwrap().0 == Value::counter(15));
         tx.commit();
         Ok(())
@@ -1182,7 +1182,7 @@ mod tests {
         doc.get_heads();
         let heads3 = doc.get_heads();
         let mut tx = doc.transaction();
-        tx.del(ROOT, "prop1")?;
+        tx.delete(ROOT, "prop1")?;
         tx.commit();
         doc.get_heads();
         let heads4 = doc.get_heads();
@@ -1264,12 +1264,12 @@ mod tests {
         let heads4 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 2)?;
+        tx.delete(&list, 2)?;
         tx.commit();
         let heads5 = doc.get_heads();
 
         let mut tx = doc.transaction();
-        tx.del(&list, 0)?;
+        tx.delete(&list, 0)?;
         tx.commit();
         let heads6 = doc.get_heads();
 
@@ -1399,7 +1399,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting a missing key in a map should just be a noop
-        assert!(tx.del(ROOT, "a").is_ok());
+        assert!(tx.delete(ROOT, "a").is_ok());
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 0);
@@ -1415,9 +1415,9 @@ mod tests {
 
         let mut tx = doc.transaction();
         // a real op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         // a no-op
-        tx.del(ROOT, "a").unwrap();
+        tx.delete(ROOT, "a").unwrap();
         tx.commit();
         let last_change = doc.get_last_local_change().unwrap();
         assert_eq!(last_change.len(), 1);
@@ -1428,7 +1428,7 @@ mod tests {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
         // deleting an element in a list that does not exist is an error
-        assert!(tx.del(ROOT, 0).is_err());
+        assert!(tx.delete(ROOT, 0).is_err());
     }
 
     #[test]
@@ -1525,7 +1525,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }
@@ -1578,7 +1578,7 @@ mod tests {
                 }
                 Action::DelText(index) => {
                     println!("deleting at {} ", index);
-                    tx.del(&list, index).unwrap();
+                    tx.delete(&list, index).unwrap();
                 }
             }
         }

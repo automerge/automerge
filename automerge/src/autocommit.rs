@@ -305,7 +305,7 @@ impl Transactable for AutoCommit {
         tx.insert_object(&mut self.doc, obj, index, value)
     }
 
-    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -316,7 +316,7 @@ impl Transactable for AutoCommit {
         tx.inc(&mut self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<O: AsRef<ExId>, P: Into<Prop>>(
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,

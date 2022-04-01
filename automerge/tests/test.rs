@@ -74,7 +74,7 @@ fn list_deletion() {
     doc.insert(&list_id, 0, 123).unwrap();
     doc.insert(&list_id, 1, 456).unwrap();
     doc.insert(&list_id, 2, 789).unwrap();
-    doc.del(&list_id, 1).unwrap();
+    doc.delete(&list_id, 1).unwrap();
     assert_doc!(
         doc.document(),
         map! {
@@ -122,8 +122,8 @@ fn add_concurrent_increments_of_same_property() {
     doc1.set(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.inc(&automerge::ROOT, "counter", 1).unwrap();
-    doc2.inc(&automerge::ROOT, "counter", 2).unwrap();
+    doc1.increment(&automerge::ROOT, "counter", 1).unwrap();
+    doc2.increment(&automerge::ROOT, "counter", 2).unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_doc!(
         doc1.document(),
@@ -142,12 +142,12 @@ fn add_increments_only_to_preceeded_values() {
 
     doc1.set(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
-    doc1.inc(&automerge::ROOT, "counter", 1).unwrap();
+    doc1.increment(&automerge::ROOT, "counter", 1).unwrap();
 
     // create a counter in doc2
     doc2.set(&automerge::ROOT, "counter", mk_counter(0))
         .unwrap();
-    doc2.inc(&automerge::ROOT, "counter", 3).unwrap();
+    doc2.increment(&automerge::ROOT, "counter", 3).unwrap();
 
     // The two values should be conflicting rather than added
     doc1.merge(&mut doc2).unwrap();
@@ -413,7 +413,7 @@ fn concurrent_assignment_and_deletion_of_a_map_entry() {
     let mut doc2 = new_doc();
     doc1.set(&automerge::ROOT, "bestBird", "robin").unwrap();
     doc2.merge(&mut doc1).unwrap();
-    doc1.del(&automerge::ROOT, "bestBird").unwrap();
+    doc1.delete(&automerge::ROOT, "bestBird").unwrap();
     doc2.set(&automerge::ROOT, "bestBird", "magpie").unwrap();
 
     doc1.merge(&mut doc2).unwrap();
@@ -440,7 +440,7 @@ fn concurrent_assignment_and_deletion_of_list_entry() {
     doc1.insert(&list_id, 2, "goldfinch").unwrap();
     doc2.merge(&mut doc1).unwrap();
     doc1.set(&list_id, 1, "starling").unwrap();
-    doc2.del(&list_id, 1).unwrap();
+    doc2.delete(&list_id, 1).unwrap();
 
     assert_doc!(
         doc2.document(),
@@ -534,9 +534,9 @@ fn concurrent_deletion_of_same_list_element() {
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.del(&list_id, 1).unwrap();
+    doc1.delete(&list_id, 1).unwrap();
 
-    doc2.del(&list_id, 1).unwrap();
+    doc2.delete(&list_id, 1).unwrap();
 
     doc1.merge(&mut doc2).unwrap();
 
@@ -581,7 +581,7 @@ fn concurrent_updates_at_different_levels() {
 
     doc1.set(&birds, "brown", "sparrow").unwrap();
 
-    doc2.del(&animals, "birds").unwrap();
+    doc2.delete(&animals, "birds").unwrap();
     doc1.merge(&mut doc2).unwrap();
 
     assert_obj!(
@@ -620,7 +620,7 @@ fn concurrent_updates_of_concurrently_deleted_objects() {
 
     doc2.merge(&mut doc1).unwrap();
 
-    doc1.del(&birds, "blackbird").unwrap();
+    doc1.delete(&birds, "blackbird").unwrap();
 
     doc2.set(&blackbird, "beak", "orange").unwrap();
 
@@ -849,8 +849,8 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc2.set(&list, 2, ScalarValue::counter(10))?;
     doc3.set(&list, 2, 100)?;
 
-    doc1.inc(&list, 1, 1)?;
-    doc1.inc(&list, 2, 1)?;
+    doc1.increment(&list, 1, 1)?;
+    doc1.increment(&list, 2, 1)?;
 
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
@@ -867,8 +867,8 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     assert_eq!(&values[1].0, &Value::counter(10));
     assert_eq!(&values[2].0, &Value::int(100));
 
-    doc1.inc(&list, 1, 1)?;
-    doc1.inc(&list, 2, 1)?;
+    doc1.increment(&list, 1, 1)?;
+    doc1.increment(&list, 2, 1)?;
 
     let values = doc1.values(&list, 1)?;
     assert_eq!(values.len(), 3);
@@ -883,7 +883,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc1.length(&list), 3);
 
-    doc1.del(&list, 2)?;
+    doc1.delete(&list, 2)?;
 
     assert_eq!(doc1.length(&list), 2);
 
@@ -891,7 +891,7 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
 
     assert_eq!(doc4.length(&list), 2);
 
-    doc1.del(&list, 1)?;
+    doc1.delete(&list, 1)?;
 
     assert_eq!(doc1.length(&list), 1);
 

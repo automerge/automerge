@@ -133,7 +133,7 @@ impl<'a> Transactable for Transaction<'a> {
             .insert_object(self.doc, obj, index, value)
     }
 
-    fn inc<O: AsRef<ExId>, P: Into<Prop>>(
+    fn increment<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,
@@ -145,7 +145,7 @@ impl<'a> Transactable for Transaction<'a> {
             .inc(self.doc, obj.as_ref(), prop, value)
     }
 
-    fn del<O: AsRef<ExId>, P: Into<Prop>>(
+    fn delete<O: AsRef<ExId>, P: Into<Prop>>(
         &mut self,
         obj: O,
         prop: P,

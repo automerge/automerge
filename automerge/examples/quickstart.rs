@@ -42,7 +42,7 @@ fn main() {
     doc2.transact_with::<_, _, AutomergeError, _>(
         |_| CommitOptions::default().with_message("Delete card".to_owned()),
         |tx| {
-            tx.del(&cards, 0)?;
+            tx.delete(&cards, 0)?;
             Ok(())
         },
     )
