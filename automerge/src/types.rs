@@ -168,9 +168,8 @@ impl fmt::Display for ObjType {
 #[derive(PartialEq, Debug, Clone)]
 pub enum OpType {
     Make(ObjType),
-    /// Perform a deletion, expanding the operation to cover `n` deletions (multiOp).
-    Del,
-    Inc(i64),
+    Delete,
+    Increment(i64),
     Set(ScalarValue),
 }
 
@@ -374,7 +373,7 @@ impl Op {
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current += *n;
                 *increments += 1;
             }
@@ -389,7 +388,7 @@ impl Op {
             ..
         })) = &mut self.action
         {
-            if let OpType::Inc(n) = &op.action {
+            if let OpType::Increment(n) = &op.action {
                 *current -= *n;
                 *increments -= 1;
             }
@@ -414,12 +413,12 @@ impl Op {
         }
     }
 
-    pub fn is_del(&self) -> bool {
-        matches!(&self.action, OpType::Del)
+    pub fn is_delete(&self) -> bool {
+        matches!(&self.action, OpType::Delete)
     }
 
     pub fn is_inc(&self) -> bool {
-        matches!(&self.action, OpType::Inc(_))
+        matches!(&self.action, OpType::Increment(_))
     }
 
     pub fn is_counter(&self) -> bool {
@@ -460,8 +459,8 @@ impl Op {
             OpType::Set(value) if self.insert => format!("i:{}", value),
             OpType::Set(value) => format!("s:{}", value),
             OpType::Make(obj) => format!("make{}", obj),
-            OpType::Inc(val) => format!("inc:{}", val),
-            OpType::Del => "del".to_string(),
+            OpType::Increment(val) => format!("inc:{}", val),
+            OpType::Delete => "del".to_string(),
         }
     }
 }

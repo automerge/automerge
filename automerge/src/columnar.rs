@@ -135,8 +135,8 @@ impl<'a> Iterator for OperationIterator<'a> {
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
             Action::MakeTable => OpType::Make(ObjType::Table),
-            Action::Del => OpType::Del,
-            Action::Inc => OpType::Inc(value.to_i64()?),
+            Action::Del => OpType::Delete,
+            Action::Inc => OpType::Increment(value.to_i64()?),
         };
         Some(amp::Op {
             action,
@@ -176,8 +176,8 @@ impl<'a> Iterator for DocOpIterator<'a> {
             Action::MakeText => OpType::Make(ObjType::Text),
             Action::MakeMap => OpType::Make(ObjType::Map),
             Action::MakeTable => OpType::Make(ObjType::Table),
-            Action::Del => OpType::Del,
-            Action::Inc => OpType::Inc(value.to_i64()?),
+            Action::Del => OpType::Delete,
+            Action::Inc => OpType::Increment(value.to_i64()?),
         };
         Some(DocOp {
             actor,
@@ -1055,11 +1055,11 @@ impl DocOpEncoder {
                     self.val.append_value(value, actors);
                     Action::Set
                 }
-                amp::OpType::Inc(val) => {
+                amp::OpType::Increment(val) => {
                     self.val.append_value(&ScalarValue::Int(*val), actors);
                     Action::Inc
                 }
-                amp::OpType::Del => {
+                amp::OpType::Delete => {
                     self.val.append_null();
                     Action::Del
                 }
@@ -1161,11 +1161,11 @@ impl ColumnEncoder {
                 self.val.append_value2(value, actors);
                 Action::Set
             }
-            OpType::Inc(val) => {
+            OpType::Increment(val) => {
                 self.val.append_value2(&ScalarValue::Int(*val), actors);
                 Action::Inc
             }
-            OpType::Del => {
+            OpType::Delete => {
                 self.val.append_null();
                 Action::Del
             }

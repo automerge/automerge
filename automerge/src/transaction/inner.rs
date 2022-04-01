@@ -142,7 +142,7 @@ impl TransactionInner {
             });
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             doc.ops.insert(pos, &obj, op.clone());
         }
 
@@ -236,7 +236,7 @@ impl TransactionInner {
         let query = doc.ops.search(&obj, query::Prop::new(prop));
 
         // no key present to delete
-        if query.ops.is_empty() && action == OpType::Del {
+        if query.ops.is_empty() && action == OpType::Delete {
             return Ok(None);
         }
 
@@ -303,7 +303,7 @@ impl TransactionInner {
         }
     }
 
-    pub fn inc<P: Into<Prop>>(
+    pub fn increment<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
@@ -311,18 +311,18 @@ impl TransactionInner {
         value: i64,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Inc(value))?;
+        self.local_op(doc, obj, prop.into(), OpType::Increment(value))?;
         Ok(())
     }
 
-    pub fn del<P: Into<Prop>>(
+    pub fn delete<P: Into<Prop>>(
         &mut self,
         doc: &mut Automerge,
         obj: &ExId,
         prop: P,
     ) -> Result<(), AutomergeError> {
         let obj = doc.exid_to_obj(obj)?;
-        self.local_op(doc, obj, prop.into(), OpType::Del)?;
+        self.local_op(doc, obj, prop.into(), OpType::Delete)?;
         Ok(())
     }
 
@@ -339,7 +339,7 @@ impl TransactionInner {
         let obj = doc.exid_to_obj(obj)?;
         for _ in 0..del {
             // del()
-            self.local_op(doc, obj, pos.into(), OpType::Del)?;
+            self.local_op(doc, obj, pos.into(), OpType::Delete)?;
         }
         for v in vals {
             // insert()

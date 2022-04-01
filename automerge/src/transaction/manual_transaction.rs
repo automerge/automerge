@@ -142,7 +142,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .inc(self.doc, obj.as_ref(), prop, value)
+            .increment(self.doc, obj.as_ref(), prop, value)
     }
 
     fn delete<O: AsRef<ExId>, P: Into<Prop>>(
@@ -153,7 +153,7 @@ impl<'a> Transactable for Transaction<'a> {
         self.inner
             .as_mut()
             .unwrap()
-            .del(self.doc, obj.as_ref(), prop)
+            .delete(self.doc, obj.as_ref(), prop)
     }
 
     /// Splice new elements into the given sequence. Returns a vector of the OpIds used to insert

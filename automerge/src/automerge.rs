@@ -205,7 +205,7 @@ impl Automerge {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             self.ops.insert(q.pos, obj, op.clone());
         }
         op
@@ -218,7 +218,7 @@ impl Automerge {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
-        if !op.is_del() {
+        if !op.is_delete() {
             self.ops.insert(q.pos, obj, op.clone());
         }
 
@@ -231,7 +231,7 @@ impl Automerge {
         let patch = if op.insert {
             let value = (op.value(), self.id_to_exid(op.id));
             Patch::Insert(obj, q.seen, value)
-        } else if op.is_del() {
+        } else if op.is_delete() {
             if let Some(winner) = &q.values.last() {
                 let value = (winner.value(), self.id_to_exid(winner.id));
                 let conflict = q.values.len() > 1;
@@ -958,8 +958,8 @@ impl Automerge {
             let value: String = match &op.action {
                 OpType::Set(value) => format!("{}", value),
                 OpType::Make(obj) => format!("make({})", obj),
-                OpType::Inc(obj) => format!("inc({})", obj),
-                OpType::Del => format!("del{}", 0),
+                OpType::Increment(obj) => format!("inc({})", obj),
+                OpType::Delete => format!("del{}", 0),
             };
             let pred: Vec<_> = op.pred.iter().map(|id| self.to_string(*id)).collect();
             let succ: Vec<_> = op.succ.iter().map(|id| self.to_string(*id)).collect();

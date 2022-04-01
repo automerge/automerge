@@ -191,7 +191,7 @@ impl VisWindow {
                     visible = true;
                 }
             }
-            OpType::Inc(inc_val) => {
+            OpType::Increment(inc_val) => {
                 for id in &op.pred {
                     // pred is always before op.id so we can see them
                     if let Some(mut entry) = self.counters.get_mut(id) {

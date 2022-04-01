@@ -47,7 +47,7 @@ impl Serialize for Op {
             op.serialize_field("datatype", &datatype)?;
         }
         match &self.action {
-            OpType::Inc(n) => op.serialize_field("value", &n)?,
+            OpType::Increment(n) => op.serialize_field("value", &n)?,
             OpType::Set(value) => op.serialize_field("value", &value)?,
             _ => {}
         }
@@ -187,7 +187,7 @@ impl<'de> Deserialize<'de> for Op {
                     RawOpType::MakeTable => OpType::Make(ObjType::Table),
                     RawOpType::MakeList => OpType::Make(ObjType::List),
                     RawOpType::MakeText => OpType::Make(ObjType::Text),
-                    RawOpType::Del => OpType::Del,
+                    RawOpType::Del => OpType::Delete,
                     RawOpType::Set => {
                         let value = if let Some(datatype) = datatype {
                             let raw_value = value
@@ -207,11 +207,11 @@ impl<'de> Deserialize<'de> for Op {
                         OpType::Set(value)
                     }
                     RawOpType::Inc => match value.flatten() {
-                        Some(ScalarValue::Int(n)) => Ok(OpType::Inc(n)),
-                        Some(ScalarValue::Uint(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::F64(n)) => Ok(OpType::Inc(n as i64)),
-                        Some(ScalarValue::Counter(n)) => Ok(OpType::Inc(n.into())),
-                        Some(ScalarValue::Timestamp(n)) => Ok(OpType::Inc(n)),
+                        Some(ScalarValue::Int(n)) => Ok(OpType::Increment(n)),
+                        Some(ScalarValue::Uint(n)) => Ok(OpType::Increment(n as i64)),
+                        Some(ScalarValue::F64(n)) => Ok(OpType::Increment(n as i64)),
+                        Some(ScalarValue::Counter(n)) => Ok(OpType::Increment(n.into())),
+                        Some(ScalarValue::Timestamp(n)) => Ok(OpType::Increment(n)),
                         Some(ScalarValue::Bytes(s)) => {
                             Err(Error::invalid_value(Unexpected::Bytes(&s), &"a number"))
                         }
@@ -430,7 +430,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Inc(12),
+                    action: OpType::Increment(12),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -447,7 +447,7 @@ mod tests {
                     "pred": []
                 }),
                 expected: Ok(Op {
-                    action: OpType::Inc(12),
+                    action: OpType::Increment(12),
                     obj: ObjectId::Root,
                     key: "somekey".into(),
                     insert: false,
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_serialize_key() {
         let map_key = Op {
-            action: OpType::Inc(12),
+            action: OpType::Increment(12),
             obj: ObjectId::Root,
             key: "somekey".into(),
             insert: false,
@@ -563,7 +563,7 @@ mod tests {
         assert_eq!(json.as_object().unwrap().get("key"), Some(&expected));
 
         let elemid_key = Op {
-            action: OpType::Inc(12),
+            action: OpType::Increment(12),
             obj: ObjectId::Root,
             key: OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716")
                 .unwrap()
@@ -587,7 +587,7 @@ mod tests {
                 pred: SortedVec::new(),
             },
             Op {
-                action: OpType::Inc(12),
+                action: OpType::Increment(12),
                 obj: ObjectId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap(),
                 key: "somekey".into(),
                 insert: false,
@@ -601,7 +601,7 @@ mod tests {
                 pred: vec![OpId::from_str("1@7ef48769b04d47e9a88e98a134d62716").unwrap()].into(),
             },
             Op {
-                action: OpType::Inc(12),
+                action: OpType::Increment(12),
                 obj: ObjectId::Root,
                 key: "somekey".into(),
                 insert: false,

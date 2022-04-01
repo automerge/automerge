@@ -234,10 +234,10 @@ impl OpTableRow {
         actor_shorthands: &HashMap<usize, String>,
     ) -> Self {
         let op_description = match &op.action {
-            crate::OpType::Del => "del".to_string(),
+            crate::OpType::Delete => "del".to_string(),
             crate::OpType::Set(v) => format!("set {}", v),
             crate::OpType::Make(obj) => format!("make {}", obj),
-            crate::OpType::Inc(v) => format!("inc {}", v),
+            crate::OpType::Increment(v) => format!("inc {}", v),
         };
         let prop = match op.key {
             crate::types::Key::Map(k) => metadata.props[k].clone(),
