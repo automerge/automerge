@@ -7,7 +7,7 @@ let state = Automerge.from({text: new Automerge.Text()})
 
 state = Automerge.change(state, doc => {
   for (let i = 0; i < edits.length; i++) {
-    if (i % 1000 === 0) {
+    if (i % 10000 === 0) {
       console.log(`Processed ${i} edits in ${new Date() - start} ms`)
     }
     let edit = edits[i]

@@ -5,7 +5,7 @@ const start = new Date()
 let chars = []
 for (let i = 0; i < edits.length; i++) {
   let edit = edits[i]
-  if (i % 1000 === 0) {
+  if (i % 10000 === 0) {
     console.log(`Processed ${i} edits in ${new Date() - start} ms`)
   }
   chars.splice(...edit)
