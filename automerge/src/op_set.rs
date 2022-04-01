@@ -76,6 +76,19 @@ impl OpSetInternal {
         }
     }
 
+    pub fn range_at<R: RangeBounds<Prop>>(
+        &self,
+        obj: ObjId,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::RangeAt<R>> {
+        if let Some((_typ, tree)) = self.trees.get(&obj) {
+            tree.range_at(range, &self.m, clock)
+        } else {
+            None
+        }
+    }
+
     pub fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
         Q: TreeQuery<'a>,
