@@ -525,7 +525,10 @@ impl Automerge {
     }
 
     /// Apply changes to this document.
-    pub fn apply_changes(&mut self, changes: Vec<Change>) -> Result<(), AutomergeError> {
+    pub fn apply_changes(
+        &mut self,
+        changes: impl IntoIterator<Item = Change>,
+    ) -> Result<(), AutomergeError> {
         for c in changes {
             if !self.history_index.contains_key(&c.hash) {
                 if self.duplicate_seq(&c) {
