@@ -299,7 +299,7 @@ impl Automerge {
                 }
                 Some((Value::Scalar(value), _)) => {
                     result.push(&datatype(&value).into());
-                    result.push(&ScalarValue(value.into_owned()).into());
+                    result.push(&ScalarValue(value).into());
                     Ok(Some(result))
                 }
                 None => Ok(None),
@@ -336,7 +336,7 @@ impl Automerge {
                     (Value::Scalar(value), id) => {
                         let sub = Array::new();
                         sub.push(&datatype(&value).into());
-                        sub.push(&ScalarValue(value.into_owned()).into());
+                        sub.push(&ScalarValue(value).into());
                         sub.push(&id.to_string().into());
                         result.push(&sub.into());
                     }
@@ -378,7 +378,7 @@ impl Automerge {
                         }
                         (Value::Scalar(value), _) => {
                             js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value.into_owned()))?;
+                            js_set(&patch, "value", ScalarValue(value))?;
                         }
                     };
                     js_set(&patch, "conflict", conflict)?;
@@ -395,7 +395,7 @@ impl Automerge {
                         }
                         (Value::Scalar(value), _) => {
                             js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value.into_owned()))?;
+                            js_set(&patch, "value", ScalarValue(value))?;
                         }
                     };
                 }
