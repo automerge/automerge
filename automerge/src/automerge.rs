@@ -488,7 +488,7 @@ impl Automerge {
                         .search(&obj, query::PropAt::new(p, clock))
                         .ops
                         .into_iter()
-                        .map(|o| (o.value(), self.id_to_exid(o.id)))
+                        .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                         .collect()
                 } else {
                     vec![]
@@ -499,7 +499,7 @@ impl Automerge {
                 .search(&obj, query::NthAt::new(n, clock))
                 .ops
                 .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
+                .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                 .collect(),
         };
         Ok(result)

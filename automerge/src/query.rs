@@ -36,11 +36,11 @@ pub(crate) use seek_op::SeekOp;
 pub(crate) use seek_op_with_patch::SeekOpWithPatch;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CounterData<'a> {
+pub(crate) struct CounterData {
     pos: usize,
     val: i64,
     succ: HashSet<OpId>,
-    op: &'a Op,
+    op: Op,
 }
 
 pub(crate) trait TreeQuery<'a> {
@@ -169,12 +169,12 @@ impl Default for Index {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) struct VisWindow<'a> {
-    counters: HashMap<OpId, CounterData<'a>>,
+pub(crate) struct VisWindow {
+    counters: HashMap<OpId, CounterData>,
 }
 
-impl<'a> VisWindow<'a> {
-    fn visible_at(&mut self, op: &'a Op, pos: usize, clock: &Clock) -> bool {
+impl VisWindow {
+    fn visible_at(&mut self, op: &Op, pos: usize, clock: &Clock) -> bool {
         if !clock.covers(&op.id) {
             return false;
         }
@@ -188,7 +188,7 @@ impl<'a> VisWindow<'a> {
                         pos,
                         val: start,
                         succ: op.succ.iter().cloned().collect(),
-                        op,
+                        op: op.clone(),
                     },
                 );
                 if !op.succ.iter().any(|i| clock.covers(i)) {
@@ -201,7 +201,7 @@ impl<'a> VisWindow<'a> {
                     if let Some(mut entry) = self.counters.get_mut(id) {
                         entry.succ.remove(&op.id);
                         entry.val += inc_val;
-                        // entry.op.action = OpType::Put(ScalarValue::counter(entry.val));
+                        entry.op.action = OpType::Put(ScalarValue::counter(entry.val));
                         if !entry.succ.iter().any(|i| clock.covers(i)) {
                             visible = true;
                         }
@@ -217,15 +217,15 @@ impl<'a> VisWindow<'a> {
         visible
     }
 
-    pub fn seen_op(&self, op: &'a Op, pos: usize) -> Vec<(usize, &'a Op)> {
+    pub fn seen_op(&self, op: &Op, pos: usize) -> Vec<(usize, Op)> {
         let mut result = vec![];
         for pred in &op.pred {
             if let Some(entry) = self.counters.get(pred) {
-                result.push((entry.pos, entry.op));
+                result.push((entry.pos, entry.op.clone()));
             }
         }
         if result.is_empty() {
-            result.push((pos, op));
+            result.push((pos, op.clone()));
         }
         result
     }
