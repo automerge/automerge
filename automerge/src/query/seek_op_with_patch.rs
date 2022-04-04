@@ -5,18 +5,18 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct SeekOpWithPatch {
+pub(crate) struct SeekOpWithPatch<'a> {
     op: Op,
     pub pos: usize,
     pub succ: Vec<usize>,
     found: bool,
     pub seen: usize,
     last_seen: Option<ElemId>,
-    pub values: Vec<Op>,
+    pub values: Vec<&'a Op>,
     pub had_value_before: bool,
 }
 
-impl SeekOpWithPatch {
+impl<'a> SeekOpWithPatch<'a> {
     pub fn new(op: &Op) -> Self {
         SeekOpWithPatch {
             op: op.clone(),
@@ -60,8 +60,12 @@ impl SeekOpWithPatch {
     }
 }
 
-impl<'a> TreeQuery<'a> for SeekOpWithPatch {
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
+impl<'a> TreeQuery<'a> for SeekOpWithPatch<'a> {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &'a OpTreeNode,
+        m: &OpSetMetadata,
+    ) -> QueryResult {
         if self.found {
             return QueryResult::Descend;
         }
@@ -133,7 +137,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch {
                     if self.op.overwrites(op) {
                         self.succ.push(self.pos);
                     } else if op.visible() {
-                        self.values.push(op.clone());
+                        self.values.push(op);
                     }
 
                     // Ops for the same key should be in ascending order of opId, so we break when
@@ -156,7 +160,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch {
                     // must always have lower Lamport timestamps than that op itself, and the ops
                     // here all have greater opIds than the new op
                     if op.visible() {
-                        self.values.push(op.clone());
+                        self.values.push(op);
                     }
                     later_pos += 1;
                 }
@@ -167,7 +171,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch {
 
     // Only called when operating on a sequence (list/text) object, since updates of a map are
     // handled in `query_node_with_metadata`.
-    fn query_element_with_metadata(&mut self, e: &Op, m: &OpSetMetadata) -> QueryResult {
+    fn query_element_with_metadata(&mut self, e: &'a Op, m: &OpSetMetadata) -> QueryResult {
         let result = if !self.found {
             // First search for the referenced list element (i.e. the element we're updating, or
             // after which we're inserting)
@@ -212,7 +216,7 @@ impl<'a> TreeQuery<'a> for SeekOpWithPatch {
                 if e.visible() {
                     self.had_value_before = true;
                     if !overwritten {
-                        self.values.push(e.clone());
+                        self.values.push(e);
                     }
                 }
 

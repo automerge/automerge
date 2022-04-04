@@ -2,6 +2,7 @@ use crate::error;
 use crate::exid::ExId;
 use crate::legacy as amp;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::cmp::Eq;
 use std::fmt;
 use std::str::FromStr;
@@ -448,7 +449,15 @@ impl Op {
     pub fn value(&self) -> Value {
         match &self.action {
             OpType::Make(obj_type) => Value::Object(*obj_type),
-            OpType::Put(scalar) => Value::Scalar(scalar.clone()),
+            OpType::Put(scalar) => Value::Scalar(Cow::Borrowed(scalar)),
+            _ => panic!("cant convert op into a value - {:?}", self),
+        }
+    }
+
+    pub fn clone_value(&self) -> Value<'static> {
+        match &self.action {
+            OpType::Make(obj_type) => Value::Object(*obj_type),
+            OpType::Put(scalar) => Value::Scalar(Cow::Owned(scalar.clone())),
             _ => panic!("cant convert op into a value - {:?}", self),
         }
     }
@@ -528,7 +537,7 @@ impl TryFrom<&[u8]> for ChangeHash {
 pub struct AssignPatch {
     pub obj: ExId,
     pub key: Prop,
-    pub value: (Value, ExId),
+    pub value: (Value<'static>, ExId),
     pub conflict: bool,
 }
 
@@ -538,7 +547,7 @@ pub enum Patch {
     /// Associating a new value with a key in a map, or an existing list element
     Assign(AssignPatch),
     /// Inserting a new element into a list/text
-    Insert(ExId, usize, (Value, ExId)),
+    Insert(ExId, usize, (Value<'static>, ExId)),
     /// Deleting an element from a list/text
     Delete(ExId, Prop),
 }

@@ -4,15 +4,15 @@ use crate::types::{Clock, Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct PropAt {
+pub(crate) struct PropAt<'a> {
     clock: Clock,
     key: Key,
-    pub ops: Vec<Op>,
+    pub ops: Vec<&'a Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
 }
 
-impl PropAt {
+impl<'a> PropAt<'a> {
     pub fn new(prop: usize, clock: Clock) -> Self {
         PropAt {
             clock,
@@ -24,8 +24,12 @@ impl PropAt {
     }
 }
 
-impl<'a> TreeQuery<'a> for PropAt {
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
+impl<'a> TreeQuery<'a> for PropAt<'a> {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &'a OpTreeNode,
+        m: &OpSetMetadata,
+    ) -> QueryResult {
         let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
         let mut window: VisWindow = Default::default();
         self.pos = start;

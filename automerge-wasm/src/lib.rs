@@ -242,14 +242,14 @@ impl Automerge {
             let opid = match (p, value) {
                 (Prop::Map(s), Value::Object(objtype)) => Some(self.0.put_object(obj, s, objtype)?),
                 (Prop::Map(s), Value::Scalar(scalar)) => {
-                    self.0.put(obj, s, scalar)?;
+                    self.0.put(obj, s, scalar.into_owned())?;
                     None
                 }
                 (Prop::Seq(i), Value::Object(objtype)) => {
                     Some(self.0.insert_object(obj, i, objtype)?)
                 }
                 (Prop::Seq(i), Value::Scalar(scalar)) => {
-                    self.0.insert(obj, i, scalar)?;
+                    self.0.insert(obj, i, scalar.into_owned())?;
                     None
                 }
             };
@@ -299,7 +299,7 @@ impl Automerge {
                 }
                 Some((Value::Scalar(value), _)) => {
                     result.push(&datatype(&value).into());
-                    result.push(&ScalarValue(value).into());
+                    result.push(&ScalarValue(value.into_owned()).into());
                     Ok(Some(result))
                 }
                 None => Ok(None),
@@ -336,7 +336,7 @@ impl Automerge {
                     (Value::Scalar(value), id) => {
                         let sub = Array::new();
                         sub.push(&datatype(&value).into());
-                        sub.push(&ScalarValue(value).into());
+                        sub.push(&ScalarValue(value.into_owned()).into());
                         sub.push(&id.to_string().into());
                         result.push(&sub.into());
                     }
@@ -378,7 +378,7 @@ impl Automerge {
                         }
                         (Value::Scalar(value), _) => {
                             js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value))?;
+                            js_set(&patch, "value", ScalarValue(value.into_owned()))?;
                         }
                     };
                     js_set(&patch, "conflict", conflict)?;
@@ -395,7 +395,7 @@ impl Automerge {
                         }
                         (Value::Scalar(value), _) => {
                             js_set(&patch, "datatype", datatype(&value))?;
-                            js_set(&patch, "value", ScalarValue(value))?;
+                            js_set(&patch, "value", ScalarValue(value.into_owned()))?;
                         }
                     };
                 }
@@ -658,7 +658,7 @@ impl Automerge {
         &mut self,
         value: &JsValue,
         datatype: Option<String>,
-    ) -> Result<(Value, Vec<(Prop, JsValue)>), JsValue> {
+    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), JsValue> {
         match self.import_scalar(value, &datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {

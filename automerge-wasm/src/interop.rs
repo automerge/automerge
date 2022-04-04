@@ -347,7 +347,7 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
                 Reflect::set(&map, &k.into(), &doc.text(&exid).unwrap().into()).unwrap();
             }
             Ok(Some((Value::Scalar(v), _))) => {
-                Reflect::set(&map, &k.into(), &ScalarValue(v).into()).unwrap();
+                Reflect::set(&map, &k.into(), &ScalarValue(v.into_owned()).into()).unwrap();
             }
             _ => (),
         };
@@ -370,7 +370,7 @@ pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
                 array.push(&list_to_js(doc, &exid));
             }
             Ok(Some((Value::Scalar(v), _))) => {
-                array.push(&ScalarValue(v).into());
+                array.push(&ScalarValue(v.into_owned()).into());
             }
             _ => (),
         };

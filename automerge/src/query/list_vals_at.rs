@@ -3,15 +3,15 @@ use crate::types::{Clock, ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ListValsAt {
+pub(crate) struct ListValsAt<'a> {
     clock: Clock,
     last_elem: Option<ElemId>,
-    pub ops: Vec<Op>,
-    window: VisWindow,
+    pub ops: Vec<&'a Op>,
+    window: VisWindow<'a>,
     pos: usize,
 }
 
-impl ListValsAt {
+impl<'a> ListValsAt<'a> {
     pub fn new(clock: Clock) -> Self {
         ListValsAt {
             clock,
@@ -23,8 +23,8 @@ impl ListValsAt {
     }
 }
 
-impl<'a> TreeQuery<'a> for ListValsAt {
-    fn query_element_with_metadata(&mut self, op: &Op, m: &OpSetMetadata) -> QueryResult {
+impl<'a> TreeQuery<'a> for ListValsAt<'a> {
+    fn query_element_with_metadata(&mut self, op: &'a Op, m: &OpSetMetadata) -> QueryResult {
         if op.insert {
             self.last_elem = None;
         }

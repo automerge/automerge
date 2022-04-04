@@ -6,7 +6,7 @@ use std::fmt::Debug;
 #[derive(Debug)]
 pub(crate) struct KeysAt<'a> {
     clock: Clock,
-    window: VisWindow,
+    window: VisWindow<'a>,
     index: usize,
     last_key: Option<Key>,
     index_back: usize,

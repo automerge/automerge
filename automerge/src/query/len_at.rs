@@ -3,15 +3,15 @@ use crate::types::{Clock, ElemId, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct LenAt {
+pub(crate) struct LenAt<'a> {
     pub len: usize,
     clock: Clock,
     pos: usize,
     last: Option<ElemId>,
-    window: VisWindow,
+    window: VisWindow<'a>,
 }
 
-impl LenAt {
+impl<'a> LenAt<'a> {
     pub fn new(clock: Clock) -> Self {
         LenAt {
             clock,
@@ -23,8 +23,8 @@ impl LenAt {
     }
 }
 
-impl<'a> TreeQuery<'a> for LenAt {
-    fn query_element(&mut self, op: &Op) -> QueryResult {
+impl<'a> TreeQuery<'a> for LenAt<'a> {
+    fn query_element(&mut self, op: &'a Op) -> QueryResult {
         if op.insert {
             self.last = None;
         }

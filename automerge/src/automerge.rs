@@ -212,41 +212,42 @@ impl Automerge {
         }
     }
 
-    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) -> Op {
+    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
 
-        for i in q.succ {
-            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            values,
+            had_value_before,
+            ..
+        } = q;
 
-        if !op.is_delete() {
-            self.ops.insert(q.pos, obj, op.clone());
-        }
-
-        let obj = self.id_to_exid(obj.0);
+        let ex_obj = self.id_to_exid(obj.0);
         let key = match op.key {
             Key::Map(index) => self.ops.m.props[index].clone().into(),
-            Key::Seq(_) => q.seen.into(),
+            Key::Seq(_) => seen.into(),
         };
 
         let patch = if op.insert {
-            let value = (op.value(), self.id_to_exid(op.id));
-            Patch::Insert(obj, q.seen, value)
+            let value = (op.clone_value(), self.id_to_exid(op.id));
+            Patch::Insert(ex_obj, seen, value)
         } else if op.is_delete() {
-            if let Some(winner) = &q.values.last() {
-                let value = (winner.value(), self.id_to_exid(winner.id));
-                let conflict = q.values.len() > 1;
+            if let Some(winner) = &values.last() {
+                let value = (winner.clone_value(), self.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
                 Patch::Assign(AssignPatch {
-                    obj,
+                    obj: ex_obj,
                     key,
                     value,
                     conflict,
                 })
             } else {
-                Patch::Delete(obj, key)
+                Patch::Delete(ex_obj, key)
             }
         } else {
-            let winner = if let Some(last_value) = q.values.last() {
+            let winner = if let Some(last_value) = values.last() {
                 if self.ops.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
                     &op
                 } else {
@@ -255,15 +256,15 @@ impl Automerge {
             } else {
                 &op
             };
-            let value = (winner.value(), self.id_to_exid(winner.id));
-            if op.is_list_op() && !q.had_value_before {
-                Patch::Insert(obj, q.seen, value)
+            let value = (winner.clone_value(), self.id_to_exid(winner.id));
+            if op.is_list_op() && !had_value_before {
+                Patch::Insert(ex_obj, seen, value)
             } else {
                 Patch::Assign(AssignPatch {
-                    obj,
+                    obj: ex_obj,
                     key,
                     value,
-                    conflict: !q.values.is_empty(),
+                    conflict: !values.is_empty(),
                 })
             }
         };
@@ -272,7 +273,13 @@ impl Automerge {
             patches.push(patch);
         }
 
-        op
+        for i in succ {
+            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op);
+        }
     }
 
     // KeysAt::()
