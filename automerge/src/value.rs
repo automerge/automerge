@@ -159,6 +159,14 @@ impl<'a> Value<'a> {
         }
     }
 
+    pub fn to_owned(&self) -> Value<'static> {
+        match self {
+            Value::Object(o) => Value::Object(*o),
+            Value::Scalar(Cow::Owned(s)) => Value::Scalar(Cow::Owned(s.clone())),
+            Value::Scalar(Cow::Borrowed(s)) => Value::Scalar(Cow::Owned((*s).clone())),
+        }
+    }
+
     pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
         match self {
             Value::Scalar(s) => s
