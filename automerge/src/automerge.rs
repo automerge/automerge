@@ -198,17 +198,18 @@ impl Automerge {
         f
     }
 
-    fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+    fn insert_op(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOp::new(&op));
 
-        for i in q.succ {
+        let succ = q.succ;
+        let pos = q.pos;
+        for i in succ {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
         if !op.is_delete() {
-            self.ops.insert(q.pos, obj, op.clone());
+            self.ops.insert(pos, obj, op);
         }
-        op
     }
 
     fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) -> Op {
