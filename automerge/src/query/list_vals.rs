@@ -18,7 +18,7 @@ impl ListVals {
     }
 }
 
-impl TreeQuery for ListVals {
+impl<'a> TreeQuery<'a> for ListVals {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         let start = 0;
         for pos in start..child.len() {

@@ -29,7 +29,7 @@ impl NthAt {
     }
 }
 
-impl TreeQuery for NthAt {
+impl<'a> TreeQuery<'a> for NthAt {
     fn query_element(&mut self, element: &Op) -> QueryResult {
         if element.insert {
             if self.seen > self.target {

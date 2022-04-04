@@ -257,7 +257,9 @@ impl TransactionInner {
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
+        let pos = query.pos;
+        let ops_pos = query.ops_pos;
+        self.insert_local_op(doc, op, pos, obj, &ops_pos);
 
         if is_make {
             Ok(Some(id))
@@ -294,7 +296,9 @@ impl TransactionInner {
             insert: false,
         };
 
-        self.insert_local_op(doc, op, query.pos, obj, &query.ops_pos);
+        let pos = query.pos;
+        let ops_pos = query.ops_pos;
+        self.insert_local_op(doc, op, pos, obj, &ops_pos);
 
         if is_make {
             Ok(Some(id))

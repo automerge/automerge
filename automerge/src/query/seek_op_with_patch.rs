@@ -60,7 +60,7 @@ impl SeekOpWithPatch {
     }
 }
 
-impl TreeQuery for SeekOpWithPatch {
+impl<'a> TreeQuery<'a> for SeekOpWithPatch {
     fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
         if self.found {
             return QueryResult::Descend;

@@ -23,7 +23,7 @@ impl LenAt {
     }
 }
 
-impl TreeQuery for LenAt {
+impl<'a> TreeQuery<'a> for LenAt {
     fn query_element(&mut self, op: &Op) -> QueryResult {
         if op.insert {
             self.last = None;

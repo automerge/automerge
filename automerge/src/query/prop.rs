@@ -4,14 +4,14 @@ use crate::types::{Key, Op};
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Prop {
+pub(crate) struct Prop<'a> {
     key: Key,
-    pub ops: Vec<Op>,
+    pub ops: Vec<&'a Op>,
     pub ops_pos: Vec<usize>,
     pub pos: usize,
 }
 
-impl Prop {
+impl<'a> Prop<'a> {
     pub fn new(prop: usize) -> Self {
         Prop {
             key: Key::Map(prop),
@@ -22,8 +22,12 @@ impl Prop {
     }
 }
 
-impl TreeQuery for Prop {
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
+impl<'a> TreeQuery<'a> for Prop<'a> {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &'a OpTreeNode,
+        m: &OpSetMetadata,
+    ) -> QueryResult {
         let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
         self.pos = start;
         for pos in start..child.len() {
@@ -32,7 +36,7 @@ impl TreeQuery for Prop {
                 break;
             }
             if op.visible() {
-                self.ops.push(op.clone());
+                self.ops.push(op);
                 self.ops_pos.push(pos);
             }
             self.pos += 1;
