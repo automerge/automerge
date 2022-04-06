@@ -51,9 +51,9 @@ impl OpTreeInternal {
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         self.root_node
             .as_ref()
@@ -172,9 +172,9 @@ impl OpTreeNode {
         }
     }
 
-    pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
             for e in &self.elements {

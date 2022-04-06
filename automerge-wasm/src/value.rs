@@ -1,13 +1,15 @@
+use std::borrow::Cow;
+
 use automerge as am;
 use js_sys::Uint8Array;
 use wasm_bindgen::prelude::*;
 
 #[derive(Debug)]
-pub struct ScalarValue(pub(crate) am::ScalarValue);
+pub struct ScalarValue<'a>(pub(crate) Cow<'a, am::ScalarValue>);
 
-impl From<ScalarValue> for JsValue {
+impl<'a> From<ScalarValue<'a>> for JsValue {
     fn from(val: ScalarValue) -> Self {
-        match &val.0 {
+        match &*val.0 {
             am::ScalarValue::Bytes(v) => Uint8Array::from(v.as_slice()).into(),
             am::ScalarValue::Str(v) => v.to_string().into(),
             am::ScalarValue::Int(v) => (*v as f64).into(),

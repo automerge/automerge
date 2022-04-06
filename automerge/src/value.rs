@@ -1,58 +1,61 @@
 use crate::error;
-use crate::types::{ObjType, Op, OpId, OpType};
+use crate::types::ObjType;
 use serde::{Deserialize, Serialize, Serializer};
 use smol_str::SmolStr;
+use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Value {
+pub enum Value<'a> {
     Object(ObjType),
-    Scalar(ScalarValue),
+    // TODO: if we don't have to store this in patches any more then it might be able to be just a
+    // &'a ScalarValue rather than a Cow
+    Scalar(Cow<'a, ScalarValue>),
 }
 
-impl Value {
-    pub fn map() -> Value {
+impl<'a> Value<'a> {
+    pub fn map() -> Value<'a> {
         Value::Object(ObjType::Map)
     }
 
-    pub fn list() -> Value {
+    pub fn list() -> Value<'a> {
         Value::Object(ObjType::List)
     }
 
-    pub fn text() -> Value {
+    pub fn text() -> Value<'a> {
         Value::Object(ObjType::Text)
     }
 
-    pub fn table() -> Value {
+    pub fn table() -> Value<'a> {
         Value::Object(ObjType::Table)
     }
 
-    pub fn str(s: &str) -> Value {
-        Value::Scalar(ScalarValue::Str(s.into()))
+    pub fn str(s: &str) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 
-    pub fn int(n: i64) -> Value {
-        Value::Scalar(ScalarValue::Int(n))
+    pub fn int(n: i64) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n)))
     }
 
-    pub fn uint(n: u64) -> Value {
-        Value::Scalar(ScalarValue::Uint(n))
+    pub fn uint(n: u64) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n)))
     }
 
-    pub fn counter(n: i64) -> Value {
-        Value::Scalar(ScalarValue::counter(n))
+    pub fn counter(n: i64) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::counter(n)))
     }
 
-    pub fn timestamp(n: i64) -> Value {
-        Value::Scalar(ScalarValue::Timestamp(n))
+    pub fn timestamp(n: i64) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::Timestamp(n)))
     }
 
-    pub fn f64(n: f64) -> Value {
-        Value::Scalar(ScalarValue::F64(n))
+    pub fn f64(n: f64) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::F64(n)))
     }
 
-    pub fn bytes(b: Vec<u8>) -> Value {
-        Value::Scalar(ScalarValue::Bytes(b))
+    pub fn bytes(b: Vec<u8>) -> Value<'a> {
+        Value::Scalar(Cow::Owned(ScalarValue::Bytes(b)))
     }
 
     pub fn is_object(&self) -> bool {
@@ -64,44 +67,80 @@ impl Value {
     }
 
     pub fn is_bytes(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Bytes(_)))
+        if let Self::Scalar(s) = self {
+            s.is_bytes()
+        } else {
+            false
+        }
     }
 
     pub fn is_str(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Str(_)))
+        if let Self::Scalar(s) = self {
+            s.is_str()
+        } else {
+            false
+        }
     }
 
     pub fn is_int(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Int(_)))
+        if let Self::Scalar(s) = self {
+            s.is_int()
+        } else {
+            false
+        }
     }
 
     pub fn is_uint(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Uint(_)))
+        if let Self::Scalar(s) = self {
+            s.is_uint()
+        } else {
+            false
+        }
     }
 
     pub fn is_f64(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::F64(_)))
+        if let Self::Scalar(s) = self {
+            s.is_f64()
+        } else {
+            false
+        }
     }
 
     pub fn is_counter(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Counter(_)))
+        if let Self::Scalar(s) = self {
+            s.is_counter()
+        } else {
+            false
+        }
     }
 
     pub fn is_timestamp(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Timestamp(_)))
+        if let Self::Scalar(s) = self {
+            s.is_timestamp()
+        } else {
+            false
+        }
     }
 
     pub fn is_boolean(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Boolean(_)))
+        if let Self::Scalar(s) = self {
+            s.is_boolean()
+        } else {
+            false
+        }
     }
 
     pub fn is_null(&self) -> bool {
-        matches!(self, Self::Scalar(ScalarValue::Null))
+        if let Self::Scalar(s) = self {
+            s.is_null()
+        } else {
+            false
+        }
     }
 
     pub fn into_scalar(self) -> Result<ScalarValue, Self> {
         match self {
-            Self::Scalar(s) => Ok(s),
+            Self::Scalar(s) => Ok(s.into_owned()),
             _ => Err(self),
         }
     }
@@ -120,9 +159,20 @@ impl Value {
         }
     }
 
+    pub fn to_owned(&self) -> Value<'static> {
+        match self {
+            Value::Object(o) => Value::Object(*o),
+            Value::Scalar(Cow::Owned(s)) => Value::Scalar(Cow::Owned(s.clone())),
+            Value::Scalar(Cow::Borrowed(s)) => Value::Scalar(Cow::Owned((*s).clone())),
+        }
+    }
+
     pub fn into_bytes(self) -> Result<Vec<u8>, Self> {
         match self {
-            Value::Scalar(s) => s.into_bytes().map_err(Value::Scalar),
+            Value::Scalar(s) => s
+                .into_owned()
+                .into_bytes()
+                .map_err(|v| Value::Scalar(Cow::Owned(v))),
             _ => Err(self),
         }
     }
@@ -136,7 +186,10 @@ impl Value {
 
     pub fn into_string(self) -> Result<String, Self> {
         match self {
-            Value::Scalar(s) => s.into_string().map_err(Value::Scalar),
+            Value::Scalar(s) => s
+                .into_owned()
+                .into_string()
+                .map_err(|v| Value::Scalar(Cow::Owned(v))),
             _ => Err(self),
         }
     }
@@ -178,7 +231,7 @@ impl Value {
     }
 }
 
-impl fmt::Display for Value {
+impl<'a> fmt::Display for Value<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Object(o) => write!(f, "Object: {}", o),
@@ -187,110 +240,81 @@ impl fmt::Display for Value {
     }
 }
 
-impl From<&str> for Value {
+impl<'a> From<&str> for Value<'a> {
     fn from(s: &str) -> Self {
-        Value::Scalar(ScalarValue::Str(s.into()))
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 }
 
-impl From<String> for Value {
+impl<'a> From<String> for Value<'a> {
     fn from(s: String) -> Self {
-        Value::Scalar(ScalarValue::Str(s.into()))
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
     }
 }
 
-impl From<char> for Value {
+impl<'a> From<char> for Value<'a> {
     fn from(c: char) -> Self {
-        Value::Scalar(ScalarValue::Str(SmolStr::new(c.to_string())))
+        Value::Scalar(Cow::Owned(ScalarValue::Str(SmolStr::new(c.to_string()))))
     }
 }
 
-impl From<Vec<u8>> for Value {
+impl<'a> From<Vec<u8>> for Value<'a> {
     fn from(v: Vec<u8>) -> Self {
-        Value::Scalar(ScalarValue::Bytes(v))
+        Value::Scalar(Cow::Owned(ScalarValue::Bytes(v)))
     }
 }
 
-impl From<f64> for Value {
+impl<'a> From<f64> for Value<'a> {
     fn from(n: f64) -> Self {
-        Value::Scalar(ScalarValue::F64(n))
+        Value::Scalar(Cow::Owned(ScalarValue::F64(n)))
     }
 }
 
-impl From<i64> for Value {
+impl<'a> From<i64> for Value<'a> {
     fn from(n: i64) -> Self {
-        Value::Scalar(ScalarValue::Int(n))
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n)))
     }
 }
 
-impl From<i32> for Value {
+impl<'a> From<i32> for Value<'a> {
     fn from(n: i32) -> Self {
-        Value::Scalar(ScalarValue::Int(n.into()))
+        Value::Scalar(Cow::Owned(ScalarValue::Int(n.into())))
     }
 }
 
-impl From<u32> for Value {
+impl<'a> From<u32> for Value<'a> {
     fn from(n: u32) -> Self {
-        Value::Scalar(ScalarValue::Uint(n.into()))
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n.into())))
     }
 }
 
-impl From<u64> for Value {
+impl<'a> From<u64> for Value<'a> {
     fn from(n: u64) -> Self {
-        Value::Scalar(ScalarValue::Uint(n))
+        Value::Scalar(Cow::Owned(ScalarValue::Uint(n)))
     }
 }
 
-impl From<bool> for Value {
+impl<'a> From<bool> for Value<'a> {
     fn from(v: bool) -> Self {
-        Value::Scalar(ScalarValue::Boolean(v))
+        Value::Scalar(Cow::Owned(ScalarValue::Boolean(v)))
     }
 }
 
-impl From<()> for Value {
+impl<'a> From<()> for Value<'a> {
     fn from(_: ()) -> Self {
-        Value::Scalar(ScalarValue::Null)
+        Value::Scalar(Cow::Owned(ScalarValue::Null))
     }
 }
 
-impl From<ObjType> for Value {
+impl<'a> From<ObjType> for Value<'a> {
     fn from(o: ObjType) -> Self {
         Value::Object(o)
     }
 }
 
-impl From<ScalarValue> for Value {
+impl<'a> From<ScalarValue> for Value<'a> {
     fn from(v: ScalarValue) -> Self {
-        Value::Scalar(v)
-    }
-}
-
-impl From<&Op> for (Value, OpId) {
-    fn from(op: &Op) -> Self {
-        match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Put(scalar) => (Value::Scalar(scalar.clone()), op.id),
-            _ => panic!("cant convert op into a value - {:?}", op),
-        }
-    }
-}
-
-impl From<Op> for (Value, OpId) {
-    fn from(op: Op) -> Self {
-        match &op.action {
-            OpType::Make(obj_type) => (Value::Object(*obj_type), op.id),
-            OpType::Put(scalar) => (Value::Scalar(scalar.clone()), op.id),
-            _ => panic!("cant convert op into a value - {:?}", op),
-        }
-    }
-}
-
-impl From<Value> for OpType {
-    fn from(v: Value) -> Self {
-        match v {
-            Value::Object(o) => OpType::Make(o),
-            Value::Scalar(s) => OpType::Put(s),
-        }
+        Value::Scalar(Cow::Owned(v))
     }
 }
 

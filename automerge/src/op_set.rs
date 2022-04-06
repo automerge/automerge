@@ -61,9 +61,9 @@ impl OpSetInternal {
         }
     }
 
-    pub fn search<Q>(&self, obj: &ObjId, query: Q) -> Q
+    pub fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         if let Some((_typ, tree)) = self.trees.get(obj) {
             tree.search(query, &self.m)

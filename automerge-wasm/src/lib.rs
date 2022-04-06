@@ -242,14 +242,14 @@ impl Automerge {
             let opid = match (p, value) {
                 (Prop::Map(s), Value::Object(objtype)) => Some(self.0.put_object(obj, s, objtype)?),
                 (Prop::Map(s), Value::Scalar(scalar)) => {
-                    self.0.put(obj, s, scalar)?;
+                    self.0.put(obj, s, scalar.into_owned())?;
                     None
                 }
                 (Prop::Seq(i), Value::Object(objtype)) => {
                     Some(self.0.insert_object(obj, i, objtype)?)
                 }
                 (Prop::Seq(i), Value::Scalar(scalar)) => {
-                    self.0.insert(obj, i, scalar)?;
+                    self.0.insert(obj, i, scalar.into_owned())?;
                     None
                 }
             };
@@ -658,7 +658,7 @@ impl Automerge {
         &mut self,
         value: &JsValue,
         datatype: Option<String>,
-    ) -> Result<(Value, Vec<(Prop, JsValue)>), JsValue> {
+    ) -> Result<(Value<'static>, Vec<(Prop, JsValue)>), JsValue> {
         match self.import_scalar(value, &datatype) {
             Some(val) => Ok((val.into(), vec![])),
             None => {
