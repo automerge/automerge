@@ -4,7 +4,6 @@ use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;
 use std::fmt::Display;
-use unicode_segmentation::UnicodeSegmentation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -286,9 +285,9 @@ pub(crate) fn to_objtype(
         Some("text") => {
             let text = value.as_string()?;
             let text = text
-                .graphemes(true)
+                .chars()
                 .enumerate()
-                .map(|(i, ch)| (i.into(), ch.into()))
+                .map(|(i, ch)| (i.into(), ch.to_string().into()))
                 .collect();
             Some((am::ObjType::Text, text))
         }
@@ -311,9 +310,9 @@ pub(crate) fn to_objtype(
                 Some((am::ObjType::Map, map))
             } else if let Some(text) = value.as_string() {
                 let text = text
-                    .graphemes(true)
+                    .chars()
                     .enumerate()
-                    .map(|(i, ch)| (i.into(), ch.into()))
+                    .map(|(i, ch)| (i.into(), ch.to_string().into()))
                     .collect();
                 Some((am::ObjType::Text, text))
             } else {
