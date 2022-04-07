@@ -26,8 +26,8 @@ impl ElemIdPos {
     }
 }
 
-impl<const B: usize> TreeQuery<B> for ElemIdPos {
-    fn query_node(&mut self, child: &OpTreeNode<B>) -> QueryResult {
+impl TreeQuery for ElemIdPos {
+    fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         dbg!(child, &self.elemid);
         // if index has our element then we can cont
         if child.index.has(&Some(self.elemid)) {
