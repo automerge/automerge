@@ -239,8 +239,8 @@ impl Automerge {
         }
     }
 
-    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
-        let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
+    pub(crate) fn insert_patch(&mut self, obj: &ObjId, op: &Op) -> (usize, Vec<usize>) {
+        let q = self.ops.search(obj, query::SeekOpWithPatch::new(op));
 
         let query::SeekOpWithPatch {
             pos,
@@ -299,6 +299,12 @@ impl Automerge {
         if let Some(patches) = &mut self.patches {
             patches.push(patch);
         }
+
+        (pos, succ)
+    }
+
+    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
+        let (pos, succ) = self.insert_patch(obj, &op);
 
         for i in succ {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
