@@ -466,10 +466,8 @@ describe('Automerge', () => {
       A.merge(B)
       let heads2 = A.getHeads();
       A.put("/", "key5","val5");
-      let C = A.forkAt(heads1)
-      let D = A.forkAt(heads2)
-      assert.deepEqual(C.materialize("/"), A.materialize("/",heads1))
-      assert.deepEqual(D.materialize("/"), A.materialize("/",heads2))
+      assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/",heads1))
+      assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/",heads2))
     })
 
     it('should handle merging text conflicts then saving & loading', () => {

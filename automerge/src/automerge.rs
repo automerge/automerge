@@ -200,13 +200,19 @@ impl Automerge {
 
     /// Fork this document at the give heads
     pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
         let mut heads = heads.to_vec();
         let mut changes = vec![];
         while let Some(hash) = heads.pop() {
             if let Some(idx) = self.history_index.get(&hash) {
                 let change = &self.history[*idx];
-                heads.extend(&change.deps);
+                for dep in &change.deps {
+                  if !seen.contains(dep) {
+                    heads.push(*dep);
+                  }
+                }
                 changes.push(change);
+                seen.insert(hash);
             } else {
                 return Err(AutomergeError::InvalidHash(hash));
             }
