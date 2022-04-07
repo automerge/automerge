@@ -67,6 +67,17 @@ impl Automerge {
         Ok(automerge)
     }
 
+    #[wasm_bindgen(js_name = forkAt)]
+    pub fn fork_at(&mut self, heads: JsValue, actor: Option<String>) -> Result<Automerge, JsValue> {
+        let deps: Vec<_> = JS(heads).try_into()?;
+        let mut automerge = Automerge(self.0.fork_at(&deps)?);
+        if let Some(s) = actor {
+            let actor = automerge::ActorId::from(hex::decode(s).map_err(to_js_err)?.to_vec());
+            automerge.0.set_actor(actor);
+        }
+        Ok(automerge)
+    }
+
     pub fn free(self) {}
 
     #[wasm_bindgen(js_name = pendingOps)]

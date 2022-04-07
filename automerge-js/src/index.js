@@ -99,7 +99,7 @@ function emptyChange(doc, options) {
 }
 
 function load(data, actor) {
-  const state = AutomergeWASM.loadDoc(data, actor)
+  const state = AutomergeWASM.load(data, actor)
   return rootProxy(state, true);
 }
 

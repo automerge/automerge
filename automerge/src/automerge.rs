@@ -198,6 +198,25 @@ impl Automerge {
         f
     }
 
+    /// Fork this document at the give heads
+    pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        let mut heads = heads.to_vec();
+        let mut changes = vec![];
+        while let Some(hash) = heads.pop() {
+            if let Some(idx) = self.history_index.get(&hash) {
+                let change = &self.history[*idx];
+                heads.extend(&change.deps);
+                changes.push(change);
+            } else {
+                return Err(AutomergeError::InvalidHash(hash));
+            }
+        }
+        let mut f = Self::new();
+        f.set_actor(ActorId::random());
+        f.apply_changes(changes.into_iter().rev().cloned())?;
+        Ok(f)
+    }
+
     fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
         let q = self.ops.search(obj, query::SeekOp::new(&op));
 

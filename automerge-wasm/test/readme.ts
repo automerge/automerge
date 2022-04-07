@@ -2,7 +2,7 @@ import { describe, it } from 'mocha';
 //@ts-ignore
 import assert from 'assert'
 //@ts-ignore
-import init, { create, loadDoc } from '..'
+import init, { create, load } from '..'
 
 describe('Automerge', () => {
   describe('Readme Examples', () => {
@@ -11,7 +11,7 @@ describe('Automerge', () => {
       doc.free()
     })
     it('Using the Library and Creating a Document (2)', (done) => {
-      init().then(_ => {
+      init().then((_:any) => {
         let doc = create()
         doc.free()
         done()
@@ -249,7 +249,7 @@ describe('Automerge', () => {
 
       let save1 = doc1.save()
 
-      let doc2 = loadDoc(save1)
+      let doc2 = load(save1)
 
       doc2.materialize("_root")  // returns { key1: "value1" }
 
@@ -265,9 +265,9 @@ describe('Automerge', () => {
 
       doc2.loadIncremental(saveIncremental)
 
-      let doc3 = loadDoc(save2)
+      let doc3 = load(save2)
 
-      let doc4 = loadDoc(save3)
+      let doc4 = load(save3)
 
       assert.deepEqual(doc1.materialize("_root"), { key1: "value1", key2: "value2" })
       assert.deepEqual(doc2.materialize("_root"), { key1: "value1", key2: "value2" })

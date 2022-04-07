@@ -11,7 +11,7 @@
     "paths": { "dev": ["*"]},
     "rootDir": "",
     "target": "es2016",
-    "typeRoots": ["./dev/index.d.ts"]
+    "typeRoots": ["./index.d.ts"]
   },
   "exclude": ["dist/**/*"]
 }

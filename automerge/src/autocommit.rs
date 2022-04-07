@@ -73,6 +73,14 @@ impl AutoCommit {
         }
     }
 
+    pub fn fork_at(&mut self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        self.ensure_transaction_closed();
+        Ok(Self {
+            doc: self.doc.fork_at(heads)?,
+            transaction: self.transaction.clone(),
+        })
+    }
+
     fn ensure_transaction_closed(&mut self) {
         if let Some(tx) = self.transaction.take() {
             tx.commit(&mut self.doc, None, None);

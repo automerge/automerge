@@ -81,7 +81,7 @@ export type Patch = {
 }
 
 export function create(actor?: Actor): Automerge;
-export function loadDoc(data: Uint8Array, actor?: Actor): Automerge;
+export function load(data: Uint8Array, actor?: Actor): Automerge;
 export function encodeChange(change: DecodedChange): Change;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
@@ -144,6 +144,7 @@ export class Automerge {
   free(): void;
   clone(actor?: string): Automerge;
   fork(actor?: string): Automerge;
+  forkAt(heads: Heads, actor?: string): Automerge;
 
   // dump internal state to console.log
   dump(): void;

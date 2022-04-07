@@ -476,10 +476,3 @@ Object Ids uniquely identify an object within a document.  They are represented 
   doc.free()
 ```
 
-```
-// TODO:
-can I rename loadDoc() to load()???
-implement forkAt()
-port sync example to typescript - make sure its right
-remove the opid from values()
-```
