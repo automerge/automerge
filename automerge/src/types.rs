@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Eq;
 use std::fmt;
+use std::fmt::Display;
 use std::str::FromStr;
 use tinyvec::{ArrayVec, TinyVec};
 
@@ -331,6 +332,15 @@ pub enum Prop {
     Seq(usize),
 }
 
+impl Display for Prop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Prop::Map(s) => write!(f, "{}", s),
+            Prop::Seq(i) => write!(f, "{}", i),
+        }
+    }
+}
+
 impl Key {
     pub fn elemid(&self) -> Option<ElemId> {
         match self {
@@ -347,7 +357,7 @@ pub(crate) struct OpId(pub u64, pub usize);
 pub(crate) struct ObjId(pub OpId);
 
 impl ObjId {
-    pub fn root() -> Self {
+    pub const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
 }
