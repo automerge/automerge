@@ -42,8 +42,10 @@ impl TransactionInner {
         }
 
         let num_ops = self.pending_ops();
-        for (obj, op) in self.operations.iter() {
-            doc.insert_patch(obj, op);
+        if doc.patches.is_some() {
+            for (obj, op) in self.operations.iter() {
+                doc.insert_patch(obj, op);
+            }
         }
         let change = export_change(self, &doc.ops.m.actors, &doc.ops.m.props);
         let hash = change.hash;
