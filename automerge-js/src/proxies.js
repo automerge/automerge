@@ -574,7 +574,7 @@ function listMethods(target) {
 }
 
 function textMethods(target) {
-  const {context, objectId, path, readonly, frozen} = target
+  const {context, objectId, path, readonly, frozen, heads } = target
   const methods = {
     set (index, value) {
       return this[index] = value
@@ -583,13 +583,7 @@ function textMethods(target) {
       return this[index]
     },
     toString () {
-      let str = ''
-      let length = this.length
-      for (let i = 0; i < length; i++) {
-        const value = this.get(i)
-        if (typeof value === 'string') str += value
-      }
-      return str
+      return context.text(objectId, heads).replace(/￼/g,'')
     },
     toSpans () {
       let spans = []
