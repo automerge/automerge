@@ -357,7 +357,7 @@ pub(crate) struct OpId(pub u64, pub usize);
 pub(crate) struct ObjId(pub OpId);
 
 impl ObjId {
-    pub fn root() -> Self {
+    pub const fn root() -> Self {
         ObjId(OpId(0, 0))
     }
 }

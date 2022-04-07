@@ -1680,4 +1680,17 @@ mod tests {
         assert!(doc1.value(&list, 1).unwrap().is_none());
         assert!(doc2.value(&list, 1).unwrap().is_none());
     }
+
+    #[test]
+    fn get_parent_objects() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(doc.parent_object(&map), Some((ROOT, Prop::Map("a".into()))));
+        assert_eq!(doc.parent_object(&list), Some((map, Prop::Seq(0))));
+        assert_eq!(doc.parent_object(&text), Some((list, Prop::Seq(0))));
+    }
 }

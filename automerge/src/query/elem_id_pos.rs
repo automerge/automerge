@@ -2,6 +2,7 @@ use crate::{op_tree::OpTreeNode, types::ElemId};
 
 use super::{QueryResult, TreeQuery};
 
+/// Lookup the index in the list that this elemid occupies.
 pub(crate) struct ElemIdPos {
     elemid: ElemId,
     pos: usize,
@@ -28,8 +29,7 @@ impl ElemIdPos {
 
 impl<'a> TreeQuery<'a> for ElemIdPos {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
-        dbg!(child, &self.elemid);
-        // if index has our element then we can cont
+        // if index has our element then we can continue
         if child.index.has_visible(&Some(self.elemid)) {
             // element is in this node somewhere
             QueryResult::Descend
