@@ -24,8 +24,12 @@ impl PropAt {
     }
 }
 
-impl TreeQuery for PropAt {
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, m: &OpSetMetadata) -> QueryResult {
+impl<'a> TreeQuery<'a> for PropAt {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &'a OpTreeNode,
+        m: &OpSetMetadata,
+    ) -> QueryResult {
         let start = binary_search_by(child, |op| m.key_cmp(&op.key, &self.key));
         let mut window: VisWindow = Default::default();
         self.pos = start;

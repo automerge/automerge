@@ -1,6 +1,6 @@
 use crate::op_tree::OpTreeNode;
 use crate::query::{QueryResult, TreeQuery};
-use crate::types::{Op, OpId};
+use crate::types::{ElemId, Key, Op, OpId};
 
 /// Search for an OpId in a tree.
 /// Returns the index of the operation in the tree.
@@ -9,6 +9,7 @@ pub(crate) struct OpIdSearch {
     target: OpId,
     pos: usize,
     found: bool,
+    key: Option<Key>,
 }
 
 impl OpIdSearch {
@@ -17,6 +18,7 @@ impl OpIdSearch {
             target,
             pos: 0,
             found: false,
+            key: None,
         }
     }
 
@@ -28,9 +30,13 @@ impl OpIdSearch {
             None
         }
     }
+
+    pub fn key(&self) -> &Option<Key> {
+        &self.key
+    }
 }
 
-impl TreeQuery for OpIdSearch {
+impl<'a> TreeQuery<'a> for OpIdSearch {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         if child.index.ops.contains(&self.target) {
             QueryResult::Descend
@@ -43,6 +49,11 @@ impl TreeQuery for OpIdSearch {
     fn query_element(&mut self, element: &Op) -> QueryResult {
         if element.id == self.target {
             self.found = true;
+            if element.insert {
+                self.key = Some(Key::Seq(ElemId(element.id)));
+            } else {
+                self.key = Some(element.key);
+            }
             QueryResult::Finish
         } else {
             self.pos += 1;

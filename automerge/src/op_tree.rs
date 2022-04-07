@@ -5,17 +5,35 @@ use std::{
 };
 
 pub(crate) use crate::op_set::OpSetMetadata;
-use crate::types::{Op, OpId};
 use crate::{
     clock::Clock,
     query::{self, Index, QueryResult, TreeQuery},
+};
+use crate::{
+    types::{ObjId, Op, OpId},
+    ObjType,
 };
 use std::collections::HashSet;
 
 pub(crate) const B: usize = 16;
 
-#[allow(dead_code)]
-pub(crate) type OpTree = OpTreeInternal;
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OpTree {
+    pub internal: OpTreeInternal,
+    pub objtype: ObjType,
+    /// The id of the parent object, root has no parent.
+    pub parent: Option<ObjId>,
+}
+
+impl OpTree {
+    pub fn new() -> Self {
+        Self {
+            internal: Default::default(),
+            objtype: ObjType::Map,
+            parent: None,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct OpTreeInternal {
@@ -51,9 +69,9 @@ impl OpTreeInternal {
             .map(|root| query::KeysAt::new(root, clock))
     }
 
-    pub fn search<Q>(&self, mut query: Q, m: &OpSetMetadata) -> Q
+    pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         self.root_node
             .as_ref()
@@ -172,9 +190,9 @@ impl OpTreeNode {
         }
     }
 
-    pub fn search<Q>(&self, query: &mut Q, m: &OpSetMetadata) -> bool
+    pub fn search<'a, 'b: 'a, Q>(&'b self, query: &mut Q, m: &OpSetMetadata) -> bool
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
         if self.is_leaf() {
             for e in &self.elements {
@@ -652,36 +670,36 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
-        t.insert(0, op());
-        t.insert(1, op());
-        t.insert(0, op());
-        t.insert(0, op());
-        t.insert(0, op());
-        t.insert(3, op());
-        t.insert(4, op());
+        t.internal.insert(0, op());
+        t.internal.insert(1, op());
+        t.internal.insert(0, op());
+        t.internal.insert(0, op());
+        t.internal.insert(0, op());
+        t.internal.insert(3, op());
+        t.internal.insert(4, op());
     }
 
     #[test]
     fn insert_book() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
         for i in 0..100 {
-            t.insert(i % 2, op());
+            t.internal.insert(i % 2, op());
         }
     }
 
     #[test]
     fn insert_book_vec() {
-        let mut t = OpTree::new();
+        let mut t: OpTree = OpTree::new();
         let mut v = Vec::new();
 
         for i in 0..100 {
-            t.insert(i % 3, op());
+            t.internal.insert(i % 3, op());
             v.insert(i % 3, op());
 
-            assert_eq!(v, t.iter().cloned().collect::<Vec<_>>())
+            assert_eq!(v, t.internal.iter().cloned().collect::<Vec<_>>())
         }
     }
 }

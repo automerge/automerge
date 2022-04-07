@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+mod elem_id_pos;
 mod insert;
 mod keys;
 mod keys_at;
@@ -20,6 +21,7 @@ mod prop_at;
 mod seek_op;
 mod seek_op_with_patch;
 
+pub(crate) use elem_id_pos::ElemIdPos;
 pub(crate) use insert::InsertNth;
 pub(crate) use keys::Keys;
 pub(crate) use keys_at::KeysAt;
@@ -43,22 +45,26 @@ pub(crate) struct CounterData {
     op: Op,
 }
 
-pub(crate) trait TreeQuery {
+pub(crate) trait TreeQuery<'a> {
     #[inline(always)]
-    fn query_node_with_metadata(&mut self, child: &OpTreeNode, _m: &OpSetMetadata) -> QueryResult {
+    fn query_node_with_metadata(
+        &mut self,
+        child: &'a OpTreeNode,
+        _m: &OpSetMetadata,
+    ) -> QueryResult {
         self.query_node(child)
     }
 
-    fn query_node(&mut self, _child: &OpTreeNode) -> QueryResult {
+    fn query_node(&mut self, _child: &'a OpTreeNode) -> QueryResult {
         QueryResult::Descend
     }
 
     #[inline(always)]
-    fn query_element_with_metadata(&mut self, element: &Op, _m: &OpSetMetadata) -> QueryResult {
+    fn query_element_with_metadata(&mut self, element: &'a Op, _m: &OpSetMetadata) -> QueryResult {
         self.query_element(element)
     }
 
-    fn query_element(&mut self, _element: &Op) -> QueryResult {
+    fn query_element(&mut self, _element: &'a Op) -> QueryResult {
         panic!("invalid element query")
     }
 }
@@ -221,10 +227,9 @@ impl VisWindow {
             }
         }
         if result.is_empty() {
-            vec![(pos, op.clone())]
-        } else {
-            result
+            result.push((pos, op.clone()));
         }
+        result
     }
 }
 

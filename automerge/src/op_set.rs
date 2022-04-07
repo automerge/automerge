@@ -1,7 +1,7 @@
 use crate::clock::Clock;
 use crate::indexed_cache::IndexedCache;
-use crate::op_tree::OpTreeInternal;
-use crate::query::{self, TreeQuery};
+use crate::op_tree::OpTree;
+use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
 use crate::ObjType;
 use fxhash::FxBuildHasher;
@@ -13,7 +13,7 @@ pub(crate) type OpSet = OpSetInternal;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpSetInternal {
     /// The map of objects to their type and ops.
-    trees: HashMap<ObjId, (ObjType, OpTreeInternal), FxBuildHasher>,
+    trees: HashMap<ObjId, OpTree, FxBuildHasher>,
     /// The number of operations in the opset.
     length: usize,
     /// Metadata about the operations in this opset.
@@ -23,7 +23,7 @@ pub(crate) struct OpSetInternal {
 impl OpSetInternal {
     pub fn new() -> Self {
         let mut trees: HashMap<_, _, _> = Default::default();
-        trees.insert(ObjId::root(), (ObjType::Map, Default::default()));
+        trees.insert(ObjId::root(), OpTree::new());
         OpSetInternal {
             trees,
             length: 0,
@@ -45,28 +45,34 @@ impl OpSetInternal {
         }
     }
 
+    pub fn parent_object(&self, obj: &ObjId) -> Option<(ObjId, Key)> {
+        let parent = self.trees.get(obj)?.parent?;
+        let key = self.search(&parent, OpIdSearch::new(obj.0)).key().unwrap();
+        Some((parent, key))
+    }
+
     pub fn keys(&self, obj: ObjId) -> Option<query::Keys> {
-        if let Some((_typ, tree)) = self.trees.get(&obj) {
-            tree.keys()
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.keys()
         } else {
             None
         }
     }
 
     pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt> {
-        if let Some((_typ, tree)) = self.trees.get(&obj) {
-            tree.keys_at(clock)
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.keys_at(clock)
         } else {
             None
         }
     }
 
-    pub fn search<Q>(&self, obj: &ObjId, query: Q) -> Q
+    pub fn search<'a, 'b: 'a, Q>(&'b self, obj: &ObjId, query: Q) -> Q
     where
-        Q: TreeQuery,
+        Q: TreeQuery<'a>,
     {
-        if let Some((_typ, tree)) = self.trees.get(obj) {
-            tree.search(query, &self.m)
+        if let Some(tree) = self.trees.get(obj) {
+            tree.internal.search(query, &self.m)
         } else {
             query
         }
@@ -76,16 +82,16 @@ impl OpSetInternal {
     where
         F: FnMut(&mut Op),
     {
-        if let Some((_typ, tree)) = self.trees.get_mut(obj) {
-            tree.update(index, f)
+        if let Some(tree) = self.trees.get_mut(obj) {
+            tree.internal.update(index, f)
         }
     }
 
     pub fn remove(&mut self, obj: &ObjId, index: usize) -> Op {
         // this happens on rollback - be sure to go back to the old state
-        let (_typ, tree) = self.trees.get_mut(obj).unwrap();
+        let tree = self.trees.get_mut(obj).unwrap();
         self.length -= 1;
-        let op = tree.remove(index);
+        let op = tree.internal.remove(index);
         if let OpType::Make(_) = &op.action {
             self.trees.remove(&op.id.into());
         }
@@ -98,19 +104,25 @@ impl OpSetInternal {
 
     pub fn insert(&mut self, index: usize, obj: &ObjId, element: Op) {
         if let OpType::Make(typ) = element.action {
-            self.trees
-                .insert(element.id.into(), (typ, Default::default()));
+            self.trees.insert(
+                element.id.into(),
+                OpTree {
+                    internal: Default::default(),
+                    objtype: typ,
+                    parent: Some(*obj),
+                },
+            );
         }
 
-        if let Some((_typ, tree)) = self.trees.get_mut(obj) {
+        if let Some(tree) = self.trees.get_mut(obj) {
             //let tree = self.trees.get_mut(&element.obj).unwrap();
-            tree.insert(index, element);
+            tree.internal.insert(index, element);
             self.length += 1;
         }
     }
 
     pub fn object_type(&self, id: &ObjId) -> Option<ObjType> {
-        self.trees.get(id).map(|(typ, _)| *typ)
+        self.trees.get(id).map(|tree| tree.objtype)
     }
 
     #[cfg(feature = "optree-visualisation")]
@@ -151,8 +163,8 @@ impl<'a> Iterator for Iter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let mut result = None;
         for obj in self.objs.iter().skip(self.index) {
-            let (_typ, tree) = self.inner.trees.get(obj)?;
-            result = tree.get(self.sub_index).map(|op| (*obj, op));
+            let tree = self.inner.trees.get(obj)?;
+            result = tree.internal.get(self.sub_index).map(|op| (*obj, op));
             if result.is_some() {
                 self.sub_index += 1;
                 break;

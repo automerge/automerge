@@ -236,6 +236,14 @@ impl<'a> Transactable for Transaction<'a> {
     ) -> Result<Vec<(Value, ExId)>, AutomergeError> {
         self.doc.values_at(obj, prop, heads)
     }
+
+    fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
+        self.doc.parent_object(obj)
+    }
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        self.doc.path_to_object(obj)
+    }
 }
 
 // If a transaction is not commited or rolled back manually then it can leave the document in an

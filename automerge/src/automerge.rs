@@ -217,54 +217,56 @@ impl Automerge {
         Ok(f)
     }
 
-    fn insert_op(&mut self, obj: &ObjId, op: Op) -> Op {
+    fn insert_op(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOp::new(&op));
 
-        for i in q.succ {
+        let succ = q.succ;
+        let pos = q.pos;
+        for i in succ {
             self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
         }
 
         if !op.is_delete() {
-            self.ops.insert(q.pos, obj, op.clone());
+            self.ops.insert(pos, obj, op);
         }
-        op
     }
 
-    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) -> Op {
+    fn insert_op_with_patch(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOpWithPatch::new(&op));
 
-        for i in q.succ {
-            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
-        }
+        let query::SeekOpWithPatch {
+            pos,
+            succ,
+            seen,
+            values,
+            had_value_before,
+            ..
+        } = q;
 
-        if !op.is_delete() {
-            self.ops.insert(q.pos, obj, op.clone());
-        }
-
-        let obj = self.id_to_exid(obj.0);
+        let ex_obj = self.id_to_exid(obj.0);
         let key = match op.key {
             Key::Map(index) => self.ops.m.props[index].clone().into(),
-            Key::Seq(_) => q.seen.into(),
+            Key::Seq(_) => seen.into(),
         };
 
         let patch = if op.insert {
-            let value = (op.value(), self.id_to_exid(op.id));
-            Patch::Insert(obj, q.seen, value)
+            let value = (op.clone_value(), self.id_to_exid(op.id));
+            Patch::Insert(ex_obj, seen, value)
         } else if op.is_delete() {
-            if let Some(winner) = &q.values.last() {
-                let value = (winner.value(), self.id_to_exid(winner.id));
-                let conflict = q.values.len() > 1;
+            if let Some(winner) = &values.last() {
+                let value = (winner.clone_value(), self.id_to_exid(winner.id));
+                let conflict = values.len() > 1;
                 Patch::Assign(AssignPatch {
-                    obj,
+                    obj: ex_obj,
                     key,
                     value,
                     conflict,
                 })
             } else {
-                Patch::Delete(obj, key)
+                Patch::Delete(ex_obj, key)
             }
         } else {
-            let winner = if let Some(last_value) = q.values.last() {
+            let winner = if let Some(last_value) = values.last() {
                 if self.ops.m.lamport_cmp(op.id, last_value.id) == Ordering::Greater {
                     &op
                 } else {
@@ -273,15 +275,15 @@ impl Automerge {
             } else {
                 &op
             };
-            let value = (winner.value(), self.id_to_exid(winner.id));
-            if op.is_list_op() && !q.had_value_before {
-                Patch::Insert(obj, q.seen, value)
+            let value = (winner.clone_value(), self.id_to_exid(winner.id));
+            if op.is_list_op() && !had_value_before {
+                Patch::Insert(ex_obj, seen, value)
             } else {
                 Patch::Assign(AssignPatch {
-                    obj,
+                    obj: ex_obj,
                     key,
                     value,
-                    conflict: !q.values.is_empty(),
+                    conflict: !values.is_empty(),
                 })
             }
         };
@@ -290,13 +292,62 @@ impl Automerge {
             patches.push(patch);
         }
 
-        op
+        for i in succ {
+            self.ops.replace(obj, i, |old_op| old_op.add_succ(&op));
+        }
+
+        if !op.is_delete() {
+            self.ops.insert(pos, obj, op);
+        }
     }
 
     // KeysAt::()
     // LenAt::()
     // PropAt::()
     // NthAt::()
+
+    /// Get the object id of the object that contains this object and the prop that this object is
+    /// at in that object.
+    pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
+        if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
+            if obj == ObjId::root() {
+                // root has no parent
+                None
+            } else {
+                self.ops
+                    .parent_object(&obj)
+                    .map(|(id, key)| (self.id_to_exid(id.0), self.export_key(id, key)))
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        let mut path = Vec::new();
+        let mut obj = obj.as_ref().clone();
+        while let Some(parent) = self.parent_object(obj) {
+            obj = parent.0.clone();
+            path.push(parent);
+        }
+        path.reverse();
+        path
+    }
+
+    /// Export a key to a prop.
+    fn export_key(&self, obj: ObjId, key: Key) -> Prop {
+        match key {
+            Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
+            Key::Seq(opid) => {
+                let i = self
+                    .ops
+                    .search(&obj, query::ElemIdPos::new(opid))
+                    .index()
+                    .unwrap();
+                Prop::Seq(i)
+            }
+        }
+    }
 
     /// Get the keys of the object `obj`.
     ///
@@ -499,7 +550,7 @@ impl Automerge {
                         .search(&obj, query::PropAt::new(p, clock))
                         .ops
                         .into_iter()
-                        .map(|o| (o.value(), self.id_to_exid(o.id)))
+                        .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                         .collect()
                 } else {
                     vec![]
@@ -510,7 +561,7 @@ impl Automerge {
                 .search(&obj, query::NthAt::new(n, clock))
                 .ops
                 .into_iter()
-                .map(|o| (o.value(), self.id_to_exid(o.id)))
+                .map(|o| (o.clone_value(), self.id_to_exid(o.id)))
                 .collect(),
         };
         Ok(result)
@@ -1661,5 +1712,44 @@ mod tests {
         );
         assert!(doc1.value(&list, 1).unwrap().is_none());
         assert!(doc2.value(&list, 1).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_parent_objects() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(doc.parent_object(&map), Some((ROOT, Prop::Map("a".into()))));
+        assert_eq!(doc.parent_object(&list), Some((map, Prop::Seq(0))));
+        assert_eq!(doc.parent_object(&text), Some((list, Prop::Seq(0))));
+    }
+
+    #[test]
+    fn get_path_to_object() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(
+            doc.path_to_object(&map),
+            vec![(ROOT, Prop::Map("a".into()))]
+        );
+        assert_eq!(
+            doc.path_to_object(&list),
+            vec![(ROOT, Prop::Map("a".into())), (map.clone(), Prop::Seq(0)),]
+        );
+        assert_eq!(
+            doc.path_to_object(&text),
+            vec![
+                (ROOT, Prop::Map("a".into())),
+                (map, Prop::Seq(0)),
+                (list, Prop::Seq(0)),
+            ]
+        );
     }
 }
