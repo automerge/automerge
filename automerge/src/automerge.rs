@@ -1749,6 +1749,21 @@ mod tests {
     }
 
     #[test]
+    fn can_insert_long_string_into_text() {
+        let mut doc = Automerge::new();
+        let mut tx = doc.transaction();
+        let text = tx.put_object(ROOT, "text", ObjType::Text).unwrap();
+        let polar_bear = "🐻‍❄️";
+        let polar_bear_army = polar_bear.repeat(100);
+        tx.insert(&text, 0, &polar_bear_army).unwrap();
+        tx.commit();
+        let s = doc.text(&text).unwrap();
+        assert_eq!(s, polar_bear_army);
+        let len = doc.length(&text);
+        assert_eq!(len, 1); // many graphemes
+    }
+
+    #[test]
     fn splice_text_uses_unicode_scalars() {
         let mut doc = Automerge::new();
         let mut tx = doc.transaction();
