@@ -6,7 +6,7 @@
   ],
   "name": "automerge-wasm",
   "description": "wasm-bindgen bindings to the automerge rust implementation",
-  "version": "0.0.24",
+  "version": "0.0.1",
   "license": "MIT",
   "files": [
     "README.md",
