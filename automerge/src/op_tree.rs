@@ -17,7 +17,7 @@ use std::collections::HashSet;
 
 pub(crate) const B: usize = 16;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OpTree {
     pub internal: OpTreeInternal,
     pub objtype: ObjType,
@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let mut t: OpTree<16> = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
         t.internal.insert(0, op());
         t.internal.insert(1, op());
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn insert_book() {
-        let mut t: OpTree<16> = OpTree::new();
+        let mut t: OpTree = OpTree::new();
 
         for i in 0..100 {
             t.internal.insert(i % 2, op());
@@ -692,7 +692,7 @@ mod tests {
 
     #[test]
     fn insert_book_vec() {
-        let mut t: OpTree<16> = OpTree::new();
+        let mut t: OpTree = OpTree::new();
         let mut v = Vec::new();
 
         for i in 0..100 {

@@ -10,25 +10,25 @@ fn main() {
 
     // a simple scalar change in the root object
     let mut tx = doc.transaction();
-    tx.set(ROOT, "hello", "world").unwrap();
+    tx.put(ROOT, "hello", "world").unwrap();
     let heads2 = tx.commit();
     get_changes(&heads1, &doc);
 
     let mut tx = doc.transaction();
     let map = tx
-        .set_object(ROOT, "my new map", automerge::ObjType::Map)
+        .put_object(ROOT, "my new map", automerge::ObjType::Map)
         .unwrap();
-    tx.set(&map, "blah", 1).unwrap();
-    tx.set(&map, "blah2", 1).unwrap();
+    tx.put(&map, "blah", 1).unwrap();
+    tx.put(&map, "blah2", 1).unwrap();
     let list = tx
-        .set_object(&map, "my list", automerge::ObjType::List)
+        .put_object(&map, "my list", automerge::ObjType::List)
         .unwrap();
     // tx.insert(&list, 0, "yay").unwrap();
     let m = tx.insert_object(&list, 0, automerge::ObjType::Map).unwrap();
-    tx.set(&m, "hi", 2).unwrap();
+    tx.put(&m, "hi", 2).unwrap();
     tx.insert(&list, 1, "woo").unwrap();
     let m = tx.insert_object(&list, 2, automerge::ObjType::Map).unwrap();
-    tx.set(&m, "hi", 2).unwrap();
+    tx.put(&m, "hi", 2).unwrap();
     let _heads3 = tx.commit();
     get_changes(&[heads2], &doc);
 

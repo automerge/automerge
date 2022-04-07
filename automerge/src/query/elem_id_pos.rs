@@ -26,16 +26,16 @@ impl ElemIdPos {
     }
 }
 
-impl TreeQuery for ElemIdPos {
+impl<'a> TreeQuery<'a> for ElemIdPos {
     fn query_node(&mut self, child: &OpTreeNode) -> QueryResult {
         dbg!(child, &self.elemid);
         // if index has our element then we can cont
-        if child.index.has(&Some(self.elemid)) {
+        if child.index.has_visible(&Some(self.elemid)) {
             // element is in this node somewhere
             QueryResult::Descend
         } else {
             // not in this node, try the next one
-            self.pos += child.index.len;
+            self.pos += child.index.visible_len();
             QueryResult::Next
         }
     }
