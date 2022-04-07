@@ -207,9 +207,9 @@ impl Automerge {
             if let Some(idx) = self.history_index.get(&hash) {
                 let change = &self.history[*idx];
                 for dep in &change.deps {
-                  if !seen.contains(dep) {
-                    heads.push(*dep);
-                  }
+                    if !seen.contains(dep) {
+                        heads.push(*dep);
+                    }
                 }
                 changes.push(change);
                 seen.insert(hash);
