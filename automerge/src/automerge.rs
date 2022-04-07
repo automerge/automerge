@@ -287,6 +287,8 @@ impl Automerge {
     // PropAt::()
     // NthAt::()
 
+    /// Get the object id of the object that contains this object and the prop that this object is
+    /// at in that object.
     pub fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
         if let Ok(obj) = self.exid_to_obj(obj.as_ref()) {
             if obj == ObjId::root() {
@@ -302,6 +304,7 @@ impl Automerge {
         }
     }
 
+    /// Export a key to a prop.
     fn export_key(&self, obj: ObjId, key: Key) -> Prop {
         match key {
             Key::Map(m) => Prop::Map(self.ops.m.props.get(m).into()),
