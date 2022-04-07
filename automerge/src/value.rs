@@ -246,6 +246,12 @@ impl<'a> From<&str> for Value<'a> {
     }
 }
 
+impl<'a> From<&String> for Value<'a> {
+    fn from(s: &String) -> Self {
+        Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
+    }
+}
+
 impl<'a> From<String> for Value<'a> {
     fn from(s: String) -> Self {
         Value::Scalar(Cow::Owned(ScalarValue::Str(s.into())))
@@ -622,6 +628,12 @@ impl ScalarValue {
 
 impl From<&str> for ScalarValue {
     fn from(s: &str) -> Self {
+        ScalarValue::Str(s.into())
+    }
+}
+
+impl From<&String> for ScalarValue {
+    fn from(s: &String) -> Self {
         ScalarValue::Str(s.into())
     }
 }
