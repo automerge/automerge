@@ -304,6 +304,17 @@ impl Automerge {
         }
     }
 
+    pub fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        let mut path = Vec::new();
+        let mut obj = obj.as_ref().clone();
+        while let Some(parent) = self.parent_object(obj) {
+            obj = parent.0.clone();
+            path.push(parent);
+        }
+        path.reverse();
+        path
+    }
+
     /// Export a key to a prop.
     fn export_key(&self, obj: ObjId, key: Key) -> Prop {
         match key {
@@ -1695,5 +1706,31 @@ mod tests {
         assert_eq!(doc.parent_object(&map), Some((ROOT, Prop::Map("a".into()))));
         assert_eq!(doc.parent_object(&list), Some((map, Prop::Seq(0))));
         assert_eq!(doc.parent_object(&text), Some((list, Prop::Seq(0))));
+    }
+
+    #[test]
+    fn get_path_to_object() {
+        let mut doc = AutoCommit::new();
+        let map = doc.put_object(ROOT, "a", ObjType::Map).unwrap();
+        let list = doc.insert_object(&map, 0, ObjType::List).unwrap();
+        doc.insert(&list, 0, 2).unwrap();
+        let text = doc.put_object(&list, 0, ObjType::Text).unwrap();
+
+        assert_eq!(
+            doc.path_to_object(&map),
+            vec![(ROOT, Prop::Map("a".into()))]
+        );
+        assert_eq!(
+            doc.path_to_object(&list),
+            vec![(ROOT, Prop::Map("a".into())), (map.clone(), Prop::Seq(0)),]
+        );
+        assert_eq!(
+            doc.path_to_object(&text),
+            vec![
+                (ROOT, Prop::Map("a".into())),
+                (map, Prop::Seq(0)),
+                (list, Prop::Seq(0)),
+            ]
+        );
     }
 }

@@ -149,4 +149,6 @@ pub trait Transactable {
     /// Get the object id of the object that contains this object and the prop that this object is
     /// at in that object.
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)>;
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)>;
 }

@@ -392,4 +392,8 @@ impl Transactable for AutoCommit {
     fn parent_object<O: AsRef<ExId>>(&self, obj: O) -> Option<(ExId, Prop)> {
         self.doc.parent_object(obj)
     }
+
+    fn path_to_object<O: AsRef<ExId>>(&self, obj: O) -> Vec<(ExId, Prop)> {
+        self.doc.path_to_object(obj)
+    }
 }
