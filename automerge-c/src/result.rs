@@ -1,69 +1,20 @@
 use automerge as am;
 use std::ffi::CString;
 
-/// \struct AMobj
-/// \brief A discriminated union of object handle variants.
-///
-/// \ingroup enumerations
-/// \enum AMobjVariant
-/// \brief An object handle discriminant.
-///
-/// \var AMobj::tag
-/// The variant discriminator of an `AMobj` struct.
-///
-/// \var AMobj::ID
-/// An object identifier.
-///
-/// \struct AMobj_Id
-/// \brief An object identifier's fields.
-///
-#[repr(C)]
-pub enum AMobj {
-    /// An object identifier variant.
-    Id {
-        /// The counter field of an object identifier.
-        ctr: u64,
-        /// The actor field of an object identifier.
-        actor: [u8; 16],
-        /// The index field of an object identifier.
-        idx: usize,
-    },
-    /// A root object signifier variant.
-    Root,
-}
+/// \struct AMobjId
+/// \brief An object's unique identifier.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub struct AMobjId(am::ObjId);
 
-impl From<&am::ObjId> for AMobj {
-    fn from(obj_id: &am::ObjId) -> Self {
-        match obj_id {
-            am::ObjId::Id(ctr, actor, idx) => {
-                let mut am_obj = AMobj::Id {
-                    ctr: *ctr,
-                    actor: Default::default(),
-                    idx: *idx,
-                };
-                if let AMobj::Id {
-                    ctr: _,
-                    actor: a,
-                    idx: _,
-                } = &mut am_obj
-                {
-                    a.copy_from_slice(actor.to_bytes());
-                }
-                am_obj
-            }
-            am::ObjId::Root => AMobj::Root,
-        }
+impl AMobjId {
+    pub fn new(obj_id: am::ObjId) -> Self {
+        Self(obj_id)
     }
 }
 
-impl From<&AMobj> for am::ObjId {
-    fn from(am_obj: &AMobj) -> Self {
-        match am_obj {
-            AMobj::Id { ctr, actor, idx } => {
-                am::ObjId::Id(*ctr, am::ActorId::from(actor.as_slice()), *idx)
-            }
-            AMobj::Root => am::ObjId::Root,
-        }
+impl AsRef<am::ObjId> for AMobjId {
+    fn as_ref(&self) -> &am::ObjId {
+        &self.0
     }
 }
 
@@ -74,7 +25,7 @@ impl From<&AMobj> for am::ObjId {
 #[repr(C)]
 pub struct AMbyteSpan {
     /// A pointer to the byte at position zero.
-    /// \warning \p src is only valid until the `AMclear()` function is called
+    /// \warning \p src is only valid until the `AMfreeResult()` function is called
     ///          on the `AMresult` struct hosting the array of bytes to which
     ///          it points.
     src: *const u8,
@@ -104,7 +55,6 @@ impl From<&mut am::ActorId> for AMbyteSpan {
 /// \struct AMvalue
 /// \brief A discriminated union of value type variants for an `AMresult` struct.
 ///
-/// \ingroup enumerations
 /// \enum AMvalueVariant
 /// \brief A value type discriminant.
 ///
@@ -126,11 +76,14 @@ impl From<&mut am::ActorId> for AMbyteSpan {
 /// \var AMvalue::f64
 /// A 64-bit float.
 ///
+/// \var AMvalue::change_hash
+/// A change hash as an `AMbyteSpan` struct.
+///
 /// \var AMvalue::int_
 /// A 64-bit signed integer.
 ///
-/// \var AMvalue::obj
-/// An object handle.
+/// \var AMvalue::obj_id
+/// An object identifier.
 ///
 /// \var AMvalue::str
 /// A UTF-8 string.
@@ -141,7 +94,7 @@ impl From<&mut am::ActorId> for AMbyteSpan {
 /// \var AMvalue::uint
 /// A 64-bit unsigned integer.
 #[repr(C)]
-pub enum AMvalue {
+pub enum AMvalue<'a> {
     /// An actor ID variant.
     ActorId(AMbyteSpan),
     /// A boolean variant.
@@ -156,10 +109,8 @@ pub enum AMvalue {
     Counter(i64),
     /// A 64-bit float variant.
     F64(f64),
-    /*
-    /// A heads variant.
-    Heads(_),
-    */
+    /// A change hash variant.
+    ChangeHash(AMbyteSpan),
     /// A 64-bit signed integer variant.
     Int(i64),
     /*
@@ -170,8 +121,8 @@ pub enum AMvalue {
     Nothing,
     /// A null variant.
     Null,
-    /// An object handle variant.
-    Obj(AMobj),
+    /// An object identifier variant.
+    ObjId(&'a AMobjId),
     /// A UTF-8 string variant.
     Str(*const libc::c_char),
     /// A Lamport timestamp variant.
@@ -187,22 +138,22 @@ pub enum AMvalue {
 /// \struct AMresult
 /// \brief A discriminated union of result variants.
 ///
-pub enum AMresult {
+pub enum AMresult<'a> {
     ActorId(am::ActorId),
     Changes(Vec<am::Change>),
     Error(CString),
-    ObjId(am::ObjId),
+    ObjId(&'a AMobjId),
     Nothing,
     Scalars(Vec<am::Value>, Option<CString>),
 }
 
-impl AMresult {
+impl<'a> AMresult<'a> {
     pub(crate) fn err(s: &str) -> Self {
         AMresult::Error(CString::new(s).unwrap())
     }
 }
 
-impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
+impl<'a> From<Result<am::ActorId, am::AutomergeError>> for AMresult<'a> {
     fn from(maybe: Result<am::ActorId, am::AutomergeError>) -> Self {
         match maybe {
             Ok(actor_id) => AMresult::ActorId(actor_id),
@@ -211,16 +162,16 @@ impl From<Result<am::ActorId, am::AutomergeError>> for AMresult {
     }
 }
 
-impl From<Result<am::ObjId, am::AutomergeError>> for AMresult {
-    fn from(maybe: Result<am::ObjId, am::AutomergeError>) -> Self {
+impl<'a> From<Result<&'a AMobjId, am::AutomergeError>> for AMresult<'a> {
+    fn from(maybe: Result<&'a AMobjId, am::AutomergeError>) -> Self {
         match maybe {
-            Ok(obj) => AMresult::ObjId(obj),
+            Ok(obj_id) => AMresult::ObjId(obj_id),
             Err(e) => AMresult::Error(CString::new(e.to_string()).unwrap()),
         }
     }
 }
 
-impl From<Result<(), am::AutomergeError>> for AMresult {
+impl<'a> From<Result<(), am::AutomergeError>> for AMresult<'a> {
     fn from(maybe: Result<(), am::AutomergeError>) -> Self {
         match maybe {
             Ok(()) => AMresult::Nothing,
@@ -229,7 +180,7 @@ impl From<Result<(), am::AutomergeError>> for AMresult {
     }
 }
 
-impl From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AMresult {
+impl<'a> From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AMresult<'a> {
     fn from(maybe: Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>) -> Self {
         match maybe {
             // \todo Ensure that it's alright to ignore the `am::ObjId` value.
@@ -240,7 +191,7 @@ impl From<Result<Option<(am::Value, am::ObjId)>, am::AutomergeError>> for AMresu
     }
 }
 
-impl From<Result<am::Value, am::AutomergeError>> for AMresult {
+impl<'a> From<Result<am::Value, am::AutomergeError>> for AMresult<'a> {
     fn from(maybe: Result<am::Value, am::AutomergeError>) -> Self {
         match maybe {
             Ok(value) => AMresult::Scalars(vec![value], None),
