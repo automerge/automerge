@@ -1,7 +1,7 @@
 use crate::AMresult;
 
-impl From<AMresult> for *mut AMresult {
-    fn from(b: AMresult) -> Self {
+impl<'a> From<AMresult<'a>> for *mut AMresult<'a> {
+    fn from(b: AMresult<'a>) -> Self {
         Box::into_raw(Box::new(b))
     }
 }
