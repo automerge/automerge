@@ -5,10 +5,14 @@ import * as Automerge from "automerge-wasm"
 
 function App() {
   const [ doc, ] = useState(Automerge.create())
-  const [ edits, ] = useState(doc.set("_root", "edits", Automerge.TEXT) || "")
+  const [ edits, ] = useState(doc.putObject("_root", "edits", ""))
   const [ val, setVal ] = useState("");
   useEffect(() => {
       doc.splice(edits, 0, 0, "the quick fox jumps over the lazy dog")
+      let doc2 = Automerge.load(doc.save());
+      console.log("LOAD",Automerge.load)
+      console.log("DOC",doc.materialize("/"))
+      console.log("DOC2",doc2.materialize("/"))
       let result = doc.text(edits)
       setVal(result)
   }, [])

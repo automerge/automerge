@@ -1,14 +1,14 @@
 use crate::types::{ActorId, ScalarValue};
 use crate::value::DataType;
-use crate::{decoding, encoding};
+use crate::{decoding, encoding, ChangeHash};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum AutomergeError {
-    #[error("invalid opid format `{0}`")]
-    InvalidOpId(String),
-    #[error("obj id not from this document `{0}`")]
-    ForeignObjId(String),
+    #[error("invalid obj id format `{0}`")]
+    InvalidObjIdFormat(String),
+    #[error("invalid obj id `{0}`")]
+    InvalidObjId(String),
     #[error("there was an encoding problem: {0}")]
     Encoding(#[from] encoding::Error),
     #[error("there was a decoding problem: {0}")]
@@ -21,7 +21,9 @@ pub enum AutomergeError {
     InvalidIndex(usize),
     #[error("duplicate seq {0} found for actor {1}")]
     DuplicateSeqNumber(u64, ActorId),
-    #[error("generic automerge error")]
+    #[error("invalid hash {0}")]
+    InvalidHash(ChangeHash),
+    #[error("general failure")]
     Fail,
 }
 

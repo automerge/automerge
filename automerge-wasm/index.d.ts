@@ -81,7 +81,7 @@ export type Patch = {
 }
 
 export function create(actor?: Actor): Automerge;
-export function loadDoc(data: Uint8Array, actor?: Actor): Automerge;
+export function load(data: Uint8Array, actor?: Actor): Automerge;
 export function encodeChange(change: DecodedChange): Change;
 export function decodeChange(change: Change): DecodedChange;
 export function initSyncState(): SyncState;
@@ -109,10 +109,10 @@ export class Automerge {
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
-  materialize(obj?: ObjID): any;
+  materialize(obj?: ObjID, heads?: Heads): any;
 
   // transactions
-  commit(message?: string, time?: number): Heads;
+  commit(message?: string, time?: number): Hash;
   merge(other: Automerge): Heads;
   getActorId(): Actor;
   pendingOps(): number;
@@ -144,6 +144,7 @@ export class Automerge {
   free(): void;
   clone(actor?: string): Automerge;
   fork(actor?: string): Automerge;
+  forkAt(heads: Heads, actor?: string): Automerge;
 
   // dump internal state to console.log
   dump(): void;
@@ -160,77 +161,4 @@ export class SyncState {
   readonly sharedHeads: any;
 }
 
-export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
-
-export interface InitOutput {
-  readonly memory: WebAssembly.Memory;
-  readonly __wbg_automerge_free: (a: number) => void;
-  readonly automerge_new: (a: number, b: number, c: number) => void;
-  readonly automerge_clone: (a: number, b: number, c: number, d: number) => void;
-  readonly automerge_free: (a: number) => void;
-  readonly automerge_pendingOps: (a: number) => number;
-  readonly automerge_commit: (a: number, b: number, c: number, d: number, e: number) => number;
-  readonly automerge_rollback: (a: number) => number;
-  readonly automerge_keys: (a: number, b: number, c: number, d: number, e: number) => void;
-  readonly automerge_text: (a: number, b: number, c: number, d: number, e: number) => void;
-  readonly automerge_splice: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-  readonly automerge_push: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
-  readonly automerge_insert: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
-  readonly automerge_set: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
-  readonly automerge_inc: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-  readonly automerge_get: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-  readonly automerge_get_all: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-  readonly automerge_length: (a: number, b: number, c: number, d: number, e: number) => void;
-  readonly automerge_del: (a: number, b: number, c: number, d: number, e: number) => void;
-  readonly automerge_save: (a: number, b: number) => void;
-  readonly automerge_saveIncremental: (a: number) => number;
-  readonly automerge_loadIncremental: (a: number, b: number, c: number) => void;
-  readonly automerge_applyChanges: (a: number, b: number, c: number) => void;
-  readonly automerge_getChanges: (a: number, b: number, c: number) => void;
-  readonly automerge_getChangesAdded: (a: number, b: number, c: number) => void;
-  readonly automerge_getHeads: (a: number) => number;
-  readonly automerge_getActorId: (a: number, b: number) => void;
-  readonly automerge_getLastLocalChange: (a: number, b: number) => void;
-  readonly automerge_dump: (a: number) => void;
-  readonly automerge_getMissingDeps: (a: number, b: number, c: number) => void;
-  readonly automerge_receiveSyncMessage: (a: number, b: number, c: number, d: number) => void;
-  readonly automerge_generateSyncMessage: (a: number, b: number, c: number) => void;
-  readonly automerge_toJS: (a: number) => number;
-  readonly create: (a: number, b: number, c: number) => void;
-  readonly loadDoc: (a: number, b: number, c: number, d: number) => void;
-  readonly encodeChange: (a: number, b: number) => void;
-  readonly decodeChange: (a: number, b: number) => void;
-  readonly initSyncState: () => number;
-  readonly importSyncState: (a: number, b: number) => void;
-  readonly exportSyncState: (a: number) => number;
-  readonly encodeSyncMessage: (a: number, b: number) => void;
-  readonly decodeSyncMessage: (a: number, b: number) => void;
-  readonly encodeSyncState: (a: number, b: number) => void;
-  readonly decodeSyncState: (a: number, b: number) => void;
-  readonly __wbg_list_free: (a: number) => void;
-  readonly __wbg_map_free: (a: number) => void;
-  readonly __wbg_text_free: (a: number) => void;
-  readonly __wbg_table_free: (a: number) => void;
-  readonly __wbg_syncstate_free: (a: number) => void;
-  readonly syncstate_sharedHeads: (a: number) => number;
-  readonly syncstate_lastSentHeads: (a: number) => number;
-  readonly syncstate_set_lastSentHeads: (a: number, b: number, c: number) => void;
-  readonly syncstate_set_sentHashes: (a: number, b: number, c: number) => void;
-  readonly syncstate_clone: (a: number) => number;
-  readonly __wbindgen_malloc: (a: number) => number;
-  readonly __wbindgen_realloc: (a: number, b: number, c: number) => number;
-  readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
-  readonly __wbindgen_free: (a: number, b: number) => void;
-  readonly __wbindgen_exn_store: (a: number) => void;
-}
-
-/**
-* If `module_or_path` is {RequestInfo} or {URL}, makes a request and
-* for everything else, calls `WebAssembly.instantiate` directly.
-*
-* @param {InitInput | Promise<InitInput>} module_or_path
-*
-* @returns {Promise<InitOutput>}
-*/
-
-export default function init (module_or_path?: InitInput | Promise<InitInput>): Promise<InitOutput>;
+export default function init (): Promise<()>;

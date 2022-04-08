@@ -3,9 +3,8 @@ import { describe, it } from 'mocha';
 import assert from 'assert'
 //@ts-ignore
 import { BloomFilter } from './helpers/sync'
-import { create, loadDoc, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '../dev/index'
-import { DecodedSyncMessage } from '../index';
-import { Hash } from '../dev/index';
+import init, { create, load, SyncState, Automerge, encodeChange, decodeChange, initSyncState, decodeSyncMessage, decodeSyncState, encodeSyncState, encodeSyncMessage } from '..'
+import { DecodedSyncMessage, Hash } from '..';
 
 function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncState = initSyncState()) {
   const MAX_ITER = 10
@@ -29,7 +28,11 @@ function sync(a: Automerge, b: Automerge, aSyncState = initSyncState(), bSyncSta
 
 describe('Automerge', () => {
   describe('basics', () => {
-    it('should init clone and free', () => {
+    it('default import init() should return a promise', () => {
+      assert(init() instanceof Promise)
+    })
+
+    it('should create, clone and free', () => {
       let doc1 = create()
       let doc2 = doc1.clone()
       doc1.free()
@@ -168,6 +171,7 @@ describe('Automerge', () => {
       doc.insert(submap, 0, "b");
       assert.deepEqual(doc.materialize(), { letters: ["b", "a" ] })
       doc.push(submap, "c");
+      let heads = doc.getHeads()
       assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c" ] })
       doc.push(submap, 3, "timestamp");
       assert.deepEqual(doc.materialize(), { letters: ["b", "a", "c", new Date(3) ] })
@@ -177,6 +181,7 @@ describe('Automerge', () => {
       assert.deepEqual(doc.materialize(), { letters: ["z", "d", "e", "f", "c", new Date(3) ] })
       assert.deepEqual(doc.materialize(submap), ["z", "d", "e", "f", "c", new Date(3) ])
       assert.deepEqual(doc.length(submap),6)
+      assert.deepEqual(doc.materialize("/", heads), { letters: ["b", "a", "c" ] })
 
       doc.free()
     })
@@ -186,17 +191,17 @@ describe('Automerge', () => {
 
       doc.put("_root", "foo","bar")
       doc.put("_root", "bip","bap")
-      let heads1 = doc.commit()
+      let hash1 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip","foo"])
 
       doc.delete("_root", "foo")
       doc.delete("_root", "baz")
-      let heads2 = doc.commit()
+      let hash2 = doc.commit()
 
       assert.deepEqual(doc.keys("_root"),["bip"])
-      assert.deepEqual(doc.keys("_root", heads1),["bip", "foo"])
-      assert.deepEqual(doc.keys("_root", heads2),["bip"])
+      assert.deepEqual(doc.keys("_root", [hash1]),["bip", "foo"])
+      assert.deepEqual(doc.keys("_root", [hash2]),["bip"])
       doc.free()
     })
 
@@ -229,7 +234,6 @@ describe('Automerge', () => {
       let root = "_root";
 
       let text = doc.putObject(root, "text", "");
-      if (!text) throw new Error('should not be undefined')
       doc.splice(text, 0, 0, "hello ")
       doc.splice(text, 6, 0, ["w","o","r","l","d"])
       doc.splice(text, 11, 0, ["!","?"])
@@ -273,9 +277,9 @@ describe('Automerge', () => {
 
       assert.notDeepEqual(saveA, saveB);
 
-      let docA = loadDoc(saveA);
-      let docB = loadDoc(saveB);
-      let docC = loadDoc(saveMidway)
+      let docA = load(saveA);
+      let docB = load(saveB);
+      let docC = load(saveMidway)
       docC.loadIncremental(save3)
 
       assert.deepEqual(docA.keys("_root"), docB.keys("_root"));
@@ -291,23 +295,23 @@ describe('Automerge', () => {
       let doc = create()
       let text = doc.putObject("_root", "text", "");
       doc.splice(text, 0, 0, "hello world");
-      let heads1 = doc.commit();
+      let hash1 = doc.commit();
       doc.splice(text, 6, 0, "big bad ");
-      let heads2 = doc.commit();
+      let hash2 = doc.commit();
       assert.strictEqual(doc.text(text), "hello big bad world")
       assert.strictEqual(doc.length(text), 19)
-      assert.strictEqual(doc.text(text, heads1), "hello world")
-      assert.strictEqual(doc.length(text, heads1), 11)
-      assert.strictEqual(doc.text(text, heads2), "hello big bad world")
-      assert.strictEqual(doc.length(text, heads2), 19)
+      assert.strictEqual(doc.text(text, [ hash1 ]), "hello world")
+      assert.strictEqual(doc.length(text, [ hash1 ]), 11)
+      assert.strictEqual(doc.text(text, [ hash2 ]), "hello big bad world")
+      assert.strictEqual(doc.length(text, [ hash2 ]), 19)
       doc.free()
     })
 
     it('local inc increments all visible counters in a map', () => {
       let doc1 = create("aaaa")
       doc1.put("_root", "hello", "world")
-      let doc2 = loadDoc(doc1.save(), "bbbb");
-      let doc3 = loadDoc(doc1.save(), "cccc");
+      let doc2 = load(doc1.save(), "bbbb");
+      let doc3 = load(doc1.save(), "cccc");
       doc1.put("_root", "cnt", 20)
       doc2.put("_root", "cnt", 0, "counter")
       doc3.put("_root", "cnt", 10, "counter")
@@ -327,7 +331,7 @@ describe('Automerge', () => {
       ])
 
       let save1 = doc1.save()
-      let doc4 = loadDoc(save1)
+      let doc4 = load(save1)
       assert.deepEqual(doc4.save(), save1);
       doc1.free()
       doc2.free()
@@ -339,8 +343,8 @@ describe('Automerge', () => {
       let doc1 = create("aaaa")
       let seq = doc1.putObject("_root", "seq", [])
       doc1.insert(seq, 0, "hello")
-      let doc2 = loadDoc(doc1.save(), "bbbb");
-      let doc3 = loadDoc(doc1.save(), "cccc");
+      let doc2 = load(doc1.save(), "bbbb");
+      let doc3 = load(doc1.save(), "cccc");
       doc1.put(seq, 0, 20)
       doc2.put(seq, 0, 0, "counter")
       doc3.put(seq, 0, 10, "counter")
@@ -360,7 +364,7 @@ describe('Automerge', () => {
       ])
 
       let save = doc1.save()
-      let doc4 = loadDoc(save)
+      let doc4 = load(save)
       assert.deepEqual(doc4.save(), save);
       doc1.free()
       doc2.free()
@@ -439,7 +443,7 @@ describe('Automerge', () => {
       let c = doc1.putObject("_root","c",{});
       let d = doc1.put(c,"d","dd");
       let saved = doc1.save();
-      let doc2 = loadDoc(saved);
+      let doc2 = load(saved);
       assert.deepEqual(doc2.get("_root","a"),["map",a])
       assert.deepEqual(doc2.keys(a),[])
       assert.deepEqual(doc2.get("_root","b"),["map",b])
@@ -449,6 +453,21 @@ describe('Automerge', () => {
       assert.deepEqual(doc2.get(c,"d"),["str","dd"])
       doc1.free()
       doc2.free()
+    })
+
+    it('should allow you to forkAt a heads', () => {
+      let A = create("aaaaaa")
+      A.put("/", "key1","val1");
+      A.put("/", "key2","val2");
+      let heads1 = A.getHeads();
+      let B = A.fork("bbbbbb")
+      A.put("/", "key3","val3");
+      B.put("/", "key4","val4");
+      A.merge(B)
+      let heads2 = A.getHeads();
+      A.put("/", "key5","val5");
+      assert.deepEqual(A.forkAt(heads1).materialize("/"), A.materialize("/",heads1))
+      assert.deepEqual(A.forkAt(heads2).materialize("/"), A.materialize("/",heads2))
     })
 
     it('should handle merging text conflicts then saving & loading', () => {
@@ -469,7 +488,7 @@ describe('Automerge', () => {
 
       let binary = A.save()
 
-      let C = loadDoc(binary)
+      let C = load(binary)
 
       assert.deepEqual(C.get('_root', 'text'), ['text', '1@aabbcc'])
       assert.deepEqual(C.text(At), 'hell! world')

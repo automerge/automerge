@@ -200,6 +200,31 @@ impl Automerge {
         f
     }
 
+    /// Fork this document at the give heads
+    pub fn fork_at(&self, heads: &[ChangeHash]) -> Result<Self, AutomergeError> {
+        let mut seen = heads.iter().cloned().collect::<HashSet<_>>();
+        let mut heads = heads.to_vec();
+        let mut changes = vec![];
+        while let Some(hash) = heads.pop() {
+            if let Some(idx) = self.history_index.get(&hash) {
+                let change = &self.history[*idx];
+                for dep in &change.deps {
+                    if !seen.contains(dep) {
+                        heads.push(*dep);
+                    }
+                }
+                changes.push(change);
+                seen.insert(hash);
+            } else {
+                return Err(AutomergeError::InvalidHash(hash));
+            }
+        }
+        let mut f = Self::new();
+        f.set_actor(ActorId::random());
+        f.apply_changes(changes.into_iter().rev().cloned())?;
+        Ok(f)
+    }
+
     fn insert_op(&mut self, obj: &ObjId, op: Op) {
         let q = self.ops.search(obj, query::SeekOp::new(&op));
 
@@ -1022,17 +1047,17 @@ impl Automerge {
         } else {
             let n = s
                 .find('@')
-                .ok_or_else(|| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let counter = s[0..n]
                 .parse()
-                .map_err(|_| AutomergeError::InvalidOpId(s.to_owned()))?;
+                .map_err(|_| AutomergeError::InvalidObjIdFormat(s.to_owned()))?;
             let actor = ActorId::from(hex::decode(&s[(n + 1)..]).unwrap());
             let actor = self
                 .ops
                 .m
                 .actors
                 .lookup(&actor)
-                .ok_or_else(|| AutomergeError::ForeignObjId(s.to_owned()))?;
+                .ok_or_else(|| AutomergeError::InvalidObjId(s.to_owned()))?;
             Ok(ExId::Id(
                 counter,
                 self.ops.m.actors.cache[actor].clone(),
