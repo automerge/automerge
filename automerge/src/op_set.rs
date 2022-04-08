@@ -3,10 +3,11 @@ use crate::indexed_cache::IndexedCache;
 use crate::op_tree::OpTree;
 use crate::query::{self, OpIdSearch, TreeQuery};
 use crate::types::{ActorId, Key, ObjId, Op, OpId, OpType};
-use crate::ObjType;
+use crate::{ObjType, Prop};
 use fxhash::FxBuildHasher;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::ops::RangeBounds;
 
 pub(crate) type OpSet = OpSetInternal;
 
@@ -62,6 +63,27 @@ impl OpSetInternal {
     pub fn keys_at(&self, obj: ObjId, clock: Clock) -> Option<query::KeysAt> {
         if let Some(tree) = self.trees.get(&obj) {
             tree.internal.keys_at(clock)
+        } else {
+            None
+        }
+    }
+
+    pub fn range<R: RangeBounds<Prop>>(&self, obj: ObjId, range: R) -> Option<query::Range<R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.range(range, &self.m)
+        } else {
+            None
+        }
+    }
+
+    pub fn range_at<R: RangeBounds<Prop>>(
+        &self,
+        obj: ObjId,
+        range: R,
+        clock: Clock,
+    ) -> Option<query::RangeAt<R>> {
+        if let Some(tree) = self.trees.get(&obj) {
+            tree.internal.range_at(range, &self.m, clock)
         } else {
             None
         }

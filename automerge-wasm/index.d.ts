@@ -103,9 +103,9 @@ export class Automerge {
   delete(obj: ObjID, prop: Prop): void;
 
   // returns a single value - if there is a conflict return the winner
-  value(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
+  get(obj: ObjID, prop: any, heads?: Heads): FullValue | null;
   // return all values in case of a conflict
-  values(obj: ObjID, arg: any, heads?: Heads): FullValue[];
+  getAll(obj: ObjID, arg: any, heads?: Heads): FullValue[];
   keys(obj: ObjID, heads?: Heads): string[];
   text(obj: ObjID, heads?: Heads): string;
   length(obj: ObjID, heads?: Heads): number;
@@ -161,5 +161,4 @@ export class SyncState {
   readonly sharedHeads: any;
 }
 
-//export default function init (module_or_path?: InitInput | Promise<InitInput>): Promise<InitOutput>;
 export default function init (): Promise<()>;

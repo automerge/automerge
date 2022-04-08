@@ -84,7 +84,7 @@ describe('Automerge', () => {
       // Anywhere Object Ids are being used a path can also be used.
       // The following two statements are equivalent:
 
-      let id = doc.value("/", "config")
+      let id = doc.get("/", "config")
       if (id && id[0] === 'map') {
         doc.put(id[1], "align", "right")
       }
@@ -118,11 +118,11 @@ describe('Automerge', () => {
       let items = doc.putObject("_root", "items", [10,"box"])
                                                     // init a new list with two elements
       doc.push(items, true)                         // push `true` to the end of the list
-      doc.putObject(items, 0, { hello: "world" })  // overwrite the value 10 with an object with a key and value
-      doc.delete(items, 1)                             // delete "box"
+      doc.putObject(items, 0, { hello: "world" })   // overwrite the value 10 with an object with a key and value
+      doc.delete(items, 1)                          // delete "box"
       doc.splice(items, 2, 0, ["bag", "brick"])     // splice in "bag" and "brick" at position 2
       doc.insert(items, 0, "bat")                   // insert "bat" to the beginning of the list
-      doc.insertObject(items, 1, [ 1, 2 ])             // insert a list with 2 values at pos 1
+      doc.insertObject(items, 1, [ 1, 2 ])          // insert a list with 2 values at pos 1
 
       assert.deepEqual(doc.materialize(items),[ "bat", [ 1 ,2 ], { hello : "world" }, true, "bag", "brick" ])
       assert.deepEqual(doc.length(items),6)
@@ -139,8 +139,8 @@ describe('Automerge', () => {
       let obj = doc.insertObject(notes, 6, { hi: "there" })
 
       assert.deepEqual(doc.text(notes), "Hello \ufffceveryone")
-      assert.deepEqual(doc.value(notes, 6), ["map", obj])
-      assert.deepEqual(doc.value(obj, "hi"), ["str", "there"])
+      assert.deepEqual(doc.get(notes, 6), ["map", obj])
+      assert.deepEqual(doc.get(obj, "hi"), ["str", "there"])
 
       doc.free()
     })
@@ -149,8 +149,8 @@ describe('Automerge', () => {
       doc1.put("_root", "key1", "val1")
       let key2 = doc1.putObject("_root", "key2", [])
 
-      assert.deepEqual(doc1.value("_root", "key1"), ["str", "val1"])
-      assert.deepEqual(doc1.value("_root", "key2"), ["list", "2@aabbcc"])
+      assert.deepEqual(doc1.get("_root", "key1"), ["str", "val1"])
+      assert.deepEqual(doc1.get("_root", "key2"), ["list", "2@aabbcc"])
       assert.deepEqual(doc1.keys("_root"), ["key1", "key2"])
 
       let doc2 = doc1.fork("ffaaff")
@@ -161,8 +161,8 @@ describe('Automerge', () => {
 
       doc1.merge(doc2)
 
-      assert.deepEqual(doc1.value("_root","key3"), ["str", "doc2val"])
-      assert.deepEqual(doc1.values("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
+      assert.deepEqual(doc1.get("_root","key3"), ["str", "doc2val"])
+      assert.deepEqual(doc1.getAll("_root","key3"),[[ "str", "doc1val", "3@aabbcc"], ["str", "doc2val", "3@ffaaff"]])
 
       doc1.free(); doc2.free()
     })
@@ -189,12 +189,12 @@ describe('Automerge', () => {
 
       doc.put("_root", "key", "val1")
 
-      assert.deepEqual(doc.value("_root", "key"),["str","val1"])
+      assert.deepEqual(doc.get("_root", "key"),["str","val1"])
       assert.deepEqual(doc.pendingOps(),1)
 
       doc.rollback()
 
-      assert.deepEqual(doc.value("_root", "key"),null)
+      assert.deepEqual(doc.get("_root", "key"),null)
       assert.deepEqual(doc.pendingOps(),0)
 
       doc.put("_root", "key", "val2")
@@ -203,7 +203,7 @@ describe('Automerge', () => {
 
       doc.commit("test commit 1")
 
-      assert.deepEqual(doc.value("_root", "key"),["str","val2"])
+      assert.deepEqual(doc.get("_root", "key"),["str","val2"])
       assert.deepEqual(doc.pendingOps(),0)
 
       doc.free()
@@ -219,10 +219,10 @@ describe('Automerge', () => {
 
       doc.put("_root", "key", "val3")
 
-      assert.deepEqual(doc.value("_root","key"), ["str","val3"])
-      assert.deepEqual(doc.value("_root","key",heads2), ["str","val2"])
-      assert.deepEqual(doc.value("_root","key",heads1), ["str","val1"])
-      assert.deepEqual(doc.value("_root","key",[]), null)
+      assert.deepEqual(doc.get("_root","key"), ["str","val3"])
+      assert.deepEqual(doc.get("_root","key",heads2), ["str","val2"])
+      assert.deepEqual(doc.get("_root","key",heads1), ["str","val1"])
+      assert.deepEqual(doc.get("_root","key",[]), null)
 
       doc.free()
     })

@@ -19,7 +19,7 @@ function parseListIndex(key) {
 
 function valueAt(target, prop) {
       const { context, objectId, path, readonly, heads} = target
-      let value = context.value(objectId, prop, heads)
+      let value = context.get(objectId, prop, heads)
       if (value === undefined) {
         return
       }
@@ -293,7 +293,7 @@ const ListHandler = {
   deleteProperty (target, index) {
     const {context, objectId} = target
     index = parseListIndex(index)
-    if (context.value(objectId, index)[0] == "counter") {
+    if (context.get(objectId, index)[0] == "counter") {
       throw new TypeError('Unsupported operation: deleting a counter from a list')
     }
     context.delete(objectId, index)

@@ -24,7 +24,6 @@ smol_str = "^0.1.21"
 tracing = { version = "^0.1.29", features = ["log"] }
 fxhash = "^0.2.1"
 tinyvec = { version = "^1.5.1", features = ["alloc"] }
-unicode-segmentation = "1.7.1"
 serde = { version = "^1.0", features=["derive"] }
 dot = { version = "0.1.4", optional = true }
 js-sys = { version = "^0.3", optional = true }

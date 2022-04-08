@@ -131,7 +131,7 @@ You can access objects by passing the object id as the first parameter for a cal
 
   // get the id then use it
 
-  let id = doc.value("/", "config")
+  let id = doc.get("/", "config")
   if (id && id[0] === 'map') {
     doc.put(id[1], "align", "right")
   }
@@ -199,8 +199,8 @@ Text is a specialized list type intended for modifying a text document.  The pri
     let obj = doc.insertObject(notes, 6, { hi: "there" })
 
     doc.text(notes)       // returns "Hello \ufffceveryone"
-    doc.value(notes, 6)   // returns ["map", obj]
-    doc.value(obj, "hi") // returns ["str", "there"]
+    doc.get(notes, 6)   // returns ["map", obj]
+    doc.get(obj, "hi") // returns ["str", "there"]
     doc.free()
 ```
 
@@ -210,15 +210,15 @@ Automerge's Table type is currently not implemented.
 
 ### Querying Data
 
-When querying maps use the `value()` method with the object in question and the property to query.  This method returns a tuple with the data type and the data.  The `keys()` method will return all the keys on the object.  If you are interested in conflicted values from a merge use `values()` instead which returns an array of values instead of just the winner.
+When querying maps use the `get()` method with the object in question and the property to query.  This method returns a tuple with the data type and the data.  The `keys()` method will return all the keys on the object.  If you are interested in conflicted values from a merge use `getAll()` instead which returns an array of values instead of just the winner.
 
 ```javascript
     let doc1 = create("aabbcc")
     doc1.put("_root", "key1", "val1")
     let key2 = doc1.putObject("_root", "key2", [])
 
-    doc1.value("_root", "key1") // returns ["str", "val1"]
-    doc1.value("_root", "key2") // returns ["list", "2@aabbcc"]
+    doc1.get("_root", "key1") // returns ["str", "val1"]
+    doc1.get("_root", "key2") // returns ["list", "2@aabbcc"]
     doc1.keys("_root")          // returns ["key1", "key2"]
 
     let doc2 = doc1.fork("ffaaff")
@@ -229,8 +229,8 @@ When querying maps use the `value()` method with the object in question and the 
 
     doc1.merge(doc2)
 
-    doc1.value("_root","key3")   // returns ["str", "doc2val"]
-    doc1.values("_root","key3")  // returns [[ "str", "doc1val"], ["str", "doc2val"]]
+    doc1.get("_root","key3")   // returns ["str", "doc2val"]
+    doc1.getAll("_root","key3")  // returns [[ "str", "doc1val"], ["str", "doc2val"]]
     doc1.free(); doc2.free()
 ```
 
@@ -266,12 +266,12 @@ Generally speaking you don't need to think about transactions when using Automer
 
     doc.put("_root", "key", "val1")
 
-    doc.value("_root", "key")        // returns ["str","val1"]
+    doc.get("_root", "key")        // returns ["str","val1"]
     doc.pendingOps()                 // returns 1
 
     doc.rollback()
 
-    doc.value("_root", "key")        // returns null
+    doc.get("_root", "key")        // returns null
     doc.pendingOps()                 // returns 0
 
     doc.put("_root", "key", "val2")
@@ -280,7 +280,7 @@ Generally speaking you don't need to think about transactions when using Automer
 
     doc.commit("test commit 1")
 
-    doc.value("_root", "key")        // returns ["str","val2"]
+    doc.get("_root", "key")        // returns ["str","val2"]
     doc.pendingOps()                 // returns 0
 
     doc.free()
@@ -301,15 +301,15 @@ All query functions can take an optional argument of `heads` which allow you to 
 
     doc.put("_root", "key", "val3")
 
-    doc.value("_root","key")          // returns ["str","val3"]
-    doc.value("_root","key",heads2)   // returns ["str","val2"]
-    doc.value("_root","key",heads1)   // returns ["str","val1"]
-    doc.value("_root","key",[])       // returns null
+    doc.get("_root","key")          // returns ["str","val3"]
+    doc.get("_root","key",heads2)   // returns ["str","val2"]
+    doc.get("_root","key",heads1)   // returns ["str","val1"]
+    doc.get("_root","key",[])       // returns null
 
     doc.free()
 ```
 
-This works for `value()`, `values()`, `keys()`, `length()`, `text()`, and `materialize()`
+This works for `get()`, `getAll()`, `keys()`, `length()`, `text()`, and `materialize()`
 
 Queries of old document states are not indexed internally and will be slower than normal access.  If you need a fast indexed version of a document at a previous point in time you can create one with `doc.forkAt(heads, actor?)`
 

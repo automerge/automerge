@@ -4,7 +4,6 @@ use automerge::{Change, ChangeHash, Prop};
 use js_sys::{Array, Object, Reflect, Uint8Array};
 use std::collections::HashSet;
 use std::fmt::Display;
-use unicode_segmentation::UnicodeSegmentation;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -286,9 +285,9 @@ pub(crate) fn to_objtype(
         Some("text") => {
             let text = value.as_string()?;
             let text = text
-                .graphemes(true)
+                .chars()
                 .enumerate()
-                .map(|(i, ch)| (i.into(), ch.into()))
+                .map(|(i, ch)| (i.into(), ch.to_string().into()))
                 .collect();
             Some((am::ObjType::Text, text))
         }
@@ -311,9 +310,9 @@ pub(crate) fn to_objtype(
                 Some((am::ObjType::Map, map))
             } else if let Some(text) = value.as_string() {
                 let text = text
-                    .graphemes(true)
+                    .chars()
                     .enumerate()
-                    .map(|(i, ch)| (i.into(), ch.into()))
+                    .map(|(i, ch)| (i.into(), ch.to_string().into()))
                     .collect();
                 Some((am::ObjType::Text, text))
             } else {
@@ -333,7 +332,7 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let keys = doc.keys(obj);
     let map = Object::new();
     for k in keys {
-        let val = doc.value(obj, &k);
+        let val = doc.get(obj, &k);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
@@ -359,7 +358,7 @@ pub(crate) fn map_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHas
     let keys = doc.keys(obj);
     let map = Object::new();
     for k in keys {
-        let val = doc.value_at(obj, &k, heads);
+        let val = doc.get_at(obj, &k, heads);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
@@ -385,7 +384,7 @@ pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {
-        let val = doc.value(obj, i as usize);
+        let val = doc.get(obj, i as usize);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
@@ -411,7 +410,7 @@ pub(crate) fn list_to_js_at(doc: &am::AutoCommit, obj: &ObjId, heads: &[ChangeHa
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {
-        let val = doc.value_at(obj, i as usize, heads);
+        let val = doc.get_at(obj, i as usize, heads);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>

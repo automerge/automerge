@@ -367,6 +367,6 @@ mod tests {
 
         let a = tx.put_object(ROOT, "a", ObjType::Map).unwrap();
         tx.put(&a, "b", 1).unwrap();
-        assert!(tx.value(&a, "b").unwrap().is_some());
+        assert!(tx.get(&a, "b").unwrap().is_some());
     }
 }
