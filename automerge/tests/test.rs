@@ -29,7 +29,7 @@ fn repeated_map_assignment_which_resolves_conflict_not_ignored() {
     doc2.put(&automerge::ROOT, "field", 456).unwrap();
     doc1.put(&automerge::ROOT, "field", 789).unwrap();
     doc1.merge(&mut doc2).unwrap();
-    assert_eq!(doc1.values(&automerge::ROOT, "field").unwrap().len(), 2);
+    assert_eq!(doc1.get_all(&automerge::ROOT, "field").unwrap().len(), 2);
 
     doc1.put(&automerge::ROOT, "field", 123).unwrap();
     assert_doc!(
@@ -94,7 +94,7 @@ fn merge_concurrent_map_prop_updates() {
     doc2.put(&automerge::ROOT, "hello", "world").unwrap();
     doc1.merge(&mut doc2).unwrap();
     assert_eq!(
-        doc1.value(&automerge::ROOT, "foo").unwrap().unwrap().0,
+        doc1.get(&automerge::ROOT, "foo").unwrap().unwrap().0,
         "bar".into()
     );
     assert_doc!(
@@ -855,13 +855,13 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc1.merge(&mut doc2).unwrap();
     doc1.merge(&mut doc3).unwrap();
 
-    let values = doc1.values(&list, 1)?;
+    let values = doc1.get_all(&list, 1)?;
     assert_eq!(values.len(), 3);
     assert_eq!(&values[0].0, &Value::counter(1));
     assert_eq!(&values[1].0, &Value::counter(10));
     assert_eq!(&values[2].0, &Value::counter(100));
 
-    let values = doc1.values(&list, 2)?;
+    let values = doc1.get_all(&list, 2)?;
     assert_eq!(values.len(), 3);
     assert_eq!(&values[0].0, &Value::counter(1));
     assert_eq!(&values[1].0, &Value::counter(10));
@@ -870,13 +870,13 @@ fn list_counter_del() -> Result<(), automerge::AutomergeError> {
     doc1.increment(&list, 1, 1)?;
     doc1.increment(&list, 2, 1)?;
 
-    let values = doc1.values(&list, 1)?;
+    let values = doc1.get_all(&list, 1)?;
     assert_eq!(values.len(), 3);
     assert_eq!(&values[0].0, &Value::counter(2));
     assert_eq!(&values[1].0, &Value::counter(11));
     assert_eq!(&values[2].0, &Value::counter(101));
 
-    let values = doc1.values(&list, 2)?;
+    let values = doc1.get_all(&list, 2)?;
     assert_eq!(values.len(), 2);
     assert_eq!(&values[0].0, &Value::counter(2));
     assert_eq!(&values[1].0, &Value::counter(11));

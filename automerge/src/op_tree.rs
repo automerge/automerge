@@ -2,6 +2,7 @@ use std::{
     cmp::{min, Ordering},
     fmt::Debug,
     mem,
+    ops::RangeBounds,
 };
 
 pub(crate) use crate::op_set::OpSetMetadata;
@@ -11,7 +12,7 @@ use crate::{
 };
 use crate::{
     types::{ObjId, Op, OpId},
-    ObjType,
+    ObjType, Prop,
 };
 use std::collections::HashSet;
 
@@ -67,6 +68,27 @@ impl OpTreeInternal {
         self.root_node
             .as_ref()
             .map(|root| query::KeysAt::new(root, clock))
+    }
+
+    pub fn range<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+    ) -> Option<query::Range<'a, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::Range::new(range, node, meta))
+    }
+
+    pub fn range_at<'a, R: RangeBounds<Prop>>(
+        &'a self,
+        range: R,
+        meta: &'a OpSetMetadata,
+        clock: Clock,
+    ) -> Option<query::RangeAt<'a, R>> {
+        self.root_node
+            .as_ref()
+            .map(|node| query::RangeAt::new(range, node, meta, clock))
     }
 
     pub fn search<'a, 'b: 'a, Q>(&'b self, mut query: Q, m: &OpSetMetadata) -> Q

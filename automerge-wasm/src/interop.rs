@@ -332,7 +332,7 @@ pub(crate) fn map_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let keys = doc.keys(obj);
     let map = Object::new();
     for k in keys {
-        let val = doc.value(obj, &k);
+        let val = doc.get(obj, &k);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
@@ -358,7 +358,7 @@ pub(crate) fn list_to_js(doc: &am::AutoCommit, obj: &ObjId) -> JsValue {
     let len = doc.length(obj);
     let array = Array::new();
     for i in 0..len {
-        let val = doc.value(obj, i as usize);
+        let val = doc.get(obj, i as usize);
         match val {
             Ok(Some((Value::Object(o), exid)))
                 if o == am::ObjType::Map || o == am::ObjType::Table =>
