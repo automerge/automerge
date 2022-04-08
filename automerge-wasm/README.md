@@ -66,7 +66,7 @@ These are puts without a data type
   doc.free()
 ```
 
-Sets with a data type and examples of all the supported data types.
+Put's with a data type and examples of all the supported data types.
 
 While int vs uint vs f64 matters little in javascript, Automerge is a cross platform library where these distinctions matter.
 
@@ -131,7 +131,7 @@ You can access objects by passing the object id as the first parameter for a cal
 
   // get the id then use it
 
-  let id = doc.value("/", "config")[1]
+  let id = doc.value("/", "config")
   if (id && id[0] === 'map') {
     doc.put(id[1], "align", "right")
   }
@@ -167,7 +167,7 @@ Maps are key/value stores.  The root object is always a map.  The keys are alway
 
 ### Lists
 
-Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with `insert()`, `put()`, `insertObject()`, `pubObject()`, `push()`, `pushObject()`, `splice()`, and `del()`.
+Lists are index addressable sets of values.  These values can be any scalar or object type.  You can manipulate lists with `insert()`, `put()`, `insertObject()`, `pubObject()`, `push()`, `pushObject()`, `splice()`, and `delete()`.
 
 ```javascript
     let doc = create()
@@ -175,7 +175,7 @@ Lists are index addressable sets of values.  These values can be any scalar or o
                                                   // init a new list with two elements
     doc.push(items, true)                         // push `true` to the end of the list
     doc.putObject(items, 0, { hello: "world" })  // overwrite the value 10 with an object with a key and value
-    doc.del(items, 1)                             // delete "box"
+    doc.delete(items, 1)                             // delete "box"
     doc.splice(items, 2, 0, ["bag", "brick"])     // splice in "bag" and "brick" at position 2
     doc.insert(items, 0, "bat")                   // insert "bat" to the beginning of the list
     doc.insertObject(items, 1, [1,2])             // insert a list with 2 values at pos 1
@@ -245,10 +245,10 @@ Counters are 64 bit ints that support the increment operation.  Frequently diffe
 
     let doc2 = doc1.fork("bbbbbb")
     doc2.put("_root", "number", 10)
-    doc2.inc("_root", "total", 11)
+    doc2.increment("_root", "total", 11)
 
     doc1.put("_root", "number", 20)
-    doc1.inc("_root", "total", 22)
+    doc1.increment("_root", "total", 22)
 
     doc1.merge(doc2)
 
