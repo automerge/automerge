@@ -28,7 +28,7 @@ fn import_map(
                 doc.put(obj, key, *b)?;
             }
             serde_json::Value::String(s) => {
-                doc.put(obj, key, s.as_ref())?;
+                doc.put(obj, key, s)?;
             }
             serde_json::Value::Array(vec) => {
                 let id = doc.put_object(obj, key, am::ObjType::List)?;
@@ -68,7 +68,7 @@ fn import_list(
                 doc.insert(obj, i, *b)?;
             }
             serde_json::Value::String(s) => {
-                doc.insert(obj, i, s.as_ref())?;
+                doc.insert(obj, i, s)?;
             }
             serde_json::Value::Array(vec) => {
                 let id = doc.insert_object(obj, i, am::ObjType::List)?;

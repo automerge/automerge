@@ -1,6 +1,5 @@
 use crate::exid::ExId;
 use crate::{AutomergeError, ChangeHash, Keys, KeysAt, ObjType, Prop, ScalarValue, Value};
-use unicode_segmentation::UnicodeSegmentation;
 
 /// A way of mutating a document within a single change.
 pub trait Transactable {
@@ -88,8 +87,7 @@ pub trait Transactable {
         del: usize,
         text: &str,
     ) -> Result<(), AutomergeError> {
-        let text = text.to_owned();
-        let vals = text.graphemes(true).map(|c| c.into());
+        let vals = text.chars().map(|c| c.into());
         self.splice(obj, pos, del, vals)
     }
 
